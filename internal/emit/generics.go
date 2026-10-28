@@ -397,10 +397,50 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 // needsDoc reports whether erasing t loses information a docblock must
 // keep.
 func (l *lowering) needsDoc(t ast.TypeExpr, sc *scope) bool {
-	if t == nil {
+	switch t := t.(type) {
+	case nil:
 		return false
+	case *ast.NamedType:
+		if len(t.TypeArgs) > 0 {
+			return true
+		}
+		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
+			name := t.Name.Parts[0]
+			if _, ok := sc.params[name]; ok {
+				return true
+			}
+			if sc.class != nil {
+				for _, tp := range sc.class.TypeParams {
+					if tp.Name == name {
+						return true
+					}
+				}
+			}
+			if isAliasCandidate(t) || sc.res.FileAlias(name) != nil {
+				return true
+			}
+		}
+		return false
+	case *ast.NullableType:
+		return l.needsDoc(t.Type, sc)
+	case *ast.UnionType:
+		for _, m := range t.Types {
+			if l.needsDoc(m, sc) {
+				return true
+			}
+		}
+		return false
+	case *ast.IntersectionType:
+		for _, m := range t.Types {
+			if l.needsDoc(m, sc) {
+				return true
+			}
+		}
+		return false
+	case *ast.ClosureType:
+		return true
 	}
-	return l.docType(t, sc) != l.erase(t, sc)
+	return false
 }
 
 // eraseType rewrites a written type to its erasure, and reports whether a
@@ -409,6 +449,9 @@ func (l *lowering) eraseType(t ast.TypeExpr, sc *scope, override string) bool {
 	if t == nil {
 		return false
 	}
+	if override == "" && !l.needsDoc(t, sc) {
+		return false // plain PHP stays byte for byte
+	}
 	erased := l.erase(t, sc)
 	if override != "" {
 		erased = override
@@ -416,7 +459,7 @@ func (l *lowering) eraseType(t ast.TypeExpr, sc *scope, override string) bool {
 	if erased != l.text(t.Span()) {
 		l.e.replace(t.Span(), erased)
 	}
-	return override != "" || l.needsDoc(t, sc)
+	return true
 }
 
 // ------------------------------------------------------------------ docblocks
