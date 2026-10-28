@@ -41,7 +41,9 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 		}
 	case *ast.Block:
 		x.stmts(s.Stmts, env)
-	case *ast.Nop, *ast.InlineHTML, *ast.OpenTag, *ast.CloseTag, *ast.Use, *ast.TypeAlias:
+	case *ast.TypeAlias:
+		x.checkTypeAlias(s)
+	case *ast.Nop, *ast.InlineHTML, *ast.OpenTag, *ast.CloseTag, *ast.Use:
 	case *ast.If:
 		x.ifStmt(s, env)
 	case *ast.While:
@@ -736,6 +738,8 @@ func (x *fnCtx) closureParams(decls []*ast.Param, expected types.Type) ([]*progr
 
 func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.Type {
 	c := x.child(e.Static)
+	c.closureTypeParams(e.TypeParams)
+	c.checkSignatureTypes(nil, e.Params, e.ReturnType, false, "a closure")
 	params, cps := c.closureParams(e.Params, expected)
 	c.returnType = x.res.Native(e.ReturnType)
 	c.hasReturn = c.returnType != nil
@@ -797,6 +801,8 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) types.Type {
 	c := x.child(e.Static)
 	c.arrow = true
+	c.closureTypeParams(e.TypeParams)
+	c.checkSignatureTypes(nil, e.Params, e.ReturnType, false, "an arrow function")
 	params, cps := c.closureParams(e.Params, expected)
 	c.returnType = x.res.Native(e.ReturnType)
 	c.hasReturn = c.returnType != nil

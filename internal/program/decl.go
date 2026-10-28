@@ -58,6 +58,21 @@ type TypeParam struct {
 	Default  types.Type
 	Variance types.Variance
 	Reified  bool
+	// Native marks a parameter declared in Phaenon syntax (`class Foo<T>`)
+	// rather than in a docblock: the emitter erases it and the checker
+	// applies the Phaenon rules (variance positions, static members, …).
+	Native bool
+	Span   ast.Span
+}
+
+// FileAlias is a file-level Phaenon type alias: `type Name<T> = Type;`.
+type FileAlias struct {
+	Decl   *ast.TypeAlias
+	File   *File
+	Scope  *Scope
+	Params []*TypeParam
+	Type   types.Type
+	state  uint8 // 0 = raw, 1 = resolving, 2 = done
 }
 
 // Class is a class, interface, trait or enum.
@@ -261,6 +276,13 @@ func (p *Program) collect(f *File) {
 				p.declareClass(f, scope, s)
 			case *ast.FunctionDecl:
 				p.declareFunction(f, scope, s)
+			case *ast.TypeAlias:
+				if scope.aliases == nil {
+					scope.aliases = map[string]*FileAlias{}
+				}
+				if _, dup := scope.aliases[s.Name.Name]; !dup {
+					scope.aliases[s.Name.Name] = &FileAlias{Decl: s, File: f, Scope: scope}
+				}
 			case *ast.ConstDecl:
 				// `/** @var int */ const X = …;` (the stubs declare most
 				// constants this way, with an UNKNOWN value).

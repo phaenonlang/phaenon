@@ -115,6 +115,17 @@ var (
 	P2515 = Code{"P2515", Error, "uninitialised readonly property"}
 	P2516 = Code{"P2516", Error, "untyped declaration"}
 
+	// P3 — generics
+	P3001 = Code{"P3001", Error, "wrong number of type arguments"}
+	P3002 = Code{"P3002", Error, "type argument outside its bound"}
+	P3003 = Code{"P3003", Error, "erased type parameter used as a value"}
+	P3004 = Code{"P3004", Error, "variance violation"}
+	P3005 = Code{"P3005", Error, "reified type parameter cannot be inferred"}
+	P3006 = Code{"P3006", Error, "reified not allowed here"}
+	P3007 = Code{"P3007", Error, "generic property redeclared"}
+	P3008 = Code{"P3008", Error, "class type parameter in a static member"}
+	P3009 = Code{"P3009", Error, "type arguments on a non-generic callee"}
+
 	// P4 — interop
 	P4001 = Code{"P4001", Warning, "docblock cannot be parsed"}
 	P4002 = Code{"P4002", Warning, "docblock type disagrees with the signature"}

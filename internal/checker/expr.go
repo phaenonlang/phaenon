@@ -124,17 +124,15 @@ func (x *fnCtx) expr(e ast.Expr, env *state, expected types.Type) types.Type {
 		env.dead = true
 		return types.TNever
 	case *ast.IsExpr:
-		x.expr(e.Expr, env, nil)
-		return types.TBool
+		return x.isType(e, env)
 	case *ast.AsExpr:
-		x.expr(e.Expr, env, nil)
-		t := x.res.Native(e.Type)
-		if e.Nullable {
-			return types.Nullable(t)
-		}
-		return t
+		return x.asExpr(e, env)
 	case *ast.Name:
-		// The parser leaves constants as bare names.
+		// The parser leaves constants as bare names. A type parameter's
+		// name denotes its runtime descriptor.
+		if tp := x.typeParamRef(e); tp != nil {
+			return x.paramAsValue(tp, e.S)
+		}
 		return x.constFetch(&ast.ConstFetch{S: e.S, Name: e})
 	case *ast.Ident:
 		return types.StringLit{V: e.Name}

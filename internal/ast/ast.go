@@ -666,8 +666,8 @@ type ClassDecl struct {
 	Modifiers   Modifier
 	Name        *Ident // nil for an anonymous class
 	TypeParams  []*TypeParam
-	Extends     []*Name // one for classes, many for interfaces
-	Implements  []*Name
+	Extends     []*NamedType // one for classes, many for interfaces; TypeArgs in Phaenon
+	Implements  []*NamedType
 	BackingType TypeExpr // enum Foo: string
 	Members     []ClassMember
 	// Anonymous classes carry their constructor arguments.

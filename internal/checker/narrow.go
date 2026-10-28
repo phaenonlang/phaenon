@@ -50,6 +50,8 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		}
 	case *ast.Instanceof:
 		return x.instanceofCond(e, env)
+	case *ast.IsExpr:
+		return x.isCond(e, env)
 	case *ast.Isset:
 		then = env.clone()
 		for _, v := range e.Vars {

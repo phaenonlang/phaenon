@@ -195,8 +195,8 @@ func Inspect(n Node, f func(Node) bool) {
 		attrs(n.Attrs, f)
 		Inspect(n.Name, f)
 		typeParams(n.TypeParams, f)
-		names(n.Extends, f)
-		names(n.Implements, f)
+		namedTypes(n.Extends, f)
+		namedTypes(n.Implements, f)
 		Inspect(n.BackingType, f)
 		for _, m := range n.Members {
 			Inspect(m, f)
@@ -387,6 +387,12 @@ func types(ts []TypeExpr, f func(Node) bool) {
 func names(ns []*Name, f func(Node) bool) {
 	for _, n := range ns {
 		Inspect(n, f)
+	}
+}
+
+func namedTypes(ts []*NamedType, f func(Node) bool) {
+	for _, t := range ts {
+		Inspect(t, f)
 	}
 }
 

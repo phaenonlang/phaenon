@@ -334,6 +334,10 @@ func (x *fnCtx) resolveClassName(n *ast.Name, span ast.Span) (string, bool) {
 // classRefType returns the type denoted by a class name in `new`,
 // `instanceof`, `Foo::` positions: static for `static`, the class otherwise.
 func (x *fnCtx) classRefType(n *ast.Name, span ast.Span) (types.Type, *program.Class) {
+	if tp := x.typeParamRef(n); tp != nil {
+		t, cl, _ := x.paramValue(tp, span, "use as a class")
+		return t, cl
+	}
 	raw := x.res.ClassName(n)
 	if raw == "static" && x.class != nil {
 		return types.Static{Of: &types.Class{Name: x.class.Name, Args: selfArgs(x.class)}}, x.class

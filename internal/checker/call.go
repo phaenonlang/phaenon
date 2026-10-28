@@ -28,6 +28,7 @@ type signature struct {
 	params     []*program.Param
 	ret        types.Type
 	typeParams []*program.TypeParam
+	explicit   []types.Type // type arguments written at the call site
 	subst      map[string]types.Type
 	recv       types.Type     // receiver, for static/$this
 	decl       *program.Class // declaring class of a method
@@ -65,6 +66,7 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 		x.report(n.S, P4006, "function %s() is deprecated", fn.Name)
 	}
 	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams}
+	sig.explicit = x.explicitArgs(e.TypeArgs, fn.TypeParams, fn.Name+"()", e.S)
 	if e.Args != nil && e.Args.FirstClassCallable {
 		return x.callableOf(sig)
 	}
@@ -389,6 +391,7 @@ func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) t
 			}
 			sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return,
 				typeParams: meth.TypeParams, recv: m, decl: meth.Class}
+			sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 			if e.Args != nil && e.Args.FirstClassCallable {
 				sig.subst = x.memberSubst(m, meth.Class)
 				out = append(out, x.callableOf(sig))
@@ -522,6 +525,7 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 		}
 		sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return,
 			typeParams: meth.TypeParams, recv: recv, decl: meth.Class}
+		sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 		if e.Args != nil && e.Args.FirstClassCallable {
 			sig.subst = x.memberSubst(recv, meth.Class)
 			out = append(out, x.callableOf(sig))
@@ -600,7 +604,8 @@ func (x *fnCtx) newExpr(e *ast.New, env *state) types.Type {
 		}
 		return recv
 	}
-	if !cl.IsInstantiable() {
+	_, viaParam := recv.(types.Param)
+	if !cl.IsInstantiable() && !viaParam {
 		what := "abstract class"
 		switch {
 		case cl.Kind == ast.KindInterface:
@@ -616,7 +621,34 @@ func (x *fnCtx) newExpr(e *ast.New, env *state) types.Type {
 	}
 	ctor := cl.FindMethod("__construct")
 	result := recv
+	// Explicit arguments close the class type: new Foo<User>(…).
+	if c, ok := recv.(types.Class); ok && len(c.Args) == 0 && len(e.TypeArgs) > 0 {
+		if args := x.explicitArgs(e.TypeArgs, cl.TypeParams, cl.Name, e.S); args != nil {
+			full := make([]types.Type, len(cl.TypeParams))
+			for i, tp := range cl.TypeParams {
+				switch {
+				case i < len(args):
+					full[i] = args[i]
+				case tp.Default != nil:
+					full[i] = tp.Default
+				case tp.Bound != nil:
+					full[i] = tp.Bound
+				default:
+					full[i] = types.TMixed
+				}
+			}
+			recv = types.Class{Name: c.Name, Args: full}
+			result = recv
+		}
+	}
 	if ctor == nil {
+		if c, ok := recv.(types.Class); ok && len(c.Args) == 0 {
+			for _, tp := range cl.TypeParams {
+				if tp.Reified {
+					x.report(e.S, P3005, "cannot infer reified type parameter %s of %s; write new %s<%s>(…)", tp.Name, cl.Name, cl.Name, tp.Name)
+				}
+			}
+		}
 		if e.Args != nil && len(e.Args.Args) > 0 {
 			x.report(e.Args.S, P2102, "class %s has no constructor but %d arguments are given", cl.Name, len(e.Args.Args))
 		}
@@ -673,6 +705,12 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	}
 	for _, tp := range sig.typeParams {
 		delete(subst, tp.Name)
+	}
+	for i, a := range sig.explicit {
+		if i < len(tps) {
+			subst[tps[i].Name] = a
+			delete(inferable, tps[i].Name)
+		}
 	}
 	paramType := func(p *program.Param) types.Type {
 		t := types.Substitute(types.Substitute(p.Type, rename), subst)
@@ -852,6 +890,15 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	if len(inferable) > 0 && expected != nil && sig.ret != nil {
 		unify(types.Substitute(types.Substitute(sig.ret, rename), subst), expected, subst, inferable, x.p())
 	}
+	// A reified parameter must end up with a runtime value: inferred from
+	// an argument or written at the call site.
+	for i, tp := range sig.typeParams {
+		if tp.Reified {
+			if _, ok := subst[tps[i].Name]; !ok {
+				x.report(span, P3005, "cannot infer reified type parameter %s of %s; pass it explicitly: %s", tp.Name, sig.name, strings.TrimSuffix(sig.name, "()")+"<"+tp.Name+">(…)")
+			}
+		}
+	}
 	// Expose the results under the declared names too (new Foo() reads them).
 	for i, tp := range sig.typeParams {
 		if v, ok := subst[tps[i].Name]; ok {
@@ -960,7 +1007,7 @@ func (x *fnCtx) freshParams(tps []*program.TypeParam) (map[string]types.Type, []
 	fresh := make([]*program.TypeParam, len(tps))
 	for i, tp := range tps {
 		id := fmt.Sprintf("%s\x00%d", tp.Name, x.c.callSeq)
-		fresh[i] = &program.TypeParam{Name: id, Bound: tp.Bound, Default: tp.Default, Variance: tp.Variance}
+		fresh[i] = &program.TypeParam{Name: id, Bound: tp.Bound, Default: tp.Default, Variance: tp.Variance, Reified: tp.Reified, Native: tp.Native}
 		rename[tp.Name] = types.Param{Name: id, Bound: tp.Bound, Owner: tp.Name}
 	}
 	for _, f := range fresh {

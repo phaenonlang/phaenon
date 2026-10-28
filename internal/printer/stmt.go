@@ -549,11 +549,11 @@ func (p *Printer) classHeader(c *ast.ClassDecl) {
 	}
 	if len(c.Extends) > 0 {
 		p.w(" extends ")
-		p.names(c.Extends)
+		p.namedTypes(c.Extends)
 	}
 	if len(c.Implements) > 0 {
 		p.w(" implements ")
-		p.names(c.Implements)
+		p.namedTypes(c.Implements)
 	}
 }
 

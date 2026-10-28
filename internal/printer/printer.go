@@ -120,6 +120,15 @@ func (p *Printer) names(ns []*ast.Name) {
 	}
 }
 
+func (p *Printer) namedTypes(ts []*ast.NamedType) {
+	for i, t := range ts {
+		if i > 0 {
+			p.w(", ")
+		}
+		p.typ(t)
+	}
+}
+
 func (p *Printer) ident(id *ast.Ident) { p.w(id.Name) }
 
 // modifiers prints a modifier set in canonical order, each followed by a space.

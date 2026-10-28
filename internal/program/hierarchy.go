@@ -27,7 +27,7 @@ func (c *Class) ensureHeader() {
 		r.reportDocErrors(c.Doc)
 	}
 	// Type parameters first: everything else may mention them.
-	c.TypeParams = templatesOf(c.Doc, r)
+	c.TypeParams = typeParamsOf(d.TypeParams, c.Doc, r)
 	for _, tp := range c.TypeParams {
 		r.params[tp.Name] = tp
 	}
@@ -62,14 +62,14 @@ func (c *Class) ensureHeader() {
 	switch d.Kind {
 	case ast.KindInterface:
 		for _, n := range d.Extends {
-			c.Interfaces = append(c.Interfaces, r.scope.ResolveClass(n))
+			c.Interfaces = append(c.Interfaces, r.scope.ResolveClass(n.Name))
 		}
 	default:
 		if len(d.Extends) > 0 {
-			c.Parent = r.scope.ResolveClass(d.Extends[0])
+			c.Parent = r.scope.ResolveClass(d.Extends[0].Name)
 		}
 		for _, n := range d.Implements {
-			c.Interfaces = append(c.Interfaces, r.scope.ResolveClass(n))
+			c.Interfaces = append(c.Interfaces, r.scope.ResolveClass(n.Name))
 		}
 	}
 	if d.Kind == ast.KindEnum {
@@ -110,7 +110,26 @@ func (c *Class) ensureHeader() {
 			}
 		}
 	}
-	// Native generic arguments (Phaenon syntax) override docblocks — M3.
+	// Native generic arguments (Phaenon syntax) override docblocks.
+	if c.InterfaceArgs == nil {
+		c.InterfaceArgs = map[string][]types.Type{}
+	}
+	for i, e := range d.Extends {
+		if len(e.TypeArgs) == 0 {
+			continue
+		}
+		args := r.NativeArgs(e.TypeArgs)
+		if d.Kind == ast.KindInterface {
+			c.InterfaceArgs[strings.ToLower(r.scope.ResolveClass(e.Name))] = args
+		} else if i == 0 {
+			c.ParentArgs = args
+		}
+	}
+	for _, e := range d.Implements {
+		if len(e.TypeArgs) > 0 {
+			c.InterfaceArgs[strings.ToLower(r.scope.ResolveClass(e.Name))] = r.NativeArgs(e.TypeArgs)
+		}
+	}
 	c.ensured = 2
 	c.ensureMembers()
 }
@@ -408,7 +427,7 @@ func (r *resolver) buildMethod(c *Class, d *ast.MethodDecl) *Method {
 	if c.File.Checked {
 		rr.reportDocErrors(m.Doc)
 	}
-	m.TypeParams = templatesOf(m.Doc, rr)
+	m.TypeParams = typeParamsOf(d.TypeParams, m.Doc, rr)
 	rr = rr.withParams(m.TypeParams)
 	m.Params = rr.buildParams(d.Params, m.Doc)
 	m.NativeReturn = rr.native(d.ReturnType)

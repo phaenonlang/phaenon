@@ -846,7 +846,7 @@ func (p *Parser) classHeader(c *ast.ClassDecl) {
 	}
 	if p.accept(token.T_EXTENDS) {
 		for {
-			c.Extends = append(c.Extends, p.className())
+			c.Extends = append(c.Extends, p.superType())
 			if c.Kind != ast.KindInterface || !p.accept(token.Kind(',')) {
 				break
 			}
@@ -854,12 +854,24 @@ func (p *Parser) classHeader(c *ast.ClassDecl) {
 	}
 	if p.accept(token.T_IMPLEMENTS) {
 		for {
-			c.Implements = append(c.Implements, p.className())
+			c.Implements = append(c.Implements, p.superType())
 			if !p.accept(token.Kind(',')) {
 				break
 			}
 		}
 	}
+}
+
+// superType parses a class name in an extends / implements list, with type
+// arguments in Phaenon mode (`extends Base<User>`).
+func (p *Parser) superType() *ast.NamedType {
+	start := p.tok().Start
+	t := &ast.NamedType{Name: p.className()}
+	if p.mode == lexer.ModePhaenon && p.at(token.Kind('<')) {
+		t.TypeArgs = p.typeArgs()
+	}
+	t.S = p.span(start)
+	return t
 }
 
 func (p *Parser) classBody() []ast.ClassMember {

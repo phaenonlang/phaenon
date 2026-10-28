@@ -53,6 +53,7 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 	for _, tp := range fn.TypeParams {
 		ctx.inScope[tp.Name] = true
 	}
+	ctx.checkSignatureTypes(fn.Decl.TypeParams, fn.Decl.Params, fn.Decl.ReturnType, true, "function "+fn.Name+"()")
 	c.checkUntyped(f, fn.Decl.Params, fn.Params, fn.Decl.ReturnType, fn.Return, fn.Decl.Name.Name, fn.Decl.S)
 	ctx.body(fn.Params, fn.Decl.Params, fn.Decl.Body, fn.Decl.Name.S)
 }
@@ -181,6 +182,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 	for _, g := range d.Attrs {
 		c.checkAttrs(cl, g)
 	}
+	c.checkGenericClass(cl)
 }
 
 func (c *Checker) checkAttrs(cl *program.Class, g *ast.AttrGroup) {
@@ -206,7 +208,7 @@ func (c *Checker) checkHeader(cl *program.Class) {
 	d := cl.Decl
 	ctx := c.newCtx(cl.File, cl.Scope, cl, true)
 	for i, n := range d.Extends {
-		name := ctx.res.ClassName(n)
+		name := ctx.res.ClassName(n.Name)
 		super := c.p.Class(name)
 		if super == nil {
 			c.report(n.S, P2001, "unknown class %s", name)
@@ -229,7 +231,7 @@ func (c *Checker) checkHeader(cl *program.Class) {
 		}
 	}
 	for _, n := range d.Implements {
-		name := ctx.res.ClassName(n)
+		name := ctx.res.ClassName(n.Name)
 		iface := c.p.Class(name)
 		if iface == nil {
 			c.report(n.S, P2001, "unknown interface %s", name)
@@ -403,6 +405,9 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 			}
 		}
 	}
+	sctx := c.newCtx(cl.File, cl.Scope, cl, m.Static)
+	sctx.res = sctx.res.WithParams(m.TypeParams)
+	sctx.checkSignatureTypes(d.TypeParams, d.Params, d.ReturnType, true, cl.Name+"::"+m.Name+"()")
 	if !d.HasBody {
 		return
 	}

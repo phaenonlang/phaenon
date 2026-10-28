@@ -76,6 +76,36 @@ func (r *Resolver) ClassName(n *ast.Name) string { return r.resolveClassName(n) 
 // Scope returns the resolver's namespace scope.
 func (r *Resolver) Scope() *Scope { return r.scope }
 
+// TypeParam returns the type parameter visible under name, or nil.
+func (r *Resolver) TypeParam(name string) *TypeParam { return r.params[name] }
+
+// ParamType is the type a reference to the type parameter name denotes.
+func (r *Resolver) ParamType(tp *TypeParam) types.Type {
+	return types.Param{Name: tp.Name, Bound: tp.Bound, Owner: r.owner()}
+}
+
+// NativeParams builds type parameters from Phaenon syntax in this scope
+// (closures declare their own).
+func (r *Resolver) NativeParams(tps []*ast.TypeParam) []*TypeParam { return nativeTypeParams(tps, r) }
+
+// NativeArgs resolves a list of type expressions.
+func (r *Resolver) NativeArgs(ts []ast.TypeExpr) []types.Type {
+	out := make([]types.Type, len(ts))
+	for i, t := range ts {
+		out[i] = r.native(t)
+	}
+	return out
+}
+
+// FileAlias returns the file-level alias visible under name, resolved.
+func (r *Resolver) FileAlias(name string) *FileAlias {
+	a := r.scope.Alias(name)
+	if a != nil && a.state != 2 {
+		r.fileAlias(name, nil)
+	}
+	return a
+}
+
 // Class returns the resolver's current class (nil outside a class).
 func (r *Resolver) Class() *Class { return r.class }
 
@@ -122,6 +152,9 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 				return types.Param{Name: tp.Name, Bound: tp.Bound, Owner: r.owner()}
 			}
 			if a, ok := r.alias(t.Name.Parts[0]); ok {
+				return a
+			}
+			if a, ok := r.fileAlias(t.Name.Parts[0], args); ok {
 				return a
 			}
 		}
@@ -268,6 +301,9 @@ func (r *resolver) keyword(lower string, args []types.Type, node *docblock.TypeN
 		return a, true
 	case "list", "non-empty-list":
 		return types.Array{Key: types.TInt, Value: arg(0, types.TMixed), List: true, NonEmpty: lower == "non-empty-list"}, true
+	case "map", "non-empty-map":
+		// Phaenon's name for array<K, V>: a keyed array.
+		return types.Array{Key: arg(0, types.TArrayKey), Value: arg(1, types.TMixed), NonEmpty: lower == "non-empty-map"}, true
 	case "non-empty-string":
 		return types.String{NonEmpty: true}, true
 	case "numeric-string":
@@ -529,6 +565,72 @@ func (r *resolver) effective(native, doc types.Type, what string) types.Type {
 
 // ------------------------------------------------------------------ building signatures
 
+// nativeTypeParams builds type parameters from Phaenon syntax
+// (`<reified T of Foo = Bar, out U>`).
+func nativeTypeParams(tps []*ast.TypeParam, r *resolver) []*TypeParam {
+	if len(tps) == 0 {
+		return nil
+	}
+	out := make([]*TypeParam, len(tps))
+	for i, tp := range tps {
+		out[i] = &TypeParam{Name: tp.Name.Name, Variance: types.Variance(tp.Variance), Reified: tp.Reified, Native: true, Span: tp.S}
+	}
+	rr := r.withParams(out)
+	for i, tp := range tps {
+		if tp.Bound != nil {
+			out[i].Bound = rr.native(tp.Bound)
+		}
+		if tp.Default != nil {
+			out[i].Default = rr.native(tp.Default)
+		}
+	}
+	return out
+}
+
+// typeParamsOf prefers Phaenon syntax over docblock templates.
+func typeParamsOf(native []*ast.TypeParam, doc *docblock.Doc, r *resolver) []*TypeParam {
+	if len(native) > 0 {
+		return nativeTypeParams(native, r)
+	}
+	return templatesOf(doc, r)
+}
+
+// fileAlias resolves a file-level `type` alias, instantiating a generic
+// one with args (missing arguments fall back to defaults, then bounds).
+func (r *resolver) fileAlias(name string, args []types.Type) (types.Type, bool) {
+	a := r.scope.Alias(name)
+	if a == nil {
+		return nil, false
+	}
+	switch a.state {
+	case 1:
+		return types.TMixed, true // cyclic alias
+	case 0:
+		a.state = 1
+		ar := r.p.newResolver(a.File, a.Scope, nil, a.Decl.S)
+		a.Params = nativeTypeParams(a.Decl.TypeParams, ar)
+		a.Type = ar.withParams(a.Params).native(a.Decl.Type)
+		a.state = 2
+	}
+	if len(a.Params) == 0 {
+		return a.Type, true
+	}
+	subst := make(map[string]types.Type, len(a.Params))
+	for i, tp := range a.Params {
+		switch {
+		case i < len(args) && args[i] != nil:
+			subst[tp.Name] = args[i]
+		case tp.Default != nil:
+			subst[tp.Name] = tp.Default
+		case tp.Bound != nil:
+			subst[tp.Name] = tp.Bound
+		default:
+			subst[tp.Name] = types.TMixed
+		}
+	}
+	return types.Substitute(a.Type, subst), true
+}
+
 func templatesOf(doc *docblock.Doc, r *resolver) []*TypeParam {
 	if doc == nil || len(doc.Templates) == 0 {
 		return nil
@@ -639,7 +741,7 @@ func (fn *Function) ensure() {
 	if fn.File.Checked {
 		r.reportDocErrors(fn.Doc)
 	}
-	fn.TypeParams = templatesOf(fn.Doc, r)
+	fn.TypeParams = typeParamsOf(fn.Decl.TypeParams, fn.Doc, r)
 	r = r.withParams(fn.TypeParams)
 	fn.Params = r.buildParams(fn.Decl.Params, fn.Doc)
 	fn.Return = r.buildReturn(fn.Decl.ReturnType, fn.Doc)

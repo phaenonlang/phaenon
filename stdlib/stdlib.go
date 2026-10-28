@@ -16,6 +16,9 @@ var phpSrc embed.FS
 //go:embed all:overlay
 var overlay embed.FS
 
+//go:embed all:runtime
+var runtime embed.FS
+
 // Stub is one embedded signature file.
 type Stub struct {
 	Path string // e.g. "php-src/ext/standard/basic_functions.stub.php"
@@ -31,6 +34,12 @@ func Stubs() []Stub {
 // and replace the signatures they redeclare.
 func Overlay() []Stub {
 	return walk(overlay, "overlay", ".php")
+}
+
+// Runtime returns the declarations of the phaenon/runtime package
+// (`\Phaenon\Type`), which compiled code may depend on.
+func Runtime() []Stub {
+	return walk(runtime, "runtime", ".php")
 }
 
 func walk(f embed.FS, root, suffix string) []Stub {
