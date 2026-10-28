@@ -1,0 +1,160 @@
+namespace App;
+
+use Acme\Repo;
+
+final class User
+{
+    public string $name = '';
+}
+
+final class Order
+{
+    public int $total = 0;
+}
+
+function takesInt(int $x): void
+{
+}
+
+function takesString(string $x): void
+{
+}
+
+function takesUser(User $u): void
+{
+}
+
+/**
+ * @template T of object
+ * @param class-string<T> $class
+ * @return T
+ */
+function make(string $class): object
+{
+    return new $class();
+}
+
+/**
+ * @template T
+ * @param list<T> $items
+ * @return T|null
+ */
+function first(array $items): mixed
+{
+    return $items[0] ?? null;
+}
+
+/**
+ * @param Repo<User> $users
+ * @param Repo<Order> $orders
+ * @param list<int> $ints
+ */
+function repos(Repo $users, Repo $orders, array $ints, mixed $value): void
+{
+    $u = $users->find(1);
+    if ($u !== null) {
+        takesUser($u);
+        takesString($u->name);
+    }
+    $o = $orders->find(1);
+    takesUser($o); // want P2103
+    foreach ($users->all() as $user) {
+        takesUser($user);
+    }
+    $names = $users->map(fn (User $u) => $u->name);
+    takesString($names[0]);
+    takesInt($names[0]); // want P2103
+    $lengths = $users->map(fn ($u) => strlen($u->name));
+    takesInt($lengths[0]);
+    $users->add(new Order()); // want P2103
+    $users->add(new User())->add(new User());
+    $x = make(User::class);
+    takesUser($x);
+    $y = make(Order::class);
+    takesUser($y); // want P2103
+    takesInt(first([1, 2, 3]) ?? 0);
+    takesString(first(['a'])); // want P2103 "'a'|null"
+    $mapped = array_map(fn (int $i): string => (string) $i, [1, 2]);
+    takesString($mapped[0]);
+    $filtered = array_filter($ints, fn (int $i) => $i > 1);
+    takesInt($filtered[0]);
+    $keys = array_keys(['a' => 1]);
+    takesString($keys[0]);
+    $r = new Repo(User::class);
+    $found = $r->find(1);
+    if ($found !== null) {
+        takesUser($found);
+    }
+    if ($users->owns($value)) {
+        takesUser($value);
+    }
+}
+
+/**
+ * @template T
+ */
+final class Box
+{
+    /** @param T $value */
+    public function __construct(private mixed $value)
+    {
+    }
+
+    /** @return T */
+    public function get(): mixed
+    {
+        return $this->value;
+    }
+
+    /**
+     * @template R
+     * @param callable(T): R $fn
+     * @return Box<R>
+     */
+    public function map(callable $fn): Box
+    {
+        return new Box($fn($this->value));
+    }
+}
+
+function boxes(): void
+{
+    $b = new Box(1);
+    takesInt($b->get());
+    takesString($b->get()); // want P2103
+    $s = $b->map(fn (int $i): string => "n$i");
+    takesString($s->get());
+    takesInt($s->get()); // want P2103
+}
+
+/**
+ * @param \ReflectionClass<User> $rc
+ */
+function reflection(\ReflectionClass $rc): void
+{
+    takesUser($rc->newInstance());
+    $rc2 = new \ReflectionClass(Order::class);
+    takesUser($rc2->newInstanceWithoutConstructor()); // want P2103
+    takesString($rc->getName());
+}
+
+/**
+ * @param array<string, int> $map
+ * @param list<string> $list
+ * @param array{id: int, tags: list<string>} $shape
+ */
+function arrays(array $map, array $list, array $shape): void
+{
+    foreach ($map as $k => $v) {
+        takesString($k);
+        takesInt($v);
+    }
+    takesString($list[0]);
+    takesInt($shape['id']);
+    takesString($shape['tags'][0]);
+    takesInt($shape['tags']); // want P2103
+    $shape['nope']; // want P2313
+    $copy = $shape;
+    $copy['extra'] = 1;
+    takesInt($copy['extra']);
+}

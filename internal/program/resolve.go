@@ -463,9 +463,14 @@ func (r *resolver) docType(n *docblock.TypeNode) types.Type {
 		}
 		return types.TMixed
 	case docblock.KindConditional:
-		// Conditional return types are evaluated at call sites (M3); until
-		// then the result is the union of both branches.
-		return types.MakeUnion(r.docType(n.Then), r.docType(n.Else))
+		// Evaluated at the call site, once the arguments are known.
+		c := types.Conditional{Target: r.docType(n.Target), Then: r.docType(n.Then), Else: r.docType(n.Else), Negated: n.Negated}
+		if n.Subject.Kind == docblock.KindNamed && strings.HasPrefix(n.Subject.Name, "$") {
+			c.ParamName = n.Subject.Name[1:]
+		} else {
+			c.Subject = r.docType(n.Subject)
+		}
+		return c
 	}
 	return types.TMixed
 }

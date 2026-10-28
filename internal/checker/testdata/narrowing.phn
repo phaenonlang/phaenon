@@ -1,0 +1,236 @@
+namespace App;
+
+interface Shape
+{
+    public function area(): float;
+}
+
+final class Circle implements Shape
+{
+    public function __construct(public float $r)
+    {
+    }
+
+    public function area(): float
+    {
+        return 3.14 * $this->r * $this->r;
+    }
+}
+
+final class Square implements Shape
+{
+    public function area(): float
+    {
+        return 1.0;
+    }
+
+    public function side(): int
+    {
+        return 1;
+    }
+}
+
+function takesInt(int $x): void
+{
+}
+
+function takesString(string $x): void
+{
+}
+
+function takesCircle(Circle $c): void
+{
+}
+
+/** @param int|string|null $v */
+function scalars(int|string|null $v): void
+{
+    if (is_int($v)) {
+        takesInt($v);
+    } else {
+        takesString($v); // want P2103 "string|null"
+    }
+    if ($v === null) {
+        return;
+    }
+    takesString($v); // want P2103 "int|string"
+    if (is_string($v)) {
+        takesString($v);
+        return;
+    }
+    takesInt($v);
+}
+
+function objects(Shape $s, ?Square $sq, mixed $m): void
+{
+    if ($s instanceof Circle) {
+        takesCircle($s);
+    }
+    takesCircle($s); // want P2103
+    if (!$s instanceof Square) {
+        return;
+    }
+    takesInt($s->side());
+    if ($sq) {
+        takesInt($sq->side());
+    }
+    if (null === $sq) {
+        return;
+    }
+    takesInt($sq->side());
+    if (!is_string($m)) {
+        return;
+    }
+    takesString($m);
+    takesInt($m); // want P2103
+}
+
+function loops(array $xs): void
+{
+    $sum = 0;
+    foreach ($xs as $x) {
+        $sum += 1;
+    }
+    takesInt($sum);
+    $last = null;
+    foreach ([1, 2] as $x) {
+        $last = $x;
+    }
+    takesInt($last);
+    $i = 0;
+    while ($i < 10) {
+        $i++;
+    }
+    takesInt($i);
+    $found = null;
+    for ($j = 0; $j < 3; $j++) {
+        if ($j === 2) {
+            $found = 'x';
+            break;
+        }
+    }
+    takesString($found); // want P2103 "null"
+}
+
+function earlyThrow(?Circle $c): float
+{
+    if ($c === null) {
+        throw new \RuntimeException('no');
+    }
+
+    return $c->area();
+}
+
+function assertions(mixed $v): void
+{
+    assert($v instanceof Circle);
+    takesCircle($v);
+}
+
+function issets(?string $a, array $opts): void
+{
+    if (isset($a)) {
+        takesString($a);
+    }
+    if (isset($opts['k'])) {
+        takesString($opts['k']); // want P2103 "mixed"
+    }
+    if (!empty($a)) {
+        takesString($a);
+    }
+}
+
+function counts(array $xs, string $s): void
+{
+    if (count($xs) === 0) {
+        return;
+    }
+    if ($s === '') {
+        return;
+    }
+    takesString($s);
+}
+
+function switches(int|string $v): void
+{
+    switch ($v) {
+        case 1:
+            takesInt($v); // want P2103
+            break;
+        case 'a':
+            takesString($v); // want P2103
+            break;
+        default:
+            break;
+    }
+}
+
+function matchTrue(Shape $s): int
+{
+    return match (true) {
+        $s instanceof Square => $s->side(),
+        default => 0,
+    };
+}
+
+function unreachable(): int
+{
+    return 1;
+    echo 'x'; // want P2401
+}
+
+function always(Circle $c, ?Circle $maybe): void
+{
+    if ($c) { // want P2402
+    }
+    if (is_string($c)) { // want P2402
+    }
+    if ($maybe instanceof Circle) {
+        takesCircle($maybe);
+    }
+}
+
+function andOr(?Circle $a, ?Square $b): void
+{
+    if ($a !== null && $b !== null) {
+        takesCircle($a);
+        takesInt($b->side());
+    }
+    if ($a === null || $b === null) {
+        return;
+    }
+    takesCircle($a);
+    takesInt($b->side());
+}
+
+function inArray(string $s): void
+{
+    if (in_array($s, ['a', 'b'], true)) {
+        takesString($s);
+    }
+}
+
+function keyExists(array $row): void
+{
+    if (array_key_exists('id', $row)) {
+        takesInt($row['id']); // want P2103 "mixed"
+    }
+}
+
+function tryCatch(): int
+{
+    try {
+        $x = 1;
+    } catch (\RuntimeException $e) {
+        takesString($e->getMessage());
+        return 0;
+    } catch (\Exception $e) {
+        return 0;
+    } catch (\RuntimeException $e) { // want P2403, P2403
+        return 0;
+    } finally {
+        $y = 2;
+    }
+
+    return $x + $y;
+}

@@ -1,0 +1,196 @@
+namespace App;
+
+interface Greeter
+{
+    public function greet(string $name): string;
+}
+
+abstract class Base implements Greeter
+{
+    abstract protected function prefix(): string;
+
+    public function greet(string $name): string
+    {
+        return $this->prefix() . $name;
+    }
+
+    final public function id(): int
+    {
+        return 1;
+    }
+}
+
+final class Hello extends Base
+{
+    #[\Override]
+    protected function prefix(): string
+    {
+        return 'Hello ';
+    }
+
+    #[\Override]
+    public function nothing(): void // want P2503
+    {
+    }
+
+    public function id(): int // want P2505
+    {
+        return 2;
+    }
+}
+
+final class Incomplete extends Base // want P2501
+{
+}
+
+final class BadOverride extends Base
+{
+    protected function prefix(): int // want P2502
+    {
+        return 1;
+    }
+
+    public function greet(int $name): string // want P2502
+    {
+        return '';
+    }
+}
+
+class Concrete
+{
+    abstract public function f(): void; // want P2504
+}
+
+final class Leaf
+{
+}
+
+final class Child extends Leaf // want P2509
+{
+}
+
+final class NotIface implements Leaf // want P2510
+{
+}
+
+enum Suit: string
+{
+    case Hearts = 'H';
+    case Spades = 2; // want P2507
+    case Clubs; // want P2507
+}
+
+enum Plain
+{
+    case A;
+    case B;
+}
+
+function suits(Suit $s, Plain $p): string
+{
+    $x = match ($s) { // want P2304
+        Suit::Hearts => 'h',
+        Suit::Spades => 's',
+    };
+    $y = match ($p) {
+        Plain::A => 'a',
+        Plain::B => 'b',
+    };
+    if ($s === Suit::Hearts) {
+        return $s->value;
+    }
+    takesSuit($s);
+    return $x . $y . $s->value . Suit::Hearts->name;
+}
+
+function takesSuit(Suit $s): void
+{
+}
+
+readonly class Point
+{
+    public function __construct(public int $x, public int $y)
+    {
+    }
+
+    public function withX(int $x): static
+    {
+        return new static($x, $this->y);
+    }
+}
+
+final class Typed
+{
+    public int $n = 'x'; // want P2201
+    public const int C = 'y'; // want P2211
+    public $untyped; // want P2516
+
+    public int $virtual {
+        get => 'no'; // want P2512
+    }
+
+    public static function make(): self
+    {
+        return new self();
+    }
+
+    public function callStatic(): void
+    {
+        self::make();
+        static::make();
+        $this->make();
+        Typed::missing(); // want P2006
+    }
+}
+
+abstract class AbstractThing
+{
+}
+
+function instantiate(): void
+{
+    new AbstractThing(); // want P2107
+    new Greeter(); // want P2107
+    new Suit(); // want P2107
+    new Point(1); // want P2101
+    $p = new Point(1, 2);
+    $p->x = 3; // want P2206
+    $q = $p->withX(5);
+    echo $q->y;
+}
+
+trait Counts
+{
+    private int $count = 0;
+
+    public function inc(): int
+    {
+        return ++$this->count;
+    }
+}
+
+trait Names
+{
+    public function inc(): string
+    {
+        return 'x';
+    }
+}
+
+final class UsesTraits
+{
+    use Counts, Names; // want P2506
+}
+
+final class ResolvesTraits
+{
+    use Counts, Names {
+        Counts::inc insteadof Names;
+        Names::inc as incName;
+    }
+
+    public function both(): string
+    {
+        return $this->inc() . $this->incName();
+    }
+}

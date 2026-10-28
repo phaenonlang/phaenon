@@ -1,0 +1,278 @@
+package checker
+
+import (
+	"sort"
+	"strings"
+
+	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/types"
+)
+
+// varInfo is what the flow analysis knows about one variable.
+type varInfo struct {
+	t     types.Type
+	maybe bool // might not be defined on some path
+}
+
+// state is the abstract state at one program point: the type of every
+// variable, narrowed member paths, and whether the point is reachable.
+type state struct {
+	vars  map[string]varInfo
+	paths map[string]types.Type // "$this->x", "$a['k']" → narrowed type
+	dead  bool
+}
+
+func newEnv() *state {
+	return &state{vars: map[string]varInfo{}, paths: map[string]types.Type{}}
+}
+
+func (e *state) clone() *state {
+	n := &state{vars: make(map[string]varInfo, len(e.vars)), paths: make(map[string]types.Type, len(e.paths)), dead: e.dead}
+	for k, v := range e.vars {
+		n.vars[k] = v
+	}
+	for k, v := range e.paths {
+		n.paths[k] = v
+	}
+	return n
+}
+
+// set defines or redefines a variable and drops narrowings under it.
+func (e *state) set(name string, t types.Type) {
+	e.vars[name] = varInfo{t: t}
+	e.invalidatePrefix("$" + name)
+}
+
+// setMaybe marks a variable as possibly undefined (after a merge).
+func (e *state) setMaybe(name string, t types.Type) {
+	e.vars[name] = varInfo{t: t, maybe: true}
+}
+
+func (e *state) get(name string) (varInfo, bool) {
+	v, ok := e.vars[name]
+	return v, ok
+}
+
+func (e *state) unset(name string) {
+	delete(e.vars, name)
+	e.invalidatePrefix("$" + name)
+}
+
+func (e *state) setPath(key string, t types.Type) {
+	e.paths[key] = t
+}
+
+func (e *state) getPath(key string) (types.Type, bool) {
+	t, ok := e.paths[key]
+	return t, ok
+}
+
+// invalidatePrefix drops every narrowed path that starts with prefix
+// followed by a member or offset separator (or equals it).
+func (e *state) invalidatePrefix(prefix string) {
+	for k := range e.paths {
+		if k == prefix || (strings.HasPrefix(k, prefix) && (strings.HasPrefix(k[len(prefix):], "->") || strings.HasPrefix(k[len(prefix):], "[") || strings.HasPrefix(k[len(prefix):], "::"))) {
+			delete(e.paths, k)
+		}
+	}
+}
+
+// invalidateMembers drops every property narrowing (after a call that may
+// mutate objects) but keeps offset narrowings on local arrays, which are
+// values.
+func (e *state) invalidateMembers() {
+	for k := range e.paths {
+		if strings.Contains(k, "->") || strings.Contains(k, "::") {
+			delete(e.paths, k)
+		}
+	}
+}
+
+// join merges two environments at a control-flow meet.
+func join(a, b *state) *state {
+	if a.dead {
+		return b.clone()
+	}
+	if b.dead {
+		return a.clone()
+	}
+	n := newEnv()
+	for k, va := range a.vars {
+		if vb, ok := b.vars[k]; ok {
+			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe}
+		} else {
+			n.vars[k] = varInfo{t: va.t, maybe: true}
+		}
+	}
+	for k, vb := range b.vars {
+		if _, ok := a.vars[k]; !ok {
+			n.vars[k] = varInfo{t: vb.t, maybe: true}
+		}
+	}
+	for k, ta := range a.paths {
+		if tb, ok := b.paths[k]; ok {
+			n.paths[k] = types.MakeUnion(ta, tb)
+		}
+	}
+	return n
+}
+
+// joinAll merges several environments.
+func joinAll(es ...*state) *state {
+	var out *state
+	for _, e := range es {
+		if e == nil {
+			continue
+		}
+		if out == nil {
+			out = e.clone()
+			continue
+		}
+		out = join(out, e)
+	}
+	if out == nil {
+		out = newEnv()
+		out.dead = true
+	}
+	return out
+}
+
+// equal reports whether two environments agree on every variable (for the
+// loop fixed point).
+func (e *state) equal(o *state) bool {
+	if e.dead != o.dead || len(e.vars) != len(o.vars) {
+		return false
+	}
+	for k, v := range e.vars {
+		w, ok := o.vars[k]
+		if !ok || v.maybe != w.maybe || !types.Equal(v.t, w.t) {
+			return false
+		}
+	}
+	return true
+}
+
+// widen generalises the variables that changed between prev and e so loop
+// iteration converges: literals become their primitive, lists stay lists.
+func (e *state) widen(prev *state) {
+	for k, v := range e.vars {
+		if pv, ok := prev.vars[k]; ok && !types.Equal(pv.t, v.t) {
+			e.vars[k] = varInfo{t: widenType(v.t), maybe: v.maybe}
+		}
+	}
+}
+
+func widenType(t types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Int:
+			return types.TInt
+		case types.StringLit:
+			return types.TString
+		case types.FloatLit:
+			return types.TFloat
+		case types.BoolLit:
+			return types.TBool
+		case types.Shape:
+			values := types.TNever // an empty shape has no values
+			if len(m.Entries) > 0 {
+				values = widenType(shapeValues(m))
+			}
+			if m.List {
+				return types.Array{Key: types.TInt, Value: values, List: true}
+			}
+			if len(m.Entries) == 0 {
+				return types.Array{Key: types.TInt, Value: values, List: true}
+			}
+			return types.Array{Key: widenType(shapeKeys(m)), Value: values}
+		case types.Array:
+			return types.Array{Key: widenType(m.Key), Value: widenType(m.Value), List: m.List}
+		}
+		return m
+	})
+}
+
+func shapeKeys(s types.Shape) types.Type {
+	var ks []types.Type
+	for _, e := range s.Entries {
+		if e.IsInt {
+			ks = append(ks, types.IntLit(e.IntKey))
+		} else {
+			ks = append(ks, types.StringLit{V: e.Key})
+		}
+	}
+	if len(ks) == 0 {
+		return types.TArrayKey
+	}
+	return types.MakeUnion(ks...)
+}
+
+func shapeValues(s types.Shape) types.Type {
+	var vs []types.Type
+	for _, e := range s.Entries {
+		vs = append(vs, e.Type)
+	}
+	if len(vs) == 0 {
+		return types.TMixed
+	}
+	return types.MakeUnion(vs...)
+}
+
+// names returns the variable names, sorted (for deterministic diagnostics).
+func (e *state) names() []string {
+	out := make([]string, 0, len(e.vars))
+	for k := range e.vars {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// pathKey returns the narrowing key of an expression that denotes a
+// stable path: $x, $x->p, $x['k'], Foo::$p, $this->p->q.
+func pathKey(e ast.Expr) (string, bool) {
+	switch e := e.(type) {
+	case *ast.Variable:
+		return "$" + e.Name, true
+	case *ast.Paren:
+		return pathKey(e.Expr)
+	case *ast.PropertyFetch:
+		base, ok := pathKey(e.Object)
+		if !ok {
+			return "", false
+		}
+		id, ok := e.Name.(*ast.Ident)
+		if !ok {
+			return "", false
+		}
+		sep := "->"
+		if e.NullSafe {
+			sep = "?->"
+		}
+		return base + sep + id.Name, true
+	case *ast.StaticPropertyFetch:
+		n, ok := e.Class.(*ast.Name)
+		if !ok {
+			return "", false
+		}
+		v, ok := e.Name.(*ast.Variable)
+		if !ok {
+			return "", false
+		}
+		return strings.ToLower(strings.Join(n.Parts, "\\")) + "::$" + v.Name, true
+	case *ast.Index:
+		base, ok := pathKey(e.Array)
+		if !ok || e.Index == nil {
+			return "", false
+		}
+		switch i := e.Index.(type) {
+		case *ast.StringLit:
+			return base + "['" + program.StringValue(i) + "']", true
+		case *ast.IntLit:
+			return base + "[" + i.Raw + "]", true
+		}
+		return "", false
+	}
+	return "", false
+}

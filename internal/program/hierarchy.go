@@ -19,6 +19,9 @@ func (c *Class) ensureHeader() {
 	p := c.File.program
 	d := c.Decl
 	c.Doc = parseDoc(d.Doc)
+	if patch := p.patches[strings.ToLower(c.Name)]; patch != nil && patch.Doc != "" {
+		c.Doc = parseDoc(patch.Doc)
+	}
 	r := &resolver{p: p, f: c.File, scope: c.Scope, class: c, params: map[string]*TypeParam{}, span: c.Span}
 	if c.File.Checked {
 		r.reportDocErrors(c.Doc)
@@ -179,11 +182,30 @@ func (c *Class) ensureMembers() {
 				c.addProp(prop)
 			}
 		case *ast.MethodDecl:
-			c.addMethod(r.buildMethod(c, m))
+			c.addMethod(r.buildMethod(c, c.patchedMethod(m)))
 		case *ast.EnumCase:
 			cs := &EnumCase{Name: m.Name.Name, Class: c, Value: m.Value, Span: m.S}
 			c.Cases = append(c.Cases, cs)
 			c.cases[cs.Name] = cs
+		}
+	}
+	// Overlay methods the stub does not declare.
+	if patch := p.patches[strings.ToLower(c.Name)]; patch != nil {
+		for _, pm := range patch.Members {
+			if md, ok := pm.(*ast.MethodDecl); ok {
+				if _, exists := c.methods[strings.ToLower(md.Name.Name)]; !exists {
+					c.addMethod(r.buildMethod(c, md))
+				}
+			}
+		}
+	}
+	// Enums have the magic read-only properties $name and $value.
+	if c.Kind == ast.KindEnum {
+		c.addProp(&Property{Name: "name", Class: c, Vis: Public, SetVis: Private, Readonly: true, Magic: true,
+			Type: types.String{NonEmpty: true}, NativeType: types.TString, Span: c.Span, File: c.File})
+		if c.BackingType != nil {
+			c.addProp(&Property{Name: "value", Class: c, Vis: Public, SetVis: Private, Readonly: true, Magic: true,
+				Type: c.BackingType, NativeType: c.BackingType, Span: c.Span, File: c.File})
 		}
 	}
 	// Promoted constructor parameters are properties.
@@ -193,6 +215,8 @@ func (c *Class) ensureMembers() {
 				continue
 			}
 			pp := ctor.Params[i]
+			// The constructor's own templates stay in the property type, as
+			// PHPStan keeps them: a call through the property infers them.
 			prop := &Property{Name: pp.Name, Class: c, Vis: visibilityOf(ap.Modifiers), Readonly: ap.Modifiers&ast.ModReadonly != 0 || c.Readonly,
 				NativeType: pp.NativeType, Type: pp.Type, HasDefault: false, Hooks: ap.Hooks, Promoted: true, Attrs: ap.Attrs, Span: ap.S, File: c.File}
 			prop.SetVis = setVisibilityOf(ap.Modifiers, prop.Vis)
@@ -238,6 +262,78 @@ func (c *Class) ensureMembers() {
 	for _, tu := range c.traitUses {
 		c.useTrait(tu)
 	}
+	c.inheritDocTypes()
+}
+
+// inheritDocTypes gives a method without docblock types the docblock types
+// of the method it overrides, as PHPStan does (implicit @inheritDoc). The
+// parent's type parameters are mapped through @extends / @implements.
+func (c *Class) inheritDocTypes() {
+	var self []types.Type
+	if t, ok := c.TypeOf().(types.Class); ok {
+		self = t.Args
+	}
+	for _, m := range c.Methods {
+		if m.Decl == nil || m.FromTrait != nil {
+			continue
+		}
+		key := strings.ToLower(m.Name)
+		for _, a := range c.Ancestors() {
+			a.ensure()
+			pm, ok := a.methods[key]
+			if !ok || pm.Vis == Private {
+				continue
+			}
+			var subst map[string]types.Type
+			if args, ok := c.SuperArgs(a.Name, self); ok {
+				subst = a.Subst(args)
+			}
+			for i, pp := range pm.Params {
+				if i >= len(m.Params) {
+					break
+				}
+				cp := m.Params[i]
+				hasDoc := cp.NativeType == nil && !types.IsMixed(cp.Type) || cp.NativeType != nil && !types.Equal(cp.Type, cp.NativeType)
+				if hasDoc || pp.Type == nil || !nativeMatches(cp.NativeType, pp.NativeType) {
+					continue
+				}
+				cp.Type = types.Substitute(pp.Type, subst)
+			}
+			hasDocReturn := m.Return != nil && (m.NativeReturn == nil || !types.Equal(m.Return, m.NativeReturn))
+			if !hasDocReturn && pm.Return != nil && nativeMatches(m.NativeReturn, pm.NativeReturn) {
+				m.Return = types.Substitute(pm.Return, subst)
+			}
+			break
+		}
+	}
+}
+
+// boundSubst replaces type parameters by their bounds (mixed when unbounded).
+func boundSubst(t types.Type, tps []*TypeParam) types.Type {
+	if len(tps) == 0 || t == nil {
+		return t
+	}
+	m := make(map[string]types.Type, len(tps))
+	for _, tp := range tps {
+		if tp.Bound != nil {
+			m[tp.Name] = tp.Bound
+		} else {
+			m[tp.Name] = types.TMixed
+		}
+	}
+	return types.Substitute(t, m)
+}
+
+// nativeMatches reports whether two native types agree closely enough for
+// a docblock to carry over: equal, or the child's is absent.
+func nativeMatches(child, parent types.Type) bool {
+	if child == nil {
+		return true
+	}
+	if parent == nil {
+		return false
+	}
+	return types.Equal(child, parent)
 }
 
 func (c *Class) addConst(k *Constant) {
@@ -315,12 +411,28 @@ func (r *resolver) buildMethod(c *Class, d *ast.MethodDecl) *Method {
 	m.TypeParams = templatesOf(m.Doc, rr)
 	rr = rr.withParams(m.TypeParams)
 	m.Params = rr.buildParams(d.Params, m.Doc)
+	m.NativeReturn = rr.native(d.ReturnType)
 	m.Return = rr.buildReturn(d.ReturnType, m.Doc)
 	if m.Doc != nil {
 		m.Deprecated = m.Doc.Deprecated
 		m.Asserts = m.Doc.Asserts
 		if m.Doc.SelfOut != nil {
 			m.SelfOut = rr.docType(m.Doc.SelfOut)
+		}
+	}
+	return m
+}
+
+// patchedMethod returns the overlay's declaration of a stub method when
+// the overlay redeclares it.
+func (c *Class) patchedMethod(m *ast.MethodDecl) *ast.MethodDecl {
+	patch := c.File.program.patches[strings.ToLower(c.Name)]
+	if patch == nil {
+		return m
+	}
+	for _, pm := range patch.Members {
+		if md, ok := pm.(*ast.MethodDecl); ok && strings.EqualFold(md.Name.Name, m.Name.Name) {
+			return md
 		}
 	}
 	return m
@@ -363,9 +475,7 @@ func (c *Class) useTrait(tu *ast.TraitUse) {
 		t.ensure()
 		for _, tm := range t.Methods {
 			key := strings.ToLower(tm.Name)
-			if excluded[strings.ToLower(t.Name)+"\x00"+key] {
-				continue
-			}
+			excludedHere := excluded[strings.ToLower(t.Name)+"\x00"+key]
 			copyM := *tm
 			copyM.Class = c
 			if copyM.FromTrait == nil {
@@ -386,7 +496,9 @@ func (c *Class) useTrait(tu *ast.TraitUse) {
 					copyM.Vis = visibilityOf(rule.mods)
 				}
 			}
-			c.addMethod(&copyM)
+			if !excludedHere {
+				c.addMethod(&copyM)
+			}
 		}
 		for _, tp := range t.Props {
 			copyP := *tp
@@ -664,3 +776,9 @@ func (c *Class) TypeOf() types.Type {
 // Signature returns the method with its types built (they are built with
 // the class, so this is a no-op accessor kept for symmetry).
 func (m *Method) Signature() *Method { return m }
+
+// Signature returns the class with its header and members built.
+func (c *Class) Signature() *Class {
+	c.ensure()
+	return c
+}

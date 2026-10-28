@@ -1,0 +1,865 @@
+package checker
+
+import (
+	"strings"
+
+	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
+	"github.com/phaenonlang/phaenon/internal/types"
+)
+
+// cond evaluates a condition and returns the environments in force when
+// it is true and when it is false. env itself is left as the state after
+// evaluating the condition's side effects (assignments).
+func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
+	switch e := e.(type) {
+	case *ast.Paren:
+		return x.cond(e.Expr, env)
+	case *ast.Unary:
+		if e.Op == token.Kind('!') {
+			t, f := x.cond(e.Expr, env)
+			x.condValueType = types.TBool
+			return f, t
+		}
+	case *ast.Binary:
+		switch e.Op {
+		case token.T_BOOLEAN_AND, token.T_LOGICAL_AND:
+			t1, f1 := x.cond(e.Left, env)
+			t2, f2 := x.cond(e.Right, t1)
+			*env = *join(t2, join(f1, f2))
+			x.condValueType = types.TBool
+			return t2, join(f1, f2)
+		case token.T_BOOLEAN_OR, token.T_LOGICAL_OR:
+			t1, f1 := x.cond(e.Left, env)
+			t2, f2 := x.cond(e.Right, f1)
+			*env = *join(join(t1, t2), f2)
+			x.condValueType = types.TBool
+			return join(t1, t2), f2
+		case token.T_LOGICAL_XOR:
+			t1, f1 := x.cond(e.Left, env)
+			both := join(t1, f1)
+			t2, f2 := x.cond(e.Right, both)
+			*env = *join(t2, f2)
+			x.condValueType = types.TBool
+			return join(t2, f2), join(t2, f2)
+		case token.T_IS_IDENTICAL, token.T_IS_NOT_IDENTICAL, token.T_IS_EQUAL, token.T_IS_NOT_EQUAL:
+			return x.comparison(e, env)
+		case token.Kind('>'), token.Kind('<'), token.T_IS_GREATER_OR_EQUAL, token.T_IS_SMALLER_OR_EQUAL:
+			return x.ordering(e, env)
+		}
+	case *ast.Instanceof:
+		return x.instanceofCond(e, env)
+	case *ast.Isset:
+		then = env.clone()
+		for _, v := range e.Vars {
+			t := x.exprLenient(v, env)
+			x.narrowPath(then, v, types.StripNull(t), true)
+		}
+		x.condValueType = types.TBool
+		els = env.clone()
+		if len(e.Vars) == 1 {
+			t := x.exprLenient(e.Vars[0], env)
+			if _, isVar := e.Vars[0].(*ast.Variable); isVar && !x.maybeUndefined(e.Vars[0], env) {
+				x.narrowPath(els, e.Vars[0], types.Intersect(t, types.TNull, x.p()), false)
+			}
+		}
+		return then, els
+	case *ast.Empty:
+		t := x.exprLenient(e.Expr, env)
+		then, els = env.clone(), env.clone()
+		x.narrowPath(then, e.Expr, types.Falsy(t), false)
+		x.narrowPath(els, e.Expr, types.Truthy(t), true)
+		x.condValueType = types.TBool
+		return then, els
+	case *ast.Call:
+		if then, els, ok := x.predicateCall(e, env); ok {
+			return then, els
+		}
+	case *ast.MethodCall:
+		if then, els, ok := x.methodAssert(e, env); ok {
+			return then, els
+		}
+	case *ast.Assign:
+		// if ($x = expr): the assigned value's truthiness narrows $x.
+		t := x.assign(e, env)
+		x.condValueType = t
+		then, els = env.clone(), env.clone()
+		if e.Op == token.Kind('=') {
+			x.narrowPath(then, e.Target, types.Truthy(t), true)
+			x.narrowPath(els, e.Target, types.Falsy(t), false)
+		}
+		return then, els
+	}
+	t := x.expr(e, env, nil)
+	x.condValueType = t
+	then, els = env.clone(), env.clone()
+	x.narrowPath(then, e, types.Truthy(t), true)
+	x.narrowPath(els, e, types.Falsy(t), false)
+	x.alwaysCheck(e, t)
+	// A fixed outcome makes the other branch unreachable (so `true ? 1 : 'a'` is 1).
+	if !types.IsMixed(t) {
+		if _, never := types.Truthy(t).(types.Never); never {
+			then.dead = true
+		} else if _, never := types.Falsy(t).(types.Never); never {
+			els.dead = true
+		}
+	}
+	return then, els
+}
+
+// alwaysCheck reports conditions whose outcome is fixed by their type.
+func (x *fnCtx) alwaysCheck(e ast.Expr, t types.Type) {
+	if x.loopCond {
+		switch e.(type) {
+		case *ast.ConstFetch, *ast.Name, *ast.IntLit, *ast.StringLit, *ast.FloatLit:
+			return // `while (true)` is idiomatic
+		}
+	}
+	if types.IsMixed(t) {
+		return
+	}
+	if _, ok := t.(types.Never); ok {
+		return
+	}
+	if _, ok := types.Truthy(t).(types.Never); ok {
+		x.report(e.Span(), P2402, "condition is always false (%s)", x.typeName(t))
+	} else if _, ok := types.Falsy(t).(types.Never); ok {
+		x.report(e.Span(), P2402, "condition is always true (%s)", x.typeName(t))
+	}
+}
+
+// narrowPath sets the narrowed type of a path expression in env; define
+// marks a variable as certainly defined.
+func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
+	switch p := e.(type) {
+	case *ast.Paren:
+		x.narrowPath(env, p.Expr, t, define)
+		return
+	case *ast.Variable:
+		if p.Name == "this" {
+			env.setPath("$this", t)
+			return
+		}
+		if superglobals[p.Name] {
+			return
+		}
+		info, ok := env.get(p.Name)
+		if !ok && !define {
+			return
+		}
+		if _, isNever := t.(types.Never); isNever && !ok {
+			return
+		}
+		// Narrowing keeps the member paths: the object is the same one.
+		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define}
+		return
+	}
+	if key, ok := pathKey(e); ok {
+		env.setPath(key, t)
+	}
+}
+
+// pathType returns the current type of a path without side effects.
+func (x *fnCtx) pathType(e ast.Expr, env *state) types.Type {
+	saved := x.c.diags
+	t := x.exprLenient(e, env.clone())
+	x.c.diags = saved
+	return t
+}
+
+// comparison narrows on ===, !==, ==, !=.
+func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
+	strict := e.Op == token.T_IS_IDENTICAL || e.Op == token.T_IS_NOT_IDENTICAL
+	negate := e.Op == token.T_IS_NOT_IDENTICAL || e.Op == token.T_IS_NOT_EQUAL
+	lt := x.expr(e.Left, env, nil)
+	rt := x.expr(e.Right, env, nil)
+	x.condValueType = types.TBool
+	if strict && !types.IsMixed(lt) && !types.IsMixed(rt) && !types.Overlaps(lt, rt, x.p()) {
+		word := "false"
+		if negate {
+			word = "true"
+		}
+		x.report(e.S, P2305, "strict comparison between %s and %s is always %s", x.typeName(lt), x.typeName(rt), word)
+	}
+	then, els = env.clone(), env.clone()
+	// count($x) === 0 and friends.
+	if c, n, ok := countCompare(e); ok {
+		at := x.pathType(c.Args.Args[0].Value, env)
+		switch {
+		case n == 0:
+			x.narrowPath(then, c.Args.Args[0].Value, emptyArray(at), false)
+			x.narrowPath(els, c.Args.Args[0].Value, nonEmptyArray(at), false)
+		case n > 0:
+			x.narrowPath(then, c.Args.Args[0].Value, nonEmptyArray(at), false)
+		}
+		if negate {
+			return els, then
+		}
+		return then, els
+	}
+	narrowBy := func(target ast.Expr, targetT, other types.Type) {
+		if !isLiteralLike(other) {
+			if strict {
+				// `$x === $y` with non-literal: then-branch intersects.
+				x.narrowPath(then, target, types.Intersect(targetT, other, x.p()), true)
+			}
+			return
+		}
+		if strict || isNullType(other) {
+			x.narrowPath(then, target, types.Intersect(targetT, other, x.p()), true)
+			x.narrowPath(els, target, x.subtract(targetT, other, x.p()), false)
+			if !strict {
+				// == null is truthiness-like.
+				x.narrowPath(then, target, types.Falsy(targetT), true)
+				x.narrowPath(els, target, types.Truthy(targetT), false)
+			}
+		}
+	}
+	narrowBy(e.Left, lt, rt)
+	narrowBy(e.Right, rt, lt)
+	// `$x === []` / `$x !== []`
+	if isEmptyArrayLit(e.Right) {
+		x.narrowPath(then, e.Left, emptyArray(lt), false)
+		x.narrowPath(els, e.Left, nonEmptyArray(lt), false)
+	}
+	if negate {
+		return els, then
+	}
+	return then, els
+}
+
+func isNullType(t types.Type) bool {
+	_, ok := t.(types.Null)
+	return ok
+}
+
+// isLiteralLike reports whether narrowing against t is meaningful.
+func isLiteralLike(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.Null, types.BoolLit, types.StringLit, types.FloatLit, types.EnumCase, types.Bool:
+		case types.Int:
+			if m.Lo != m.Hi {
+				return false
+			}
+		case types.Shape:
+			if len(m.Entries) > 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isEmptyArrayLit(e ast.Expr) bool {
+	a, ok := e.(*ast.ArrayLit)
+	return ok && len(a.Items) == 0
+}
+
+func emptyArray(t types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Array:
+			if m.NonEmpty {
+				return types.TNever
+			}
+			return types.Shape{List: m.List}
+		case types.Shape:
+			for _, e := range m.Entries {
+				if !e.Optional {
+					return types.TNever
+				}
+			}
+			return types.Shape{List: m.List}
+		}
+		return m
+	})
+}
+
+func nonEmptyArray(t types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Array:
+			m.NonEmpty = true
+			return m
+		case types.Shape:
+			if len(m.Entries) == 0 && !m.Unsealed {
+				return types.TNever
+			}
+		}
+		return m
+	})
+}
+
+// countCompare recognises count($x) <op> N with a literal N (either side).
+func countCompare(e *ast.Binary) (*ast.Call, int64, bool) {
+	call, ok := e.Left.(*ast.Call)
+	lit, ok2 := e.Right.(*ast.IntLit)
+	if !ok || !ok2 {
+		call, ok = e.Right.(*ast.Call)
+		lit, ok2 = e.Left.(*ast.IntLit)
+		if !ok || !ok2 {
+			return nil, 0, false
+		}
+	}
+	n, isName := call.Callee.(*ast.Name)
+	if !isName || len(n.Parts) != 1 || !strings.EqualFold(n.Parts[0], "count") || call.Args == nil || len(call.Args.Args) == 0 {
+		return nil, 0, false
+	}
+	v, ok := types.IsIntLit(intLitType(lit.Raw))
+	if !ok {
+		return nil, 0, false
+	}
+	return call, v, true
+}
+
+// ordering narrows count($x) > 0 and similar.
+func (x *fnCtx) ordering(e *ast.Binary, env *state) (then, els *state) {
+	lt := x.expr(e.Left, env, nil)
+	rt := x.expr(e.Right, env, nil)
+	x.condValueType = types.TBool
+	then, els = env.clone(), env.clone()
+	if li, ok := lt.(types.Int); ok {
+		if ri, ok := rt.(types.Int); ok {
+			if always, value := orderingOutcome(e.Op, li, ri); always {
+				x.report(e.S, P2402, "comparison between %s and %s is always %v", x.typeName(lt), x.typeName(rt), value)
+				if value {
+					els.dead = true
+				} else {
+					then.dead = true
+				}
+			}
+		}
+	}
+	c, n, ok := countCompare(e)
+	if !ok {
+		return then, els
+	}
+	arg := c.Args.Args[0].Value
+	at := x.pathType(arg, env)
+	callOnLeft := e.Left.(*ast.Call) == c
+	op := e.Op
+	if !callOnLeft {
+		// N < count($x) is count($x) > N
+		switch op {
+		case token.Kind('<'):
+			op = token.Kind('>')
+		case token.Kind('>'):
+			op = token.Kind('<')
+		case token.T_IS_SMALLER_OR_EQUAL:
+			op = token.T_IS_GREATER_OR_EQUAL
+		case token.T_IS_GREATER_OR_EQUAL:
+			op = token.T_IS_SMALLER_OR_EQUAL
+		}
+	}
+	switch {
+	case op == token.Kind('>') && n >= 0, op == token.T_IS_GREATER_OR_EQUAL && n >= 1:
+		x.narrowPath(then, arg, nonEmptyArray(at), false)
+		if (op == token.Kind('>') && n == 0) || (op == token.T_IS_GREATER_OR_EQUAL && n == 1) {
+			x.narrowPath(els, arg, emptyArray(at), false)
+		}
+	case op == token.Kind('<') && n <= 1, op == token.T_IS_SMALLER_OR_EQUAL && n <= 0:
+		x.narrowPath(then, arg, emptyArray(at), false)
+		x.narrowPath(els, arg, nonEmptyArray(at), false)
+	}
+	return then, els
+}
+
+// instanceofCond narrows on instanceof and reports always-true/false.
+func (x *fnCtx) instanceofCond(e *ast.Instanceof, env *state) (then, els *state) {
+	t := x.expr(e.Expr, env, nil)
+	target := x.instanceofTarget(e, env)
+	x.condValueType = types.TBool
+	then, els = env.clone(), env.clone()
+	if target == nil {
+		return then, els
+	}
+	if !types.IsMixed(t) {
+		if _, isObject := target.(types.Object); !isObject {
+			if types.IsSubtype(t, target, x.p()) && !isParamType(t) {
+				x.report(e.S, P2306, "%s is always an instance of %s", x.typeName(t), x.typeName(target))
+			} else if !types.Overlaps(t, target, x.p()) {
+				x.report(e.S, P2306, "%s is never an instance of %s", x.typeName(t), x.typeName(target))
+			}
+		}
+	}
+	x.narrowPath(then, e.Expr, types.Intersect(t, target, x.p()), true)
+	x.narrowPath(els, e.Expr, x.subtract(t, target, x.p()), false)
+	return then, els
+}
+
+func isParamType(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		if _, ok := m.(types.Param); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// instanceofTarget resolves the right-hand side of instanceof to a type.
+func (x *fnCtx) instanceofTarget(e *ast.Instanceof, env *state) types.Type {
+	switch c := e.Class.(type) {
+	case *ast.Name:
+		raw := x.res.ClassName(c)
+		if raw == "parent" && x.class != nil {
+			if pc := x.class.ParentClass(); pc != nil {
+				return types.Class{Name: pc.Name}
+			}
+		}
+		t, _ := x.classRefType(c, c.S)
+		return types.StripNull(t)
+	default:
+		ct := x.expr(e.Class, env, nil)
+		var out []types.Type
+		for _, m := range types.Members(ct) {
+			switch m := m.(type) {
+			case types.ClassString:
+				if m.Of != nil {
+					out = append(out, m.Of)
+				} else {
+					out = append(out, types.TObject)
+				}
+			case types.StringLit:
+				out = append(out, types.Class{Name: m.V})
+			case types.Class, types.Static, types.This:
+				out = append(out, m)
+			default:
+				out = append(out, types.TObject)
+			}
+		}
+		return types.MakeUnion(out...)
+	}
+}
+
+// instanceofType types an instanceof used as a value.
+func (x *fnCtx) instanceofType(e *ast.Instanceof, env *state) {
+	then, els := x.instanceofCond(e, env)
+	*env = *join(then, els)
+}
+
+// predicateCall narrows on is_*() and the other predicate functions.
+func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok bool) {
+	n, isName := e.Callee.(*ast.Name)
+	if !isName || e.Args == nil || len(e.Args.Args) == 0 || e.Args.FirstClassCallable {
+		return nil, nil, false
+	}
+	name := strings.ToLower(n.Parts[len(n.Parts)-1])
+	if len(n.Parts) > 1 && n.Kind != ast.NameFullyQualified {
+		return nil, nil, false
+	}
+	arg := e.Args.Args[0].Value
+	var target types.Type
+	switch name {
+	case "is_int", "is_integer", "is_long":
+		target = types.TInt
+	case "is_float", "is_double":
+		target = types.TFloat
+	case "is_string":
+		target = types.TString
+	case "is_bool":
+		target = types.TBool
+	case "is_array":
+		target = types.TArray
+	case "is_object":
+		target = types.TObject
+	case "is_null":
+		target = types.TNull
+	case "is_iterable":
+		target = types.TIterable
+	case "is_callable":
+		target = types.TCallable
+	case "is_scalar":
+		target = types.TScalar
+	case "is_numeric":
+		target = types.TNumeric
+	case "is_countable":
+		target = types.MakeUnion(types.TArray, types.NewClass("Countable"))
+	case "is_resource":
+		target = types.TResource
+	case "is_a", "is_subclass_of":
+		if len(e.Args.Args) < 2 {
+			return nil, nil, false
+		}
+		x.call(e, env, nil)
+		ct := x.pathType(e.Args.Args[1].Value, env)
+		var cls types.Type
+		switch c := ct.(type) {
+		case types.StringLit:
+			cls = types.Class{Name: c.V}
+		case types.ClassString:
+			if c.Of != nil {
+				cls = c.Of
+			}
+		}
+		then, els = env.clone(), env.clone()
+		x.condValueType = types.TBool
+		if cls == nil {
+			return then, els, true
+		}
+		at := x.pathType(arg, env)
+		allowString := len(e.Args.Args) >= 3 && isTrueLit(e.Args.Args[2].Value)
+		if allowString {
+			x.narrowPath(then, arg, types.Intersect(at, types.MakeUnion(cls, types.ClassString{Of: cls}), x.p()), true)
+		} else {
+			x.narrowPath(then, arg, types.Intersect(at, cls, x.p()), true)
+			x.narrowPath(els, arg, x.subtract(at, cls, x.p()), false)
+		}
+		return then, els, true
+	case "array_key_exists", "key_exists":
+		if len(e.Args.Args) < 2 {
+			return nil, nil, false
+		}
+		x.call(e, env, nil)
+		then, els = env.clone(), env.clone()
+		x.condValueType = types.TBool
+		keyT := x.pathType(arg, env)
+		arrExpr := e.Args.Args[1].Value
+		at := x.pathType(arrExpr, env)
+		x.narrowPath(then, arrExpr, withKey(at, keyT, true), false)
+		x.narrowPath(els, arrExpr, withKey(at, keyT, false), false)
+		return then, els, true
+	case "in_array":
+		if len(e.Args.Args) < 3 || !isTrueLit(e.Args.Args[2].Value) {
+			return nil, nil, false
+		}
+		x.call(e, env, nil)
+		then, els = env.clone(), env.clone()
+		x.condValueType = types.TBool
+		at := x.pathType(arg, env)
+		hay := x.pathType(e.Args.Args[1].Value, env)
+		_, v, _ := types.IterableKV(hay, x.p())
+		if isLiteralLike(v) {
+			x.narrowPath(then, arg, types.Intersect(at, v, x.p()), true)
+			x.narrowPath(els, arg, x.subtract(at, v, x.p()), false)
+		} else {
+			x.narrowPath(then, arg, types.Intersect(at, v, x.p()), true)
+		}
+		return then, els, true
+	case "assert":
+		then, els = x.cond(arg, env)
+		x.condValueType = types.TBool
+		return then, then.clone(), true
+	case "method_exists", "property_exists", "function_exists", "class_exists", "interface_exists", "enum_exists":
+		x.call(e, env, nil)
+		x.condValueType = types.TBool
+		return env.clone(), env.clone(), true
+	default:
+		// User functions with @phpstan-assert.
+		fn := x.lookupFunction(n)
+		if fn == nil || len(fn.Signature().Asserts) == 0 {
+			return nil, nil, false
+		}
+		x.call(e, env, nil)
+		then, els = x.applyAsserts(x.functionCallee(fn, e.Args), env)
+		x.condValueType = types.TBool
+		return then, els, true
+	}
+	x.call(e, env, nil)
+	x.condValueType = types.TBool
+	at := x.pathType(arg, env)
+	then, els = env.clone(), env.clone()
+	x.narrowPath(then, arg, types.Intersect(at, target, x.p()), true)
+	x.narrowPath(els, arg, x.subtract(at, target, x.p()), false)
+	if !types.IsMixed(at) {
+		if _, isNever := types.Intersect(at, target, x.p()).(types.Never); isNever {
+			x.report(e.S, P2402, "%s() on %s is always false", name, x.typeName(at))
+		} else if types.IsSubtype(at, target, x.p()) && !isParamType(at) {
+			x.report(e.S, P2402, "%s() on %s is always true", name, x.typeName(at))
+		}
+	}
+	return then, els, true
+}
+
+// subtract is types.Subtract with enums expanded into their cases first, so
+// that removing Suit::Hearts from Suit leaves the other cases.
+func (x *fnCtx) subtract(t, target types.Type, h types.Hierarchy) types.Type {
+	return types.Subtract(x.expandEnums(t), target, h)
+}
+
+func (x *fnCtx) expandEnums(t types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		c, ok := m.(types.Class)
+		if !ok {
+			return m
+		}
+		cl := x.p().Class(c.Name)
+		if cl == nil || cl.Kind != ast.KindEnum {
+			return m
+		}
+		cl.Signature()
+		if len(cl.Cases) == 0 {
+			return m
+		}
+		cases := make([]types.Type, 0, len(cl.Cases))
+		for _, cs := range cl.Cases {
+			cases = append(cases, types.EnumCase{Class: cl.Name, Case: cs.Name})
+		}
+		return types.MakeUnion(cases...)
+	})
+}
+
+func isTrueLit(e ast.Expr) bool {
+	n, ok := constName(e)
+	return ok && n == "true"
+}
+
+// withKey marks a shape key as present (or absent) in t.
+func withKey(t types.Type, key types.Type, present bool) types.Type {
+	key = normaliseKey(key)
+	return types.Map(t, func(m types.Type) types.Type {
+		s, ok := m.(types.Shape)
+		if !ok {
+			if a, ok := m.(types.Array); ok && present {
+				a.NonEmpty = true
+				return a
+			}
+			return m
+		}
+		entries := append([]types.ShapeEntry{}, s.Entries...)
+		for i, e := range entries {
+			match := false
+			switch k := key.(type) {
+			case types.StringLit:
+				match = !e.IsInt && e.Key == k.V
+			case types.Int:
+				match = e.IsInt && k.Lo == k.Hi && e.IntKey == k.Lo
+			}
+			if !match {
+				continue
+			}
+			if present {
+				entries[i].Optional = false
+			} else {
+				if !e.Optional {
+					return types.TNever
+				}
+				entries = append(entries[:i], entries[i+1:]...)
+			}
+			return types.Shape{Entries: entries, Unsealed: s.Unsealed, List: s.List}
+		}
+		if present && !s.Unsealed {
+			return types.TNever
+		}
+		return s
+	})
+}
+
+// methodAssert narrows on methods with @phpstan-assert tags.
+func (x *fnCtx) methodAssert(e *ast.MethodCall, env *state) (then, els *state, ok bool) {
+	name, isIdent := identName(e.Name)
+	if !isIdent {
+		return nil, nil, false
+	}
+	obj := x.pathType(e.Object, env)
+	var m *program.Method
+	for _, cl := range x.classesOf(types.StripNull(obj), e.Object.Span()) {
+		if mm := cl.FindMethod(name); mm != nil {
+			m = mm
+			break
+		}
+	}
+	if m == nil || len(m.Asserts) == 0 {
+		return nil, nil, false
+	}
+	x.methodCall(e, env, nil)
+	then, els = x.applyAsserts(x.methodCallee(m, types.StripNull(obj), e.Args, e.Object), env)
+	x.condValueType = types.TBool
+	return then, els, true
+}
+
+// callee is what a call statement resolves to, for assertion handling.
+type callee struct {
+	asserts []docblockAssert
+	params  []*program.Param
+	tps     []*program.TypeParam
+	args    *ast.ArgList
+	this    ast.Expr
+	// res resolves the assert types in the callee's own scope (its file,
+	// class and templates); classSubst maps the declaring class's type
+	// parameters to the receiver's arguments.
+	res        *program.Resolver
+	classSubst map[string]types.Type
+}
+
+// methodCallee builds the callee record of a method found on a receiver.
+func (x *fnCtx) methodCallee(m *program.Method, recv types.Type, args *ast.ArgList, this ast.Expr) callee {
+	return callee{asserts: m.Asserts, params: m.Params, tps: m.TypeParams, args: args, this: this,
+		res:        x.p().NewResolver(m.Class.File, m.Class.Scope, m.Class, m.Span).WithParams(m.TypeParams),
+		classSubst: x.memberSubst(recv, m.Class)}
+}
+
+// functionCallee builds the callee record of a function.
+func (x *fnCtx) functionCallee(fn *program.Function, args *ast.ArgList) callee {
+	fn.Signature()
+	return callee{asserts: fn.Asserts, params: fn.Params, tps: fn.TypeParams, args: args,
+		res: x.p().NewResolver(fn.File, fn.Scope, nil, fn.Span).WithParams(fn.TypeParams)}
+}
+
+// calleeOf finds the function or method a call expression targets, without
+// reporting (the call itself is checked separately).
+func (x *fnCtx) calleeOf(e ast.Expr, env *state) (callee, bool) {
+	switch e := e.(type) {
+	case *ast.Call:
+		n, ok := e.Callee.(*ast.Name)
+		if !ok || e.Args == nil || e.Args.FirstClassCallable {
+			return callee{}, false
+		}
+		fn := x.lookupFunction(n)
+		if fn == nil {
+			return callee{}, false
+		}
+		return x.functionCallee(fn, e.Args), true
+	case *ast.MethodCall:
+		name, ok := identName(e.Name)
+		if !ok || e.Args == nil || e.Args.FirstClassCallable {
+			return callee{}, false
+		}
+		obj := x.pathType(e.Object, env)
+		saved := x.c.diags
+		classes := x.classesOf(types.StripNull(obj), e.Object.Span())
+		x.c.diags = saved
+		for _, cl := range classes {
+			if m := cl.FindMethod(name); m != nil {
+				return x.methodCallee(m, types.StripNull(obj), e.Args, e.Object), true
+			}
+		}
+	case *ast.StaticCall:
+		name, ok := identName(e.Name)
+		if !ok || e.Args == nil || e.Args.FirstClassCallable {
+			return callee{}, false
+		}
+		var classes []*program.Class
+		if n, isName := e.Class.(*ast.Name); isName {
+			switch x.res.ClassName(n) {
+			case "self", "static":
+				if x.class != nil {
+					classes = []*program.Class{x.class}
+				}
+			case "parent":
+				if x.class != nil {
+					if pc := x.class.ParentClass(); pc != nil {
+						classes = []*program.Class{pc}
+					}
+				}
+			default:
+				if cl := x.p().Class(x.res.ClassName(n)); cl != nil {
+					classes = []*program.Class{cl}
+				}
+			}
+		} else {
+			saved := x.c.diags
+			classes = x.classesOf(x.pathType(e.Class, env), e.Class.Span())
+			x.c.diags = saved
+		}
+		for _, cl := range classes {
+			if m := cl.FindMethod(name); m != nil {
+				return x.methodCallee(m, types.Class{Name: cl.Name}, e.Args, nil), true
+			}
+		}
+	}
+	return callee{}, false
+}
+
+// applyCallAsserts handles a call statement whose callee declares
+// unconditional @phpstan-assert tags (PHPUnit's assertNotNull and friends).
+func (x *fnCtx) applyCallAsserts(e ast.Expr, env *state) bool {
+	ce, ok := x.calleeOf(e, env)
+	if !ok {
+		return false
+	}
+	plain := false
+	for _, a := range ce.asserts {
+		if !a.IfTrue && !a.IfFalse {
+			plain = true
+		}
+	}
+	if !plain {
+		return false
+	}
+	x.expr(e, env, nil)
+	then, _ := x.applyAsserts(ce, env)
+	*env = *then
+	return true
+}
+
+// applyAsserts turns @phpstan-assert tags into narrowings of the argument
+// expressions (or $this). Template parameters of the callee mentioned by
+// the tags are inferred from the arguments first.
+func (x *fnCtx) applyAsserts(ce callee, env *state) (then, els *state) {
+	asserts, params, args, this := ce.asserts, ce.params, ce.args, ce.this
+	then, els = env.clone(), env.clone()
+	res := ce.res
+	if res == nil {
+		res = x.res.WithParams(ce.tps)
+	}
+	subst := map[string]types.Type{}
+	if len(ce.tps) > 0 && args != nil {
+		inferable := map[string]bool{}
+		for _, tp := range ce.tps {
+			inferable[tp.Name] = true
+		}
+		for i, arg := range args.Args {
+			if arg.Value == nil {
+				continue
+			}
+			var p *program.Param
+			if arg.Name != nil {
+				for _, cand := range params {
+					if cand.Name == arg.Name.Name {
+						p = cand
+					}
+				}
+			} else if i < len(params) {
+				p = params[i]
+			}
+			if p != nil {
+				unify(p.Type, x.pathType(arg.Value, env), subst, inferable, x.p())
+			}
+		}
+	}
+	for _, a := range asserts {
+		var target ast.Expr
+		if a.Var == "this" {
+			target = this
+		} else {
+			idx := -1
+			for i, p := range params {
+				if p.Name == a.Var {
+					idx = i
+				}
+			}
+			if idx < 0 || args == nil {
+				continue
+			}
+			for i, arg := range args.Args {
+				if (arg.Name == nil && i == idx) || (arg.Name != nil && arg.Name.Name == a.Var) {
+					target = arg.Value
+				}
+			}
+		}
+		if target == nil {
+			continue
+		}
+		t := types.Substitute(types.Substitute(res.Doc(a.Type), ce.classSubst), subst)
+		cur := x.pathType(target, env)
+		narrowed := types.Intersect(cur, t, x.p())
+		subtracted := x.subtract(cur, t, x.p())
+		if a.Negated {
+			narrowed, subtracted = subtracted, narrowed
+		}
+		switch {
+		case a.IfTrue:
+			x.narrowPath(then, target, narrowed, true)
+		case a.IfFalse:
+			x.narrowPath(els, target, narrowed, true)
+		default:
+			x.narrowPath(then, target, narrowed, true)
+			x.narrowPath(els, target, narrowed, true)
+		}
+	}
+	return then, els
+}

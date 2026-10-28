@@ -268,12 +268,39 @@ func print(b *strings.Builder, t Type, nested bool) {
 			b.WriteString(")")
 		}
 	case Param:
-		b.WriteString(t.Name)
+		b.WriteString(ParamName(t.Name))
+	case Conditional:
+		b.WriteString("(")
+		if t.ParamName != "" {
+			b.WriteString("$" + t.ParamName)
+		} else {
+			print(b, t.Subject, false)
+		}
+		if t.Negated {
+			b.WriteString(" is not ")
+		} else {
+			b.WriteString(" is ")
+		}
+		print(b, t.Target, false)
+		b.WriteString(" ? ")
+		print(b, t.Then, false)
+		b.WriteString(" : ")
+		print(b, t.Else, false)
+		b.WriteString(")")
 	case Unknown:
 		b.WriteString(t.Name)
 	default:
 		fmt.Fprintf(b, "%T", t)
 	}
+}
+
+// ParamName strips the per-call identity suffix a type parameter name may
+// carry (after a NUL byte), giving the name as declared.
+func ParamName(name string) string {
+	if i := strings.IndexByte(name, 0); i >= 0 {
+		return name[:i]
+	}
+	return name
 }
 
 func isIdent(s string) bool {

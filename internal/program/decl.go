@@ -120,24 +120,27 @@ type Function struct {
 
 // Method is a method of a class (including those copied in from traits).
 type Method struct {
-	Name       string
-	Class      *Class // the class whose table this entry belongs to
-	FromTrait  *Class // the trait it was copied from, if any
-	Vis        Visibility
-	Static     bool
-	Abstract   bool
-	Final      bool
-	ByRef      bool
-	Params     []*Param
-	Return     types.Type
-	TypeParams []*TypeParam
-	Doc        *docblock.Doc
-	Deprecated bool
-	Asserts    []docblock.AssertTag
-	SelfOut    types.Type
-	Attrs      []*ast.AttrGroup
-	Decl       *ast.MethodDecl
-	Span       ast.Span
+	Name      string
+	Class     *Class // the class whose table this entry belongs to
+	FromTrait *Class // the trait it was copied from, if any
+	Vis       Visibility
+	Static    bool
+	Abstract  bool
+	Final     bool
+	ByRef     bool
+	Params    []*Param
+	Return    types.Type
+	// NativeReturn is the declared PHP return type (nil when absent), kept
+	// apart from Return so docblock inheritance can tell them apart.
+	NativeReturn types.Type
+	TypeParams   []*TypeParam
+	Doc          *docblock.Doc
+	Deprecated   bool
+	Asserts      []docblock.AssertTag
+	SelfOut      types.Type
+	Attrs        []*ast.AttrGroup
+	Decl         *ast.MethodDecl
+	Span         ast.Span
 	// Magic marks a @method tag entry (no body, no Decl).
 	Magic bool
 }
@@ -259,8 +262,19 @@ func (p *Program) collect(f *File) {
 			case *ast.FunctionDecl:
 				p.declareFunction(f, scope, s)
 			case *ast.ConstDecl:
+				// `/** @var int */ const X = …;` (the stubs declare most
+				// constants this way, with an UNKNOWN value).
+				var docT types.Type
+				if s.Doc != "" {
+					if doc := parseDoc(s.Doc); doc != nil && len(doc.Vars) > 0 {
+						docT = p.newResolver(f, scope, nil, s.S).docType(doc.Vars[0].Type)
+					}
+				}
 				for _, c := range s.Consts {
-					p.declareConstant(f, scope, scope.prefix()+c.Name.Name, c.Value, c.S)
+					k := p.declareConstant(f, scope, scope.prefix()+c.Name.Name, c.Value, c.S)
+					if k != nil && k.Type == nil {
+						k.Type = docT
+					}
 				}
 			case *ast.ExprStmt:
 				// define('NAME', value) at the top level.
@@ -323,8 +337,19 @@ func (p *Program) declareClass(f *File, scope *Scope, d *ast.ClassDecl) *Class {
 		c.Name = scope.prefix() + d.Name.Name
 	}
 	key := strings.ToLower(c.Name)
-	if _, exists := p.classes[key]; exists && !p.override && !c.Anonymous {
-		return p.classes[key]
+	if p.override && !c.Anonymous {
+		// The overlay never declares classes: it patches the class of the
+		// same name, whether a stub already declared it or vendor code
+		// declares it later. Its docblocks and the methods it lists replace
+		// theirs; everything else stays.
+		p.patches[key] = d
+		if existing, exists := p.classes[key]; exists {
+			return existing
+		}
+		return c
+	}
+	if existing, exists := p.classes[key]; exists && !c.Anonymous {
+		return existing
 	}
 	p.classes[key] = c
 	return c
@@ -342,21 +367,35 @@ func (p *Program) DeclareAnonymous(f *File, scope *Scope, d *ast.ClassDecl) *Cla
 	return p.declareClass(f, scope, d)
 }
 
-func (p *Program) declareFunction(f *File, scope *Scope, d *ast.FunctionDecl) {
+func (p *Program) declareFunction(f *File, scope *Scope, d *ast.FunctionDecl) *Function {
 	name := scope.prefix() + d.Name.Name
 	key := strings.ToLower(name)
-	if _, exists := p.functions[key]; exists && !p.override {
-		return
+	if fn, exists := p.functions[key]; exists && !p.override {
+		return fn
 	}
-	p.functions[key] = &Function{Name: name, File: f, Scope: scope, Decl: d, Span: d.S, ByRef: d.ByRef}
+	fn := &Function{Name: name, File: f, Scope: scope, Decl: d, Span: d.S, ByRef: d.ByRef}
+	p.functions[key] = fn
+	return fn
 }
 
-func (p *Program) declareConstant(f *File, scope *Scope, fqn string, value ast.Expr, span ast.Span) {
+// DeclareFunction registers a function declared inside a body (the
+// collector only sees top-level and conditionally declared functions).
+func (p *Program) DeclareFunction(f *File, scope *Scope, d *ast.FunctionDecl) *Function {
+	return p.declareFunction(f, scope, d)
+}
+
+// Prefix returns the namespace prefix with a trailing backslash ("" for
+// the global namespace).
+func (s *Scope) Prefix() string { return s.prefix() }
+
+func (p *Program) declareConstant(f *File, scope *Scope, fqn string, value ast.Expr, span ast.Span) *Constant {
 	key := constKey(fqn)
 	if _, exists := p.constants[key]; exists && !p.override {
-		return
+		return nil
 	}
-	p.constants[key] = &Constant{Name: fqn, Value: value, File: f, Scope: scope, Span: span}
+	k := &Constant{Name: fqn, Value: value, File: f, Scope: scope, Span: span}
+	p.constants[key] = k
+	return k
 }
 
 // StringValue returns the value of a constant string literal (quotes

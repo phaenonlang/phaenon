@@ -39,6 +39,19 @@ func Overlaps(a, b Type, h Hierarchy) bool {
 }
 
 func overlap2(x, y Type, h Hierarchy) bool {
+	// A type parameter overlaps what its bound overlaps.
+	if p, ok := x.(Param); ok {
+		if p.Bound == nil {
+			return true
+		}
+		return Overlaps(p.Bound, y, h)
+	}
+	if p, ok := y.(Param); ok {
+		if p.Bound == nil {
+			return true
+		}
+		return Overlaps(x, p.Bound, h)
+	}
 	if subtype(x, y, h, 0) || subtype(y, x, h, 0) {
 		return true
 	}
@@ -100,6 +113,13 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 	if _, ok := a.(Void); ok {
 		return false // void is not a value type
 	}
+	// An unevaluated conditional is the union of its branches.
+	if c, ok := a.(Conditional); ok {
+		return subtype(MakeUnion(c.Then, c.Else), b, h, depth+1)
+	}
+	if c, ok := b.(Conditional); ok {
+		return subtype(a, MakeUnion(c.Then, c.Else), h, depth+1)
+	}
 	switch b := b.(type) {
 	case Mixed:
 		return true
@@ -148,9 +168,9 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 	case Mixed:
 		return false
 	case Unknown:
-		// Unknown classes are treated as mixed-but-object: fits object types.
-		_, isObject := b.(Object)
-		return isObject
+		// The error type fits everywhere: whatever produced it has already
+		// been reported, and cascading errors would only add noise.
+		return true
 	case Union:
 		for _, m := range a.Types {
 			if !subtype(m, b, h, depth+1) {
@@ -213,10 +233,11 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 			if b.Of == nil {
 				return true
 			}
-			if a.Of == nil {
-				return false
+			aOf := a.Of
+			if aOf == nil {
+				aOf = TObject // class-string is class-string<object>
 			}
-			return subtype(a.Of, b.Of, h, depth+1)
+			return subtype(aOf, b.Of, h, depth+1)
 		}
 		return false
 	case Array:
@@ -354,11 +375,11 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 			if b.Closure && !a.Closure {
 				return false
 			}
-			if !b.HasSig {
+			if !b.HasSig || !a.HasSig {
+				// A callable of unknown signature is accepted for any
+				// signature (PHPStan does the same); the mismatch, if
+				// any, surfaces at the call.
 				return true
-			}
-			if !a.HasSig {
-				return false
 			}
 			return callableSub(a, b, h, depth)
 		case Class:

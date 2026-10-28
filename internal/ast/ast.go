@@ -964,6 +964,7 @@ type (
 	// ConstDecl is a top-level `const A = 1, B = 2;`.
 	ConstDecl struct {
 		S      Span
+		Doc    string
 		Attrs  []*AttrGroup
 		Consts []*ConstItem
 	}

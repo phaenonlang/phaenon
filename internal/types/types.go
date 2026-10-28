@@ -145,7 +145,20 @@ type (
 	// docblock); it behaves as mixed but prints as itself so diagnostics
 	// stay informative.
 	Unknown struct{ Name string }
+	// Conditional is a docblock conditional type, `T is X ? A : B` or
+	// `$param is X ? A : B`, evaluated at the call site once the subject is
+	// known; until then it behaves as A|B.
+	Conditional struct {
+		Subject   Type   // nil when ParamName is set
+		ParamName string // the parameter whose argument type is the subject
+		Target    Type
+		Then      Type
+		Else      Type
+		Negated   bool
+	}
 )
+
+func (Conditional) typeNode() {}
 
 func (Mixed) typeNode()        {}
 func (Never) typeNode()        {}
@@ -201,6 +214,10 @@ var (
 	TNumeric Type = Union{[]Type{TInt, TFloat, String{Numeric: true}}}
 	// TIterable is iterable<mixed, mixed>.
 	TIterable Type = Iterable{TMixed, TMixed}
+	// TError is the type of an expression that was already reported as
+	// wrong (an undefined variable, an unknown function); it is accepted
+	// everywhere so one mistake yields one diagnostic.
+	TError Type = Unknown{Name: "*error*"}
 )
 
 // IntLit is the literal integer type n.
@@ -299,6 +316,10 @@ func Equal(a, b Type) bool {
 	case Unknown:
 		b, ok := b.(Unknown)
 		return ok && strings.EqualFold(a.Name, b.Name)
+	case Conditional:
+		b, ok := b.(Conditional)
+		return ok && a.ParamName == b.ParamName && a.Negated == b.Negated && equalOrNil(a.Subject, b.Subject) &&
+			Equal(a.Target, b.Target) && Equal(a.Then, b.Then) && Equal(a.Else, b.Else)
 	}
 	return false
 }
@@ -402,6 +423,8 @@ func unionOrder(t Type) int {
 		return 70
 	case Iterable:
 		return 80
+	case Conditional:
+		return 85
 	case Intersection:
 		return 90
 	case Resource:
@@ -1042,6 +1065,9 @@ func Substitute(t Type, subst map[string]Type) Type {
 			ps[i] = p
 		}
 		return Callable{Params: ps, Return: Substitute(t.Return, subst), Closure: t.Closure, Pure: t.Pure, HasSig: true}
+	case Conditional:
+		return Conditional{Subject: Substitute(t.Subject, subst), ParamName: t.ParamName, Target: Substitute(t.Target, subst),
+			Then: Substitute(t.Then, subst), Else: Substitute(t.Else, subst), Negated: t.Negated}
 	}
 	return t
 }
@@ -1093,5 +1119,10 @@ func Walk(t Type, f func(Type)) {
 			Walk(p.Type, f)
 		}
 		Walk(t.Return, f)
+	case Conditional:
+		Walk(t.Subject, f)
+		Walk(t.Target, f)
+		Walk(t.Then, f)
+		Walk(t.Else, f)
 	}
 }

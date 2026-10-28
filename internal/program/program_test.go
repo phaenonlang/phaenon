@@ -34,7 +34,7 @@ func TestStubs(t *testing.T) {
 		t.Fatal("ReflectionClass missing")
 	}
 	ni := rc.FindMethod("newInstance")
-	if ni == nil || types.Print(ni.Return) != "object" || !ni.Params[0].Variadic {
+	if ni == nil || types.Print(ni.Return) != "T" || !ni.Params[0].Variadic {
 		t.Errorf("ReflectionClass::newInstance %+v", ni)
 	}
 	if !rc.IsSubclassOf("Reflector") || !rc.IsSubclassOf("Stringable") {

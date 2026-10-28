@@ -36,6 +36,9 @@ type Program struct {
 	// earlier ones instead of being ignored.
 	override bool
 	anon     int
+	// patches are overlay declarations of classes the stubs already
+	// declare, applied on top of them (see declareClass).
+	patches map[string]*ast.ClassDecl
 	// Problems are interop (P4) findings made while reading declarations:
 	// unparsable docblocks, docblock types narrower than the signature…
 	Problems []Problem
@@ -72,6 +75,7 @@ func New() *Program {
 		constants: map[string]*Constant{},
 		files:     map[string]*File{},
 		missing:   map[string]bool{},
+		patches:   map[string]*ast.ClassDecl{},
 	}
 }
 

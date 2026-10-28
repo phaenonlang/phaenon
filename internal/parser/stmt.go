@@ -240,7 +240,7 @@ func (p *Parser) statement() ast.Stmt {
 		return p.useStmt()
 	case token.T_CONST:
 		p.next()
-		c := &ast.ConstDecl{}
+		c := &ast.ConstDecl{Doc: doc}
 		for {
 			c.Consts = append(c.Consts, p.constItem())
 			if !p.accept(token.Kind(',')) {
@@ -269,7 +269,7 @@ func (p *Parser) statement() ast.Stmt {
 			return p.functionDecl(attrs)
 		case p.at(token.T_CONST):
 			p.next()
-			c := &ast.ConstDecl{Attrs: attrs}
+			c := &ast.ConstDecl{Doc: doc, Attrs: attrs}
 			for {
 				c.Consts = append(c.Consts, p.constItem())
 				if !p.accept(token.Kind(',')) {

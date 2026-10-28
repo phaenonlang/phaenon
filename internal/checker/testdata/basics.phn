@@ -1,0 +1,131 @@
+namespace App;
+
+final class User
+{
+    public function __construct(
+        public readonly int $id,
+        public string $name = '',
+        private ?User $manager = null,
+    ) {
+    }
+
+    public function manager(): ?User
+    {
+        return $this->manager;
+    }
+
+    public function rename(string $name): void
+    {
+        $this->name = $name;
+        $this->id = 2; // want P2206
+    }
+
+    private function secret(): int
+    {
+        return 1;
+    }
+}
+
+function takesInt(int $x): int
+{
+    return $x;
+}
+
+function noReturn(): int
+{
+    if (rand() > 1) { // want P2203
+        return 1;
+    }
+}
+
+function voidReturns(): void
+{
+    return 1; // want P2204
+}
+
+function wrongReturn(): string
+{
+    return 1; // want P2202
+}
+
+function untypedParam($x): int // want P2516
+{
+    return 1;
+}
+
+function main(User $u): void
+{
+    echo $undefined; // want P2008
+    takesInt('a'); // want P2103
+    takesInt(); // want P2101
+    takesInt(1, 2); // want P2102
+    takesInt(x: 1);
+    takesInt(y: 1); // want P2010, P2101
+    $u->unknown; // want P2005
+    $u->unknown(); // want P2006
+    $u->secret(); // want P2108
+    $u->id = 3; // want P2206
+    $u->name = 5; // want P2201
+    $u?->name; // want P2307
+    $m = $u->manager();
+    $m->name; // want P2105
+    $m?->name;
+    if ($m !== null) {
+        $m->name;
+    }
+    $x = $u->manager() ?? $u;
+    $x->name;
+    $s = takesInt(1) . 'a';
+    takesInt($s); // want P2103
+    unknownFn(); // want P2002
+    new Unknown(); // want P2001
+    $arr = ['a' => 1, 'b' => 'x'];
+    $arr['c']; // want P2313
+    takesInt($arr['b']); // want P2103
+    takesInt($arr['a']);
+    $r = voidReturns(); // want P2205
+    $v = 1 + 'a'; // want P2301
+    $f = fn (int $i): int => $i * 2;
+    takesInt($f(2));
+    $list = [1, 2, 3];
+    foreach ($list as $n) {
+        takesInt($n);
+    }
+    foreach ($u as $y) { // want P2303
+    }
+    $c = count($list);
+    takesInt($c);
+    $str = 'abc';
+    takesInt(strlen($str));
+    $maybe = null;
+    if ($u->id > 1) { // want P2402
+        $maybe = 1;
+    }
+    takesInt($maybe);
+    $u->id === 'a'; // want P2305
+    $u instanceof User; // want P2306
+    $b = true ? 1 : 'a'; // want P2402
+    takesInt($b);
+    $n = (int) '5';
+    takesInt($n);
+    takesInt(PHP_INT_MAX);
+    takesInt(UNKNOWN_CONST); // want P2003
+    takesInt(User::NOPE); // want P2004
+    User::nope(); // want P2006
+    $cls = User::class;
+    new $cls(1);
+    $u->rename(name: 'x');
+    $w = $u->manager() ?: $u;
+    $w->name;
+    $u->manager()->name; // want P2105
+    global $g; // want P1001
+    $z = match ($u->id) { // want P2304
+        1 => 'a', // want P2305
+        2 => 'b', // want P2305
+    };
+    $q = match (true) {
+        $u->id > 1 => 1, // want P2402
+        default => 2,
+    };
+    takesInt($q);
+}
