@@ -8,8 +8,27 @@ A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for P
 
 Status: pre-alpha. M0 done — lexer, parser and printer are conformance-tested against php-src's
 `.phpt` corpus (token-identical lexing, 100% of PHP-accepted files parse, parse → print round-trips
-token-identically, printed files run identically under `php`). M1 in progress — `phn build` and
-`phn migrate` work for the PHP subset; the first Tequila library is compiled from `.phn`.
+token-identically, printed files run identically under `php`). M1 done — `phn build` and
+`phn migrate` work for the PHP subset with line-preserving output. M2 done — `phn check` is a
+type checker for the PHP subset plus the PHPStan docblock vocabulary; on the first two Tequila
+libraries it reports exactly what PHPStan reports at level 10.
+
+## Type checking
+
+```sh
+phn check src tests            # diagnostics with codes, source lines and carets; exit 1 on errors
+phn check --json src           # one JSON object per diagnostic, for editors
+phn build src                  # type-checks first; a file with errors is not written
+```
+
+The checker reads the rest of the program without configuration: project files, vendor code
+through the nearest `vendor/composer` autoload maps, and the php-src stubs embedded in the binary
+(refined by an overlay for what PHP cannot express: `array_map` returning `array<K, R>`,
+`ReflectionClass<T>`, PHPUnit's assertions). Docblocks are the interop contract: `@param`,
+`@return`, `@var`, `@template`, `@extends`, `@phpstan-assert` and the PHPStan type grammar are
+understood, and `@phpstan-ignore` comments are honoured. Diagnostic codes are stable: `P1xxx`
+removed constructs, `P2xxx` types and flow, `P4xxx` interop (docblocks, vendor). Design:
+`design/checker.md`.
 
 ## How it fits into a Composer project
 
@@ -42,8 +61,9 @@ the type checker lands (M2/M3).
 ## CLI
 
 ```sh
-phn build [--out DIR] [--check] path...   # compile .phn → .php (directories are walked)
-phn migrate path...                       # rewrite .php as .phn
+phn build [--out DIR] [--check] [--no-types] path...   # type-check and compile .phn → .php
+phn check [--json] [--no-deprecations] path...         # type-check .phn (and .php) files
+phn migrate path...                                    # rewrite .php as .phn
 phn lex   [--php] file                    # token stream
 phn print [--php] file                    # parse and pretty-print
 ```
@@ -63,5 +83,11 @@ after a transformation — and compare the output. `TestPrinterExecution` checks
 (line numbers normalised away); `TestEmitExecution` checks `migrate` + `build` byte for byte, line
 numbers included. ≈2.5 min each. `PHAENON_PHPT_FILTER=ext/standard/tests` narrows any suite to a
 corpus subset; `PHAENON_SHOW_DIFFS=n` controls how many differences are listed.
+
+The checker's golden corpus lives in `internal/checker/testdata`: each `.phn` carries the expected
+diagnostics as `// want P2103` comments on the offending lines. `PHAENON_PHPSTAN=/path/to/phpstan`
+additionally runs PHPStan at level max over the same corpus and fails when PHPStan reports
+something the corpus does not expect — the checker may be stricter than PHPStan, never more
+lenient. `PHAENON_COMPOSER_PROJECT=/path/to/a/composer/project` exercises the vendor reader.
 
 License: MIT.
