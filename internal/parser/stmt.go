@@ -293,13 +293,13 @@ func (p *Parser) statement() ast.Stmt {
 		if p.mode == lexer.ModePhaenon && p.atString1() {
 			return p.typeAlias(nil)
 		}
-	case token.T_STRING:
-		if p.peekKind(1) == token.Kind(':') {
-			l := &ast.Label{Name: p.stringIdent()}
-			p.expect(token.Kind(':'))
-			l.S = p.span(start)
-			return l
-		}
+	}
+	// A label; Phaenon's contextual keywords are ordinary names here (`out:`).
+	if p.atString() && p.peekKind(1) == token.Kind(':') {
+		l := &ast.Label{Name: p.stringIdent()}
+		p.expect(token.Kind(':'))
+		l.S = p.span(start)
+		return l
 	}
 	e := p.expr()
 	p.semi()
@@ -447,7 +447,7 @@ func (p *Parser) foreachStmt() ast.Stmt {
 	start := p.tok().Start
 	p.expect(token.T_FOREACH)
 	p.expect(token.Kind('('))
-	f := &ast.Foreach{Expr: p.expr()}
+	f := &ast.Foreach{Expr: p.exprNoAs()}
 	p.expect(token.T_AS)
 	byRef, v := p.foreachVariable()
 	if p.accept(token.T_DOUBLE_ARROW) {

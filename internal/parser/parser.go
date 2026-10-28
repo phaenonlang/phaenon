@@ -35,6 +35,10 @@ type Parser struct {
 	mode lexer.Mode
 	// docComment is the doc comment that immediately precedes the current token.
 	docComment string
+	// noAs is set while parsing a foreach subject so that `as` ends the
+	// expression instead of starting Phaenon's `x as T`. Nested contexts
+	// (parentheses, argument lists, closures) clear it through expr().
+	noAs bool
 }
 
 // Parse parses a whole file.

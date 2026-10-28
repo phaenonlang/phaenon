@@ -109,7 +109,23 @@ func isVariableExpr(e ast.Expr) bool {
 }
 
 // expr parses a full expression.
-func (p *Parser) expr() ast.Expr { return p.exprBP(bpLowest) }
+func (p *Parser) expr() ast.Expr {
+	saved := p.noAs
+	p.noAs = false
+	e := p.exprBP(bpLowest)
+	p.noAs = saved
+	return e
+}
+
+// exprNoAs parses an expression in which a top-level `as` is not an
+// operator: the subject of foreach.
+func (p *Parser) exprNoAs() ast.Expr {
+	saved := p.noAs
+	p.noAs = true
+	e := p.exprBP(bpLowest)
+	p.noAs = saved
+	return e
+}
 
 // exprBP is the Pratt loop: parse a prefix/primary, then fold infix
 // operators whose binding power is at least min.
@@ -165,7 +181,7 @@ func (p *Parser) exprBP(min int) ast.Expr {
 			left.(*ast.Instanceof).S = p.span(start)
 			continue
 		case token.T_IS, token.T_AS:
-			if p.mode != lexer.ModePhaenon || bpInstanceof < min {
+			if p.mode != lexer.ModePhaenon || bpInstanceof < min || (k == token.T_AS && p.noAs) {
 				return left
 			}
 			if k == token.T_IS {

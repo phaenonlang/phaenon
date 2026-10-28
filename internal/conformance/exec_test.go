@@ -180,9 +180,20 @@ var execDeviations = map[string]bool{
 	"Zend/tests/unterminated_comment.phpt":                                true,
 }
 
-// runPHP executes dir/t.php and returns its normalised combined output.
-// ok is false when the run timed out.
+// runPHP executes dir/t.php and returns its combined output with line
+// numbers normalised away (the printer reflows lines). ok is false when the
+// run timed out.
 func runPHP(dir string) (out string, ok bool) {
+	raw, ok := execPHP(dir)
+	if !ok {
+		return "", false
+	}
+	return normaliseLines(raw), true
+}
+
+// execPHP executes dir/t.php and returns its combined output plus exit
+// code, with the directory name replaced by <dir>. ok is false on timeout.
+func execPHP(dir string) (out string, ok bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "php", "-n",
@@ -201,8 +212,11 @@ func runPHP(dir string) (out string, ok bool) {
 	if ee, isExit := err.(*exec.ExitError); isExit {
 		code = ee.ExitCode()
 	}
-	s := buf.String()
-	s = strings.ReplaceAll(s, dir, "<dir>")
+	s := strings.ReplaceAll(buf.String(), dir, "<dir>")
+	return fmt.Sprintf("%s\n[exit %d]", s, code), true
+}
+
+func normaliseLines(s string) string {
 	s = reLine.ReplaceAllString(s, " on line N")
 	s = reFrame.ReplaceAllString(s, "t.php(N)")
 	s = reLineCol.ReplaceAllString(s, "t.php:N")
@@ -217,7 +231,7 @@ func runPHP(dir string) (out string, ok bool) {
 		}
 		s = n
 	}
-	return fmt.Sprintf("%s\n[exit %d]", s, code), true
+	return s
 }
 
 func showLimit() int {
