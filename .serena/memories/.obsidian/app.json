@@ -1,0 +1,9 @@
+{
+  "useMarkdownLinks": false,
+  "newLinkFormat": "shortest",
+  "alwaysUpdateLinks": true,
+  "newFileLocation": "root",
+  "showFrontmatter": true,
+  "trashOption": "system",
+  "tabSize": 2
+}
