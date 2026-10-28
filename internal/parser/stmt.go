@@ -451,7 +451,7 @@ func (p *Parser) foreachStmt() ast.Stmt {
 	p.expect(token.T_AS)
 	byRef, v := p.foreachVariable()
 	if p.accept(token.T_DOUBLE_ARROW) {
-		f.Key = v
+		f.Key, f.KeyByRef = v, byRef
 		byRef, v = p.foreachVariable()
 	}
 	f.ByRef, f.Value = byRef, v

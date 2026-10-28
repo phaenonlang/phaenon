@@ -857,13 +857,14 @@ type (
 		Alt  bool
 	}
 	Foreach struct {
-		S     Span
-		Expr  Expr
-		Key   Expr
-		Value Expr // Variable, destructuring ArrayLit, …
-		ByRef bool
-		Body  Stmt
-		Alt   bool
+		S        Span
+		Expr     Expr
+		Key      Expr
+		KeyByRef bool // `&$k => $v` — the parser accepts it; PHP's compiler rejects it
+		Value    Expr // Variable, destructuring ArrayLit, …
+		ByRef    bool
+		Body     Stmt
+		Alt      bool
 	}
 	Switch struct {
 		S       Span
