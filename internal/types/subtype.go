@@ -1,0 +1,532 @@
+package types
+
+import "strings"
+
+// IsSubtype reports whether every value of a is a value of b. h may be nil,
+// in which case classes are related only by name.
+func IsSubtype(a, b Type, h Hierarchy) bool {
+	return subtype(a, b, h, 0)
+}
+
+// IsAcceptable reports whether a value of type arg may be passed where
+// param is declared, under strict_types=1: subtyping plus PHP's int → float
+// widening.
+func IsAcceptable(arg, param Type, h Hierarchy) bool {
+	if subtype(arg, param, h, 0) {
+		return true
+	}
+	// int → float widening applies to every int member of the argument.
+	widened := Map(arg, func(m Type) Type {
+		if _, ok := m.(Int); ok {
+			return TFloat
+		}
+		return m
+	})
+	return !Equal(widened, arg) && subtype(widened, param, h, 0)
+}
+
+// Overlaps reports whether a and b can share a value (used for `===`
+// always-false and `instanceof` always-false diagnostics).
+func Overlaps(a, b Type, h Hierarchy) bool {
+	for _, x := range Members(a) {
+		for _, y := range Members(b) {
+			if overlap2(x, y, h) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func overlap2(x, y Type, h Hierarchy) bool {
+	if subtype(x, y, h, 0) || subtype(y, x, h, 0) {
+		return true
+	}
+	if IsMixed(x) || IsMixed(y) {
+		return true
+	}
+	kx, ky := kindOf(x), kindOf(y)
+	if kx == kindAny || ky == kindAny {
+		// Params, intersections: be permissive.
+		return true
+	}
+	if kx == kindObject && ky == kindObject {
+		// Two class types overlap unless one is final and unrelated, or
+		// both are classes (not interfaces) on different branches; we only
+		// know finality here.
+		cx, okx := x.(Class)
+		cy, oky := y.(Class)
+		if okx && oky && h != nil {
+			if h.IsFinal(cx.Name) || h.IsFinal(cy.Name) {
+				return false
+			}
+		}
+		return true
+	}
+	if kx == kindCallable || ky == kindCallable {
+		return ky == kindObject || kx == kindObject || kx == kindString || ky == kindString || kx == kindArray || ky == kindArray
+	}
+	if kx == kindIterable || ky == kindIterable {
+		other := ky
+		if ky == kindIterable {
+			other = kx
+		}
+		return other == kindArray || other == kindObject || other == kindIterable
+	}
+	if kx != ky {
+		return false
+	}
+	// Same kind, neither a subtype of the other: literals differ, ranges disjoint…
+	switch x := x.(type) {
+	case Int:
+		y := y.(Int)
+		return x.Lo <= y.Hi && y.Lo <= x.Hi
+	case StringLit, FloatLit, BoolLit, EnumCase:
+		return false
+	}
+	return true
+}
+
+func subtype(a, b Type, h Hierarchy, depth int) bool {
+	if depth > 32 {
+		return true
+	}
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	if Equal(a, b) {
+		return true
+	}
+	if _, ok := a.(Void); ok {
+		return false // void is not a value type
+	}
+	switch b := b.(type) {
+	case Mixed:
+		return true
+	case Unknown:
+		return true
+	case Union:
+		if au, ok := a.(Union); ok {
+			for _, m := range au.Types {
+				if !subtype(m, b, h, depth+1) {
+					return false
+				}
+			}
+			return true
+		}
+		for _, m := range b.Types {
+			if subtype(a, m, h, depth+1) {
+				return true
+			}
+		}
+		// A bool is true|false, an int range may split across members.
+		switch a := a.(type) {
+		case Bool:
+			return subtype(TTrue, b, h, depth+1) && subtype(TFalse, b, h, depth+1)
+		case Int:
+			return intCovered(a, b.Types)
+		}
+		return false
+	case Intersection:
+		for _, m := range b.Types {
+			if !subtype(a, m, h, depth+1) {
+				return false
+			}
+		}
+		return true
+	case Param:
+		// A value fits a type parameter only if it is that parameter (or never).
+		if ap, ok := a.(Param); ok {
+			return ap.Name == b.Name
+		}
+		_, isNever := a.(Never)
+		return isNever
+	}
+	switch a := a.(type) {
+	case Never:
+		return true
+	case Mixed:
+		return false
+	case Unknown:
+		// Unknown classes are treated as mixed-but-object: fits object types.
+		_, isObject := b.(Object)
+		return isObject
+	case Union:
+		for _, m := range a.Types {
+			if !subtype(m, b, h, depth+1) {
+				return false
+			}
+		}
+		return true
+	case Intersection:
+		for _, m := range a.Types {
+			if subtype(m, b, h, depth+1) {
+				return true
+			}
+		}
+		return false
+	case Param:
+		if a.Bound == nil {
+			return false
+		}
+		return subtype(a.Bound, b, h, depth+1)
+	case BoolLit:
+		_, ok := b.(Bool)
+		return ok
+	case Int:
+		switch b := b.(type) {
+		case Int:
+			return b.Lo <= a.Lo && a.Hi <= b.Hi
+		}
+		return false
+	case FloatLit:
+		_, ok := b.(Float)
+		return ok
+	case StringLit:
+		switch b := b.(type) {
+		case String:
+			return stringLitFits(a.V, b)
+		case ClassString:
+			if h == nil {
+				return b.Of == nil
+			}
+			if !h.Exists(a.V) {
+				return false
+			}
+			if b.Of == nil {
+				return true
+			}
+			return subtype(NewClass(a.V), b.Of, h, depth+1)
+		}
+		return false
+	case String:
+		switch b := b.(type) {
+		case String:
+			return stringRefines(a, b)
+		}
+		return false
+	case ClassString:
+		switch b := b.(type) {
+		case String:
+			return !b.Numeric && !b.Lowercase
+		case ClassString:
+			if b.Of == nil {
+				return true
+			}
+			if a.Of == nil {
+				return false
+			}
+			return subtype(a.Of, b.Of, h, depth+1)
+		}
+		return false
+	case Array:
+		switch b := b.(type) {
+		case Array:
+			if b.NonEmpty && !a.NonEmpty {
+				return false
+			}
+			if b.List && !a.List {
+				return false
+			}
+			return subtype(a.Key, b.Key, h, depth+1) && subtype(a.Value, b.Value, h, depth+1)
+		case Shape:
+			// A general array fits only an unsealed shape with all-optional entries.
+			if !b.Unsealed {
+				return false
+			}
+			for _, e := range b.Entries {
+				if !e.Optional {
+					return false
+				}
+			}
+			return true
+		case Iterable:
+			return subtype(a.Key, b.Key, h, depth+1) && subtype(a.Value, b.Value, h, depth+1)
+		}
+		return false
+	case Shape:
+		switch b := b.(type) {
+		case Array:
+			if b.NonEmpty && !shapeNonEmpty(a) {
+				return false
+			}
+			if b.List && !a.List && !shapeIsList(a) {
+				return false
+			}
+			for _, e := range a.Entries {
+				if !subtype(shapeKeyType(e), b.Key, h, depth+1) || !subtype(e.Type, b.Value, h, depth+1) {
+					return false
+				}
+			}
+			return true
+		case Shape:
+			for _, be := range b.Entries {
+				ae, found := shapeLookup(a, be)
+				if !found {
+					if be.Optional {
+						continue
+					}
+					return false
+				}
+				if ae.Optional && !be.Optional {
+					return false
+				}
+				if !subtype(ae.Type, be.Type, h, depth+1) {
+					return false
+				}
+			}
+			if !b.Unsealed {
+				for _, ae := range a.Entries {
+					if _, found := shapeLookup(b, ae); !found {
+						return false
+					}
+				}
+			}
+			return true
+		case Iterable:
+			for _, e := range a.Entries {
+				if !subtype(shapeKeyType(e), b.Key, h, depth+1) || !subtype(e.Type, b.Value, h, depth+1) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	case Iterable:
+		switch b := b.(type) {
+		case Iterable:
+			return subtype(a.Key, b.Key, h, depth+1) && subtype(a.Value, b.Value, h, depth+1)
+		}
+		return false
+	case Object:
+		return false
+	case Class:
+		switch b := b.(type) {
+		case Object:
+			return true
+		case Class:
+			return classSub(a, b, h, depth)
+		case Iterable:
+			if h != nil && h.IsSubclassOf(a.Name, "Traversable") {
+				// Key/value types of a Traversable are not tracked without generics.
+				k, v := classIterableKV(a)
+				return subtype(k, b.Key, h, depth+1) && subtype(v, b.Value, h, depth+1)
+			}
+			return false
+		case Callable:
+			if h != nil && h.IsSubclassOf(a.Name, "Closure") {
+				return true
+			}
+			return false
+		}
+		return false
+	case Static:
+		if a.Of == nil {
+			return false
+		}
+		switch bb := b.(type) {
+		case Static:
+			return bb.Of != nil && classSub(*a.Of, *bb.Of, h, depth)
+		}
+		return subtype(*a.Of, b, h, depth+1)
+	case This:
+		if a.Of == nil {
+			return false
+		}
+		switch bb := b.(type) {
+		case Static:
+			return bb.Of != nil && classSub(*a.Of, *bb.Of, h, depth)
+		case This:
+			return bb.Of != nil && classSub(*a.Of, *bb.Of, h, depth)
+		}
+		return subtype(*a.Of, b, h, depth+1)
+	case EnumCase:
+		switch b := b.(type) {
+		case Object:
+			return true
+		case Class:
+			return classSub(Class{Name: a.Class}, b, h, depth)
+		}
+		return false
+	case Callable:
+		switch b := b.(type) {
+		case Callable:
+			if b.Closure && !a.Closure {
+				return false
+			}
+			if !b.HasSig {
+				return true
+			}
+			if !a.HasSig {
+				return false
+			}
+			return callableSub(a, b, h, depth)
+		case Class:
+			return a.Closure && strings.EqualFold(b.Name, "Closure")
+		case Object:
+			return a.Closure
+		}
+		return false
+	case Resource, Null, Bool, Float:
+		return false
+	}
+	return false
+}
+
+func classIterableKV(c Class) (Type, Type) {
+	if len(c.Args) == 2 {
+		return c.Args[0], c.Args[1]
+	}
+	if len(c.Args) == 1 {
+		return TMixed, c.Args[0]
+	}
+	return TMixed, TMixed
+}
+
+func classSub(a, b Class, h Hierarchy, depth int) bool {
+	if !strings.EqualFold(a.Name, b.Name) {
+		if h == nil || !h.IsSubclassOf(a.Name, b.Name) {
+			return false
+		}
+		// Type arguments across an inheritance step are not mapped without
+		// the program model; accept when b has no arguments and otherwise
+		// defer to the (M3) generic mapping. Until then be permissive.
+		return true
+	}
+	if len(b.Args) == 0 {
+		return true
+	}
+	if len(a.Args) != len(b.Args) {
+		return len(a.Args) == 0
+	}
+	var vars []Variance
+	if h != nil {
+		vars = h.Variances(a.Name)
+	}
+	for i := range a.Args {
+		v := Invariant
+		if i < len(vars) {
+			v = vars[i]
+		}
+		switch v {
+		case Covariant:
+			if !subtype(a.Args[i], b.Args[i], h, depth+1) {
+				return false
+			}
+		case Contravariant:
+			if !subtype(b.Args[i], a.Args[i], h, depth+1) {
+				return false
+			}
+		default:
+			if IsMixed(b.Args[i]) {
+				continue
+			}
+			if !subtype(a.Args[i], b.Args[i], h, depth+1) || !subtype(b.Args[i], a.Args[i], h, depth+1) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func callableSub(a, b Callable, h Hierarchy, depth int) bool {
+	// b's parameters must be accepted by a: for each parameter b declares,
+	// a must have a corresponding one whose type is wider.
+	for i, bp := range b.Params {
+		if i >= len(a.Params) {
+			if bp.Optional {
+				continue
+			}
+			last := len(a.Params) - 1
+			if last >= 0 && a.Params[last].Variadic {
+				if !subtype(bp.Type, a.Params[last].Type, h, depth+1) {
+					return false
+				}
+				continue
+			}
+			// a takes fewer arguments: PHP ignores extras, so it is fine.
+			continue
+		}
+		ap := a.Params[i]
+		if bp.Type != nil && ap.Type != nil && !subtype(bp.Type, ap.Type, h, depth+1) {
+			return false
+		}
+	}
+	for i, ap := range a.Params {
+		if i >= len(b.Params) && !ap.Optional && !ap.Variadic {
+			return false
+		}
+	}
+	if a.Return == nil || b.Return == nil {
+		return true
+	}
+	if _, ok := b.Return.(Void); ok {
+		return true
+	}
+	return subtype(a.Return, b.Return, h, depth+1)
+}
+
+// intCovered reports whether range a is covered by the int members of ms.
+func intCovered(a Int, ms []Type) bool {
+	var ranges []Int
+	for _, m := range ms {
+		if i, ok := m.(Int); ok {
+			ranges = append(ranges, i)
+		}
+	}
+	if len(ranges) == 0 {
+		return false
+	}
+	lo := a.Lo
+	for lo <= a.Hi {
+		progressed := false
+		for _, r := range ranges {
+			if r.Lo <= lo && lo <= r.Hi {
+				if r.Hi >= a.Hi {
+					return true
+				}
+				lo = r.Hi + 1
+				progressed = true
+				break
+			}
+		}
+		if !progressed {
+			return false
+		}
+	}
+	return true
+}
+
+func shapeKeyType(e ShapeEntry) Type {
+	if e.IsInt {
+		return IntLit(e.IntKey)
+	}
+	return StringLit{e.Key}
+}
+
+func shapeNonEmpty(s Shape) bool {
+	for _, e := range s.Entries {
+		if !e.Optional {
+			return true
+		}
+	}
+	return false
+}
+
+func shapeIsList(s Shape) bool {
+	for i, e := range s.Entries {
+		if !e.IsInt || e.IntKey != int64(i) {
+			return false
+		}
+	}
+	return true
+}
+
+func shapeLookup(s Shape, key ShapeEntry) (ShapeEntry, bool) {
+	for _, e := range s.Entries {
+		if e.IsInt == key.IsInt && e.IntKey == key.IntKey && e.Key == key.Key {
+			return e, true
+		}
+	}
+	return ShapeEntry{}, false
+}

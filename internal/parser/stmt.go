@@ -38,6 +38,7 @@ func (p *Parser) block() []ast.Stmt {
 // statement parses one statement, including declarations.
 func (p *Parser) statement() ast.Stmt {
 	start := p.tok().Start
+	doc := p.docComment // for the statement kinds that carry a `@var`
 	switch p.kind() {
 	case token.T_OPEN_TAG, token.T_OPEN_TAG_WITH_ECHO:
 		t := p.next()
@@ -138,7 +139,7 @@ func (p *Parser) statement() ast.Stmt {
 	case token.T_STATIC:
 		if p.peekKind(1) == token.T_VARIABLE {
 			p.next()
-			s := &ast.StaticVars{}
+			s := &ast.StaticVars{Doc: doc}
 			for {
 				vstart := p.tok().Start
 				v := &ast.StaticVar{Var: p.variable()}
@@ -288,7 +289,7 @@ func (p *Parser) statement() ast.Stmt {
 		p.docComment = ""
 		e := p.expr()
 		p.semi()
-		return &ast.ExprStmt{S: p.span(start), Expr: e}
+		return &ast.ExprStmt{S: p.span(start), Doc: doc, Expr: e}
 	case token.T_TYPE:
 		if p.mode == lexer.ModePhaenon && p.atString1() {
 			return p.typeAlias(nil)
@@ -303,7 +304,7 @@ func (p *Parser) statement() ast.Stmt {
 	}
 	e := p.expr()
 	p.semi()
-	return &ast.ExprStmt{S: p.span(start), Expr: e}
+	return &ast.ExprStmt{S: p.span(start), Doc: doc, Expr: e}
 }
 
 // atString1 reports whether the next token is a plain identifier (for `type Name =`).
@@ -445,9 +446,10 @@ func (p *Parser) altBlock(start int, until ...token.Kind) *ast.Block {
 
 func (p *Parser) foreachStmt() ast.Stmt {
 	start := p.tok().Start
+	doc := p.docComment
 	p.expect(token.T_FOREACH)
 	p.expect(token.Kind('('))
-	f := &ast.Foreach{Expr: p.exprNoAs()}
+	f := &ast.Foreach{Doc: doc, Expr: p.exprNoAs()}
 	p.expect(token.T_AS)
 	byRef, v := p.foreachVariable()
 	if p.accept(token.T_DOUBLE_ARROW) {

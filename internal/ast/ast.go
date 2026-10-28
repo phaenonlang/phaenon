@@ -783,9 +783,10 @@ func (n *TraitAdaptation) Span() Span { return n.S }
 // ------------------------------------------------------------------ statements
 
 type (
-	// ExprStmt is expr;
+	// ExprStmt is expr; Doc carries a preceding doc comment (`/** @var T $x */`).
 	ExprStmt struct {
 		S    Span
+		Doc  string
 		Expr Expr
 	}
 	// VoidCastStmt is PHP 8.5's `(void) expr;`.
@@ -858,6 +859,7 @@ type (
 	}
 	Foreach struct {
 		S        Span
+		Doc      string // a preceding `/** @var T $v */`
 		Expr     Expr
 		Key      Expr
 		KeyByRef bool // `&$k => $v` — the parser accepts it; PHP's compiler rejects it
@@ -896,6 +898,7 @@ type (
 	}
 	StaticVars struct {
 		S    Span
+		Doc  string
 		Vars []*StaticVar
 	}
 	StaticVar struct {
