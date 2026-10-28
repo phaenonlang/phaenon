@@ -32,23 +32,67 @@ type Options struct {
 	// line keeps its number (the conformance suite relies on it). Off, the
 	// leading blank lines are dropped.
 	KeepLines bool
+	// Generics lifts generic docblocks (@template, @param list<T>, …) into
+	// Phaenon syntax; the tags it cannot lift are reported as notes.
+	Generics bool
 }
 
 // File converts PHP source to Phaenon source.
 func File(src []byte, opts Options) ([]byte, error) {
+	out, _, err := Convert(src, opts)
+	return out, err
+}
+
+// Convert is File with the notes of the generics lift.
+func Convert(src []byte, opts Options) ([]byte, []Note, error) {
+	// The lift runs on the line-preserving form so its notes carry the
+	// input's line numbers; the leading blank lines go afterwards.
+	out, closeTag, err := strip(src)
+	if err != nil {
+		return nil, nil, err
+	}
+	var notes []Note
+	if opts.Generics {
+		if out, notes, err = Lift(out); err != nil {
+			return nil, nil, err
+		}
+	}
+	if !opts.KeepLines {
+		out = trim(out, closeTag)
+	}
+	return out, notes, nil
+}
+
+// trim drops the blank lines the removed tag and declare leave behind.
+func trim(out []byte, closeTag bool) []byte {
+	out = bytes.TrimLeft(out, "\r\n")
+	if closeTag {
+		// `?>` on its own line usually sat after a blank line; one
+		// trailing line break is enough once it is gone.
+		trimmed := bytes.TrimRight(out, "\r\n")
+		if len(trimmed) < len(out) {
+			out = append(trimmed, '\n')
+		}
+	}
+	return out
+}
+
+// strip is the mechanical part: tags and the strict_types declare, every
+// line keeping its number. closeTag reports a dropped trailing `?>`.
+func strip(src []byte) (out []byte, closeTag bool, err error) {
 	if emit.IsGenerated(src) {
-		return nil, ErrGenerated
+		return nil, false, ErrGenerated
 	}
 	f, err := parser.Parse(src, lexer.ModePHP)
 	if err != nil {
-		return nil, fmt.Errorf("parse: %w", err)
+		return nil, false, fmt.Errorf("parse: %w", err)
 	}
 	if len(f.Stmts) == 0 {
-		return nil, ErrNotPlainCode
+		return nil, false, ErrNotPlainCode
 	}
 	open, ok := f.Stmts[0].(*ast.OpenTag)
 	if !ok || open.S.Start != 0 {
-		return nil, ErrNotPlainCode
+		return nil, false, ErrNotPlainCode
 	}
 	stmts := f.Stmts[1:]
 	// A close tag as the very last thing (it swallows one newline) is a
@@ -69,7 +113,7 @@ func File(src []byte, opts Options) ([]byte, error) {
 		})
 	}
 	if bad {
-		return nil, ErrNotPlainCode
+		return nil, false, ErrNotPlainCode
 	}
 
 	// The open tag token ends with the whitespace character that follows
@@ -84,7 +128,7 @@ func File(src []byte, opts Options) ([]byte, error) {
 			edits = append(edits, edit{d.S, nil})
 		}
 	}
-	closeTag := len(stmts) < len(f.Stmts)-1 // a trailing close tag was dropped above
+	closeTag = len(stmts) < len(f.Stmts)-1 // a trailing close tag was dropped above
 	if closeTag {
 		if needsSemicolon(src, stmts) {
 			// `echo 1 ?>` — the close tag doubled as the statement terminator.
@@ -96,7 +140,6 @@ func File(src []byte, opts Options) ([]byte, error) {
 		tag := f.Stmts[len(f.Stmts)-1].Span()
 		edits = append(edits, edit{tag, lineBreakSuffix(src[tag.Start:tag.End])})
 	}
-	var out []byte
 	pos := 0
 	for _, e := range edits {
 		out = append(out, src[pos:e.Start]...)
@@ -104,18 +147,7 @@ func File(src []byte, opts Options) ([]byte, error) {
 		pos = e.End
 	}
 	out = append(out, src[pos:]...)
-	if !opts.KeepLines {
-		out = bytes.TrimLeft(out, "\r\n")
-		if closeTag {
-			// `?>` on its own line usually sat after a blank line; one
-			// trailing line break is enough once it is gone.
-			trimmed := bytes.TrimRight(out, "\r\n")
-			if len(trimmed) < len(out) {
-				out = append(trimmed, '\n')
-			}
-		}
-	}
-	return out, nil
+	return out, closeTag, nil
 }
 
 // needsSemicolon reports whether the last statement relied on the close

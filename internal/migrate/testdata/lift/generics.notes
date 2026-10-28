@@ -1,0 +1,13 @@
+26: kept @var: it has a description; the type is now also in the declaration
+29: kept @var int|string: it erases to a different type than the declared (none)
+33: kept @var array{id: int}: no Phaenon spelling for it
+63: kept @return: it has a description; the type is now also in the declaration
+74: kept @param callable(int): string: no Phaenon spelling for it
+75: kept @param int<0, max>: no Phaenon spelling for it
+76: kept @param array{id: int}: no Phaenon spelling for it
+86: kept @return list<int>: it erases to a different type than the declared iterable
+102: kept @param int: it erases to a different type than the declared (none)
+103: kept @return iterable<string>: the declaration has no return type to refine
+110: kept @template ClassType: a promoted property uses it, and a property cannot carry a method type parameter; make it a class type parameter
+111: kept @param ReflectorInterface<ClassType, \UnitEnum>: it mentions a type parameter that stayed in the docblock
+158: kept @param \Closure(int, int=): int: no Phaenon spelling for it

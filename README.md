@@ -39,10 +39,19 @@ A `.phn` file is PHP without the `<?php` tag. `phn build` writes `Foo.php` next 
 PSR-4 autoloading, PHPUnit, PHPStan and Xdebug keep working unchanged:
 
 ```sh
-phn migrate src tests          # once: Foo.php → Foo.phn (strips <?php, declare(strict_types=1), trailing ?>)
+phn migrate src tests          # once: Foo.php → Foo.phn, generic docblocks lifted into syntax
 phn build src tests            # Foo.phn → Foo.php
 phn build --check src tests    # CI: fail when any .php is stale
 ```
+
+`phn migrate` strips `<?php`, `declare(strict_types=1)` and a trailing `?>`, then lifts what
+PHPStan code says in comments into the signature: `@template T of Foo` → `<T of Foo>`, `@extends
+Base<T>` → `extends Base<T>`, `@param list<T> $xs` → `list<T> $xs`, `@return T` → `: T`, a
+property's `@var array<K, V>` → `map<K, V>`. A tag is lifted only when its type has a Phaenon
+spelling and erases to the type PHP already saw — the generated `.php` keeps the same signatures —
+and every tag left in place is reported with the reason (`--keep-docblocks` skips the lift).
+`@param T $x prose` keeps its prose as `@param $x prose`; the emitter puts the type back. It also
+runs on `.phn` files, so a project migrated earlier can be lifted later.
 
 The generated file keeps **every line number**: line N of `Foo.php` is line N of `Foo.phn`. Stack
 traces, `__LINE__`, coverage and PHPStan findings point at the Phaenon source without source maps.
@@ -107,6 +116,9 @@ after a transformation — and compare the output. `TestPrinterExecution` checks
 (line numbers normalised away); `TestEmitExecution` checks `migrate` + `build` byte for byte, line
 numbers included. ≈2.5 min each. `PHAENON_PHPT_FILTER=ext/standard/tests` narrows any suite to a
 corpus subset; `PHAENON_SHOW_DIFFS=n` controls how many differences are listed.
+
+`internal/migrate/testdata/lift/*.php` are migrated and compared with the `.phn` and `.notes`
+next to them (`PHAENON_UPDATE=1` rewrites them); the output must parse and lift to itself.
 
 `internal/emit/testdata/*.phn` are compiled through the checker and the emitter and compared
 with the `.php` next to them (`PHAENON_UPDATE=1` rewrites them); the output must pass `php -l`,

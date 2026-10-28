@@ -45,7 +45,7 @@ func usage() {
 usage:
   phn build [--out DIR] [--check] [--no-types] <path>...   type-check and compile .phn files to .php
   phn check [--json] [--no-deprecations] <path>...         type-check .phn files, write nothing
-  phn migrate <path>...                                    rewrite .php files as .phn
+  phn migrate [--keep-docblocks] <path>...                 rewrite .php files as .phn; lift generic docblocks into syntax
   phn lex   [--php] <file>                                 dump the token stream
   phn print [--php] <file>                                 parse and pretty-print
 
@@ -284,35 +284,63 @@ func printDiag(d checker.Diagnostic) {
 // ------------------------------------------------------------------ migrate
 
 func migrateCmd(args []string) {
-	if len(args) == 0 {
+	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
+	keepDoc := fs.Bool("keep-docblocks", false, "leave generic docblocks as they are")
+	fs.Parse(args)
+	if fs.NArg() == 0 {
 		usage()
 	}
-	files := collect(args, ".php")
-	skipped, migrated := 0, 0
+	files := collect(fs.Args(), ".php", ".phn")
+	skipped, migrated, lifted, kept := 0, 0, 0, 0
 	for _, in := range files {
 		src, err := os.ReadFile(in)
 		if err != nil {
 			fail("%v", err)
 		}
-		phn, err := migrate.File(src, migrate.Options{})
-		if err != nil {
-			if errors.Is(err, migrate.ErrNotPlainCode) || errors.Is(err, migrate.ErrGenerated) {
-				fmt.Fprintf(os.Stderr, "%s: skipped: %v\n", in, err)
-				skipped++
+		var phn []byte
+		var notes []migrate.Note
+		if strings.HasSuffix(in, ".phn") {
+			if *keepDoc {
 				continue
 			}
-			fail("%s: %v", in, err)
+			phn, notes, err = migrate.Lift(src)
+			if err != nil {
+				fail("%s: %v", in, err)
+			}
+			if bytes.Equal(phn, src) {
+				continue
+			}
+			lifted++
+		} else {
+			phn, notes, err = migrate.Convert(src, migrate.Options{Generics: !*keepDoc})
+			if err != nil {
+				if errors.Is(err, migrate.ErrNotPlainCode) || errors.Is(err, migrate.ErrGenerated) {
+					fmt.Fprintf(os.Stderr, "%s: skipped: %v\n", in, err)
+					skipped++
+					continue
+				}
+				fail("%s: %v", in, err)
+			}
+			migrated++
 		}
-		dst := strings.TrimSuffix(in, ".php") + ".phn"
+		for _, n := range notes {
+			fmt.Fprintf(os.Stderr, "%s:%d: %s\n", in, n.Line, n.Msg)
+			kept++
+		}
+		dst := in
+		if strings.HasSuffix(in, ".php") {
+			dst = strings.TrimSuffix(in, ".php") + ".phn"
+		}
 		if err := os.WriteFile(dst, phn, 0o644); err != nil {
 			fail("%v", err)
 		}
-		if err := os.Remove(in); err != nil {
-			fail("%v", err)
+		if dst != in {
+			if err := os.Remove(in); err != nil {
+				fail("%v", err)
+			}
 		}
-		migrated++
 	}
-	fmt.Printf("%d files migrated, %d skipped\n", migrated, skipped)
+	fmt.Printf("%d files migrated, %d skipped, %d .phn files updated, %d docblock tags kept\n", migrated, skipped, lifted, kept)
 }
 
 // ------------------------------------------------------------------ lex / print

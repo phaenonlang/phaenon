@@ -1,0 +1,118 @@
+namespace App;
+
+use App\Model\Row;
+
+/**
+ * A cache of reflections, keyed by class name.
+ */
+final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> implements \Countable, ReflectorInterface<ClassType, EnumType>
+{
+    private map<class-string<ClassType>, \ReflectionClass<ClassType>> $cache = [];
+
+    private list<string> $names = [];
+
+    /** @var array<string, int> the hit counts, by name */
+    private map<string, int> $hits = [];
+
+    /** @var int|string */
+    private $untyped = 0;
+
+    /**
+     * @var array{id: int}
+     */
+    private array $shape = ['id' => 1];
+
+    /**
+     * @param $attributeType FQN of an attribute class
+     * @param $className FQN of a class we look for attributes in
+     */
+    public function allOfType<T of object>(class-string<T> $attributeType, class-string $className): array<T>
+    {
+        return [];
+    }
+
+    /**
+     * Finds the first one.
+     *
+     * @throws \ReflectionException
+     */
+    public function first<T of object>(class-string<T> $attributeType): ?T
+    {
+        return null;
+    }
+
+    /**
+     * @return T the mapped object
+     */
+    public function map<T of object>(object $source, T|class-string<T> $target): T
+    {
+        return $source;
+    }
+
+    /**
+     * @param callable(int): string $g
+     * @param int<0, max> $n
+     * @param array{id: int} $row
+     */
+    public function closures(?Closure(object, object): object $mapping, Closure(int): string $f, callable $g, int $n, array $row, non-empty-string ...$names, ?string $maybe = null): void
+    {
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function widened(list<int> $xs): iterable
+    {
+        return $xs;
+    }
+
+    public function qualified(\App\Model\Row $row, Row $other): void
+    {
+    }
+
+    /**
+     * @param int $n
+     * @return iterable<string>
+     */
+    public function untypedParts($n)
+    {
+    }
+
+    /**
+     * @template ClassType of object
+     * @param ReflectorInterface<ClassType, \UnitEnum> $reflector
+     */
+    public function __construct(private ReflectorInterface $reflector, string $name = '')
+    {
+    }
+
+    public function fluent(): static
+    {
+        return $this;
+    }
+
+    public function prefixed(positive-int $n): void
+    {
+    }
+
+    public function count(): int
+    {
+        return 0;
+    }
+}
+
+abstract class Repo<T> extends Base<T>
+{
+}
+
+function firstOf<T of object>(list<T> $items): ?T
+{
+    return $items[0] ?? null;
+}
+
+/**
+ * @param \Closure(int, int=): int $withOptional
+ */
+function keyed(map<int, string> $map, non-empty-map<string, \stdClass> $objects, \Closure $withOptional): void
+{
+}
