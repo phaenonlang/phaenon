@@ -12,7 +12,7 @@ import (
 	"bytes"
 	"strconv"
 
-	"github.com/phaenon/phaenon/internal/token"
+	"github.com/phaenonlang/phaenon/internal/token"
 )
 
 // Mode selects the dialect being lexed.

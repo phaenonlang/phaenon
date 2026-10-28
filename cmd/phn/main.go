@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/phaenon/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/lexer"
 )
 
 func main() {

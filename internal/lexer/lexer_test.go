@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phaenon/phaenon/internal/token"
+	"github.com/phaenonlang/phaenon/internal/token"
 )
 
 // render prints tokens as "KIND(text)" joined by spaces, trivia omitted.

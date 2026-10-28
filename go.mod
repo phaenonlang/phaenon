@@ -1,3 +1,3 @@
-module github.com/phaenon/phaenon
+module github.com/phaenonlang/phaenon
 
 go 1.27

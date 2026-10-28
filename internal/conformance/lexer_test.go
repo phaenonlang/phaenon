@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phaenon/phaenon/internal/conformance/phpt"
-	"github.com/phaenon/phaenon/internal/lexer"
-	"github.com/phaenon/phaenon/internal/token"
+	"github.com/phaenonlang/phaenon/internal/conformance/phpt"
+	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/token"
 )
 
 // phpSrc returns the php-src checkout to test against, or skips.
