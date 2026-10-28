@@ -127,7 +127,11 @@ func build(args []string) {
 		if err != nil {
 			fail("%v", err)
 		}
-		php, err := emit.File(src, emit.Options{SourceName: in, StrictTypes: true})
+		opts := emit.Options{SourceName: in, StrictTypes: true}
+		if loadedChecker != nil {
+			opts.Program, opts.File, opts.Reified = loadedProgram, loadedProgram.File(in), loadedChecker.ReifiedArgs
+		}
+		php, err := emit.File(src, opts)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			failed++
@@ -169,7 +173,10 @@ func build(args []string) {
 
 // ------------------------------------------------------------------ check
 
-var loadedProgram *program.Program
+var (
+	loadedProgram *program.Program
+	loadedChecker *checker.Checker
+)
 
 // typeCheck loads the stubs, the nearest Composer maps and the given files,
 // and returns the diagnostics.
@@ -205,7 +212,8 @@ func typeCheck(files []string, opts checker.Options) []checker.Diagnostic {
 		}
 	}
 	loadedProgram = p
-	return append(diags, checker.New(p, opts).Check()...)
+	loadedChecker = checker.New(p, opts)
+	return append(diags, loadedChecker.Check()...)
 }
 
 func checkCmd(args []string) {

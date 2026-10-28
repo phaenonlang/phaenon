@@ -1,0 +1,148 @@
+namespace App;
+
+use Closure;
+
+type Ids = list<int>;
+type Table<K of int|string, V> = map<K, V>;
+
+/**
+ * A value in a box.
+ */
+final class Box<T>
+{
+    public function __construct(private T $value)
+    {
+    }
+
+    public function get(): T
+    {
+        return $this->value;
+    }
+
+    /**
+     * Applies $fn to the value.
+     *
+     * @throws \RuntimeException never
+     */
+    public function map<U>(Closure(T): U $fn): Box<U>
+    {
+        return new Box($fn($this->value));
+    }
+
+    /** @return list<T> */
+    public function toList(): list<T>
+    {
+        return [$this->value];
+    }
+}
+
+interface Source<out T>
+{
+    public function next(): ?T;
+}
+
+abstract class Model
+{
+    public function __construct(public readonly int $id)
+    {
+    }
+}
+
+final class User extends Model
+{
+}
+
+class Repository<reified T of Model>
+{
+    private map<int, Model> $items = [];
+
+    public function __construct(private readonly string $table = 'default')
+    {
+    }
+
+    public function get(int $id): ?T
+    {
+        $item = $this->items[$id] ?? null;
+        if ($item is T) {
+            return $item;
+        }
+        return null;
+    }
+
+    public function fresh(int $id): T
+    {
+        return new T($id);
+    }
+
+    public function describe(): string
+    {
+        return T::class . ' in ' . $this->table . ' (' . T->name() . ')';
+    }
+
+    public function all(): list<T>
+    {
+        $out = [];
+        foreach ($this->items as $item) {
+            if ($item instanceof T) {
+                $out[] = $item;
+            }
+        }
+        return $out;
+    }
+}
+
+final class UserRepository extends Repository<User>
+{
+}
+
+final class LoggingRepository<reified T of Model> extends Repository<T>
+{
+    public function __construct(private readonly string $log)
+    {
+        parent::__construct('logged');
+    }
+
+    public function log(): string
+    {
+        return $this->log . ': ' . $this->describe();
+    }
+}
+
+function first<T>(list<T> $items): ?T
+{
+    return $items[0] ?? null;
+}
+
+function decode<reified T of Model>(int $id): T
+{
+    $make = function (int $n) use ($id): T {
+        return new T($n + $id);
+    };
+    return $make(1);
+}
+
+function sum(Ids $ids, Table<string, int> $table): int
+{
+    return count($ids) + count($table);
+}
+
+function uses(mixed $m, Box<int> $box): void
+{
+    $repo = new Repository<User>('users');
+    $user = $repo->get(1);
+    $fresh = decode<User>(2);
+    $n = first<int>([1, 2]);
+    $s = $box->map(fn(int $x): string => (string) $x)->get();
+    if ($m is int) {
+        echo $m;
+    }
+    if ($m is ?User) {
+        echo $user?->id, $fresh->id, $n, $s;
+    }
+    if ($m is list<int>) {
+        echo count($m);
+    }
+    $t = $m as Table<string, int>;
+    $u = $m as? User;
+    echo count($t), $u?->id, $repo->describe();
+}

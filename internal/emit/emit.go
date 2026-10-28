@@ -26,6 +26,8 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/types"
 )
 
 // Marker is the comment that identifies generated output; it is always on
@@ -41,6 +43,14 @@ type Options struct {
 	// strict_types itself. Phaenon is strict by default; the conformance
 	// suite turns this off to compare against non-strict PHP tests.
 	StrictTypes bool
+	// Program and File carry the type information generics need (the
+	// checked program and this file's entry in it). A file that uses
+	// Phaenon type syntax cannot be compiled without them.
+	Program *program.Program
+	File    *program.File
+	// Reified returns, for a call site, the types bound to the callee's
+	// reified type parameters (the checker records them).
+	Reified func(ast.Node) []types.Type
 }
 
 // Error is an emission error at a source position.
@@ -72,7 +82,7 @@ func File(src []byte, opts Options) ([]byte, error) {
 // Tree compiles an already parsed file. src must be the text f was parsed from.
 func Tree(src []byte, f *ast.File, opts Options) ([]byte, error) {
 	e := &emitter{src: src, opts: opts}
-	if err := e.checkSupported(f); err != nil {
+	if err := e.lowerGenerics(f); err != nil {
 		return nil, err
 	}
 	e.prologue(f)
@@ -114,6 +124,16 @@ func (e *emitter) insert(at int, text string) {
 	e.replace(ast.Span{Start: at, End: at}, text)
 }
 
+// replaceLines is replace for the one kind of edit that may add lines: a
+// docblock, which PHPStan reads one tag per line. Lines after it shift.
+func (e *emitter) replaceLines(s ast.Span, text string) {
+	e.edits = append(e.edits, edit{s, text})
+}
+
+func (e *emitter) insertLines(at int, text string) {
+	e.replaceLines(ast.Span{Start: at, End: at}, text)
+}
+
 // apply splices the edits into the source. Edits must not overlap; insertions
 // at the same offset keep their order of registration.
 func (e *emitter) apply() []byte {
@@ -142,51 +162,6 @@ func (e *emitter) errorf(n ast.Node, format string, args ...any) error {
 }
 
 // ------------------------------------------------------------------ passes
-
-// checkSupported rejects Phaenon-only constructs the emitter cannot lower
-// yet. They parse, so the message can be precise.
-func (e *emitter) checkSupported(f *ast.File) error {
-	var err error
-	ast.Inspect(f, func(n ast.Node) bool {
-		if err != nil {
-			return false
-		}
-		switch n := n.(type) {
-		case *ast.TypeParam:
-			err = e.errorf(n, "generic type parameters are not supported by the emitter yet (planned for M3)")
-		case *ast.TypeAlias:
-			err = e.errorf(n, "type aliases are not supported by the emitter yet (planned for M3)")
-		case *ast.IsExpr:
-			err = e.errorf(n, "`is` is not supported by the emitter yet (planned for M3); use instanceof")
-		case *ast.AsExpr:
-			err = e.errorf(n, "`as` is not supported by the emitter yet (planned for M3)")
-		case *ast.ClosureType:
-			err = e.errorf(n, "Closure(...) types are not supported by the emitter yet (planned for M3); use Closure")
-		case *ast.NamedType:
-			if len(n.TypeArgs) > 0 {
-				err = e.errorf(n, "generic type arguments are not supported by the emitter yet (planned for M3)")
-			}
-		case *ast.Call:
-			if len(n.TypeArgs) > 0 {
-				err = e.errorf(n, "explicit type arguments on calls are not supported by the emitter yet (planned for M3)")
-			}
-		case *ast.MethodCall:
-			if len(n.TypeArgs) > 0 {
-				err = e.errorf(n, "explicit type arguments on calls are not supported by the emitter yet (planned for M3)")
-			}
-		case *ast.StaticCall:
-			if len(n.TypeArgs) > 0 {
-				err = e.errorf(n, "explicit type arguments on calls are not supported by the emitter yet (planned for M3)")
-			}
-		case *ast.New:
-			if len(n.TypeArgs) > 0 {
-				err = e.errorf(n, "explicit type arguments on new are not supported by the emitter yet (planned for M3)")
-			}
-		}
-		return true
-	})
-	return err
-}
 
 // prologue puts the open tag, the marker and (unless the file has its own)
 // declare(strict_types=1) at the start of line 1.

@@ -14,11 +14,33 @@ func String_(t Type) string { return Print(t) }
 // Print prints t in PHPStan vocabulary.
 func Print(t Type) string {
 	var b strings.Builder
-	print(&b, t, false)
+	(&printer{b: &b}).print(t, false)
 	return b.String()
 }
 
-func print(b *strings.Builder, t Type, nested bool) {
+// PrintQualified prints t for a docblock in emitted code: like Print, but
+// class names carry a leading backslash so they resolve regardless of the
+// file's imports.
+func PrintQualified(t Type) string {
+	var b strings.Builder
+	(&printer{b: &b, qualified: true}).print(t, false)
+	return b.String()
+}
+
+type printer struct {
+	b         *strings.Builder
+	qualified bool
+}
+
+func (pr *printer) class(name string) {
+	if pr.qualified && name != "" && name[0] != '\\' {
+		pr.b.WriteByte('\\')
+	}
+	pr.b.WriteString(name)
+}
+
+func (pr *printer) print(t Type, nested bool) {
+	b := pr.b
 	switch t := t.(type) {
 	case nil:
 		b.WriteString("<nil>")
@@ -92,7 +114,7 @@ func print(b *strings.Builder, t Type, nested bool) {
 		b.WriteString("class-string")
 		if t.Of != nil {
 			b.WriteString("<")
-			print(b, t.Of, false)
+			pr.print(t.Of, false)
 			b.WriteString(">")
 		}
 	case Array:
@@ -104,7 +126,7 @@ func print(b *strings.Builder, t Type, nested bool) {
 			b.WriteString("list")
 			if !IsMixed(t.Value) {
 				b.WriteString("<")
-				print(b, t.Value, false)
+				pr.print(t.Value, false)
 				b.WriteString(">")
 			}
 		default:
@@ -116,10 +138,10 @@ func print(b *strings.Builder, t Type, nested bool) {
 			if !keyIsAny || !IsMixed(t.Value) {
 				b.WriteString("<")
 				if !keyIsAny {
-					print(b, t.Key, false)
+					pr.print(t.Key, false)
 					b.WriteString(", ")
 				}
-				print(b, t.Value, false)
+				pr.print(t.Value, false)
 				b.WriteString(">")
 			}
 		}
@@ -146,7 +168,7 @@ func print(b *strings.Builder, t Type, nested bool) {
 				}
 				b.WriteString(": ")
 			}
-			print(b, e.Type, false)
+			pr.print(e.Type, false)
 		}
 		if t.Unsealed {
 			if len(t.Entries) > 0 {
@@ -158,14 +180,14 @@ func print(b *strings.Builder, t Type, nested bool) {
 	case Object:
 		b.WriteString("object")
 	case Class:
-		b.WriteString(t.Name)
+		pr.class(t.Name)
 		if len(t.Args) > 0 {
 			b.WriteString("<")
 			for i, a := range t.Args {
 				if i > 0 {
 					b.WriteString(", ")
 				}
-				print(b, a, false)
+				pr.print(a, false)
 			}
 			b.WriteString(">")
 		}
@@ -173,18 +195,18 @@ func print(b *strings.Builder, t Type, nested bool) {
 		b.WriteString("static")
 		if t.Of != nil {
 			b.WriteString("(")
-			print(b, *t.Of, false)
+			pr.print(*t.Of, false)
 			b.WriteString(")")
 		}
 	case This:
 		b.WriteString("$this")
 		if t.Of != nil {
 			b.WriteString("(")
-			print(b, *t.Of, false)
+			pr.print(*t.Of, false)
 			b.WriteString(")")
 		}
 	case EnumCase:
-		b.WriteString(t.Class)
+		pr.class(t.Class)
 		b.WriteString("::")
 		b.WriteString(t.Case)
 	case Callable:
@@ -208,7 +230,7 @@ func print(b *strings.Builder, t Type, nested bool) {
 				if p.Type == nil {
 					b.WriteString("mixed")
 				} else {
-					print(b, p.Type, false)
+					pr.print(p.Type, false)
 				}
 				if p.ByRef {
 					b.WriteString(" &")
@@ -224,7 +246,7 @@ func print(b *strings.Builder, t Type, nested bool) {
 			if t.Return == nil {
 				b.WriteString("mixed")
 			} else {
-				print(b, t.Return, false)
+				pr.print(t.Return, false)
 			}
 		}
 	case Iterable:
@@ -233,10 +255,10 @@ func print(b *strings.Builder, t Type, nested bool) {
 		if !keyIsAny || !IsMixed(t.Value) {
 			b.WriteString("<")
 			if !keyIsAny {
-				print(b, t.Key, false)
+				pr.print(t.Key, false)
 				b.WriteString(", ")
 			}
-			print(b, t.Value, false)
+			pr.print(t.Value, false)
 			b.WriteString(">")
 		}
 	case Resource:
@@ -249,7 +271,7 @@ func print(b *strings.Builder, t Type, nested bool) {
 			if i > 0 {
 				b.WriteString("|")
 			}
-			print(b, m, true)
+			pr.print(m, true)
 		}
 		if nested {
 			b.WriteString(")")
@@ -262,7 +284,7 @@ func print(b *strings.Builder, t Type, nested bool) {
 			if i > 0 {
 				b.WriteString("&")
 			}
-			print(b, m, true)
+			pr.print(m, true)
 		}
 		if nested {
 			b.WriteString(")")
@@ -274,21 +296,21 @@ func print(b *strings.Builder, t Type, nested bool) {
 		if t.ParamName != "" {
 			b.WriteString("$" + t.ParamName)
 		} else {
-			print(b, t.Subject, false)
+			pr.print(t.Subject, false)
 		}
 		if t.Negated {
 			b.WriteString(" is not ")
 		} else {
 			b.WriteString(" is ")
 		}
-		print(b, t.Target, false)
+		pr.print(t.Target, false)
 		b.WriteString(" ? ")
-		print(b, t.Then, false)
+		pr.print(t.Then, false)
 		b.WriteString(" : ")
-		print(b, t.Else, false)
+		pr.print(t.Else, false)
 		b.WriteString(")")
 	case Unknown:
-		b.WriteString(t.Name)
+		pr.class(t.Name)
 	default:
 		fmt.Fprintf(b, "%T", t)
 	}

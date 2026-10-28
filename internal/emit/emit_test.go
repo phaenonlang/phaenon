@@ -68,18 +68,10 @@ func TestNoStrictTypes(t *testing.T) {
 
 func TestErrors(t *testing.T) {
 	cases := map[string]string{
-		"<?php\necho 1;":                    "A.phn:1: Phaenon files do not start with <?php",
-		"function f<T>(T $x): T {}":         "A.phn:1: generic type parameters are not supported",
-		"\n\nfunction f(list<int> $x) {}":   "A.phn:3: generic type arguments are not supported",
-		"$x = f<int>(1);":                   "A.phn:1: explicit type arguments on calls",
-		"$x = $o->m<int>(1);":               "A.phn:1: explicit type arguments on calls",
-		"$x = A::m<int>(1);":                "A.phn:1: explicit type arguments on calls",
-		"$x = new A<int>(1);":               "A.phn:1: explicit type arguments on new",
-		"type Id = int;":                    "A.phn:1: type aliases are not supported",
-		"$y = $x is int;":                   "A.phn:1: `is` is not supported",
-		"$y = $x as int;":                   "A.phn:1: `as` is not supported",
-		"function f(Closure(A): int $x) {}": "A.phn:1: Closure(...) types are not supported",
-		"echo 1\necho 2;":                   "A.phn:2: ",
+		"<?php\necho 1;":            "A.phn:1: Phaenon files do not start with <?php",
+		"function f<T>(T $x): T {}": "A.phn:1: generics need type information",
+		"$y = $x is int;":           "A.phn:1: generics need type information",
+		"echo 1\necho 2;":           "A.phn:2: ",
 	}
 	for in, want := range cases {
 		_, err := File([]byte(in), Options{SourceName: "A.phn"})
