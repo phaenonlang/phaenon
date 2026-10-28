@@ -36,7 +36,7 @@ type Doc struct {
 	Errors []TagError
 }
 
-// ParamTag is @param T $name.
+// ParamTag is @param T $name; Type is nil for `@param $name description`.
 type ParamTag struct {
 	Name     string
 	Type     *TypeNode
@@ -181,10 +181,17 @@ func (d *Doc) handle(t tagText) {
 	}
 	switch name {
 	case "@param", "@param-out":
-		typ, rest, err := parseTypePrefix(t.text)
-		if err != nil {
-			d.fail(t, err.Error())
-			return
+		// `@param $x description` carries no type: in Phaenon source the
+		// type is in the signature and the tag keeps only the prose.
+		rest := t.text
+		var typ *TypeNode
+		if !startsVar(rest) {
+			var err error
+			typ, rest, err = parseTypePrefix(t.text)
+			if err != nil {
+				d.fail(t, err.Error())
+				return
+			}
 		}
 		p := ParamTag{Type: typ, Line: t.line}
 		rest = strings.TrimSpace(rest)
@@ -343,6 +350,12 @@ func (d *Doc) handle(t tagText) {
 	case "@final":
 		d.Final = true
 	}
+}
+
+// startsVar reports whether s begins with a parameter: $x, ...$x, &$x.
+func startsVar(s string) bool {
+	s = strings.TrimLeft(s, "&.")
+	return strings.HasPrefix(s, "$")
 }
 
 func (d *Doc) appendType(dst *[]*TypeNode, t tagText) {
@@ -506,6 +519,10 @@ func ParseType(s string) (*TypeNode, error) {
 	}
 	return t, nil
 }
+
+// ParseTypePrefix parses the type at the start of s and returns the rest
+// of s after it.
+func ParseTypePrefix(s string) (*TypeNode, string, error) { return parseTypePrefix(s) }
 
 // parseTypePrefix parses the type at the start of s and returns the rest.
 func parseTypePrefix(s string) (*TypeNode, string, error) {

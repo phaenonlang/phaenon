@@ -239,10 +239,10 @@ func (l *lowering) erase(t ast.TypeExpr, sc *scope) string {
 				return "array"
 			case "iterable":
 				return "iterable"
-			case "class-string":
-				return "string"
 			}
-			if a := sc.res.FileAlias(name); a != nil {
+			if strings.Contains(name, "-") || sc.res.FileAlias(name) != nil {
+				// class-string<T>, non-empty-string, array-key, …: the
+				// resolved type knows its native spelling.
 				return nativeOf(sc.res.Native(t))
 			}
 		}
@@ -416,7 +416,7 @@ func (l *lowering) needsDoc(t ast.TypeExpr, sc *scope) bool {
 					}
 				}
 			}
-			if isAliasCandidate(t) || sc.res.FileAlias(name) != nil {
+			if isAliasCandidate(t) || sc.res.FileAlias(name) != nil || strings.Contains(name, "-") {
 				return true
 			}
 		}
@@ -490,6 +490,7 @@ func (l *lowering) addDoc(declStart int, doc string, tags []string) {
 	if idx < 0 {
 		return
 	}
+	tags = l.fillTypes(doc, idx, tags)
 	tags = missingTags(doc, tags)
 	if len(tags) == 0 {
 		return
@@ -516,11 +517,57 @@ func (l *lowering) addDoc(declStart int, doc string, tags []string) {
 	if ws := strings.TrimRight(doc[lastNL+1:], "*/ "); ws != "" {
 		closeIndent = ws
 	}
+	// The generated tags go before the first tag already there, so that
+	// `@throws`, `@see` and the like keep their place after the signature
+	// tags; with no tags they go at the end, after the prose.
+	at := idx + lastNL + 1
+	off := 0
+	for _, line := range strings.SplitAfter(doc, "\n") {
+		if strings.HasPrefix(strings.TrimLeft(strings.TrimSpace(line), "/* "), "@") {
+			at = idx + off
+			break
+		}
+		off += len(line)
+	}
 	var b strings.Builder
 	for _, t := range tags {
 		b.WriteString(closeIndent + " * " + t + "\n")
 	}
-	l.e.insertLines(idx+lastNL+1, b.String())
+	l.e.insertLines(at, b.String())
+}
+
+// fillTypes puts the type back into `@param $x description` lines, which
+// Phaenon source writes without one (the type is in the signature), and
+// returns the tags that found no such line.
+func (l *lowering) fillTypes(doc string, idx int, tags []string) []string {
+	var rest []string
+	for _, tag := range tags {
+		fields := strings.Fields(tag)
+		if len(fields) < 3 || fields[0] != "@param" {
+			rest = append(rest, tag)
+			continue
+		}
+		key := tagKey(tag)
+		off := 0
+		found := false
+		for _, line := range strings.SplitAfter(doc, "\n") {
+			text := strings.TrimLeft(strings.TrimSpace(line), "/* ")
+			if strings.HasPrefix(text, "@param") && tagKey(text) == key {
+				lf := strings.Fields(text)
+				if len(lf) >= 2 && strings.HasPrefix(strings.TrimLeft(lf[1], "&."), "$") {
+					at := idx + off + strings.Index(line, "@param") + len("@param")
+					l.e.replace(ast.Span{Start: at, End: at}, " "+strings.Join(fields[1:len(fields)-1], " "))
+					found = true
+				}
+				break
+			}
+			off += len(line)
+		}
+		if !found {
+			rest = append(rest, tag)
+		}
+	}
+	return rest
 }
 
 // missingTags drops the tags a docblock already states (same tag and, for

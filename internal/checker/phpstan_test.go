@@ -3,6 +3,9 @@ package checker
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/parser"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,6 +56,12 @@ func TestPHPStanParity(t *testing.T) {
 			src, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if usesPhaenonSyntax(src) {
+				// PHPStan reads the file as PHP; Phaenon-only syntax has no
+				// PHP form before the emitter runs. The emit golden covers
+				// those files (compiled output through PHPStan level max).
+				t.Skip("Phaenon-only syntax; covered by the emit golden")
 			}
 			phpName := strings.TrimSuffix(name, ".phn") + ".php"
 			if err := os.WriteFile(filepath.Join(dir, phpName), append([]byte("<?php "), src...), 0o644); err != nil {
@@ -108,4 +117,32 @@ func TestPHPStanParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+// usesPhaenonSyntax reports whether a corpus file has constructs PHP
+// cannot parse: type parameters and arguments, is / as, type aliases,
+// Closure signatures, hyphenated type names.
+func usesPhaenonSyntax(src []byte) bool {
+	f, err := parser.Parse(src, lexer.ModePhaenon)
+	if err != nil {
+		return false
+	}
+	found := false
+	for _, s := range f.Stmts {
+		ast.Inspect(s, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.TypeParam, *ast.IsExpr, *ast.AsExpr, *ast.TypeAlias, *ast.ClosureType:
+				found = true
+			case *ast.NamedType:
+				if len(n.TypeArgs) > 0 || strings.Contains(n.Name.Parts[0], "-") {
+					found = true
+				}
+			}
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+	return false
 }

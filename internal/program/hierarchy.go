@@ -313,13 +313,13 @@ func (c *Class) inheritDocTypes() {
 				}
 				cp := m.Params[i]
 				hasDoc := cp.NativeType == nil && !types.IsMixed(cp.Type) || cp.NativeType != nil && !types.Equal(cp.Type, cp.NativeType)
-				if hasDoc || pp.Type == nil || !nativeMatches(cp.NativeType, pp.NativeType) {
+				if hasDoc || pp.Type == nil || !nativeMatches(cp.NativeType, erasedNative(pp.NativeType, pm, a)) {
 					continue
 				}
 				cp.Type = types.Substitute(pp.Type, subst)
 			}
 			hasDocReturn := m.Return != nil && (m.NativeReturn == nil || !types.Equal(m.Return, m.NativeReturn))
-			if !hasDocReturn && pm.Return != nil && nativeMatches(m.NativeReturn, pm.NativeReturn) {
+			if !hasDocReturn && pm.Return != nil && nativeMatches(m.NativeReturn, erasedNative(pm.NativeReturn, pm, a)) {
 				m.Return = types.Substitute(pm.Return, subst)
 			}
 			break
@@ -343,8 +343,20 @@ func boundSubst(t types.Type, tps []*TypeParam) types.Type {
 	return types.Substitute(t, m)
 }
 
+// erasedNative is what a parent's declared type looks like in PHP: a
+// Phaenon signature (`class-string<T> $x`) declares what a PHP one
+// declares in a docblock, so a child written as `string $x` overrides it
+// just as it would override the erased `string`.
+func erasedNative(t types.Type, m *Method, c *Class) types.Type {
+	if t == nil {
+		return nil
+	}
+	return boundSubst(boundSubst(t, m.TypeParams), c.TypeParams)
+}
+
 // nativeMatches reports whether two native types agree closely enough for
-// a docblock to carry over: equal, or the child's is absent.
+// a docblock to carry over: equal, or the child's is absent, or the same
+// once refinements are erased.
 func nativeMatches(child, parent types.Type) bool {
 	if child == nil {
 		return true
@@ -352,7 +364,12 @@ func nativeMatches(child, parent types.Type) bool {
 	if parent == nil {
 		return false
 	}
-	return types.Equal(child, parent)
+	if types.Equal(child, parent) {
+		return true
+	}
+	cs, ok1 := types.Native(child)
+	ps, ok2 := types.Native(parent)
+	return ok1 && ok2 && cs == ps
 }
 
 func (c *Class) addConst(k *Constant) {

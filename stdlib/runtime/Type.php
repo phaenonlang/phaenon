@@ -98,6 +98,16 @@ final class Type
      */
     public static function literal(mixed $value): Type {}
 
+    /**
+     * @template U of object
+     * @param Type<U> $of
+     * @return Type<class-string<U>>
+     */
+    public static function classString(Type $of): Type {}
+
+    /** @return Type<resource> */
+    public static function resource(): Type {}
+
     /** @phpstan-assert-if-true T $value */
     public function check(mixed $value): bool {}
 

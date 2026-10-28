@@ -25,10 +25,10 @@ final class Box
     /**
      * Applies $fn to the value.
      *
-     * @throws \RuntimeException never
      * @template U
      * @param \Closure(T): U $fn
      * @return Box<U>
+     * @throws \RuntimeException never
      */
     public function map(\Closure $fn): Box
     {
@@ -194,4 +194,28 @@ function uses(mixed $m, Box $box): void
     $t = \Phaenon\Type::map(\Phaenon\Type::string(), \Phaenon\Type::int())->assert($m);
     $u = \Phaenon\Type::of(\App\User::class)->orNull($m);
     echo count($t), $u?->id, $repo->describe();
+}
+
+/**
+ * What a lifted PHPStan signature looks like: hyphenated names, a param tag
+ * with prose only, a Closure the lexer would otherwise read as a cast.
+ *
+ * @template T of object
+ * @param non-empty-string $id
+ * @param array-key $k
+ * @param positive-int $n
+ * @param \Closure(int): string $f
+ * @param ?\Closure(object, object): object $m
+ * @return ?T
+ * @param class-string<T> $c the class to describe
+ * @throws \RuntimeException never
+ */
+function lifted(string $c, string $id, int|string $k, int $n, \Closure $f, ?\Closure $m): ?object
+{
+    echo $id, $k, $n, $f($n);
+    if ($m !== null) {
+        $o = $m(new \stdClass(), new \stdClass());
+        return $o instanceof $c ? $o : null;
+    }
+    return null;
 }

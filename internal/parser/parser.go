@@ -8,6 +8,7 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
@@ -381,17 +382,19 @@ func (p *Parser) atClosureTypeStart() bool { return false }
 // singleType parses a named type: int, Foo, static, array, callable, Foo<T>, Closure(A): R.
 func (p *Parser) singleType() ast.TypeExpr {
 	start := p.tok().Start
-	var name *ast.Name
-	switch {
-	case p.at(token.T_ARRAY), p.at(token.T_CALLABLE), p.at(token.T_STATIC), p.at(token.T_LIST):
-		t := p.next()
-		name = &ast.Name{S: ast.Span{Start: t.Start, End: t.End}, Parts: []string{t.Text(p.src)}}
-	default:
-		name = p.name()
+	name := p.hyphenatedName()
+	if name == nil {
+		switch {
+		case p.at(token.T_ARRAY), p.at(token.T_CALLABLE), p.at(token.T_STATIC), p.at(token.T_LIST):
+			t := p.next()
+			name = &ast.Name{S: ast.Span{Start: t.Start, End: t.End}, Parts: []string{t.Text(p.src)}}
+		default:
+			name = p.name()
+		}
 	}
 	nt := &ast.NamedType{S: p.span(start), Name: name}
 	if p.mode == lexer.ModePhaenon {
-		if len(name.Parts) == 1 && name.Parts[0] == "Closure" && p.at(token.Kind('(')) {
+		if len(name.Parts) == 1 && name.Parts[0] == "Closure" && (p.at(token.Kind('(')) || p.atCast()) {
 			return p.closureType(start)
 		}
 		if p.at(token.Kind('<')) {
@@ -402,23 +405,84 @@ func (p *Parser) singleType() ast.TypeExpr {
 	return nt
 }
 
+// hyphenatedName parses a PHPStan-vocabulary type name written with
+// hyphens and no spaces — class-string, non-empty-list, array-key, key-of —
+// as one unqualified name, Phaenon mode only. It consumes the tokens, or
+// returns nil without moving. `A - B` with spaces, or outside a type, stays
+// a subtraction.
+func (p *Parser) hyphenatedName() *ast.Name {
+	if p.mode != lexer.ModePhaenon {
+		return nil
+	}
+	first := p.toks[p.i]
+	if !isLabel(first.Text(p.src)) {
+		return nil
+	}
+	j, end := p.i, first.End
+	for j+2 < len(p.toks) && p.toks[j+1].Kind == token.Kind('-') && p.toks[j+1].Start == end &&
+		p.toks[j+2].Start == p.toks[j+1].End && isLabel(p.toks[j+2].Text(p.src)) {
+		j += 2
+		end = p.toks[j].End
+	}
+	if j == p.i {
+		return nil
+	}
+	n := &ast.Name{S: ast.Span{Start: first.Start, End: end}, Kind: ast.NameUnqualified, Parts: []string{string(p.src[first.Start:end])}}
+	for p.i <= j {
+		p.advance()
+	}
+	return n
+}
+
+// isLabel reports whether s is one PHP label: a keyword or an identifier.
+func isLabel(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= 0x80 || (i > 0 && c >= '0' && c <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // closureType parses Phaenon's Closure(A, B): R after the Closure name.
 func (p *Parser) closureType(start int) ast.TypeExpr {
-	p.expect(token.Kind('('))
 	var params []ast.TypeExpr
-	for !p.at(token.Kind(')')) {
-		params = append(params, p.typeExpr())
-		if !p.accept(token.Kind(',')) {
-			break
+	if p.atCast() {
+		// `Closure(int): string` — the lexer read `(int)` as a cast token.
+		t := p.next()
+		text := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(t.Text(p.src), "("), ")"))
+		params = append(params, &ast.NamedType{S: ast.Span{Start: t.Start + 1, End: t.End - 1},
+			Name: &ast.Name{S: ast.Span{Start: t.Start + 1, End: t.End - 1}, Kind: ast.NameUnqualified, Parts: []string{text}}})
+	} else {
+		p.expect(token.Kind('('))
+		for !p.at(token.Kind(')')) {
+			params = append(params, p.typeExpr())
+			if !p.accept(token.Kind(',')) {
+				break
+			}
 		}
+		p.expect(token.Kind(')'))
 	}
-	p.expect(token.Kind(')'))
 	ct := &ast.ClosureType{Params: params}
 	if p.accept(token.Kind(':')) {
 		ct.Return = p.typeExpr()
 	}
 	ct.S = p.span(start)
 	return ct
+}
+
+// atCast reports whether the current token is a `(type)` cast.
+func (p *Parser) atCast() bool {
+	switch p.kind() {
+	case token.T_INT_CAST, token.T_DOUBLE_CAST, token.T_STRING_CAST, token.T_ARRAY_CAST, token.T_OBJECT_CAST, token.T_BOOL_CAST:
+		return true
+	}
+	return false
 }
 
 // typeArgs parses <T, U> in a type position (Phaenon only).

@@ -1,0 +1,67 @@
+namespace Lifted;
+
+// What `phn migrate` produces from PHPStan code: hyphenated type names,
+// generic signatures on interfaces that plain overrides inherit, and
+// prose-only @param tags.
+
+function takesInt(int $i): void
+{
+}
+
+function takesString(string $s): void
+{
+}
+
+interface Reflector<ClassType of object>
+{
+    public function reflect(class-string<ClassType> $className): \ReflectionClass<ClassType>;
+
+    public function names(): list<class-string<ClassType>>;
+}
+
+final class Cached<ClassType of object> implements Reflector<ClassType>
+{
+    private map<class-string<ClassType>, \ReflectionClass<ClassType>> $cache = [];
+
+    // No docblock, erased native types: the interface's generic signature
+    // carries over, as PHPStan's implicit @inheritDoc does for docblocks.
+    public function reflect(string $className): \ReflectionClass
+    {
+        return $this->cache[$className] ??= new \ReflectionClass($className);
+    }
+
+    public function names(): array
+    {
+        return array_keys($this->cache);
+    }
+
+    public function count(): int
+    {
+        return count($this->names());
+    }
+}
+
+final class Service
+{
+    /**
+     * @param $r the reflector to use
+     * @param $c the class to describe
+     */
+    public function __construct<U of object>(private readonly Reflector $r, class-string<U> $c)
+    {
+        takesString($c);
+    }
+}
+
+function hyphens(non-empty-string $s, array-key $k, positive-int $n, Closure(int): string $f, numeric-string $q, ?Closure(object, object): object $m): void
+{
+    takesString($s);
+    takesInt($k); // want P2103
+    takesInt($n);
+    takesString($f($n));
+    takesInt($f($n)); // want P2103
+    takesString($q);
+    if ($m !== null) {
+        takesInt($m(new \stdClass(), new \stdClass())); // want P2103
+    }
+}

@@ -146,3 +146,20 @@ function uses(mixed $m, Box<int> $box): void
     $u = $m as? User;
     echo count($t), $u?->id, $repo->describe();
 }
+
+/**
+ * What a lifted PHPStan signature looks like: hyphenated names, a param tag
+ * with prose only, a Closure the lexer would otherwise read as a cast.
+ *
+ * @param $c the class to describe
+ * @throws \RuntimeException never
+ */
+function lifted<T of object>(class-string<T> $c, non-empty-string $id, array-key $k, positive-int $n, Closure(int): string $f, ?Closure(object, object): object $m): ?T
+{
+    echo $id, $k, $n, $f($n);
+    if ($m !== null) {
+        $o = $m(new \stdClass(), new \stdClass());
+        return $o instanceof $c ? $o : null;
+    }
+    return null;
+}
