@@ -1024,6 +1024,23 @@ func (l *lowering) arrowFunc(n *ast.ArrowFunc, sc *scope) error {
 
 // ------------------------------------------------------------------ is / as
 
+// classTest tests operand against `class` or `class<Foo>` the way PHP code
+// does: a string that names a class, or one that is_a() the argument. The
+// operand is repeated, so it must be simple; a type argument that is not a
+// plain class (object, a type parameter, a union) is left to the runtime.
+func (l *lowering) classTest(t *ast.NamedType, operand string, simple bool, sc *scope) (string, bool) {
+	if !simple {
+		return "", false
+	}
+	if len(t.TypeArgs) == 0 {
+		return "\\is_string(" + operand + ") && (\\class_exists(" + operand + ") || \\interface_exists(" + operand + "))", true
+	}
+	if c, ok := sc.res.Native(t.TypeArgs[0]).(types.Class); ok && len(c.Args) == 0 {
+		return "\\is_string(" + operand + ") && \\is_a(" + operand + ", \\" + c.Name + "::class, true)", true
+	}
+	return "", false
+}
+
 // simpleOperand reports whether an expression can be repeated in the
 // output without changing behaviour.
 func simpleOperand(e ast.Expr) bool {
@@ -1053,6 +1070,9 @@ func isIdent(e ast.Expr) bool {
 func (l *lowering) nativeTest(t ast.TypeExpr, operand string, simple bool, sc *scope) (string, bool) {
 	switch t := t.(type) {
 	case *ast.NamedType:
+		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified && strings.EqualFold(t.Name.Parts[0], "class") {
+			return l.classTest(t, operand, simple, sc)
+		}
 		if len(t.TypeArgs) > 0 {
 			return "", false
 		}

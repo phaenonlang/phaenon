@@ -184,6 +184,12 @@ function uses(mixed $m, Box $box): void
     if (\Phaenon\Type::list(\Phaenon\Type::int())->check($m)) {
         echo count($m);
     }
+    if (\is_string($m) && \is_a($m, \App\User::class, true)) {
+        echo $m;
+    }
+    if (\is_string($m) && (\class_exists($m) || \interface_exists($m))) {
+        echo $m;
+    }
     $t = \Phaenon\Type::map(\Phaenon\Type::string(), \Phaenon\Type::int())->assert($m);
     $u = \Phaenon\Type::of(\App\User::class)->orNull($m);
     echo count($t), $u?->id, $repo->describe();

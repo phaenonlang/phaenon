@@ -148,6 +148,12 @@ function uses(mixed $m, Box<int> $box): void
     if ($m is list<int>) {
         echo count($m);
     }
+    if ($m is class<User>) {
+        echo $m;
+    }
+    if ($m is class) {
+        echo $m;
+    }
     $t = $m as Table<string, int>;
     $u = $m as? User;
     echo count($t), $u?->id, $repo->describe();
