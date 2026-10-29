@@ -217,7 +217,7 @@ func isReservedNonModifier(k token.Kind) bool {
 		token.T_CLASS, token.T_CLASS_C, token.T_TRAIT_C, token.T_FUNC_C, token.T_METHOD_C, token.T_LINE,
 		token.T_FILE, token.T_DIR, token.T_NS_C, token.T_FN, token.T_MATCH, token.T_ENUM, token.T_PROPERTY_C,
 		// Phaenon contextual keywords are identifiers everywhere PHP allows a keyword.
-		token.T_IS, token.T_TYPE, token.T_REIFIED, token.T_OF, token.T_IN, token.T_OUT:
+		token.T_IS, token.T_TYPE, token.T_OF, token.T_IN, token.T_OUT:
 		return true
 	}
 	return false
@@ -241,7 +241,7 @@ func isSemiReserved(k token.Kind) bool {
 // identifiers whenever the grammar wants a T_STRING.
 func isPhaenonContextual(k token.Kind) bool {
 	switch k {
-	case token.T_TYPE, token.T_REIFIED, token.T_OF, token.T_IN, token.T_OUT:
+	case token.T_TYPE, token.T_OF, token.T_IN, token.T_OUT:
 		return true
 	}
 	return false
@@ -379,18 +379,21 @@ func (p *Parser) intersectionRest(start int, first ast.TypeExpr, parenthesised b
 
 func (p *Parser) atClosureTypeStart() bool { return false }
 
-// singleType parses a named type: int, Foo, static, array, callable, Foo<T>, Closure(A): R.
+// singleType parses a named type: int, Foo, static, array, callable, Foo<T>, class<T>, Closure(A): R.
 func (p *Parser) singleType() ast.TypeExpr {
 	start := p.tok().Start
-	name := p.hyphenatedName()
-	if name == nil {
-		switch {
-		case p.at(token.T_ARRAY), p.at(token.T_CALLABLE), p.at(token.T_STATIC), p.at(token.T_LIST):
-			t := p.next()
-			name = &ast.Name{S: ast.Span{Start: t.Start, End: t.End}, Parts: []string{t.Text(p.src)}}
-		default:
-			name = p.name()
-		}
+	var name *ast.Name
+	switch {
+	case p.at(token.T_ARRAY), p.at(token.T_CALLABLE), p.at(token.T_STATIC), p.at(token.T_LIST):
+		t := p.next()
+		name = &ast.Name{S: ast.Span{Start: t.Start, End: t.End}, Parts: []string{t.Text(p.src)}}
+	case p.mode == lexer.ModePhaenon && p.at(token.T_CLASS):
+		// `class<T>` is the type of T::class (design/generics.md §11.2). PHP
+		// never puts `class` in a type position, so the keyword is free here.
+		t := p.next()
+		name = &ast.Name{S: ast.Span{Start: t.Start, End: t.End}, Parts: []string{"class"}}
+	default:
+		name = p.name()
 	}
 	nt := &ast.NamedType{S: p.span(start), Name: name}
 	if p.mode == lexer.ModePhaenon {
@@ -403,50 +406,6 @@ func (p *Parser) singleType() ast.TypeExpr {
 		}
 	}
 	return nt
-}
-
-// hyphenatedName parses a PHPStan-vocabulary type name written with
-// hyphens and no spaces — class-string, non-empty-list, array-key, key-of —
-// as one unqualified name, Phaenon mode only. It consumes the tokens, or
-// returns nil without moving. `A - B` with spaces, or outside a type, stays
-// a subtraction.
-func (p *Parser) hyphenatedName() *ast.Name {
-	if p.mode != lexer.ModePhaenon {
-		return nil
-	}
-	first := p.toks[p.i]
-	if !isLabel(first.Text(p.src)) {
-		return nil
-	}
-	j, end := p.i, first.End
-	for j+2 < len(p.toks) && p.toks[j+1].Kind == token.Kind('-') && p.toks[j+1].Start == end &&
-		p.toks[j+2].Start == p.toks[j+1].End && isLabel(p.toks[j+2].Text(p.src)) {
-		j += 2
-		end = p.toks[j].End
-	}
-	if j == p.i {
-		return nil
-	}
-	n := &ast.Name{S: ast.Span{Start: first.Start, End: end}, Kind: ast.NameUnqualified, Parts: []string{string(p.src[first.Start:end])}}
-	for p.i <= j {
-		p.advance()
-	}
-	return n
-}
-
-// isLabel reports whether s is one PHP label: a keyword or an identifier.
-func isLabel(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= 0x80 || (i > 0 && c >= '0' && c <= '9') {
-			continue
-		}
-		return false
-	}
-	return true
 }
 
 // closureType parses Phaenon's Closure(A, B): R after the Closure name.
@@ -517,7 +476,7 @@ func (p *Parser) closeAngle() {
 	}
 }
 
-// typeParams parses Phaenon's <[reified] [in|out] T [of Bound] [= Default], ...>
+// typeParams parses Phaenon's <[in|out] T [of Bound] [= Default], ...>
 // after a declaration name, when present.
 func (p *Parser) typeParams() []*ast.TypeParam {
 	if p.mode != lexer.ModePhaenon || !p.at(token.Kind('<')) {
@@ -528,9 +487,6 @@ func (p *Parser) typeParams() []*ast.TypeParam {
 	for {
 		start := p.tok().Start
 		tp := &ast.TypeParam{}
-		if p.accept(token.T_REIFIED) {
-			tp.Reified = true
-		}
 		switch {
 		case p.at(token.T_IN) && p.peekKind(1) != token.T_OF && p.peekKind(1) != token.Kind(',') && p.peekKind(1) != token.Kind('>'):
 			p.next()

@@ -285,15 +285,17 @@ func (c *Class) ensureMembers() {
 }
 
 // inheritDocTypes gives a method without docblock types the docblock types
-// of the method it overrides, as PHPStan does (implicit @inheritDoc). The
-// parent's type parameters are mapped through @extends / @implements.
+// of the method it overrides, as PHPStan does (implicit @inheritDoc):
+// parameters are matched by name, and constructors are left alone, since a
+// child's constructor overrides nothing in PHP. The parent's type
+// parameters are mapped through @extends / @implements.
 func (c *Class) inheritDocTypes() {
 	var self []types.Type
 	if t, ok := c.TypeOf().(types.Class); ok {
 		self = t.Args
 	}
 	for _, m := range c.Methods {
-		if m.Decl == nil || m.FromTrait != nil {
+		if m.Decl == nil || m.FromTrait != nil || strings.EqualFold(m.Name, "__construct") {
 			continue
 		}
 		key := strings.ToLower(m.Name)
@@ -307,11 +309,11 @@ func (c *Class) inheritDocTypes() {
 			if args, ok := c.SuperArgs(a.Name, self); ok {
 				subst = a.Subst(args)
 			}
-			for i, pp := range pm.Params {
-				if i >= len(m.Params) {
-					break
+			for _, pp := range pm.Params {
+				cp := paramNamed(m.Params, pp.Name)
+				if cp == nil {
+					continue
 				}
-				cp := m.Params[i]
 				hasDoc := cp.NativeType == nil && !types.IsMixed(cp.Type) || cp.NativeType != nil && !types.Equal(cp.Type, cp.NativeType)
 				if hasDoc || pp.Type == nil || !nativeMatches(cp.NativeType, erasedNative(pp.NativeType, pm, a)) {
 					continue
@@ -325,6 +327,16 @@ func (c *Class) inheritDocTypes() {
 			break
 		}
 	}
+}
+
+// paramNamed returns the parameter called name, or nil.
+func paramNamed(ps []*Param, name string) *Param {
+	for _, p := range ps {
+		if p.Name == name {
+			return p
+		}
+	}
+	return nil
 }
 
 // boundSubst replaces type parameters by their bounds (mixed when unbounded).

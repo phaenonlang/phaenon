@@ -145,7 +145,16 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 			args = append(args, r.native(a))
 		}
 		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
-			if ty, ok := r.keyword(strings.ToLower(t.Name.Parts[0]), args, nil); ok {
+			lower := strings.ToLower(t.Name.Parts[0])
+			if lower == "class" {
+				// `class<T>` is the type of T::class — native syntax only; a
+				// docblock writes PHPStan's class-string<T> (generics.md §11.2).
+				if len(args) == 1 {
+					return types.ClassString{Of: args[0]}
+				}
+				return types.ClassString{}
+			}
+			if ty, ok := r.keyword(lower, args, nil); ok {
 				return ty
 			}
 			if tp, ok := r.params[t.Name.Parts[0]]; ok {
@@ -566,14 +575,14 @@ func (r *resolver) effective(native, doc types.Type, what string) types.Type {
 // ------------------------------------------------------------------ building signatures
 
 // nativeTypeParams builds type parameters from Phaenon syntax
-// (`<reified T of Foo = Bar, out U>`).
+// (`<T of Foo = Bar, out U>`).
 func nativeTypeParams(tps []*ast.TypeParam, r *resolver) []*TypeParam {
 	if len(tps) == 0 {
 		return nil
 	}
 	out := make([]*TypeParam, len(tps))
 	for i, tp := range tps {
-		out[i] = &TypeParam{Name: tp.Name.Name, Variance: types.Variance(tp.Variance), Reified: tp.Reified, Native: true, Span: tp.S}
+		out[i] = &TypeParam{Name: tp.Name.Name, Variance: types.Variance(tp.Variance), Native: true, Span: tp.S}
 	}
 	rr := r.withParams(out)
 	for i, tp := range tps {

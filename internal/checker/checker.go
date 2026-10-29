@@ -49,24 +49,14 @@ type Checker struct {
 	// ignored lists, per file, the lines silenced by @phpstan-ignore /
 	// @phaenon-ignore comments.
 	ignored map[string]map[int]bool
-	// reified records, per call site whose callee has reified type
-	// parameters, the type each one ended up bound to (class parameters
-	// first, then the callee's own) — the emitter turns them into the
-	// leading runtime arguments.
-	reified map[ast.Node][]types.Type
 }
 
 // New creates a checker for the program.
 func New(p *program.Program, opts Options) *Checker {
-	c := &Checker{p: p, opts: opts, seen: map[string]bool{}, ignored: map[string]map[int]bool{}, reified: map[ast.Node][]types.Type{}}
+	c := &Checker{p: p, opts: opts, seen: map[string]bool{}, ignored: map[string]map[int]bool{}}
 	p.ConstType = c.constType
 	return c
 }
-
-// ReifiedArgs returns the types bound to the reified type parameters of
-// the callee of a call site (a Call, MethodCall, StaticCall or New node),
-// or nil when the callee has none.
-func (c *Checker) ReifiedArgs(n ast.Node) []types.Type { return c.reified[n] }
 
 // ignoredLines finds the lines silenced by ignore comments: `// @phpstan-ignore …`
 // (or `@phaenon-ignore`) at the end of a line silences that line, on its

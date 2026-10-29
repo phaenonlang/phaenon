@@ -3,22 +3,20 @@ package emit
 import (
 	"bytes"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
-	"github.com/phaenonlang/phaenon/internal/printer"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
 // This file lowers Phaenon's generics to PHP: type parameters and
 // arguments are erased from the native signatures and restated in
-// PHPStan docblocks; reified parameters become leading `string|\Phaenon\Type`
-// parameters (or a `$__T` property for a class) and their value uses
-// become calls on that descriptor; `is` / `as` become native checks where
-// PHP has them and \Phaenon\Type checks elsewhere; `type` aliases are
-// expanded. See design/generics.md §4–§5.
+// PHPStan docblocks; `is` / `as` become native checks where PHP has them
+// and \Phaenon\Type checks elsewhere; `type` aliases are expanded. The
+// output contains no identifier the programmer did not write (roadmap D9):
+// a type parameter has no runtime value, a `class<T>` parameter does. See
+// design/generics.md §4 and §11.2.
 
 // RuntimeType is the fully qualified runtime descriptor class.
 const RuntimeType = "\\Phaenon\\Type"
@@ -37,21 +35,12 @@ type scope struct {
 	// params are the type parameters visible by name, with their syntax
 	// (for textual erasure of bounds).
 	params map[string]*ast.TypeParam
-	// reified maps a reified parameter to the PHP expression holding its
-	// descriptor: "$T" in a function or method, "$this->__T" in a class.
-	reified map[string]string
-	// used records the function-level descriptors a body referenced, so
-	// an enclosing closure can capture them.
-	used map[string]bool
 }
 
 func (s *scope) child() *scope {
-	c := &scope{res: s.res, class: s.class, static: s.static, params: map[string]*ast.TypeParam{}, reified: map[string]string{}, used: map[string]bool{}}
+	c := &scope{res: s.res, class: s.class, static: s.static, params: map[string]*ast.TypeParam{}}
 	for k, v := range s.params {
 		c.params[k] = v
-	}
-	for k, v := range s.reified {
-		c.reified[k] = v
 	}
 	return c
 }
@@ -91,7 +80,7 @@ func isAliasCandidate(n *ast.NamedType) bool {
 		return false
 	}
 	switch strings.ToLower(n.Name.Parts[0]) {
-	case "list", "map", "non-empty-list", "non-empty-map", "class-string":
+	case "list", "map", "class":
 		return true
 	}
 	return false
@@ -117,7 +106,7 @@ func (l *lowering) errorf(n ast.Node, format string, args ...any) error {
 
 // topScope is the scope of a position outside any declaration.
 func (l *lowering) topScope(off int) *scope {
-	return &scope{res: l.p.NewResolver(l.f, l.f.ScopeAt(off), nil, ast.Span{}), params: map[string]*ast.TypeParam{}, reified: map[string]string{}, used: map[string]bool{}}
+	return &scope{res: l.p.NewResolver(l.f, l.f.ScopeAt(off), nil, ast.Span{}), params: map[string]*ast.TypeParam{}}
 }
 
 func (l *lowering) stmts(list []ast.Stmt) error {
@@ -235,14 +224,15 @@ func (l *lowering) erase(t ast.TypeExpr, sc *scope) string {
 				}
 			}
 			switch strings.ToLower(name) {
-			case "list", "map", "non-empty-list", "non-empty-map", "array", "non-empty-array":
+			case "list", "map", "array":
 				return "array"
+			case "class":
+				return "string"
 			case "iterable":
 				return "iterable"
 			}
-			if strings.Contains(name, "-") || sc.res.FileAlias(name) != nil {
-				// class-string<T>, non-empty-string, array-key, …: the
-				// resolved type knows its native spelling.
+			if sc.res.FileAlias(name) != nil {
+				// A file-level alias: the resolved type knows its native spelling.
 				return nativeOf(sc.res.Native(t))
 			}
 		}
@@ -343,8 +333,9 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 				switch strings.ToLower(t.Name.Parts[0]) {
 				case "map":
 					name = "array"
-				case "non-empty-map":
-					name = "non-empty-array"
+				case "class":
+					// A bare `class` is any class name; PHPStan spells both class-string.
+					name = "class-string"
 				case "closure":
 					name = "\\Closure"
 				default:
@@ -676,92 +667,6 @@ func (l *lowering) paramsOpen(after int) int { return l.find(after, '(') }
 // bodyOpen is the offset of the `{` opening a body after offset after.
 func (l *lowering) bodyOpen(after int) int { return l.find(after, '{') }
 
-// reifiedParams inserts the leading `string|\Phaenon\Type $T` parameters
-// and the normalising statements for the reified parameters of a function
-// or method, and returns their @param tags.
-func (l *lowering) reifiedParams(tps []*ast.TypeParam, params []*ast.Param, nameEnd int, body []ast.Stmt, hasBody bool, sc *scope) []string {
-	var decls, inits, tags []string
-	for _, tp := range tps {
-		if !tp.Reified {
-			continue
-		}
-		decls = append(decls, l.reifiedParamDecl(tp, sc))
-		inits = append(inits, "$"+tp.Name.Name+" = "+RuntimeType+"::from($"+tp.Name.Name+");")
-		tags = append(tags, "@param "+l.reifiedParamDoc(tp, sc))
-		sc.reified[tp.Name.Name] = "$" + tp.Name.Name
-	}
-	if len(decls) == 0 {
-		return nil
-	}
-	open := l.paramsOpen(nameEnd)
-	text := strings.Join(decls, ", ")
-	if len(params) > 0 {
-		text += ", "
-	}
-	l.e.insert(open+1, text)
-	if hasBody {
-		var after int
-		if len(params) > 0 {
-			after = params[len(params)-1].S.End
-		} else {
-			after = open
-		}
-		brace := l.bodyOpen(after)
-		l.e.insertLines(brace+1, l.firstStatements(brace, body, inits))
-	}
-	return tags
-}
-
-// firstStatements renders statements to put right after a body's `{`,
-// on their own lines when the body spans lines.
-func (l *lowering) firstStatements(brace int, body []ast.Stmt, stmts []string) string {
-	src := l.e.src
-	i := brace + 1
-	for i < len(src) && (src[i] == ' ' || src[i] == '\t') {
-		i++
-	}
-	if i < len(src) && src[i] == '\n' {
-		indent := l.indentAt(brace) + "    "
-		if len(body) > 0 {
-			indent = l.indentAt(body[0].Span().Start)
-		}
-		var b strings.Builder
-		for _, s := range stmts {
-			b.WriteString("\n" + indent + s)
-		}
-		return b.String()
-	}
-	return " " + strings.Join(stmts, " ")
-}
-
-func (l *lowering) reifiedParamDecl(tp *ast.TypeParam, sc *scope) string {
-	t := RuntimeType
-	if tp.Bound != nil && l.boundIsClass(tp.Bound, sc) {
-		t = "string|" + RuntimeType
-	}
-	return t + " $" + tp.Name.Name
-}
-
-func (l *lowering) reifiedParamDoc(tp *ast.TypeParam, sc *scope) string {
-	n := tp.Name.Name
-	if tp.Bound != nil && l.boundIsClass(tp.Bound, sc) {
-		return "class-string<" + n + ">|" + RuntimeType + "<" + n + "> $" + n
-	}
-	return RuntimeType + "<" + n + "> $" + n
-}
-
-func (l *lowering) boundIsClass(t ast.TypeExpr, sc *scope) bool {
-	switch r := sc.res.Native(t).(type) {
-	case types.Class:
-		return true
-	case types.Object:
-		return true
-	default:
-		_ = r
-	}
-	return false
-}
-
 // ------------------------------------------------------------------ functions
 
 func (l *lowering) funcDecl(d *ast.FunctionDecl) error {
@@ -775,7 +680,6 @@ func (l *lowering) funcDecl(d *ast.FunctionDecl) error {
 		sc.params[tp.Name.Name] = tp
 	}
 	tags := l.templateTags(d.TypeParams, sc)
-	tags = append(tags, l.reifiedParams(d.TypeParams, d.Params, d.Name.S.End, d.Body, true, sc)...)
 	l.removeTypeParams(d.Name.S.End, d.TypeParams)
 	tags = append(tags, l.signature(d.Params, d.ReturnType, sc, nil)...)
 	l.addDoc(d.S.Start, d.Doc, tags)
@@ -822,59 +726,10 @@ func (l *lowering) classDecl(d *ast.ClassDecl) error {
 	}
 	l.addDoc(d.S.Start, d.Doc, tags)
 
-	// Reified class parameters live in private properties.
-	var reified []*ast.TypeParam
-	for _, tp := range d.TypeParams {
-		if tp.Reified {
-			reified = append(reified, tp)
-			sc.reified[tp.Name.Name] = "$this->__" + tp.Name.Name
-		}
-	}
-	// The arguments a reified parent needs from this class.
-	parentVals, err := l.parentReifiedValues(cl, d, sc)
-	if err != nil {
-		return err
-	}
-	var ctor *ast.MethodDecl
-	for _, m := range d.Members {
-		if md, ok := m.(*ast.MethodDecl); ok && strings.EqualFold(md.Name.Name, "__construct") {
-			ctor = md
-		}
-	}
-	brace := l.bodyOpen(l.headerEnd(d))
-	memberIndent := l.indentAt(brace) + "    "
-	if len(d.Members) > 0 {
-		memberIndent = l.indentAt(d.Members[0].Span().Start)
-	}
-	if len(reified) > 0 {
-		var b strings.Builder
-		for _, tp := range reified {
-			b.WriteString("\n" + memberIndent + "/** @var " + RuntimeType + "<" + tp.Name.Name + "> */")
-			b.WriteString("\n" + memberIndent + "private readonly " + RuntimeType + " $__" + tp.Name.Name + ";")
-		}
-		if ctor == nil {
-			b.WriteString("\n")
-			b.WriteString(l.synthesizedCtor(cl, reified, parentVals, memberIndent, sc))
-		}
-		text := b.String()
-		if len(d.Members) == 0 {
-			text = strings.TrimSuffix(text, "\n")
-		} else if ctor != nil {
-			text += "\n"
-		}
-		l.e.insertLines(brace+1, text)
-	} else if len(parentVals) > 0 && ctor == nil {
-		text := "\n" + l.synthesizedCtor(cl, nil, parentVals, memberIndent, sc)
-		if len(d.Members) == 0 {
-			text = strings.TrimSuffix(text, "\n")
-		}
-		l.e.insertLines(brace+1, text)
-	}
-
 	for _, m := range d.Members {
 		switch m := m.(type) {
 		case *ast.MethodDecl:
-			if err := l.methodDecl(cl, d, m, sc, reified, parentVals); err != nil {
+			if err := l.methodDecl(cl, m, sc); err != nil {
 				return err
 			}
 		case *ast.PropertyDecl:
@@ -907,145 +762,9 @@ func (l *lowering) classDecl(d *ast.ClassDecl) error {
 	return nil
 }
 
-// headerEnd is the offset after the last token of a class header.
-func (l *lowering) headerEnd(d *ast.ClassDecl) int {
-	end := d.S.Start
-	if d.Name != nil {
-		end = d.Name.S.End
-	}
-	for _, tp := range d.TypeParams {
-		end = max(end, tp.S.End)
-	}
-	if d.BackingType != nil {
-		end = max(end, d.BackingType.Span().End)
-	}
-	for _, e := range d.Extends {
-		end = max(end, e.S.End)
-	}
-	for _, e := range d.Implements {
-		end = max(end, e.S.End)
-	}
-	if d.Args != nil {
-		end = max(end, d.Args.S.End)
-	}
-	// Past a closing `>` the span may not include.
-	for end < len(l.e.src) && l.e.src[end] == '>' {
-		end++
-	}
-	return end
-}
-
-// parentReifiedValues returns the runtime expressions this class must
-// pass to its parent's constructor for the parent's reified parameters.
-func (l *lowering) parentReifiedValues(cl *program.Class, d *ast.ClassDecl, sc *scope) ([]string, error) {
-	parent := cl.ParentClass()
-	if parent == nil || d.Kind != ast.KindClass {
-		return nil, nil
-	}
-	parent.Signature()
-	var vals []string
-	for i, tp := range parent.TypeParams {
-		if !tp.Reified {
-			continue
-		}
-		if i >= len(cl.ParentArgs) {
-			return nil, l.errorf(d, "%s needs a type argument for reified %s", parent.Name, tp.Name)
-		}
-		v, err := l.argValue(cl.ParentArgs[i], sc, d)
-		if err != nil {
-			return nil, err
-		}
-		vals = append(vals, v)
-	}
-	return vals, nil
-}
-
-// synthesizedCtor writes a constructor for a class that declares reified
-// parameters or binds a parent's, forwarding the parent's parameters.
-func (l *lowering) synthesizedCtor(cl *program.Class, reified []*ast.TypeParam, parentVals []string, indent string, sc *scope) string {
-	var params, docs, body []string
-	for _, tp := range reified {
-		params = append(params, l.reifiedParamDecl(tp, sc))
-		docs = append(docs, "@param "+l.reifiedParamDoc(tp, sc))
-		body = append(body, "$this->__"+tp.Name.Name+" = "+RuntimeType+"::from($"+tp.Name.Name+");")
-	}
-	var parentCtor *program.Method
-	if parent := cl.ParentClass(); parent != nil {
-		parentCtor = parent.FindMethod("__construct")
-	}
-	if parentCtor != nil || len(parentVals) > 0 {
-		args := append([]string{}, parentVals...)
-		if parentCtor != nil {
-			for _, p := range parentCtor.Params {
-				params = append(params, l.paramText(p))
-				if p.Variadic {
-					args = append(args, "...$"+p.Name)
-				} else {
-					args = append(args, "$"+p.Name)
-				}
-				if doc, ok := paramDoc(p); ok {
-					docs = append(docs, doc)
-				}
-			}
-		}
-		body = append(body, "parent::__construct("+strings.Join(args, ", ")+");")
-	}
-	var b strings.Builder
-	if len(docs) == 1 {
-		b.WriteString(indent + "/** " + docs[0] + " */\n")
-	} else if len(docs) > 1 {
-		b.WriteString(indent + "/**\n")
-		for _, d := range docs {
-			b.WriteString(indent + " * " + d + "\n")
-		}
-		b.WriteString(indent + " */\n")
-	}
-	b.WriteString(indent + "public function __construct(" + strings.Join(params, ", ") + ")\n")
-	b.WriteString(indent + "{\n")
-	for _, s := range body {
-		b.WriteString(indent + "    " + s + "\n")
-	}
-	b.WriteString(indent + "}\n")
-	return b.String()
-}
-
-// paramText renders a parameter of a parent constructor for a forwarding
-// constructor: native type, name, default.
-func (l *lowering) paramText(p *program.Param) string {
-	var b strings.Builder
-	if p.NativeType != nil {
-		b.WriteString(nativeOf(p.NativeType) + " ")
-	}
-	if p.ByRef {
-		b.WriteString("&")
-	}
-	if p.Variadic {
-		b.WriteString("...")
-	}
-	b.WriteString("$" + p.Name)
-	if p.HasDefault && p.Default != nil {
-		b.WriteString(" = " + printer.Expr(p.Default))
-	} else if p.HasDefault {
-		b.WriteString(" = null")
-	}
-	return b.String()
-}
-
-// paramDoc restates a parent parameter's docblock type when it is more
-// precise than the native one.
-func paramDoc(p *program.Param) (string, bool) {
-	if p.Type == nil || p.NativeType == nil {
-		return "", false
-	}
-	if types.Print(p.Type) == types.Print(p.NativeType) {
-		return "", false
-	}
-	return "@param " + types.PrintQualified(p.Type) + " $" + p.Name, true
-}
-
 // ------------------------------------------------------------------ methods
 
-func (l *lowering) methodDecl(cl *program.Class, cd *ast.ClassDecl, d *ast.MethodDecl, csc *scope, reified []*ast.TypeParam, parentVals []string) error {
+func (l *lowering) methodDecl(cl *program.Class, d *ast.MethodDecl, csc *scope) error {
 	sc := csc.child()
 	sc.static = d.Modifiers&ast.ModStatic != 0
 	m := cl.FindMethod(d.Name.Name)
@@ -1054,57 +773,8 @@ func (l *lowering) methodDecl(cl *program.Class, cd *ast.ClassDecl, d *ast.Metho
 	}
 	for _, tp := range d.TypeParams {
 		sc.params[tp.Name.Name] = tp
-		delete(sc.reified, tp.Name.Name) // shadowed until declared reified below
-	}
-	if sc.static {
-		for k, v := range sc.reified {
-			if strings.HasPrefix(v, "$this") {
-				delete(sc.reified, k)
-			}
-		}
 	}
 	tags := l.templateTags(d.TypeParams, sc)
-	isCtor := strings.EqualFold(d.Name.Name, "__construct")
-	// Leading parameters: the class's reified parameters on the
-	// constructor, the method's own on itself.
-	var leading []*ast.TypeParam
-	if isCtor {
-		leading = append(leading, reified...)
-	}
-	leading = append(leading, d.TypeParams...)
-	var decls, inits []string
-	for _, tp := range leading {
-		if !tp.Reified {
-			continue
-		}
-		decls = append(decls, l.reifiedParamDecl(tp, sc))
-		tags = append(tags, "@param "+l.reifiedParamDoc(tp, sc))
-		if isCtor && containsTP(reified, tp) {
-			inits = append(inits, "$this->__"+tp.Name.Name+" = "+RuntimeType+"::from($"+tp.Name.Name+");")
-		} else {
-			inits = append(inits, "$"+tp.Name.Name+" = "+RuntimeType+"::from($"+tp.Name.Name+");")
-			sc.reified[tp.Name.Name] = "$" + tp.Name.Name
-		}
-	}
-	if len(decls) > 0 {
-		open := l.paramsOpen(d.Name.S.End)
-		text := strings.Join(decls, ", ")
-		if len(d.Params) > 0 {
-			text += ", "
-		}
-		l.e.insert(open+1, text)
-		if d.HasBody {
-			after := open
-			if len(d.Params) > 0 {
-				after = d.Params[len(d.Params)-1].S.End
-			}
-			if d.ReturnType != nil {
-				after = d.ReturnType.Span().End
-			}
-			brace := l.bodyOpen(after)
-			l.e.insertLines(brace+1, l.firstStatements(brace, d.Body, inits))
-		}
-	}
 	l.removeTypeParams(d.Name.S.End, d.TypeParams)
 	var overrides map[int]string
 	if m != nil && m.Class == cl {
@@ -1115,41 +785,7 @@ func (l *lowering) methodDecl(cl *program.Class, cd *ast.ClassDecl, d *ast.Metho
 	if !d.HasBody {
 		return nil
 	}
-	// A binding subclass passes the parent's reified arguments first.
-	if isCtor && len(parentVals) > 0 {
-		found := false
-		ast.Inspect(&ast.Block{Stmts: d.Body}, func(n ast.Node) bool {
-			if found {
-				return false
-			}
-			if sc, ok := n.(*ast.StaticCall); ok {
-				if cn, ok := sc.Class.(*ast.Name); ok && len(cn.Parts) == 1 && strings.EqualFold(cn.Parts[0], "parent") {
-					if id, ok := sc.Name.(*ast.Ident); ok && strings.EqualFold(id.Name, "__construct") && sc.Args != nil {
-						text := strings.Join(parentVals, ", ")
-						if len(sc.Args.Args) > 0 {
-							text += ", "
-						}
-						l.e.insert(sc.Args.S.Start+1, text)
-						found = true
-					}
-				}
-			}
-			return !found
-		})
-		if !found {
-			return l.errorf(d, "constructor of %s must call parent::__construct() so the parent's reified type parameters are bound", cl.Name)
-		}
-	}
 	return l.walkBody(d.Body, sc)
-}
-
-func containsTP(list []*ast.TypeParam, tp *ast.TypeParam) bool {
-	for _, x := range list {
-		if x == tp {
-			return true
-		}
-	}
-	return false
 }
 
 // overrideErasure applies the override-erasure rule: a method that
@@ -1251,7 +887,7 @@ func (l *lowering) walk(root ast.Node, sc *scope) error {
 			err = l.asExpr(n, sc)
 			return false
 		case *ast.Call:
-			err = l.callSite(n, n.Callee.Span().End, n.Args, n.TypeArgs, sc)
+			err = l.callSite(n.Callee.Span().End, n.Args, n.TypeArgs)
 			if _, isName := n.Callee.(*ast.Name); !isName {
 				err = l.walkOr(err, n.Callee, sc)
 			}
@@ -1262,7 +898,7 @@ func (l *lowering) walk(root ast.Node, sc *scope) error {
 			if _, isIdent := n.Name.(*ast.Ident); !isIdent {
 				err = l.walkOr(err, n.Name, sc)
 			}
-			err = l.callSiteOr(err, n, n.Name.Span().End, n.Args, n.TypeArgs, sc)
+			err = l.callSiteOr(err, n.Name.Span().End, n.Args, n.TypeArgs)
 			err = l.walkOr(err, n.Args, sc)
 			return false
 		case *ast.StaticCall:
@@ -1270,22 +906,14 @@ func (l *lowering) walk(root ast.Node, sc *scope) error {
 			if _, isIdent := n.Name.(*ast.Ident); !isIdent {
 				err = l.walkOr(err, n.Name, sc)
 			}
-			err = l.callSiteOr(err, n, n.Name.Span().End, n.Args, n.TypeArgs, sc)
+			err = l.callSiteOr(err, n.Name.Span().End, n.Args, n.TypeArgs)
 			err = l.walkOr(err, n.Args, sc)
 			return false
 		case *ast.New:
 			err = l.newExpr(n, sc)
 			return false
 		case *ast.ClassConstFetch:
-			if cn, ok := n.Class.(*ast.Name); ok {
-				if r, ok := l.reifiedRef(cn, sc); ok {
-					if id, ok := n.Name.(*ast.Ident); ok && strings.EqualFold(id.Name, "class") {
-						l.e.replace(n.S, r+"->className()")
-					} else {
-						l.e.replace(cn.S, "("+r+"->className())")
-					}
-					return false
-				}
+			if _, ok := n.Class.(*ast.Name); ok {
 				return false
 			}
 			return true
@@ -1293,21 +921,12 @@ func (l *lowering) walk(root ast.Node, sc *scope) error {
 			err = l.classRef(n.Class, sc)
 			return false
 		case *ast.Instanceof:
-			if cn, ok := n.Class.(*ast.Name); ok {
-				if r, ok := l.reifiedRef(cn, sc); ok {
-					l.e.insert(n.Expr.Span().Start, r+"->check(")
-					l.e.replace(ast.Span{Start: n.Expr.Span().End, End: n.S.End}, ")")
-					err = l.walk(n.Expr, sc)
-					return false
-				}
+			if _, ok := n.Class.(*ast.Name); ok {
 				err = l.walk(n.Expr, sc)
 				return false
 			}
 			return true
 		case *ast.Name:
-			if r, ok := l.reifiedRef(n, sc); ok {
-				l.e.replace(n.S, r)
-			}
 			return false
 		case *ast.AttrGroup, *ast.Use, *ast.Namespace:
 			return false
@@ -1324,111 +943,49 @@ func (l *lowering) walkOr(err error, n ast.Node, sc *scope) error {
 	return l.walk(n, sc)
 }
 
-func (l *lowering) callSiteOr(err error, n ast.Node, argsAfter int, args *ast.ArgList, typeArgs []ast.TypeExpr, sc *scope) error {
+func (l *lowering) callSiteOr(err error, argsAfter int, args *ast.ArgList, typeArgs []ast.TypeExpr) error {
 	if err != nil {
 		return err
 	}
-	return l.callSite(n, argsAfter, args, typeArgs, sc)
+	return l.callSite(argsAfter, args, typeArgs)
 }
 
-// classRef lowers the class position of `X::…`: a reified parameter
-// becomes its class name; anything else is walked as an expression.
+// classRef lowers the class position of `X::…`: a name needs nothing;
+// anything else is walked as an expression.
 func (l *lowering) classRef(class ast.Expr, sc *scope) error {
-	if cn, ok := class.(*ast.Name); ok {
-		if r, ok := l.reifiedRef(cn, sc); ok {
-			l.e.replace(cn.S, "("+r+"->className())")
-		}
+	if _, ok := class.(*ast.Name); ok {
 		return nil
 	}
 	return l.walk(class, sc)
 }
 
-// reifiedRef returns the descriptor expression for a name that denotes a
-// reified type parameter in scope.
-func (l *lowering) reifiedRef(n *ast.Name, sc *scope) (string, bool) {
-	if len(n.Parts) != 1 || n.Kind != ast.NameUnqualified {
-		return "", false
-	}
-	r, ok := sc.reified[n.Parts[0]]
-	if ok && !strings.HasPrefix(r, "$this") {
-		sc.used[n.Parts[0]] = true
-	}
-	return r, ok
-}
-
-// callSite drops written type arguments and inserts the runtime values of
-// the callee's reified parameters.
-func (l *lowering) callSite(n ast.Node, argsAfter int, args *ast.ArgList, typeArgs []ast.TypeExpr, sc *scope) error {
+// callSite drops the type arguments written at a call site; the
+// parentheses and the arguments stay where they were.
+func (l *lowering) callSite(argsAfter int, args *ast.ArgList, typeArgs []ast.TypeExpr) error {
 	if len(typeArgs) > 0 && args != nil {
 		s := ast.Span{Start: argsAfter, End: args.S.Start}
 		l.e.replace(s, strings.Repeat("\n", bytes.Count(l.e.src[s.Start:s.End], []byte("\n"))))
 	}
-	vals := l.reifiedArgs(n)
-	if len(vals) == 0 || args == nil {
-		return nil
-	}
-	var texts []string
-	for _, v := range vals {
-		t, err := l.argValue(v, sc, n)
-		if err != nil {
-			return err
-		}
-		texts = append(texts, t)
-	}
-	text := strings.Join(texts, ", ")
-	if len(args.Args) > 0 {
-		text += ", "
-	}
-	l.e.insert(args.S.Start+1, text)
 	return nil
-}
-
-func (l *lowering) reifiedArgs(n ast.Node) []types.Type {
-	if l.e.opts.Reified == nil {
-		return nil
-	}
-	return l.e.opts.Reified(n)
 }
 
 func (l *lowering) newExpr(n *ast.New, sc *scope) error {
 	if n.Anon != nil {
 		return l.walk(n.Anon, sc)
 	}
-	if cn, ok := n.Class.(*ast.Name); ok {
-		if r, ok := l.reifiedRef(cn, sc); ok {
-			// new T(args) → $T->instantiate(args)
-			if n.Args != nil {
-				l.e.replace(ast.Span{Start: n.S.Start, End: n.Args.S.Start}, r+"->instantiate")
-				return l.walk(n.Args, sc)
-			}
-			l.e.replace(n.S, r+"->instantiate()")
-			return nil
+	if _, ok := n.Class.(*ast.Name); !ok {
+		if err := l.walk(n.Class, sc); err != nil {
+			return err
 		}
-	} else if err := l.walk(n.Class, sc); err != nil {
-		return err
 	}
-	vals := l.reifiedArgs(n)
 	if n.Args == nil {
-		// `new Foo<User>` without parentheses: supply them when needed.
-		s := ast.Span{Start: n.Class.Span().End, End: n.S.End}
-		if len(vals) == 0 {
-			if len(n.TypeArgs) > 0 {
-				l.e.replace(s, "")
-			}
-			return nil
+		// `new Foo<User>` without parentheses: drop the type arguments.
+		if len(n.TypeArgs) > 0 {
+			l.e.replace(ast.Span{Start: n.Class.Span().End, End: n.S.End}, "")
 		}
-		var texts []string
-		for _, v := range vals {
-			t, err := l.argValue(v, sc, n)
-			if err != nil {
-				return err
-			}
-			texts = append(texts, t)
-		}
-		l.e.replace(s, "("+strings.Join(texts, ", ")+")")
 		return nil
 	}
-	if err := l.callSite(n, n.Class.Span().End, n.Args, n.TypeArgs, sc); err != nil {
+	if err := l.callSite(n.Class.Span().End, n.Args, n.TypeArgs); err != nil {
 		return err
 	}
 	return l.walk(n.Args, sc)
@@ -1438,16 +995,8 @@ func (l *lowering) newExpr(n *ast.New, sc *scope) error {
 
 func (l *lowering) closure(n *ast.Closure, sc *scope) error {
 	c := sc.child()
-	if n.Static {
-		for k, v := range c.reified {
-			if strings.HasPrefix(v, "$this") {
-				delete(c.reified, k)
-			}
-		}
-	}
 	for _, tp := range n.TypeParams {
 		c.params[tp.Name.Name] = tp
-		delete(c.reified, tp.Name.Name)
 	}
 	c.res = c.res.WithParams(c.res.NativeParams(n.TypeParams))
 	l.removeTypeParams(n.S.Start, n.TypeParams)
@@ -1458,65 +1007,19 @@ func (l *lowering) closure(n *ast.Closure, sc *scope) error {
 			return err
 		}
 	}
-	if err := l.walkBody(n.Body, c); err != nil {
-		return err
-	}
-	// Capture the function-level descriptors the body used.
-	var captured []string
-	for name := range c.used {
-		if r, ok := sc.reified[name]; ok && !strings.HasPrefix(r, "$this") {
-			captured = append(captured, r)
-			sc.used[name] = true
-		}
-	}
-	if len(captured) == 0 {
-		return nil
-	}
-	sort.Strings(captured)
-	for _, u := range n.Uses {
-		for i, cv := range captured {
-			if cv == "$"+u.Var.Name {
-				captured = append(captured[:i], captured[i+1:]...)
-				break
-			}
-		}
-	}
-	if len(captured) == 0 {
-		return nil
-	}
-	if len(n.Uses) > 0 {
-		last := n.Uses[len(n.Uses)-1]
-		l.e.insert(last.S.End, ", "+strings.Join(captured, ", "))
-		return nil
-	}
-	after := n.S.Start
-	if len(n.Params) > 0 {
-		after = n.Params[len(n.Params)-1].S.End
-	} else {
-		after = l.paramsOpen(n.S.Start)
-	}
-	close := l.find(after, ')')
-	l.e.insert(close+1, " use ("+strings.Join(captured, ", ")+")")
-	return nil
+	return l.walkBody(n.Body, c)
 }
 
 func (l *lowering) arrowFunc(n *ast.ArrowFunc, sc *scope) error {
 	c := sc.child()
 	for _, tp := range n.TypeParams {
 		c.params[tp.Name.Name] = tp
-		delete(c.reified, tp.Name.Name)
 	}
 	c.res = c.res.WithParams(c.res.NativeParams(n.TypeParams))
 	l.removeTypeParams(n.S.Start, n.TypeParams)
 	tags := append(l.templateTags(n.TypeParams, c), l.signature(n.Params, n.ReturnType, c, nil)...)
 	l.addDoc(n.S.Start, "", tags)
-	if err := l.walk(n.Body, c); err != nil {
-		return err
-	}
-	for name := range c.used {
-		sc.used[name] = true // arrow functions capture by value automatically
-	}
-	return nil
+	return l.walk(n.Body, c)
 }
 
 // ------------------------------------------------------------------ is / as
@@ -1593,7 +1096,7 @@ func (l *lowering) nativeTest(t ast.TypeExpr, operand string, simple bool, sc *s
 				return operand + " === false", true
 			case "mixed":
 				return "true", true
-			case "void", "never", "list", "map", "non-empty-list", "non-empty-map", "non-empty-array", "class-string", "closure", "scalar", "numeric", "array-key":
+			case "void", "never", "list", "map", "class", "closure", "scalar", "numeric":
 				return "", false
 			}
 		}
@@ -1673,25 +1176,6 @@ func (l *lowering) asExpr(n *ast.AsExpr, sc *scope) error {
 
 // ------------------------------------------------------------------ runtime descriptors
 
-// argValue renders a type as the argument for a reified parameter: a class
-// name string where one suffices, a descriptor otherwise.
-func (l *lowering) argValue(t types.Type, sc *scope, at ast.Node) (string, error) {
-	switch v := t.(type) {
-	case types.Class:
-		if len(v.Args) == 0 {
-			return "\\" + v.Name + "::class", nil
-		}
-	case types.Param:
-		if r, ok := sc.reified[types.ParamName(v.Name)]; ok {
-			if !strings.HasPrefix(r, "$this") {
-				sc.used[types.ParamName(v.Name)] = true
-			}
-			return r, nil
-		}
-	}
-	return l.typeValue(t, sc, at)
-}
-
 // typeValue renders a type as a \Phaenon\Type expression.
 func (l *lowering) typeValue(t types.Type, sc *scope, at ast.Node) (string, error) {
 	rt := RuntimeType
@@ -1699,13 +1183,8 @@ func (l *lowering) typeValue(t types.Type, sc *scope, at ast.Node) (string, erro
 	case nil:
 		return rt + "::mixed()", nil
 	case types.Param:
-		if r, ok := sc.reified[types.ParamName(v.Name)]; ok {
-			if !strings.HasPrefix(r, "$this") {
-				sc.used[types.ParamName(v.Name)] = true
-			}
-			return r, nil
-		}
-		return "", l.errorf(at, "type parameter %s has no runtime value here; declare it reified", types.ParamName(v.Name))
+		name := types.ParamName(v.Name)
+		return "", l.errorf(at, "type parameter %s is erased and has no runtime value; test against a class<%s> value instead", name, name)
 	case types.Class:
 		if strings.EqualFold(v.Name, "Closure") {
 			return rt + "::of(\\Closure::class)", nil

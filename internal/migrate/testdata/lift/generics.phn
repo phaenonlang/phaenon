@@ -7,7 +7,7 @@ use App\Model\Row;
  */
 final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> implements \Countable, ReflectorInterface<ClassType, EnumType>
 {
-    private map<class-string<ClassType>, \ReflectionClass<ClassType>> $cache = [];
+    private map<class<ClassType>, \ReflectionClass<ClassType>> $cache = [];
 
     private list<string> $names = [];
 
@@ -26,7 +26,7 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
      * @param $attributeType FQN of an attribute class
      * @param $className FQN of a class we look for attributes in
      */
-    public function allOfType<T of object>(class-string<T> $attributeType, class-string $className): array<T>
+    public function allOfType<T of object>(class<T> $attributeType, class $className): array<T>
     {
         return [];
     }
@@ -36,7 +36,7 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
      *
      * @throws \ReflectionException
      */
-    public function first<T of object>(class-string<T> $attributeType): ?T
+    public function first<T of object>(class<T> $attributeType): ?T
     {
         return null;
     }
@@ -44,7 +44,7 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
     /**
      * @return T the mapped object
      */
-    public function map<T of object>(object $source, T|class-string<T> $target): T
+    public function map<T of object>(object $source, T|class<T> $target): T
     {
         return $source;
     }
@@ -53,8 +53,9 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
      * @param callable(int): string $g
      * @param int<0, max> $n
      * @param array{id: int} $row
+     * @param non-empty-string ...$names
      */
-    public function closures(?Closure(object, object): object $mapping, Closure(int): string $f, callable $g, int $n, array $row, non-empty-string ...$names, ?string $maybe = null): void
+    public function closures(?Closure(object, object): object $mapping, Closure(int): string $f, callable $g, int $n, array $row, string ...$names, ?string $maybe = null): void
     {
     }
 
@@ -91,7 +92,8 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
         return $this;
     }
 
-    public function prefixed(positive-int $n): void
+    /** @phpstan-param positive-int $n */
+    public function prefixed(int $n): void
     {
     }
 
@@ -111,8 +113,9 @@ function firstOf<T of object>(list<T> $items): ?T
 }
 
 /**
+ * @param non-empty-array<string, \stdClass> $objects
  * @param \Closure(int, int=): int $withOptional
  */
-function keyed(map<int, string> $map, non-empty-map<string, \stdClass> $objects, \Closure $withOptional): void
+function keyed(map<int, string> $map, array $objects, \Closure $withOptional): void
 {
 }

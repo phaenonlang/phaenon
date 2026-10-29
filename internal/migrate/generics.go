@@ -761,17 +761,17 @@ func render(n *docblock.TypeNode) (string, bool) {
 			if len(n.Args) == 2 {
 				name = "map"
 			}
-		case "non-empty-array":
-			if len(n.Args) == 2 {
-				name = "non-empty-map"
-			}
+		case "class-string":
+			// The one hyphenated name with a Phaenon spelling; the rest stay
+			// docblock vocabulary (design/generics.md §11.2).
+			name = "class"
 		case "int", "float":
 			if len(n.Args) > 0 {
 				return "", false // int<0, max>
 			}
 		}
 		for _, c := range name {
-			if !(c == '\\' || c == '-' || c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c >= 0x80) {
+			if !(c == '\\' || c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c >= 0x80) {
 				return "", false
 			}
 		}
@@ -913,7 +913,7 @@ var keywordErasure = map[string][]string{
 	"array": {"array"}, "non-empty-array": {"array"}, "callable-array": {"array"},
 	"iterable": {"iterable"}, "callable": {"callable"}, "pure-callable": {"callable"},
 	"closure": {"closure"}, "pure-closure": {"closure"},
-	"class-string": {"string"}, "interface-string": {"string"}, "enum-string": {"string"}, "trait-string": {"string"},
+	"class": {"string"}, "class-string": {"string"}, "interface-string": {"string"}, "enum-string": {"string"}, "trait-string": {"string"},
 	"non-empty-string": {"string"}, "numeric-string": {"string"}, "literal-string": {"string"},
 	"non-empty-literal-string": {"string"}, "callable-string": {"string"}, "lowercase-string": {"string"},
 	"non-empty-lowercase-string": {"string"}, "truthy-string": {"string"}, "non-falsy-string": {"string"},

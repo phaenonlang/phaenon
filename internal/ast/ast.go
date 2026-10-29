@@ -569,14 +569,13 @@ const (
 	Contravariant          // in T
 )
 
-// TypeParam is one Phaenon generic parameter: [reified] [in|out] T [of Bound] [= Default].
+// TypeParam is one Phaenon generic parameter: [in|out] T [of Bound] [= Default].
 type TypeParam struct {
 	S        Span
 	Name     *Ident
 	Bound    TypeExpr
 	Default  TypeExpr
 	Variance Variance
-	Reified  bool
 }
 
 func (n *TypeParam) Span() Span { return n.S }

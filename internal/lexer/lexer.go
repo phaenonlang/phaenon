@@ -527,11 +527,10 @@ func (l *Lexer) word(i int) token.Token {
 }
 
 // phaenonKeywords are reserved only in Phaenon mode. The contextual ones
-// (type, reified, of, in, out) are lexed as keywords and re-interpreted as
+// (type, of, in, out) are lexed as keywords and re-interpreted as
 // identifiers by the parser where the grammar allows a name.
 var phaenonKeywords = map[string]token.Kind{
-	"is": token.T_IS, "type": token.T_TYPE, "reified": token.T_REIFIED,
-	"of": token.T_OF, "in": token.T_IN, "out": token.T_OUT,
+	"is": token.T_IS, "type": token.T_TYPE, "of": token.T_OF, "in": token.T_IN, "out": token.T_OUT,
 }
 
 func (l *Lexer) skipWhitespaceAndComments(i int) int {

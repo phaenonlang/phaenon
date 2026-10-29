@@ -54,7 +54,7 @@ func TestGenerics(t *testing.T) {
 					t.Errorf("checker: %s:%d: %s: %s", d.File, d.Line, d.Code, d.Message)
 				}
 			}
-			got, err := Tree(src, f.AST, Options{SourceName: path, StrictTypes: true, Program: p, File: f, Reified: c.ReifiedArgs})
+			got, err := Tree(src, f.AST, Options{SourceName: path, StrictTypes: true, Program: p, File: f})
 			if err != nil {
 				t.Fatal(err)
 			}

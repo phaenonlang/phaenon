@@ -19,13 +19,6 @@ final class Type
      */
     public static function of(string $class, Type ...$args): Type {}
 
-    /**
-     * @template U of object
-     * @param class-string<U>|Type<U> $type
-     * @return Type<U>
-     */
-    public static function from(string|Type $type): Type {}
-
     /** @return Type<int> */
     public static function int(): Type {}
 
@@ -116,9 +109,6 @@ final class Type
 
     /** @return T|null */
     public function orNull(mixed $value): mixed {}
-
-    /** @return T */
-    public function instantiate(mixed ...$args): mixed {}
 
     /** @return class-string<T> */
     public function className(): string {}

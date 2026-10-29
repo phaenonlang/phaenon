@@ -52,18 +52,20 @@ final class User extends Model
 {
 }
 
-class Repository<reified T of Model>
+// Runtime generics are written, not synthesised: a class<T> value carries
+// the type, the compiler adds nothing (design/generics.md §11.2).
+class Repository<T of Model>
 {
     private map<int, Model> $items = [];
 
-    public function __construct(private readonly string $table = 'default')
+    public function __construct(private readonly class<T> $class, private readonly string $table = 'default')
     {
     }
 
     public function get(int $id): ?T
     {
         $item = $this->items[$id] ?? null;
-        if ($item is T) {
+        if ($item instanceof $this->class) {
             return $item;
         }
         return null;
@@ -71,19 +73,19 @@ class Repository<reified T of Model>
 
     public function fresh(int $id): T
     {
-        return new T($id);
+        return new $this->class($id);
     }
 
     public function describe(): string
     {
-        return T::class . ' in ' . $this->table . ' (' . T->name() . ')';
+        return $this->class . ' in ' . $this->table;
     }
 
     public function all(): list<T>
     {
         $out = [];
         foreach ($this->items as $item) {
-            if ($item instanceof T) {
+            if ($item instanceof $this->class) {
                 $out[] = $item;
             }
         }
@@ -93,13 +95,17 @@ class Repository<reified T of Model>
 
 final class UserRepository extends Repository<User>
 {
+    public function __construct(string $table = 'default')
+    {
+        parent::__construct(User::class, $table);
+    }
 }
 
-final class LoggingRepository<reified T of Model> extends Repository<T>
+final class LoggingRepository<T of Model> extends Repository<T>
 {
-    public function __construct(private readonly string $log)
+    public function __construct(class<T> $class, private readonly string $log)
     {
-        parent::__construct('logged');
+        parent::__construct($class, 'logged');
     }
 
     public function log(): string
@@ -113,10 +119,10 @@ function first<T>(list<T> $items): ?T
     return $items[0] ?? null;
 }
 
-function decode<reified T of Model>(int $id): T
+function decode<T of Model>(class<T> $class, int $id): T
 {
-    $make = function (int $n) use ($id): T {
-        return new T($n + $id);
+    $make = function (int $n) use ($class, $id): T {
+        return new $class($n + $id);
     };
     return $make(1);
 }
@@ -128,9 +134,9 @@ function sum(Ids $ids, Table<string, int> $table): int
 
 function uses(mixed $m, Box<int> $box): void
 {
-    $repo = new Repository<User>('users');
+    $repo = new Repository(User::class, 'users');
     $user = $repo->get(1);
-    $fresh = decode<User>(2);
+    $fresh = decode(User::class, 2);
     $n = first<int>([1, 2]);
     $s = $box->map(fn(int $x): string => (string) $x)->get();
     if ($m is int) {
@@ -148,13 +154,17 @@ function uses(mixed $m, Box<int> $box): void
 }
 
 /**
- * What a lifted PHPStan signature looks like: hyphenated names, a param tag
- * with prose only, a Closure the lexer would otherwise read as a cast.
+ * What a lifted PHPStan signature looks like: class<T>, a param tag with
+ * prose only, PHPStan's refinement types left in the docblock, a Closure
+ * the lexer would otherwise read as a cast.
  *
  * @param $c the class to describe
+ * @param non-empty-string $id
+ * @param array-key $k
+ * @param positive-int $n
  * @throws \RuntimeException never
  */
-function lifted<T of object>(class-string<T> $c, non-empty-string $id, array-key $k, positive-int $n, Closure(int): string $f, ?Closure(object, object): object $m): ?T
+function lifted<T of object>(class<T> $c, string $id, int|string $k, int $n, Closure(int): string $f, ?Closure(object, object): object $m): ?T
 {
     echo $id, $k, $n, $f($n);
     if ($m !== null) {
