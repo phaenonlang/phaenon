@@ -1,7 +1,7 @@
 ---
 type: status
 tags: [phaenon, roadmap, history]
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Milestones — history and state
@@ -23,16 +23,18 @@ Outside the milestone numbering, also 2026-10-28: the PhpStorm plugin `../jetbra
 (`53dcd00`, `eb3193f`) — `.phn` read as PHP code without the open tag; Phaenon-only syntax not yet.
 The roadmap puts the editor plugins in M6.
 
-| **M3** migrate step | `phn migrate` lifts generic docblocks into syntax (`internal/migrate/generics.go`); hyphenated type names native; prose-only `@param $x`; parent generic signatures inherited by plain overrides | `tequila/reflection` and `tequila/object-mapper` (51 `.phn`) migrated with real generics: both suites, PHPStan and php-cs-fixer pass on compiled output; lift golden `internal/migrate/testdata/lift/` | see `git log` after `2680bec` · design (`generics.md` §11.1) · reflector / object-mapper `phaenon-dogfood` |
+| **M3** migrate step | `phn migrate` lifts generic docblocks into syntax (`internal/migrate/generics.go`); prose-only `@param $x`; parent generic signatures inherited by plain overrides | `tequila/reflection` and `tequila/object-mapper` (51 `.phn`) migrated with real generics: both suites, PHPStan and php-cs-fixer pass on compiled output; lift golden `internal/migrate/testdata/lift/` | see `git log` after `2680bec` · design (`generics.md` §11.1) · reflector / object-mapper `phaenon-dogfood` |
 
-## Next — Petr decides
+| **M3** correction (2026-10-29) | `reified` removed end to end (keyword, `P3005`/`P3006`, hidden constructor parameters, `$__T`, synthesised constructors, `Type::from()`/`instantiate()`); `class<T>` is the native type of `T::class`; PHPStan's hyphenated names are docblock vocabulary again, not syntax; inferred type arguments are checked against their bounds | reflector and object-mapper rebuilt with `class<T>`: 0 findings, both suites, PHPStan and cs pass; output of object-mapper byte-identical | design `generics.md` §11.2, roadmap D9 |
 
-Recorded 2026-10-28 when the migrate step landed. Whoever lands the next one updates this section
+## Next — a maintainer's choice
+
+Recorded 2026-10-28 when the migrate step landed, unchanged by the 2026-10-29 correction. Whoever lands the next one updates this section
 and [[open-items]].
 
 1. **M4 — collections and strings**: `list<T>` / `map<K, V>` as first-class types with literals,
    `array` as a legacy type, `\Phaenon\*` stdlib, string methods, `bytes`; target `tequila/core`.
-   M4 also settles `P2516`'s severity and `array-key` / shapes as syntax ([[open-items]]).
+   M4 also settles `P2516`'s severity and shapes ([[open-items]]).
 2. `tequila/mongodb-odm` as the next generics dogfood target (roadmap M3 line).
 
 ← [[Home]]

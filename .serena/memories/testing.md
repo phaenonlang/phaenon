@@ -13,7 +13,7 @@ suites, and the tools they shell out to. Without its variable a suite **skips**,
 
 ## Variables
 
-| Variable | Read by | Effect | Value on Petr's machine |
+| Variable | Read by | Effect | Value behind the recorded results |
 |---|---|---|---|
 | `PHAENON_PHP_SRC` | `internal/conformance` (all suites) | Absolute path of the php-src checkout whose `.phpt` files are the corpus | `/Users/petr/labs/phaenon/php-src` |
 | `PHAENON_EXEC` | `TestPrinterExecution`, `TestEmitExecution` | Any non-empty value runs the execution comparisons (≈2.5 min each; pass `-timeout 30m`) | `1` |

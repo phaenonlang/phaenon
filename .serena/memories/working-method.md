@@ -38,14 +38,14 @@ reasoning. This note is the concrete checklist, with where each artifact lives.
   *Open*, *Target*; the status line gets the date.
 - `README.md` here: the status paragraph.
 - This vault: [[milestones]] and [[open-items]].
-- One commit per repo, prose messages (`AGENTS.md` § Git and commits). Then report to Petr and ask
-  what comes next.
+- One commit per repo, prose messages (`AGENTS.md` § Git and commits). Then report, and let a
+  maintainer choose what comes next.
 
 ## Division of labour (roadmap §4)
 
 Mechanical, parallelisable work — corpus classification, stub conversion, codemod corpora — goes
-to subagents. Design and the checker core stay in the main session. Petr does design review and
-decisions, the Tequila-side migrations, and the PHP semantics that need someone who has been
-bitten.
+to subagents. Design and the checker core stay in the main session. The maintainers keep design
+review and decisions, the Tequila-side migrations, and the PHP semantics that need someone who has
+been bitten.
 
 ← [[Home]]

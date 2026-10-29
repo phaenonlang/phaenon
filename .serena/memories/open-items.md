@@ -1,7 +1,7 @@
 ---
 type: backlog
 tags: [phaenon, backlog]
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Open and deferred items
@@ -17,7 +17,7 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   migrated. Left behind by it:
   - A constructor-level `@template` used only by a promoted property stays a docblock (three
     places: `AttributeReader`, `ObjectMapper`, the two `AttributeBased*Factory`); whether those
-    classes become generic is Petr's call per class.
+    classes become generic is a per-class design decision for a maintainer, not a mechanical one.
   - `tequila/object-mapper` `tests/` carry 16 findings that PHPStan never saw (its `paths` is
     `src` only): Symfony container `get()` typing (needs a phpstan-symfony-like overlay) and
     untyped closure parameters in fixtures. The tests are built with `phn build --no-types tests`.
@@ -27,8 +27,11 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 - **`P2516` (missing declared type)** is a *warning* until M4's collections exist; decide then
   whether it becomes an error.
-- **`array-key` and array shapes as native syntax** — docblocks and alias bodies only today; a shape
-  cannot be tested at runtime (emitter error).
+- ~~**`array-key` as native syntax**~~ — decided 2026-10-29 (`generics.md` §11.2): hyphenated
+  PHPStan names stay docblock vocabulary; `array-key` is written `int|string`, M4 decides `map`'s
+  key bound.
+- **Array shapes as native syntax** — docblocks and alias bodies only today; a shape cannot be
+  tested at runtime (emitter error).
 - **Phaenon vocabulary inside user docblocks** in `.phn` (`@var map<int, T>`) passes through
   untranslated, so PHPStan on the output does not know `map`. Decide: translate, or forbid docblock
   types in `.phn`.
@@ -46,8 +49,12 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 ## Generics follow-ups (unscheduled)
 
+- ~~Symfony DI warning for reified services~~ — moot since 2026-10-29: `reified` is gone
+  (`generics.md` §11.2).
+- **`$x is class<User>` lowers to the runtime** (`Type::classString(...)->check()`); PHP can do it
+  natively (`\is_string($x) && \is_a($x, User::class, true)`), as `is int` already does.
+
 - **`--runtime-guards=boundary|all|off`** (`generics.md` §6) — not built.
-- **Symfony DI warning** for a reified service without a binding subclass (§5.4) — not built.
 - **Descriptor hoisting** — `static $__t ??= Type::list(...)` for `is` / `as` in hot paths.
 - **Warning for an erased type parameter nothing constrains** (§3.4 item 4, a `P3010` candidate) —
   silent for now, like PHPStan.
@@ -65,8 +72,8 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   checks the stub against `../runtime/src/Type.php` yet ([[gotcha-runtime-stub-drift]]).
 - ~~**`checker.md` §8 item 5**~~ — fixed 2026-10-28.
 - **`design` repo tracks GoLand files** — `.idea/*.xml`, `.idea/.gitignore` and a `go.mod` reading
-  `module design` (found 2026-10-28; cf. [[gotcha-goland-rewrites-go-mod]]). Petr decides whether to
-  untrack them.
+  `module design` (found 2026-10-28; cf. [[gotcha-goland-rewrites-go-mod]]). Whether to untrack them is a
+  maintainer's call.
 
 ## PhpStorm plugin (`../jetbrains`)
 
@@ -76,7 +83,7 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 ## Before the repositories go public
 
-- `AGENTS.md`, `.mcp.json` and this vault name paths on Petr's machine (`~/labs/…`,
+- `AGENTS.md`, `.mcp.json` and this vault name paths on the development machine (`~/labs/…`,
   `~/.local/bin/serena`). Generalise or move them before publishing.
 - `tequila/reflection`'s `phaenon-dogfood` branch exists only locally.
 

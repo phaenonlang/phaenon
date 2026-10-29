@@ -23,7 +23,8 @@ How notes here are written, so Serena, Claude and Obsidian read the same files t
 4. **Every new note is linked from [[Home]].**
 5. **Absolute dates** (`2026-10-28`), taken from the session context, never guessed or relative.
 6. **Durable, shared knowledge only.** The vault is committed and will be public with the repo.
-   Private working state and Petr's personal preferences belong in Claude's harness memory.
+   Private working state and the personal preferences of whoever runs the session belong in
+   Claude's harness memory.
 
 ## Frontmatter
 
@@ -57,6 +58,6 @@ updated: YYYY-MM-DD       # last meaningful edit
 | `AGENTS.md` + `CLAUDE.md` | always | yes | The brief: org map, commands, rules |
 | This vault | on demand | yes | History, state, test environment, gotchas, open items |
 | `../design` docs | on demand | yes (`phaenonlang/design`) | Language design and every decision |
-| Claude harness memory | Claude, this machine | no | Private working state, Petr's preferences |
+| Claude harness memory | Claude, this machine | no | Private working state, the developer's own preferences |
 
 ← [[Home]]
