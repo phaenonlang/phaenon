@@ -41,8 +41,7 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 ## M4 — collections and strings
 
-- **`P2516` (missing declared type)** is a *warning* until M4's collections exist; decide then
-  whether it becomes an error.
+- ~~**`P2516` (missing declared type)** as a warning until M4~~ — an error (`collections.md` §7).
 - ~~**`array-key` as native syntax**~~ — decided 2026-10-29 (`generics.md` §11.2): hyphenated
   PHPStan names stay docblock vocabulary; `array-key` is written `int|string`, M4 decides `map`'s
   key bound.
@@ -63,8 +62,9 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - `phn migrate`: `array{A, B}` (positional shape) → `(A, B)`.
 - The runtime package `../runtime` does not yet carry `Seq`, `Map`, `Str`: build it from
   `stdlib/runtime/*.phn` with `phn` (one source), then [[gotcha-runtime-stub-drift]] is moot.
-- `Bytes.phn`, the `(bytes)` cast, `P2530`, the overlay's binary producers (`strings.md` §2, §5).
-- `P2516` to an error, `P2518` (`map` key bound) — `collections.md` §7.
+- ~~`Bytes.phn`, the `(bytes)` cast, `P2530`, the overlay's binary producers~~ — done 2026-10-30.
+- ~~`P2516` to an error, `P2518` (`map` key bound)~~ — done 2026-10-30 (`P2516` had been an error
+  since the checker landed; the comment said otherwise).
 
 ## M6 — tooling, analysis rules
 

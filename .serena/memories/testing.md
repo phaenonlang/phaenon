@@ -52,6 +52,13 @@ recorded results were established with it.
 The PHPStan behaviour the emitter is built around — one docblock tag per line — was verified
 against 2.2 ([[gotcha-phpstan-one-tag-per-line]]).
 
+## The stdlib written in Phaenon
+
+`stdlib/runtime/*.phn` is read as the compiler's declaration of `Seq`, `Map`, `Str`, `Bytes`
+and compiled for the emit goldens' PHPStan run. `TestRuntimeStubs` (`internal/checker/stdlib_test.go`)
+type-checks those bodies: `phn check stdlib/runtime/X.phn` cannot (the class is already declared
+by the embedded copy, `P2511`), so the test marks the embedded files as checked instead.
+
 ## Extension stubs
 
 `phn check` and `phn build` ask the local `php` for its loaded extensions and generate a stub for
