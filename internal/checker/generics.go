@@ -105,6 +105,8 @@ func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 		if ar, ok := keywordArity[lower]; ok {
 			if given < ar[0] || given > ar[1] {
 				x.report(t.S, P3001, "%s takes %s, %d given", lower, arityText(ar[0], ar[1]), given)
+			} else if lower == "map" && given == 2 {
+				x.checkMapKey(t.TypeArgs[0])
 			}
 			return
 		}
@@ -127,6 +129,26 @@ func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 	}
 	cl.Signature()
 	x.checkArity(t, cl.Name, cl.TypeParams, given)
+}
+
+// checkMapKey enforces map's key bound (design/collections.md §2): a key
+// type is int|string, or a type parameter whose bound is; an unbounded
+// parameter used as a key means `K of int|string`.
+func (x *fnCtx) checkMapKey(key ast.TypeExpr) {
+	k := x.res.Native(key)
+	if k == nil || types.IsMixed(k) {
+		return
+	}
+	if p, ok := k.(types.Param); ok {
+		if p.Bound == nil {
+			return
+		}
+		k = p.Bound
+	}
+	if _, unknown := k.(types.Unknown); unknown || types.IsSubtype(k, types.TArrayKey, x.p()) {
+		return
+	}
+	x.report(key.Span(), P2518, "a map key is int|string, not %s", x.typeName(k))
 }
 
 // checkArity checks a type-argument list against the declared parameters,
@@ -560,12 +582,22 @@ func (x *fnCtx) explicitArgs(exprs []ast.TypeExpr, tps []*program.TypeParam, wha
 }
 
 // closureTypeParams brings a closure's own `<T>` into scope.
-func (x *fnCtx) closureTypeParams(tps []*ast.TypeParam) {
+func (x *fnCtx) closureTypeParams(tps []*ast.TypeParam, decl []*ast.Param, ret ast.TypeExpr) {
 	if len(tps) == 0 {
 		return
 	}
 	x.checkTypeParams(tps)
 	params := x.res.NativeParams(tps)
+	nodes := make([]ast.Node, 0, len(decl)+1)
+	for _, p := range decl {
+		if p.Type != nil {
+			nodes = append(nodes, p.Type)
+		}
+	}
+	if ret != nil {
+		nodes = append(nodes, ret)
+	}
+	program.ImplyMapKeyBounds(params, nodes...)
 	x.res = x.res.WithParams(params)
 	scope := make(map[string]bool, len(x.inScope)+len(params))
 	for k, v := range x.inScope {

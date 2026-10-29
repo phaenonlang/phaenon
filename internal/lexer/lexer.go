@@ -448,17 +448,28 @@ func (l *Lexer) cast(i int) (token.Kind, int) {
 	for l.at(j) == ' ' || l.at(j) == '\t' {
 		j++
 	}
-	for _, c := range casts {
-		if !l.hasPrefixFold(j, c.word) {
-			continue
+	try := func(word string, kind token.Kind) (token.Kind, int) {
+		if !l.hasPrefixFold(j, word) {
+			return token.EOF, 0
 		}
-		k := j + len(c.word)
+		k := j + len(word)
 		for l.at(k) == ' ' || l.at(k) == '\t' {
 			k++
 		}
 		if l.at(k) == ')' {
-			return c.kind, k + 1
+			return kind, k + 1
 		}
+		return token.EOF, 0
+	}
+	for _, c := range casts {
+		if k, end := try(c.word, c.kind); k != token.EOF {
+			return k, end
+		}
+	}
+	if l.mode == ModePhaenon {
+		// (bytes) retypes a string as binary data (design/strings.md §2);
+		// in PHP it would be a parenthesised constant.
+		return try("bytes", token.T_BYTES_CAST)
 	}
 	return token.EOF, 0
 }

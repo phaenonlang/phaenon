@@ -448,7 +448,7 @@ func (p *Parser) closureType(start int) ast.TypeExpr {
 // atCast reports whether the current token is a `(type)` cast.
 func (p *Parser) atCast() bool {
 	switch p.kind() {
-	case token.T_INT_CAST, token.T_DOUBLE_CAST, token.T_STRING_CAST, token.T_ARRAY_CAST, token.T_OBJECT_CAST, token.T_BOOL_CAST:
+	case token.T_INT_CAST, token.T_DOUBLE_CAST, token.T_STRING_CAST, token.T_ARRAY_CAST, token.T_OBJECT_CAST, token.T_BOOL_CAST, token.T_BYTES_CAST:
 		return true
 	}
 	return false

@@ -7,6 +7,7 @@ import (
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -55,6 +56,8 @@ func hasGenerics(f *ast.File) bool {
 		switch n := n.(type) {
 		case *ast.TypeParam, *ast.TypeAlias, *ast.IsExpr, *ast.AsExpr, *ast.ClosureType, *ast.TupleType:
 			found = true
+		case *ast.Cast:
+			found = found || n.Op == token.T_BYTES_CAST
 		case *ast.NamedType:
 			if len(n.TypeArgs) > 0 || isAliasCandidate(n) {
 				found = true
@@ -226,7 +229,7 @@ func (l *lowering) erase(t ast.TypeExpr, sc *scope) string {
 			switch strings.ToLower(name) {
 			case "list", "map", "array":
 				return "array"
-			case "class":
+			case "class", "bytes":
 				return "string"
 			case "iterable":
 				return "iterable"
@@ -335,6 +338,8 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 				switch strings.ToLower(t.Name.Parts[0]) {
 				case "map":
 					name = "array"
+				case "bytes":
+					name = "string" // PHPStan has no binary string (strings.md §5)
 				case "class":
 					// A bare `class` is any class name; PHPStan spells both class-string.
 					name = "class-string"
@@ -448,7 +453,8 @@ func (l *lowering) eraseType(t ast.TypeExpr, sc *scope, override string) bool {
 	if t == nil {
 		return false
 	}
-	if override == "" && !l.needsDoc(t, sc) {
+	doc := override != "" || l.needsDoc(t, sc)
+	if !doc && !mentionsBytes(t) {
 		return false // plain PHP stays byte for byte
 	}
 	erased := l.erase(t, sc)
@@ -458,7 +464,20 @@ func (l *lowering) eraseType(t ast.TypeExpr, sc *scope, override string) bool {
 	if erased != l.text(t.Span()) {
 		l.e.replace(t.Span(), erased)
 	}
-	return true
+	return doc
+}
+
+// mentionsBytes reports a type that spells bytes: it erases to string
+// without a docblock saying more (strings.md §5).
+func mentionsBytes(t ast.TypeExpr) bool {
+	found := false
+	ast.Inspect(t, func(n ast.Node) bool {
+		if nt, ok := n.(*ast.NamedType); ok && len(nt.Name.Parts) == 1 && strings.EqualFold(nt.Name.Parts[0], "bytes") {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // ------------------------------------------------------------------ docblocks
@@ -888,6 +907,12 @@ func (l *lowering) walk(root ast.Node, sc *scope) error {
 		case *ast.ArrowFunc:
 			err = l.arrowFunc(n, sc)
 			return false
+		case *ast.Cast:
+			if n.Op == token.T_BYTES_CAST {
+				// bytes is a string at runtime: the cast has nothing to do.
+				l.e.replace(ast.Span{Start: n.S.Start, End: n.Expr.Span().Start}, "")
+			}
+			return true
 		case *ast.IsExpr:
 			err = l.isExpr(n, sc)
 			return false

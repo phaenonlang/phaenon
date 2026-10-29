@@ -86,3 +86,16 @@ function bytesAreNotText(bytes $raw, string $text): void
     takesString($raw); // want P2103
     takesString($text);
 }
+
+function keyBound(map<bool, int> $flags, map<int|string, int> $any): void // want P2518
+{
+}
+
+function keyBoundParam<K of object, V>(map<K, V> $m): void // want P2518
+{
+}
+
+function impliedKeyBound<K, V>(map<K, V> $m): list<K>
+{
+    return $m->keys();
+}

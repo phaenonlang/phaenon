@@ -164,4 +164,12 @@ final class Str
     {
         return 1 === preg_match($pattern, (string) $s);
     }
+
+    /**
+     * The UTF-8 encoding of the text, as binary data: free at runtime.
+     */
+    public static function bytes(string|\Stringable $s): bytes
+    {
+        return (bytes) (string) $s;
+    }
 }

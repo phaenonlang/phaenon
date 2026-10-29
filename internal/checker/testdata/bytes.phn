@@ -1,0 +1,67 @@
+namespace Bin;
+
+use Phaenon\Bytes;
+
+// bytes: binary data kept apart from text (design/strings.md §2, §5). The
+// overlay types PHP's producers, (bytes) retypes a string, (string) is the
+// unchecked way back, and text never mixes with binary silently.
+
+function takesString(string $s): void
+{
+}
+
+function takesBytes(bytes $b): void
+{
+}
+
+function takesInt(int $i): void
+{
+}
+
+function producers(): void
+{
+    $key = random_bytes(32);
+    takesBytes($key);
+    takesString($key); // want P2103
+    takesBytes(hash('sha256', 'abc', true));
+    takesString(hash('sha256', 'abc'));
+    takesBytes(hash('sha256', 'abc')); // want P2103
+    takesBytes(pack('N', 1));
+    takesBytes(hash_hmac('sha256', $key, $key, true));
+    takesString(bin2hex($key));
+    takesString(base64_encode($key));
+    takesInt(strlen($key));
+    takesBytes(substr($key, 0, 4));
+    takesString(substr('text', 0, 2));
+    takesBytes(substr('text', 0, 2)); // want P2103
+}
+
+function text(bytes $raw, string $name): void
+{
+    takesString("hello $raw"); // want P2530
+    takesString('x' . $raw); // want P2530
+    $s = 'id-';
+    $s .= $raw; // want P2530
+    takesString((string) $raw);
+    takesBytes((bytes) $name);
+    takesBytes((bytes) 42); // want P2309
+    takesString($raw->hex());
+    takesString($raw->base64(urlSafe: true));
+    takesInt($raw->length());
+    takesBytes($raw->slice(0, 16));
+    takesString($raw->text());
+    takesInt($raw->at(0));
+    takesBytes($name->bytes());
+    takesBytes(Bytes::fromHex('00ff'));
+    takesBytes(Bytes::concat($raw, $name->bytes()));
+    $raw->upper(); // want P2006
+}
+
+function equality(bytes $a, string $b, bytes $c): void
+{
+    if ($a === $b) { // want P2305
+    }
+    if ($a === $c) {
+    }
+    takesInt($a->equals($c)); // want P2103
+}

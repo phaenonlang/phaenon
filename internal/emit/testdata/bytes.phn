@@ -1,0 +1,54 @@
+namespace App;
+
+use Phaenon\Bytes;
+
+// bytes erases to string: the (bytes) cast disappears and the methods
+// become Bytes:: calls, the class imported by the compiler
+// (design/strings.md §5, roadmap D11).
+
+final class Token
+{
+    public function __construct(public readonly bytes $secret)
+    {
+    }
+
+    public static function generate(): self
+    {
+        return new self(random_bytes(32));
+    }
+
+    public static function fromHex(string $hex): self
+    {
+        return new self(Bytes::fromHex($hex));
+    }
+
+    public function hex(): string
+    {
+        return $this->secret->hex();
+    }
+
+    public function matches(bytes $candidate): bool
+    {
+        return $this->secret->equals($candidate);
+    }
+
+    public function fingerprint(): string
+    {
+        return hash('sha256', $this->secret, true)->slice(0, 8)->hex();
+    }
+}
+
+function fromBinary(string $raw): bytes
+{
+    return (bytes) $raw;
+}
+
+function label(bytes $id): string
+{
+    return 'id-' . $id->hex() . ' (' . $id->length() . ' bytes)';
+}
+
+function keys(list<bytes> $keys): list<string>
+{
+    return $keys->map(fn (bytes $k) => $k->base64(urlSafe: true));
+}

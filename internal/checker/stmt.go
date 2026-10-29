@@ -834,7 +834,7 @@ func (x *fnCtx) closureParams(decls []*ast.Param, expected types.Type) ([]*progr
 
 func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.Type {
 	c := x.child(e.Static)
-	c.closureTypeParams(e.TypeParams)
+	c.closureTypeParams(e.TypeParams, e.Params, e.ReturnType)
 	c.checkSignatureTypes(nil, e.Params, e.ReturnType)
 	params, cps := c.closureParams(e.Params, expected)
 	c.returnType = x.res.Native(e.ReturnType)
@@ -909,7 +909,7 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) types.Type {
 	c := x.child(e.Static)
 	c.arrow = true
-	c.closureTypeParams(e.TypeParams)
+	c.closureTypeParams(e.TypeParams, e.Params, e.ReturnType)
 	c.checkSignatureTypes(nil, e.Params, e.ReturnType)
 	params, cps := c.closureParams(e.Params, expected)
 	c.returnType = x.res.Native(e.ReturnType)

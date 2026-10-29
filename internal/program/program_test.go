@@ -22,7 +22,7 @@ func TestStubs(t *testing.T) {
 	if got := types.Print(fn.Return); got != "int<0, max>" {
 		t.Errorf("strlen returns %s (overlay should win)", got)
 	}
-	if len(fn.Params) != 1 || fn.Params[0].Name != "string" || types.Print(fn.Params[0].Type) != "string" {
+	if len(fn.Params) != 1 || fn.Params[0].Name != "string" || types.Print(fn.Params[0].Type) != "string|bytes" {
 		t.Errorf("strlen params %+v", fn.Params[0])
 	}
 	am := p.Function("\\array_map").Signature()

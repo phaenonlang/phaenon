@@ -178,11 +178,12 @@ const (
 	T_INLINE_HTML
 
 	// Phaenon additions (never produced in PHP mode).
-	T_IS   // 'is'
-	T_TYPE // 'type' (contextual)
-	T_OF   // 'of' (contextual)
-	T_IN   // 'in' (contextual)
-	T_OUT  // 'out' (contextual)
+	T_IS         // 'is'
+	T_TYPE       // 'type' (contextual)
+	T_OF         // 'of' (contextual)
+	T_IN         // 'in' (contextual)
+	T_OUT        // 'out' (contextual)
+	T_BYTES_CAST // '(bytes)': the retyping of a string as binary data
 
 	lastNamed
 )
@@ -345,6 +346,7 @@ var names = [...]string{
 	T_OF - firstNamed:                                      "T_OF",
 	T_IN - firstNamed:                                      "T_IN",
 	T_OUT - firstNamed:                                     "T_OUT",
+	T_BYTES_CAST - firstNamed:                              "T_BYTES_CAST",
 }
 
 // String returns the token's name as PHP's token_name() prints it; single-character

@@ -240,7 +240,7 @@ func (p *Parser) prefix() ast.Expr {
 	case token.Kind('~'), token.Kind('-'), token.Kind('+'), token.Kind('@'):
 		p.next()
 		return &ast.Unary{S: p.span(start), Op: k, Expr: p.exprBP(bpUnary)}
-	case token.T_INT_CAST, token.T_DOUBLE_CAST, token.T_STRING_CAST, token.T_ARRAY_CAST,
+	case token.T_INT_CAST, token.T_DOUBLE_CAST, token.T_STRING_CAST, token.T_BYTES_CAST, token.T_ARRAY_CAST,
 		token.T_OBJECT_CAST, token.T_BOOL_CAST, token.T_UNSET_CAST:
 		t := p.next()
 		return &ast.Cast{S: p.span(start), Op: k, Raw: t.Text(p.src), Expr: p.exprBP(bpUnary)}
@@ -294,7 +294,7 @@ func (p *Parser) startsExpr() bool {
 	case token.T_VARIABLE, token.Kind('$'), token.T_LNUMBER, token.T_DNUMBER, token.T_CONSTANT_ENCAPSED_STRING,
 		token.Kind('"'), token.Kind('`'), token.T_START_HEREDOC, token.Kind('['), token.Kind('('),
 		token.Kind('!'), token.Kind('~'), token.Kind('-'), token.Kind('+'), token.Kind('@'),
-		token.T_INT_CAST, token.T_DOUBLE_CAST, token.T_STRING_CAST, token.T_ARRAY_CAST, token.T_OBJECT_CAST,
+		token.T_INT_CAST, token.T_DOUBLE_CAST, token.T_STRING_CAST, token.T_BYTES_CAST, token.T_ARRAY_CAST, token.T_OBJECT_CAST,
 		token.T_BOOL_CAST, token.T_UNSET_CAST, token.T_INC, token.T_DEC,
 		token.T_NEW, token.T_CLONE, token.T_PRINT, token.T_YIELD, token.T_YIELD_FROM, token.T_THROW,
 		token.T_INCLUDE, token.T_INCLUDE_ONCE, token.T_REQUIRE, token.T_REQUIRE_ONCE,
