@@ -317,6 +317,13 @@ func pathKey(e ast.Expr) (string, bool) {
 			return base + "['" + program.StringValue(i) + "']", true
 		case *ast.IntLit:
 			return base + "[" + i.Raw + "]", true
+		case *ast.ClassConstFetch:
+			// A constant key names one offset, whatever its value.
+			n, ok := i.Class.(*ast.Name)
+			id, isIdent := i.Name.(*ast.Ident)
+			if ok && isIdent {
+				return base + "[" + strings.ToLower(strings.Join(n.Parts, "\\")) + "::" + id.Name + "]", true
+			}
 		}
 		return "", false
 	}

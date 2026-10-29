@@ -82,6 +82,14 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		if then, els, ok := x.methodAssert(e, env); ok {
 			return then, els
 		}
+	case *ast.StaticCall:
+		// Foo::isDocument($x) with @phpstan-assert-if-true tags.
+		if ce, ok := x.calleeOf(e, env); ok && len(ce.asserts) > 0 {
+			x.staticCall(e, env, nil)
+			then, els = x.applyAsserts(ce, env)
+			x.condValueType = types.TBool
+			return then, els
+		}
 	case *ast.Assign:
 		// if ($x = expr): the assigned value's truthiness narrows $x.
 		t := x.assign(e, env)
@@ -142,6 +150,15 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 		// `null !== ($x = f())` narrows what was assigned.
 		if p.Op == token.Kind('=') {
 			x.narrowPath(env, p.Target, t, define)
+		}
+		return
+	case *ast.Binary:
+		// `is_string($a['k'] ?? null)`: a type without null says the offset
+		// is set and of that type.
+		if p.Op == token.T_COALESCE && !types.IsNullable(t) && !types.IsMixed(t) {
+			if n, ok := constName(p.Right); ok && n == "null" {
+				x.narrowPath(env, p.Left, t, define)
+			}
 		}
 		return
 	case *ast.Variable:
@@ -613,7 +630,7 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 		then, els = x.cond(arg, env)
 		x.condValueType = types.TBool
 		return then, then.clone(), true
-	case "method_exists", "property_exists", "function_exists", "class_exists", "interface_exists", "enum_exists":
+	case "method_exists", "property_exists", "function_exists":
 		x.call(e, env, nil)
 		x.condValueType = types.TBool
 		return env.clone(), env.clone(), true
@@ -632,13 +649,23 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 	x.condValueType = types.TBool
 	at := x.pathType(arg, env)
 	then, els = env.clone(), env.clone()
-	x.narrowPath(then, arg, types.Intersect(at, target, x.p()), true)
-	x.narrowPath(els, arg, x.subtract(at, target, x.p()), false)
-	if !types.IsMixed(at) {
+	var nthen, nels types.Type
+	if nold := x.nativeVar(arg, env); nold != nil {
+		nthen, nels = types.Intersect(nold, target, x.p()), x.subtract(nold, target, x.p())
+	}
+	x.narrowPathNative(then, arg, types.Intersect(at, target, x.p()), nthen, true)
+	x.narrowPathNative(els, arg, x.subtract(at, target, x.p()), nels, false)
+	if nt := x.nativeOr(arg, at, env); !types.IsMixed(at) {
 		if _, isNever := types.Intersect(at, target, x.p()).(types.Never); isNever {
-			x.report(e.S, P2402, "%s() on %s is always false", name, x.typeName(at))
+			x.condValueType = types.TFalse
+			if _, never := types.Intersect(nt, target, x.p()).(types.Never); never && !types.IsMixed(nt) {
+				x.report(e.S, P2402, "%s() on %s is always false", name, x.typeName(at))
+			}
 		} else if types.IsSubtype(at, target, x.p()) && !isParamType(at) {
-			x.report(e.S, P2402, "%s() on %s is always true", name, x.typeName(at))
+			x.condValueType = types.TTrue
+			if !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p()) {
+				x.report(e.S, P2402, "%s() on %s is always true", name, x.typeName(at))
+			}
 		}
 	}
 	return then, els, true

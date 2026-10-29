@@ -221,7 +221,7 @@ function array_reduce(array $array, callable $callback, mixed $initial = null): 
  * @template K of array-key
  * @template V
  * @param array<K, V> $array
- * @return K|null
+ * @return ($array is non-empty-array ? K : K|null)
  */
 function array_key_first(array $array): int|string|null {}
 
@@ -229,7 +229,7 @@ function array_key_first(array $array): int|string|null {}
  * @template K of array-key
  * @template V
  * @param array<K, V> $array
- * @return K|null
+ * @return ($array is non-empty-array ? K : K|null)
  */
 function array_key_last(array $array): int|string|null {}
 
