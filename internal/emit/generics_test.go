@@ -26,12 +26,28 @@ func TestGenerics(t *testing.T) {
 	}
 	phpstan := os.Getenv("PHAENON_PHPSTAN")
 	php, _ := exec.LookPath("php")
-	var runtimeStub string
+	// PHPStan reads the runtime package's declarations beside the output;
+	// the stubs written in Phaenon are compiled first, as the package is.
+	var runtimeStubs []string
 	if phpstan != "" || php != "" {
 		dir := t.TempDir()
+		rp := program.New()
+		if err := rp.LoadStubs(); err != nil {
+			t.Fatal(err)
+		}
 		for _, s := range stdlib.Runtime() {
-			runtimeStub = filepath.Join(dir, filepath.Base(s.Path))
-			os.WriteFile(runtimeStub, s.Src, 0o644)
+			name, src := filepath.Base(s.Path), s.Src
+			if strings.HasSuffix(name, ".phn") {
+				f := rp.File("<stub>/" + s.Path)
+				compiled, err := Tree(src, f.AST, Options{SourceName: name, StrictTypes: true, Program: rp, File: f})
+				if err != nil {
+					t.Fatalf("%s: %v", name, err)
+				}
+				name, src = strings.TrimSuffix(name, ".phn")+".php", compiled
+			}
+			path := filepath.Join(dir, name)
+			os.WriteFile(path, src, 0o644)
+			runtimeStubs = append(runtimeStubs, path)
 		}
 	}
 	for _, path := range files {
@@ -74,7 +90,7 @@ func TestGenerics(t *testing.T) {
 			}
 			if phpstan != "" {
 				cfg := filepath.Join(t.TempDir(), "phpstan.neon")
-				os.WriteFile(cfg, []byte("parameters:\n    level: max\n    scanFiles:\n        - "+runtimeStub+"\n"), 0o644)
+				os.WriteFile(cfg, []byte("parameters:\n    level: max\n    scanFiles:\n        - "+strings.Join(runtimeStubs, "\n        - ")+"\n"), 0o644)
 				out, err := exec.Command(phpstan, "analyse", "--no-progress", "--error-format=raw", "-c", cfg, wantPath).CombinedOutput()
 				if err != nil {
 					var findings []string

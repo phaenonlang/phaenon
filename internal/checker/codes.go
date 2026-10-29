@@ -114,6 +114,7 @@ var (
 	P2514 = Code{"P2514", Error, "interface rule violated"}
 	P2515 = Code{"P2515", Error, "uninitialised readonly property"}
 	P2516 = Code{"P2516", Error, "untyped declaration"}
+	P2519 = Code{"P2519", Error, "method call on a receiver that is not one kind of value"}
 
 	// P3 — generics
 	P3001 = Code{"P3001", Error, "wrong number of type arguments"}

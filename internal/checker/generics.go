@@ -73,6 +73,10 @@ func (x *fnCtx) checkTypeExpr(t ast.TypeExpr) {
 			x.checkTypeExpr(m)
 		}
 		x.checkTypeExpr(t.Return)
+	case *ast.TupleType:
+		for _, m := range t.Elems {
+			x.checkTypeExpr(m)
+		}
 	}
 }
 
@@ -82,7 +86,7 @@ func (x *fnCtx) checkTypeExpr(t ast.TypeExpr) {
 var keywordArity = map[string][2]int{
 	"list": {1, 1}, "map": {2, 2}, "array": {0, 2}, "iterable": {0, 2}, "class": {0, 1},
 	"closure": {0, 0}, "callable": {0, 0}, "scalar": {0, 0}, "numeric": {0, 0}, "number": {0, 0},
-	"int": {0, 0}, "float": {0, 0}, "string": {0, 0}, "bool": {0, 0}, "mixed": {0, 0},
+	"int": {0, 0}, "float": {0, 0}, "string": {0, 0}, "bytes": {0, 0}, "bool": {0, 0}, "mixed": {0, 0},
 	"null": {0, 0}, "void": {0, 0}, "never": {0, 0}, "object": {0, 0}, "self": {0, 0},
 	"static": {0, 0}, "parent": {0, 0}, "true": {0, 0}, "false": {0, 0}, "resource": {0, 0},
 }

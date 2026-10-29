@@ -1,0 +1,167 @@
+namespace Phaenon;
+
+/**
+ * The text functions of the Phaenon stdlib (design/strings.md §4). A
+ * `string` is UTF-8 text and the unit is the code point: length(),
+ * slice() and indexOf() never split a character; graphemes are explicit.
+ * Every function takes the string first and accepts a \Stringable in its
+ * place. In Phaenon source these are the methods of a string: `$s->upper()`
+ * compiles to `Str::upper($s)`.
+ */
+final class Str
+{
+    private function __construct()
+    {
+    }
+
+    public static function length(string|\Stringable $s): int
+    {
+        return mb_strlen((string) $s);
+    }
+
+    public static function isEmpty(string|\Stringable $s): bool
+    {
+        return '' === (string) $s;
+    }
+
+    public static function upper(string|\Stringable $s): string
+    {
+        return mb_strtoupper((string) $s);
+    }
+
+    public static function lower(string|\Stringable $s): string
+    {
+        return mb_strtolower((string) $s);
+    }
+
+    public static function upperFirst(string|\Stringable $s): string
+    {
+        $s = (string) $s;
+
+        return mb_strtoupper(mb_substr($s, 0, 1)) . mb_substr($s, 1);
+    }
+
+    public static function trim(string|\Stringable $s, string $chars = " \t\n\r\0\x0B"): string
+    {
+        return trim((string) $s, $chars);
+    }
+
+    public static function trimStart(string|\Stringable $s, string $chars = " \t\n\r\0\x0B"): string
+    {
+        return ltrim((string) $s, $chars);
+    }
+
+    public static function trimEnd(string|\Stringable $s, string $chars = " \t\n\r\0\x0B"): string
+    {
+        return rtrim((string) $s, $chars);
+    }
+
+    public static function startsWith(string|\Stringable $s, string $prefix): bool
+    {
+        return str_starts_with((string) $s, $prefix);
+    }
+
+    public static function endsWith(string|\Stringable $s, string $suffix): bool
+    {
+        return str_ends_with((string) $s, $suffix);
+    }
+
+    public static function contains(string|\Stringable $s, string $needle): bool
+    {
+        return str_contains((string) $s, $needle);
+    }
+
+    public static function indexOf(string|\Stringable $s, string $needle, int $from = 0): ?int
+    {
+        $i = mb_strpos((string) $s, $needle, $from);
+
+        return false === $i ? null : $i;
+    }
+
+    public static function lastIndexOf(string|\Stringable $s, string $needle): ?int
+    {
+        $i = mb_strrpos((string) $s, $needle);
+
+        return false === $i ? null : $i;
+    }
+
+    public static function slice(string|\Stringable $s, int $start, ?int $length = null): string
+    {
+        return mb_substr((string) $s, $start, $length);
+    }
+
+    public static function split(string|\Stringable $s, string $separator, int $limit = PHP_INT_MAX): list<string>
+    {
+        return explode($separator, (string) $s, $limit);
+    }
+
+    public static function lines(string|\Stringable $s): list<string>
+    {
+        $lines = preg_split('/\r\n|\n|\r/', (string) $s);
+
+        return false === $lines ? [(string) $s] : $lines;
+    }
+
+    public static function replace(string|\Stringable $s, string $search, string $replacement): string
+    {
+        return str_replace($search, $replacement, (string) $s);
+    }
+
+    /**
+     * Every key replaced by its value in one pass, longest keys first, as strtr() does.
+     */
+    public static function replaceAll(string|\Stringable $s, map<string, string> $pairs): string
+    {
+        return strtr((string) $s, $pairs);
+    }
+
+    public static function repeat(string|\Stringable $s, int $times): string
+    {
+        return str_repeat((string) $s, $times);
+    }
+
+    public static function padStart(string|\Stringable $s, int $length, string $pad = ' '): string
+    {
+        return mb_str_pad((string) $s, $length, $pad, STR_PAD_LEFT);
+    }
+
+    public static function padEnd(string|\Stringable $s, int $length, string $pad = ' '): string
+    {
+        return mb_str_pad((string) $s, $length, $pad, STR_PAD_RIGHT);
+    }
+
+    public static function chars(string|\Stringable $s): list<string>
+    {
+        return mb_str_split((string) $s);
+    }
+
+    public static function graphemes(string|\Stringable $s): list<string>
+    {
+        $parts = grapheme_str_split((string) $s);
+
+        return false === $parts ? [] : $parts;
+    }
+
+    public static function graphemeLength(string|\Stringable $s): int
+    {
+        $n = grapheme_strlen((string) $s);
+
+        return is_int($n) ? $n : 0;
+    }
+
+    public static function truncate(string|\Stringable $s, int $graphemes, string $ellipsis = '…'): string
+    {
+        $s = (string) $s;
+        if (self::graphemeLength($s) <= $graphemes) {
+            return $s;
+        }
+        $head = grapheme_substr($s, 0, $graphemes);
+
+        return (false === $head ? '' : $head) . $ellipsis;
+    }
+
+    public static function matches(string|\Stringable $s, string $pattern): bool
+    {
+        return 1 === preg_match($pattern, (string) $s);
+    }
+}

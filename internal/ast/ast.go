@@ -546,6 +546,11 @@ type (
 		Params []TypeExpr
 		Return TypeExpr
 	}
+	// TupleType is Phaenon's (A, B): a positional shape (design/collections.md §2.4).
+	TupleType struct {
+		S     Span
+		Elems []TypeExpr
+	}
 )
 
 func (*NamedType) typeNode()        {}
@@ -553,12 +558,14 @@ func (*NullableType) typeNode()     {}
 func (*UnionType) typeNode()        {}
 func (*IntersectionType) typeNode() {}
 func (*ClosureType) typeNode()      {}
+func (*TupleType) typeNode()        {}
 
 func (n *NamedType) Span() Span        { return n.S }
 func (n *NullableType) Span() Span     { return n.S }
 func (n *UnionType) Span() Span        { return n.S }
 func (n *IntersectionType) Span() Span { return n.S }
 func (n *ClosureType) Span() Span      { return n.S }
+func (n *TupleType) Span() Span        { return n.S }
 
 // Variance of a Phaenon type parameter.
 type Variance uint8

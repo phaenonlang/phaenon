@@ -323,3 +323,74 @@ final class Spec
 function takesClass(string $c): void
 {
 }
+
+final class Field
+{
+    public function __construct(public readonly string $name, public readonly ?Field $next)
+    {
+    }
+}
+
+final class Version
+{
+    public function __construct(public readonly Field $primary, public readonly ?Field $field)
+    {
+    }
+}
+
+function chains(?Version $v, Field $f): string
+{
+    $name = $v?->primary->name; // the chain short-circuits on $v: ?string
+    $bad = $v?->field->name; // want P2105
+    if (null !== $fieldName = $v?->field?->name) {
+        takesString($fieldName);
+        takesString($v->field->name); // both narrowed by the non-null result
+    }
+
+    return $name ?? $bad ?? $f->next?->next->name ?? '';
+}
+
+/**
+ * @param array<string, string> $bindings
+ */
+function bound(string $alias, array $bindings, string $base): void
+{
+    $b = $bindings[$alias] ?? null;
+    if (null === $b || !is_a($b, $base, true)) {
+        return;
+    }
+    takesClass($b);
+}
+
+/**
+ * @param array<string, mixed> $options
+ * @return array<string, mixed>
+ */
+function withDefault(array $options): array
+{
+    return array_filter($options, fn (int|string $k): bool => 'x' !== strtolower((string) $k), ARRAY_FILTER_USE_KEY) + ['x' => 0];
+}
+
+/**
+ * @param array<string, list<int>> $by
+ * @param list<int> $more
+ * @param list<array<string, mixed>> $stages
+ */
+function merged(array $by, array $more, array $stages, string $k): void
+{
+    $by[$k] = array_merge($by[$k] ?? [], $more);
+    takesList($by[$k]);
+    foreach ($stages as $i => $stage) {
+        if (!is_array($stage) || 1 !== count($stage)) { // erasure lets anything in: not always true
+            continue;
+        }
+        takesInt($i);
+    }
+}
+
+/**
+ * @param list<int> $l
+ */
+function takesList(array $l): void
+{
+}

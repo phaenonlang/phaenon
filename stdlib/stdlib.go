@@ -57,7 +57,7 @@ func EmbeddedExtensions() map[string]bool {
 // Runtime returns the declarations of the phaenon/runtime package
 // (`\Phaenon\Type`), which compiled code may depend on.
 func Runtime() []Stub {
-	return walk(runtime, "runtime", ".php")
+	return append(walk(runtime, "runtime", ".php"), walk(runtime, "runtime", ".phn")...)
 }
 
 func walk(f embed.FS, root, suffix string) []Stub {

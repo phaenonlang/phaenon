@@ -1,0 +1,167 @@
+namespace Phaenon;
+
+use Closure;
+
+/**
+ * The list functions of the Phaenon stdlib (design/collections.md §3). A
+ * `list<T>` is a PHP array with keys 0..n-1; every function here takes the
+ * list first and returns a new array, PHP's value semantics throughout. In
+ * Phaenon source these are the methods of a list: `$xs->map($f)` compiles
+ * to `Seq::map($xs, $f)`.
+ */
+final class Seq
+{
+    private function __construct()
+    {
+    }
+
+    public static function map<T, U>(list<T> $xs, Closure(T): U $f): list<U>
+    {
+        return array_map($f, $xs);
+    }
+
+    public static function filter<T>(list<T> $xs, Closure(T): bool $keep): list<T>
+    {
+        return array_values(array_filter($xs, $keep));
+    }
+
+    public static function reduce<T, A>(list<T> $xs, A $initial, Closure(A, T): A $f): A
+    {
+        $acc = $initial;
+        foreach ($xs as $x) {
+            $acc = $f($acc, $x);
+        }
+
+        return $acc;
+    }
+
+    public static function each<T>(list<T> $xs, Closure(T): void $f): void
+    {
+        foreach ($xs as $x) {
+            $f($x);
+        }
+    }
+
+    public static function first<T>(list<T> $xs): ?T
+    {
+        return [] === $xs ? null : $xs[0];
+    }
+
+    public static function last<T>(list<T> $xs): ?T
+    {
+        return [] === $xs ? null : $xs[count($xs) - 1];
+    }
+
+    public static function contains<T>(list<T> $xs, T $needle): bool
+    {
+        return in_array($needle, $xs, true);
+    }
+
+    public static function indexOf<T>(list<T> $xs, T $needle): ?int
+    {
+        $i = array_search($needle, $xs, true);
+
+        return is_int($i) ? $i : null;
+    }
+
+    public static function slice<T>(list<T> $xs, int $offset, ?int $length = null): list<T>
+    {
+        return array_values(array_slice($xs, $offset, $length));
+    }
+
+    public static function concat<T>(list<T> ...$lists): list<T>
+    {
+        return self::flatten($lists);
+    }
+
+    public static function reverse<T>(list<T> $xs): list<T>
+    {
+        return array_reverse($xs);
+    }
+
+    public static function sort<T>(list<T> $xs, ?Closure(T, T): int $cmp = null): list<T>
+    {
+        if (null === $cmp) {
+            sort($xs);
+        } else {
+            usort($xs, $cmp);
+        }
+
+        return array_values($xs);
+    }
+
+    public static function sortBy<T, K of int|string>(list<T> $xs, Closure(T): K $key): list<T>
+    {
+        usort($xs, fn ($a, $b): int => $key($a) <=> $key($b));
+
+        return array_values($xs);
+    }
+
+    public static function unique<T of int|string>(list<T> $xs): list<T>
+    {
+        return array_values(array_unique($xs));
+    }
+
+    public static function flatten<T>(list<list<T>> $xs): list<T>
+    {
+        $out = [];
+        foreach ($xs as $inner) {
+            foreach ($inner as $x) {
+                $out[] = $x;
+            }
+        }
+
+        return $out;
+    }
+
+    public static function chunk<T>(list<T> $xs, int $size): list<list<T>>
+    {
+        return array_chunk($xs, $size);
+    }
+
+    public static function zip<A, B>(list<A> $as, list<B> $bs): list<(A, B)>
+    {
+        $out = [];
+        $n = min(count($as), count($bs));
+        for ($i = 0; $i < $n; ++$i) {
+            $out[] = [$as[$i], $bs[$i]];
+        }
+
+        return $out;
+    }
+
+    public static function keyBy<T, K of int|string>(list<T> $xs, Closure(T): K $key): map<K, T>
+    {
+        $out = [];
+        foreach ($xs as $x) {
+            $out[$key($x)] = $x;
+        }
+
+        return $out;
+    }
+
+    public static function groupBy<T, K of int|string>(list<T> $xs, Closure(T): K $key): map<K, list<T>>
+    {
+        $out = [];
+        foreach ($xs as $x) {
+            $out[$key($x)][] = $x;
+        }
+
+        return $out;
+    }
+
+    public static function join(list<string|\Stringable> $xs, string $separator): string
+    {
+        return implode($separator, $xs);
+    }
+
+    public static function isEmpty(list<mixed> $xs): bool
+    {
+        return [] === $xs;
+    }
+
+    public static function count(list<mixed> $xs): int
+    {
+        return count($xs);
+    }
+}

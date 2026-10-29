@@ -134,6 +134,8 @@ type (
 	Iterable struct{ Key, Value Type }
 	// Resource is the resource type.
 	Resource struct{}
+	// Bytes is binary data, a PHP string kept apart from text (design/strings.md §2).
+	Bytes struct{}
 	// Union and Intersection are normalised: flat, no duplicates, at least two members.
 	Union        struct{ Types []Type }
 	Intersection struct{ Types []Type }
@@ -185,6 +187,7 @@ func (EnumCase) typeNode()     {}
 func (Callable) typeNode()     {}
 func (Iterable) typeNode()     {}
 func (Resource) typeNode()     {}
+func (Bytes) typeNode()        {}
 func (Union) typeNode()        {}
 func (Intersection) typeNode() {}
 func (Param) typeNode()        {}
@@ -205,6 +208,8 @@ var (
 	TString   Type = String{}
 	TObject   Type = Object{}
 	TResource Type = Resource{}
+	// TBytes is bytes.
+	TBytes    Type = Bytes{}
 	TCallable Type = Callable{}
 	TClosure  Type = Callable{Closure: true}
 	// TArray is array<array-key, mixed>.
@@ -245,7 +250,7 @@ func NewClass(name string) Type { return Class{Name: name} }
 // Equal reports structural equality after normalisation.
 func Equal(a, b Type) bool {
 	switch a := a.(type) {
-	case Mixed, Never, Void, Null, Bool, Float, Object, Resource:
+	case Mixed, Never, Void, Null, Bool, Float, Object, Resource, Bytes:
 		return a == b
 	case BoolLit:
 		b, ok := b.(BoolLit)
@@ -911,6 +916,7 @@ const (
 	kindArray
 	kindObject
 	kindResource
+	kindBytes
 	kindCallable
 	kindIterable
 )
@@ -933,6 +939,8 @@ func kindOf(t Type) kind {
 		return kindObject
 	case Resource:
 		return kindResource
+	case Bytes:
+		return kindBytes
 	case Callable:
 		return kindCallable
 	case Iterable:
