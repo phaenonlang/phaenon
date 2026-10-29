@@ -98,6 +98,9 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 ## PhpStorm plugin (`../jetbrains`)
 
 - No Phaenon-only syntax yet: generics, `is` / `as`, `type` aliases show as PHP syntax errors.
+- **M4 ships with editor support for the method syntax** (decided 2026-10-30, `collections.md`
+  §7): completion and resolution of `Seq`/`Map`/`Str`/`Bytes` methods on `list`, `map`,
+  `string` and `bytes` receivers, and the tuple type `(A, B)`.
 - The implied `declare(strict_types=1)` is not modelled.
 - Editor colouring relies on the internal extension point `com.jetbrains.php.baseLexerProvider`.
 
