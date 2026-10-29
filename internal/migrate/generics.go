@@ -393,9 +393,11 @@ func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
 	for _, tp := range fn.TypeParams {
 		sc[tp.Name.Name] = l.astAtoms(tp.Bound, sc)
 	}
+	lifted := map[string]string{}
 	if d != nil {
-		l.signature(d, fn.Params, fn.ReturnType, sc)
+		lifted = l.signature(d, fn.Params, fn.ReturnType, sc)
 	}
+	l.paramDocs(fn.Params, lifted, sc)
 	l.finish(d)
 	l.stmts(fn.Body, sc)
 }
@@ -409,9 +411,11 @@ func (l *lifter) methodDecl(m *ast.MethodDecl, outer scope) {
 	for _, tp := range m.TypeParams {
 		sc[tp.Name.Name] = l.astAtoms(tp.Bound, sc)
 	}
+	lifted := map[string]string{}
 	if d != nil {
-		l.signature(d, m.Params, m.ReturnType, sc)
+		lifted = l.signature(d, m.Params, m.ReturnType, sc)
 	}
+	l.paramDocs(m.Params, lifted, sc)
 	l.finish(d)
 	l.stmts(m.Body, sc)
 }
@@ -617,7 +621,7 @@ func nameMatches(docName string, n *ast.Name) bool {
 
 // signature lifts the @param and @return tags of a function-like
 // declaration.
-func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc scope) {
+func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc scope) map[string]string {
 	lifted := map[string]string{}
 	for _, g := range d.groups {
 		off := d.start + lineOffset(d, g.first)
@@ -685,6 +689,55 @@ func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc sco
 				d.remove(g)
 			}
 		}
+	}
+	return lifted
+}
+
+// paramDocs lifts the `/** @var T */` a promoted property carries on its
+// parameter, unless the method's own @param typed the parameter already.
+func (l *lifter) paramDocs(params []*ast.Param, lifted map[string]string, sc scope) {
+	for _, p := range params {
+		if p.Doc == "" {
+			continue
+		}
+		d := l.findDoc(p.Doc, p.S.Start)
+		if d == nil {
+			continue
+		}
+		for _, g := range d.groups {
+			if g.name != "@var" {
+				continue
+			}
+			off := d.start + lineOffset(d, g.first)
+			if _, ok := lifted[p.Var.Name]; ok {
+				l.note(off, "kept %s: the @param tag already typed $%s", g.tag, p.Var.Name)
+				continue
+			}
+			if len(g.parsed.Vars) != 1 || g.parsed.Vars[0].Type == nil {
+				l.note(off, "kept %s: unreadable type", g.tag)
+				continue
+			}
+			v := g.parsed.Vars[0]
+			if v.Name != "" && v.Name != p.Var.Name {
+				l.note(off, "kept %s: names another variable", g.tag)
+				continue
+			}
+			text, ok := l.liftable(off, g, v.Type, p.Type, sc, p.Type == nil)
+			if !ok {
+				continue
+			}
+			at := p.Var.S.Start
+			for at > 0 && (l.src[at-1] == '.' || l.src[at-1] == '&') {
+				at--
+			}
+			l.setType(p.Type, at, text)
+			if g.description(v.Name != "") != "" {
+				l.note(off, "kept %s: it has a description; the type is now also in the declaration", g.tag)
+			} else {
+				d.remove(g)
+			}
+		}
+		l.finish(d)
 	}
 }
 
@@ -812,9 +865,15 @@ func render(n *docblock.TypeNode) (string, bool) {
 			}
 		}
 		var parts []string
+		var closure *docblock.TypeNode
 		for _, m := range n.Args {
 			if m.Kind == docblock.KindCallable {
-				return "", false
+				if closure != nil {
+					return "", false
+				}
+				// Spelled last: its return type would swallow the members after it.
+				closure = m
+				continue
 			}
 			s, ok := render(m)
 			if !ok {
@@ -822,6 +881,13 @@ func render(n *docblock.TypeNode) (string, bool) {
 			}
 			if m.Kind == docblock.KindIntersection {
 				s = "(" + s + ")"
+			}
+			parts = append(parts, s)
+		}
+		if closure != nil {
+			s, ok := render(closure)
+			if !ok {
+				return "", false
 			}
 			parts = append(parts, s)
 		}
