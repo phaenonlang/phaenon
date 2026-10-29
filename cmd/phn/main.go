@@ -44,15 +44,17 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, strings.TrimSpace(`
 usage:
-  phn build [--out DIR] [--check] [--no-types] <path>...   type-check and compile .phn files to .php
+  phn build [--out DIR] [--check] [--no-types] [--emit-on-error] <path>...
+                                                           type-check and compile .phn files to .php
   phn check [--json] [--no-deprecations] <path>...         type-check .phn files, write nothing
   phn migrate [--keep-docblocks] <path>...                 rewrite .php files as .phn; lift generic docblocks into syntax
   phn lex   [--php] <file>                                 dump the token stream
   phn print [--php] <file>                                 parse and pretty-print
 
 build writes Foo.php next to Foo.phn, or under DIR (mirroring the path given) with --out;
-a file with type errors is not written. --check writes nothing and fails when any output
-is missing or stale. --no-types skips the type checker.
+a file with type errors is not written unless --emit-on-error is given (the exit status still
+reports the errors). --check writes nothing and fails when any output is missing or stale.
+--no-types skips the type checker.
 check reads vendor code through the nearest vendor/composer autoload maps.
 --php reads the file as plain PHP (with <?php tags) instead of Phaenon.`))
 	os.Exit(2)
@@ -102,6 +104,7 @@ func build(args []string) {
 	out := fs.String("out", "", "write outputs under this directory instead of beside the sources")
 	check := fs.Bool("check", false, "verify outputs are up to date; write nothing")
 	noTypes := fs.Bool("no-types", false, "skip the type checker")
+	emitOnError := fs.Bool("emit-on-error", false, "write files that have type errors too; the exit status still reports them")
 	fs.Parse(args)
 	if fs.NArg() == 0 {
 		usage()
@@ -122,7 +125,9 @@ func build(args []string) {
 	for _, in := range files {
 		if broken[in] {
 			failed++
-			continue
+			if !*emitOnError {
+				continue
+			}
 		}
 		src, err := os.ReadFile(in)
 		if err != nil {
