@@ -11,11 +11,10 @@ import (
 
 // This file holds the rules that only Phaenon's generic syntax needs:
 // type-argument arity and bounds, variance positions, what an erased type
-// parameter may be used for, `is` / `as`, explicit type arguments on calls
-// and the placement of `reified`.
+// parameter may be used for, `is` / `as`, explicit type arguments on calls.
 
-// RuntimeType is the class that carries a reified type parameter at
-// runtime (the `phaenon/runtime` package).
+// RuntimeType is the descriptor class behind structural `is` / `as`
+// (the `phaenon/runtime` package).
 const RuntimeType = "Phaenon\\Type"
 
 // typeParamRef reports whether a name in an expression position refers to
@@ -27,45 +26,24 @@ func (x *fnCtx) typeParamRef(n *ast.Name) *program.TypeParam {
 	return x.res.TypeParam(n.Parts[0])
 }
 
-// paramValue types a use of a type parameter as a value and reports the
-// uses that erasure forbids. ok is false when the use was rejected.
+// paramValue reports a use of a type parameter as a value. Type parameters
+// are erased, so `new T`, `T::class` and `$x instanceof T` have nothing to
+// run on; the fix is a `class<T>` value (design/generics.md §11.2). ok is
+// always false; t and cl describe the parameter for the caller's recovery.
 func (x *fnCtx) paramValue(tp *program.TypeParam, span ast.Span, use string) (t types.Type, cl *program.Class, ok bool) {
 	t = x.res.ParamType(tp)
 	if names := types.ClassNames(tp.Bound); len(names) == 1 {
 		cl = x.p().Class(names[0])
 	}
-	if !tp.Reified {
-		x.report(span, P3003, "%s on erased type parameter %s: declare it `reified`, or test against its bound", use, tp.Name)
-		return t, cl, false
-	}
-	if x.static && x.classParam(tp) {
-		x.report(span, P3008, "type parameter %s of class %s is not available in a static member", tp.Name, x.class.Name)
-		return t, cl, false
-	}
-	return t, cl, true
+	x.report(span, P3003, "%s on type parameter %s, which is erased at runtime: take a class<%s> value and use that instead", use, tp.Name, tp.Name)
+	return t, cl, false
 }
 
-// classParam reports whether tp is one of the current class's parameters.
-func (x *fnCtx) classParam(tp *program.TypeParam) bool {
-	if x.class == nil {
-		return false
-	}
-	for _, c := range x.class.TypeParams {
-		if c == tp {
-			return true
-		}
-	}
-	return false
-}
-
-// paramAsValue types a bare `T` in expression position: the runtime
-// descriptor of a reified parameter.
+// paramAsValue types a bare `T` in expression position: always an error,
+// a type parameter has no runtime value.
 func (x *fnCtx) paramAsValue(tp *program.TypeParam, span ast.Span) types.Type {
-	t, _, ok := x.paramValue(tp, span, "use as a value")
-	if !ok {
-		return types.TError
-	}
-	return types.Class{Name: RuntimeType, Args: []types.Type{t}}
+	x.paramValue(tp, span, "use as a value")
+	return types.TError
 }
 
 // ------------------------------------------------------------------ type expressions
@@ -99,18 +77,11 @@ func (x *fnCtx) checkTypeExpr(t ast.TypeExpr) {
 }
 
 // keywordArity is the number of type arguments the built-in type keywords
-// accept in Phaenon syntax.
+// accept in Phaenon syntax. PHPStan's hyphenated names are not among them:
+// they are docblock vocabulary (design/generics.md §11.2).
 var keywordArity = map[string][2]int{
-	"list": {1, 1}, "non-empty-list": {1, 1}, "map": {2, 2},
-	"array": {0, 2}, "non-empty-array": {0, 2}, "iterable": {0, 2},
-	"class-string": {0, 1}, "interface-string": {0, 1}, "enum-string": {0, 1}, "trait-string": {0, 1},
-	"closure": {0, 0}, "callable": {0, 0}, "pure-callable": {0, 0}, "pure-closure": {0, 0},
-	"callable-array": {0, 2}, "non-empty-map": {2, 2}, "key-of": {1, 1}, "value-of": {1, 1},
-	"array-key": {0, 0}, "scalar": {0, 0}, "numeric": {0, 0}, "number": {0, 0},
-	"non-empty-string": {0, 0}, "numeric-string": {0, 0}, "literal-string": {0, 0}, "non-empty-literal-string": {0, 0},
-	"callable-string": {0, 0}, "lowercase-string": {0, 0}, "non-empty-lowercase-string": {0, 0},
-	"truthy-string": {0, 0}, "non-falsy-string": {0, 0},
-	"positive-int": {0, 0}, "negative-int": {0, 0}, "non-negative-int": {0, 0}, "non-positive-int": {0, 0},
+	"list": {1, 1}, "map": {2, 2}, "array": {0, 2}, "iterable": {0, 2}, "class": {0, 1},
+	"closure": {0, 0}, "callable": {0, 0}, "scalar": {0, 0}, "numeric": {0, 0}, "number": {0, 0},
 	"int": {0, 0}, "float": {0, 0}, "string": {0, 0}, "bool": {0, 0}, "mixed": {0, 0},
 	"null": {0, 0}, "void": {0, 0}, "never": {0, 0}, "object": {0, 0}, "self": {0, 0},
 	"static": {0, 0}, "parent": {0, 0}, "true": {0, 0}, "false": {0, 0}, "resource": {0, 0},
@@ -224,8 +195,8 @@ func itoa(n int) string {
 }
 
 // checkTypeParams validates a declaration's own type parameters: their
-// bounds and defaults, and where `reified` may appear.
-func (x *fnCtx) checkTypeParams(tps []*ast.TypeParam, reifiedAllowed bool, where string) {
+// bounds and defaults.
+func (x *fnCtx) checkTypeParams(tps []*ast.TypeParam) {
 	seen := map[string]bool{}
 	for _, tp := range tps {
 		if seen[tp.Name.Name] {
@@ -234,12 +205,6 @@ func (x *fnCtx) checkTypeParams(tps []*ast.TypeParam, reifiedAllowed bool, where
 		seen[tp.Name.Name] = true
 		x.checkTypeExpr(tp.Bound)
 		x.checkTypeExpr(tp.Default)
-		if tp.Reified && !reifiedAllowed {
-			x.report(tp.S, P3006, "%s cannot declare a reified type parameter", where)
-		}
-		if tp.Reified && tp.Variance != ast.Invariant {
-			x.report(tp.S, P3006, "reified type parameter %s cannot be in or out: a runtime value is invariant", tp.Name.Name)
-		}
 		if tp.Default != nil && tp.Bound != nil {
 			d, b := x.res.Native(tp.Default), x.res.Native(tp.Bound)
 			if !types.IsSubtype(d, b, x.p()) {
@@ -373,28 +338,15 @@ func (x *fnCtx) variance(t types.Type, pos variancePos, span ast.Span, where str
 
 // ------------------------------------------------------------------ declarations
 
-// checkGenericClass applies the class-level rules: reified placement,
-// generic property redeclaration, static members and variance.
+// checkGenericClass applies the class-level rules: generic property
+// redeclaration, static members and variance.
 func (c *Checker) checkGenericClass(cl *program.Class) {
 	d := cl.Decl
 	if cl.File.Mode != lexer.ModePhaenon || d == nil {
 		return
 	}
 	ctx := c.newCtx(cl.File, cl.Scope, cl, false)
-	where := "class " + cl.Name
-	reifiedAllowed := d.Kind == ast.KindClass
-	switch d.Kind {
-	case ast.KindInterface:
-		where = "interface " + cl.Name
-	case ast.KindTrait:
-		where = "trait " + cl.Name
-	case ast.KindEnum:
-		where = "enum " + cl.Name
-	}
-	if d.Kind == ast.KindInterface {
-		where += " (no constructor carries it)"
-	}
-	ctx.checkTypeParams(d.TypeParams, reifiedAllowed, where)
+	ctx.checkTypeParams(d.TypeParams)
 	for _, e := range d.Extends {
 		ctx.checkTypeExpr(e)
 	}
@@ -404,27 +356,6 @@ func (c *Checker) checkGenericClass(cl *program.Class) {
 	for _, m := range d.Members {
 		if pd, ok := m.(*ast.PropertyDecl); ok {
 			ctx.checkTypeExpr(pd.Type)
-		}
-	}
-	// A reified parent needs its argument from every subclass: either a
-	// closed type (`extends Repository<User>`) or a reified parameter of
-	// the subclass itself.
-	if d.Kind == ast.KindClass && len(d.Extends) > 0 {
-		if parent := cl.ParentClass(); parent != nil {
-			parent.Signature()
-			for i, tp := range parent.TypeParams {
-				if !tp.Reified {
-					continue
-				}
-				if i >= len(cl.ParentArgs) {
-					x := d.Extends[0]
-					c.report(x.S, P3005, "%s has a reified type parameter %s; extends %s<…> must bind it", parent.Name, tp.Name, parent.Name)
-					continue
-				}
-				if !ctx.closedOrReified(cl.ParentArgs[i]) {
-					c.report(d.Extends[0].TypeArgs[i].Span(), P3005, "the argument for reified %s of %s must be a class type or a reified parameter of %s", tp.Name, parent.Name, cl.Name)
-				}
-			}
 		}
 	}
 	// Properties whose type mentions a class parameter cannot be
@@ -498,26 +429,13 @@ func (x *fnCtx) mentionsClassParam(t types.Type) bool {
 	return found
 }
 
-// closedOrReified reports whether a type argument can be turned into a
-// runtime value: a class type, or a reified parameter in scope.
-func (x *fnCtx) closedOrReified(t types.Type) bool {
-	switch t := t.(type) {
-	case types.Class:
-		return true
-	case types.Param:
-		tp := x.res.TypeParam(t.Name)
-		return tp != nil && tp.Reified
-	}
-	return false
-}
-
 // checkSignatureTypes validates the written types of a function or
 // method: type arguments, and its own type parameters.
-func (x *fnCtx) checkSignatureTypes(tps []*ast.TypeParam, params []*ast.Param, ret ast.TypeExpr, reifiedAllowed bool, where string) {
+func (x *fnCtx) checkSignatureTypes(tps []*ast.TypeParam, params []*ast.Param, ret ast.TypeExpr) {
 	if x.file.Mode != lexer.ModePhaenon {
 		return
 	}
-	x.checkTypeParams(tps, reifiedAllowed, where)
+	x.checkTypeParams(tps)
 	for _, p := range params {
 		x.checkTypeExpr(p.Type)
 	}
@@ -533,7 +451,7 @@ func (x *fnCtx) checkTypeAlias(a *ast.TypeAlias) {
 	}
 	saved := x.res
 	x.res = x.res.WithParams(decl.Params)
-	x.checkTypeParams(a.TypeParams, false, "type alias "+a.Name.Name)
+	x.checkTypeParams(a.TypeParams)
 	x.checkTypeExpr(a.Type)
 	x.res = saved
 }
@@ -641,7 +559,7 @@ func (x *fnCtx) closureTypeParams(tps []*ast.TypeParam) {
 	if len(tps) == 0 {
 		return
 	}
-	x.checkTypeParams(tps, false, "a closure")
+	x.checkTypeParams(tps)
 	params := x.res.NativeParams(tps)
 	x.res = x.res.WithParams(params)
 	scope := make(map[string]bool, len(x.inScope)+len(params))

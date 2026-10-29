@@ -1,8 +1,9 @@
 namespace Lifted;
 
-// What `phn migrate` produces from PHPStan code: hyphenated type names,
-// generic signatures on interfaces that plain overrides inherit, and
-// prose-only @param tags.
+// What `phn migrate` produces from PHPStan code: class-string<T> lifted
+// to class<T>, generic signatures on interfaces that plain overrides
+// inherit, prose-only @param tags, and PHPStan's refinement types left in
+// docblocks (design/generics.md §11.2).
 
 function takesInt(int $i): void
 {
@@ -14,14 +15,14 @@ function takesString(string $s): void
 
 interface Reflector<ClassType of object>
 {
-    public function reflect(class-string<ClassType> $className): \ReflectionClass<ClassType>;
+    public function reflect(class<ClassType> $className): \ReflectionClass<ClassType>;
 
-    public function names(): list<class-string<ClassType>>;
+    public function names(): list<class<ClassType>>;
 }
 
 final class Cached<ClassType of object> implements Reflector<ClassType>
 {
-    private map<class-string<ClassType>, \ReflectionClass<ClassType>> $cache = [];
+    private map<class<ClassType>, \ReflectionClass<ClassType>> $cache = [];
 
     // No docblock, erased native types: the interface's generic signature
     // carries over, as PHPStan's implicit @inheritDoc does for docblocks.
@@ -47,13 +48,19 @@ final class Service
      * @param $r the reflector to use
      * @param $c the class to describe
      */
-    public function __construct<U of object>(private readonly Reflector $r, class-string<U> $c)
+    public function __construct<U of object>(private readonly Reflector $r, class<U> $c)
     {
         takesString($c);
     }
 }
 
-function hyphens(non-empty-string $s, array-key $k, positive-int $n, Closure(int): string $f, numeric-string $q, ?Closure(object, object): object $m): void
+/**
+ * @param non-empty-string $s
+ * @param array-key $k
+ * @param positive-int $n
+ * @param numeric-string $q
+ */
+function hyphens(string $s, int|string $k, int $n, Closure(int): string $f, string $q, ?Closure(object, object): object $m): void
 {
     takesString($s);
     takesInt($k); // want P2103

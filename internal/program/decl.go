@@ -57,7 +57,6 @@ type TypeParam struct {
 	Bound    types.Type // nil = mixed
 	Default  types.Type
 	Variance types.Variance
-	Reified  bool
 	// Native marks a parameter declared in Phaenon syntax (`class Foo<T>`)
 	// rather than in a docblock: the emitter erases it and the checker
 	// applies the Phaenon rules (variance positions, static members, …).

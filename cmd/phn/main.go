@@ -129,7 +129,7 @@ func build(args []string) {
 		}
 		opts := emit.Options{SourceName: in, StrictTypes: true}
 		if loadedChecker != nil {
-			opts.Program, opts.File, opts.Reified = loadedProgram, loadedProgram.File(in), loadedChecker.ReifiedArgs
+			opts.Program, opts.File = loadedProgram, loadedProgram.File(in)
 		}
 		php, err := emit.File(src, opts)
 		if err != nil {

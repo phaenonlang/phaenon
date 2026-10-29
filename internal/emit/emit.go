@@ -27,7 +27,6 @@ import (
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/program"
-	"github.com/phaenonlang/phaenon/internal/types"
 )
 
 // Marker is the comment that identifies generated output; it is always on
@@ -48,9 +47,6 @@ type Options struct {
 	// Phaenon type syntax cannot be compiled without them.
 	Program *program.Program
 	File    *program.File
-	// Reified returns, for a call site, the types bound to the callee's
-	// reified type parameters (the checker records them).
-	Reified func(ast.Node) []types.Type
 }
 
 // Error is an emission error at a source position.

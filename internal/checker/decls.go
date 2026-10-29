@@ -53,7 +53,7 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 	for _, tp := range fn.TypeParams {
 		ctx.inScope[tp.Name] = true
 	}
-	ctx.checkSignatureTypes(fn.Decl.TypeParams, fn.Decl.Params, fn.Decl.ReturnType, true, "function "+fn.Name+"()")
+	ctx.checkSignatureTypes(fn.Decl.TypeParams, fn.Decl.Params, fn.Decl.ReturnType)
 	c.checkUntyped(f, fn.Decl.Params, fn.Params, fn.Decl.ReturnType, fn.Return, fn.Decl.Name.Name, fn.Decl.S)
 	ctx.body(fn.Params, fn.Decl.Params, fn.Decl.Body, fn.Decl.Name.S)
 }
@@ -407,7 +407,7 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	}
 	sctx := c.newCtx(cl.File, cl.Scope, cl, m.Static)
 	sctx.res = sctx.res.WithParams(m.TypeParams)
-	sctx.checkSignatureTypes(d.TypeParams, d.Params, d.ReturnType, true, cl.Name+"::"+m.Name+"()")
+	sctx.checkSignatureTypes(d.TypeParams, d.Params, d.ReturnType)
 	if !d.HasBody {
 		return
 	}

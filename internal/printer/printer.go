@@ -266,9 +266,6 @@ func (p *Printer) typeParams(params []*ast.TypeParam) {
 		if i > 0 {
 			p.w(", ")
 		}
-		if tp.Reified {
-			p.w("reified ")
-		}
 		switch tp.Variance {
 		case ast.Covariant:
 			p.w("out ")

@@ -120,8 +120,8 @@ var (
 	P3002 = Code{"P3002", Error, "type argument outside its bound"}
 	P3003 = Code{"P3003", Error, "erased type parameter used as a value"}
 	P3004 = Code{"P3004", Error, "variance violation"}
-	P3005 = Code{"P3005", Error, "reified type parameter cannot be inferred"}
-	P3006 = Code{"P3006", Error, "reified not allowed here"}
+	// P3005 and P3006 belonged to reified type parameters, removed on
+	// 2026-10-29 (design/generics.md §11.2); the codes stay reserved.
 	P3007 = Code{"P3007", Error, "generic property redeclared"}
 	P3008 = Code{"P3008", Error, "class type parameter in a static member"}
 	P3009 = Code{"P3009", Error, "type arguments on a non-generic callee"}

@@ -60,26 +60,24 @@ final class User extends Model
 {
 }
 
+// Runtime generics are written, not synthesised: a class<T> value carries
+// the type, the compiler adds nothing (design/generics.md §11.2).
 /** @template T of Model */
 class Repository
 {
-    /** @var \Phaenon\Type<T> */
-    private readonly \Phaenon\Type $__T;
-
     /** @var array<int, Model> */
     private array $items = [];
 
-    /** @param class-string<T>|\Phaenon\Type<T> $T */
-    public function __construct(string|\Phaenon\Type $T, private readonly string $table = 'default')
+    /** @param class-string<T> $class */
+    public function __construct(private readonly string $class, private readonly string $table = 'default')
     {
-        $this->__T = \Phaenon\Type::from($T);
     }
 
     /** @return ?T */
     public function get(int $id): ?Model
     {
         $item = $this->items[$id] ?? null;
-        if ($this->__T->check($item)) {
+        if ($item instanceof $this->class) {
             return $item;
         }
         return null;
@@ -88,12 +86,12 @@ class Repository
     /** @return T */
     public function fresh(int $id): Model
     {
-        return $this->__T->instantiate($id);
+        return new $this->class($id);
     }
 
     public function describe(): string
     {
-        return $this->__T->className() . ' in ' . $this->table . ' (' . $this->__T->name() . ')';
+        return $this->class . ' in ' . $this->table;
     }
 
     /** @return list<T> */
@@ -101,7 +99,7 @@ class Repository
     {
         $out = [];
         foreach ($this->items as $item) {
-            if ($this->__T->check($item)) {
+            if ($item instanceof $this->class) {
                 $out[] = $item;
             }
         }
@@ -114,7 +112,7 @@ final class UserRepository extends Repository
 {
     public function __construct(string $table = 'default')
     {
-        parent::__construct(\App\User::class, $table);
+        parent::__construct(User::class, $table);
     }
 }
 
@@ -124,14 +122,10 @@ final class UserRepository extends Repository
  */
 final class LoggingRepository extends Repository
 {
-    /** @var \Phaenon\Type<T> */
-    private readonly \Phaenon\Type $__T;
-
-    /** @param class-string<T>|\Phaenon\Type<T> $T */
-    public function __construct(string|\Phaenon\Type $T, private readonly string $log)
+    /** @param class-string<T> $class */
+    public function __construct(string $class, private readonly string $log)
     {
-        $this->__T = \Phaenon\Type::from($T);
-        parent::__construct($this->__T, 'logged');
+        parent::__construct($class, 'logged');
     }
 
     public function log(): string
@@ -152,15 +146,14 @@ function first(array $items): mixed
 
 /**
  * @template T of Model
- * @param class-string<T>|\Phaenon\Type<T> $T
+ * @param class-string<T> $class
  * @return T
  */
-function decode(string|\Phaenon\Type $T, int $id): Model
+function decode(string $class, int $id): Model
 {
-    $T = \Phaenon\Type::from($T);
     $make = /** @return T */
-    function (int $n) use ($id, $T): Model {
-        return $T->instantiate($n + $id);
+    function (int $n) use ($class, $id): Model {
+        return new $class($n + $id);
     };
     return $make(1);
 }
@@ -177,9 +170,9 @@ function sum(array $ids, array $table): int
 /** @param Box<int> $box */
 function uses(mixed $m, Box $box): void
 {
-    $repo = new Repository(\App\User::class, 'users');
+    $repo = new Repository(User::class, 'users');
     $user = $repo->get(1);
-    $fresh = decode(\App\User::class, 2);
+    $fresh = decode(User::class, 2);
     $n = first([1, 2]);
     $s = $box->map(fn(int $x): string => (string) $x)->get();
     if (\is_int($m)) {
@@ -197,17 +190,18 @@ function uses(mixed $m, Box $box): void
 }
 
 /**
- * What a lifted PHPStan signature looks like: hyphenated names, a param tag
- * with prose only, a Closure the lexer would otherwise read as a cast.
+ * What a lifted PHPStan signature looks like: class<T>, a param tag with
+ * prose only, PHPStan's refinement types left in the docblock, a Closure
+ * the lexer would otherwise read as a cast.
  *
  * @template T of object
- * @param non-empty-string $id
- * @param array-key $k
- * @param positive-int $n
  * @param \Closure(int): string $f
  * @param ?\Closure(object, object): object $m
  * @return ?T
  * @param class-string<T> $c the class to describe
+ * @param non-empty-string $id
+ * @param array-key $k
+ * @param positive-int $n
  * @throws \RuntimeException never
  */
 function lifted(string $c, string $id, int|string $k, int $n, \Closure $f, ?\Closure $m): ?object

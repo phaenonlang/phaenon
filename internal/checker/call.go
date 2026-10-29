@@ -29,7 +29,6 @@ type signature struct {
 	ret        types.Type
 	typeParams []*program.TypeParam
 	explicit   []types.Type // type arguments written at the call site
-	node       ast.Node     // the call site, for the reified record
 	subst      map[string]types.Type
 	recv       types.Type     // receiver, for static/$this
 	decl       *program.Class // declaring class of a method
@@ -66,7 +65,7 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	if fn.Deprecated && x.c.opts.Deprecations {
 		x.report(n.S, P4006, "function %s() is deprecated", fn.Name)
 	}
-	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, node: e}
+	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams}
 	sig.explicit = x.explicitArgs(e.TypeArgs, fn.TypeParams, fn.Name+"()", e.S)
 	if e.Args != nil && e.Args.FirstClassCallable {
 		return x.callableOf(sig)
@@ -391,7 +390,7 @@ func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) t
 				x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated", meth.Class.Name, name)
 			}
 			sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return,
-				typeParams: meth.TypeParams, recv: m, decl: meth.Class, node: e}
+				typeParams: meth.TypeParams, recv: m, decl: meth.Class}
 			sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 			if e.Args != nil && e.Args.FirstClassCallable {
 				sig.subst = x.memberSubst(m, meth.Class)
@@ -525,7 +524,7 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 			x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated", meth.Class.Name, name)
 		}
 		sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return,
-			typeParams: meth.TypeParams, recv: recv, decl: meth.Class, node: e}
+			typeParams: meth.TypeParams, recv: recv, decl: meth.Class}
 		sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 		if e.Args != nil && e.Args.FirstClassCallable {
 			sig.subst = x.memberSubst(recv, meth.Class)
@@ -642,32 +641,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state) types.Type {
 			result = recv
 		}
 	}
-	// A closed class type (explicit or already known) still records its
-	// reified arguments for the emitter.
-	if c, ok := recv.(types.Class); ok && len(c.Args) > 0 {
-		var vals []types.Type
-		for i, tp := range cl.TypeParams {
-			if tp.Reified && i < len(c.Args) {
-				vals = append(vals, c.Args[i])
-			}
-		}
-		if len(vals) > 0 {
-			x.c.reified[e] = vals
-			for i, v := range vals {
-				if !x.closedOrReified(v) {
-					x.report(e.S, P3005, "the argument for reified %s of %s must be a class type or a reified parameter in scope, not %s", cl.TypeParams[i].Name, cl.Name, x.typeName(v))
-				}
-			}
-		}
-	}
 	if ctor == nil {
-		if c, ok := recv.(types.Class); ok && len(c.Args) == 0 {
-			for _, tp := range cl.TypeParams {
-				if tp.Reified {
-					x.report(e.S, P3005, "cannot infer reified type parameter %s of %s; write new %s<%s>(…)", tp.Name, cl.Name, cl.Name, tp.Name)
-				}
-			}
-		}
 		if e.Args != nil && len(e.Args.Args) > 0 {
 			x.report(e.Args.S, P2102, "class %s has no constructor but %d arguments are given", cl.Name, len(e.Args.Args))
 		}
@@ -677,7 +651,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state) types.Type {
 	if !x.canAccess(ctor.Vis, ctor.Class) {
 		x.report(e.S, P2108, "constructor of %s is %s", cl.Name, ctor.Vis)
 	}
-	sig := &signature{name: cl.Name + "::__construct()", params: ctor.Params, ret: types.TVoid, typeParams: ctor.TypeParams, recv: recv, decl: ctor.Class, node: e}
+	sig := &signature{name: cl.Name + "::__construct()", params: ctor.Params, ret: types.TVoid, typeParams: ctor.TypeParams, recv: recv, decl: ctor.Class}
 	// Infer the class's own type arguments from the constructor call.
 	if c, ok := recv.(types.Class); ok && len(c.Args) == 0 && len(cl.TypeParams) > 0 {
 		sig.typeParams = append(append([]*program.TypeParam{}, cl.TypeParams...), ctor.TypeParams...)
@@ -909,29 +883,26 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	if len(inferable) > 0 && expected != nil && sig.ret != nil {
 		unify(types.Substitute(types.Substitute(sig.ret, rename), subst), expected, subst, inferable, x.p())
 	}
-	// A reified parameter must end up with a runtime value: inferred from
-	// an argument or written at the call site.
-	var reifiedVals []types.Type
-	for i, tp := range sig.typeParams {
-		if !tp.Reified {
-			continue
-		}
-		v, ok := subst[tps[i].Name]
-		if !ok {
-			x.report(span, P3005, "cannot infer reified type parameter %s of %s; pass it explicitly: %s", tp.Name, sig.name, strings.TrimSuffix(sig.name, "()")+"<"+tp.Name+">(…)")
-			v = types.TError
-		} else if !x.closedOrReified(v) {
-			x.report(span, P3005, "reified %s of %s was inferred as %s, which has no runtime value; pass a class type explicitly", tp.Name, sig.name, x.typeName(v))
-		}
-		reifiedVals = append(reifiedVals, v)
-	}
-	if len(reifiedVals) > 0 && sig.node != nil {
-		x.c.reified[sig.node] = append(x.c.reified[sig.node], reifiedVals...)
-	}
 	// Expose the results under the declared names too (new Foo() reads them).
 	for i, tp := range sig.typeParams {
 		if v, ok := subst[tps[i].Name]; ok {
 			subst[tp.Name] = v
+		}
+	}
+	// An inferred type argument must respect its bound, like a written one
+	// (`repo(Order::class)` against `class<T of User>`): PHPStan reports
+	// the argument, Phaenon the type argument it stands for.
+	for i, tp := range sig.typeParams {
+		v, ok := subst[tps[i].Name]
+		if !ok || !inferable[tps[i].Name] || tp.Bound == nil {
+			continue
+		}
+		if _, unknown := v.(types.Unknown); unknown {
+			continue
+		}
+		bound := types.Substitute(tp.Bound, subst)
+		if !types.IsSubtype(v, bound, x.p()) {
+			x.report(span, P3002, "type argument %s inferred for %s of %s is not a subtype of its bound %s", x.typeName(v), tp.Name, sig.name, x.typeName(bound))
 		}
 	}
 	// Check acceptability with the final substitution.
@@ -1036,7 +1007,7 @@ func (x *fnCtx) freshParams(tps []*program.TypeParam) (map[string]types.Type, []
 	fresh := make([]*program.TypeParam, len(tps))
 	for i, tp := range tps {
 		id := fmt.Sprintf("%s\x00%d", tp.Name, x.c.callSeq)
-		fresh[i] = &program.TypeParam{Name: id, Bound: tp.Bound, Default: tp.Default, Variance: tp.Variance, Reified: tp.Reified, Native: tp.Native}
+		fresh[i] = &program.TypeParam{Name: id, Bound: tp.Bound, Default: tp.Default, Variance: tp.Variance, Native: tp.Native}
 		rename[tp.Name] = types.Param{Name: id, Bound: tp.Bound, Owner: tp.Name}
 	}
 	for _, f := range fresh {

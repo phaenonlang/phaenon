@@ -61,42 +61,57 @@ interface Sink<in T>
     public function last(): T; // want P3004
 }
 
-class Repository<reified T of User>
+// A type parameter has no runtime value; a class<T> value does. This is
+// how runtime generics are written (design/generics.md §11.2).
+class Repository<T of User>
 {
+    public function __construct(private readonly class<T> $class)
+    {
+    }
+
     public function get(int $id): T
     {
         $u = new User('x');
-        if ($u is T) {
+        if ($u instanceof $this->class) {
             return $u;
         }
-        return new T('fresh');
+        return new $this->class('fresh');
     }
 
     public function name(): string
     {
-        return T::class;
+        return $this->class;
     }
 
-    public function describe(): string
+    public function same(class<T> $other): bool
     {
-        return T->name();
+        return $other === $this->class;
     }
 }
 
 final class UserRepository extends Repository<User>
 {
+    public function __construct()
+    {
+        parent::__construct(User::class);
+    }
 }
 
 final class BadRepository extends Repository<Order> // want P3002
 {
 }
 
-final class UnboundRepository extends Repository // want P3005
+final class UnboundRepository extends Repository
 {
 }
 
-interface Reified<reified T> // want P3006
+function repositories(): void
 {
+    $r = new Repository(User::class);
+    takesUser($r->get(1));
+    takesString($r->name());
+    takesInt($r->name()); // want P2103
+    $r->same(Order::class); // want P2103
 }
 
 final class Erased<T of User>
@@ -174,10 +189,10 @@ function uses(Box<int> $ints, Box<User> $users, Source<Admin> $admins, Sink<User
     $b = new Box<int>(1);
     takesInt($b->get());
     $c = new Box<string>(1); // want P2103
-    $r = new Repository<User>();
+    $r = new Repository<User>(User::class);
     takesUser($r->get(1));
-    $x = new Repository<Order>(); // want P3002
-    $e = new Repository(); // want P3005
+    $x = new Repository<Order>(Order::class); // want P3002
+    $e = new Repository(Order::class); // want P3002
     $w = new Box<int, int>(1); // want P3001
 
     $m = mixedValue();
