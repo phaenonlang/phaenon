@@ -166,6 +166,8 @@ func Inspect(n Node, f func(Node) bool) {
 	case *ClosureType:
 		types(n.Params, f)
 		Inspect(n.Return, f)
+	case *TupleType:
+		types(n.Elems, f)
 	case *TypeParam:
 		Inspect(n.Name, f)
 		Inspect(n.Bound, f)

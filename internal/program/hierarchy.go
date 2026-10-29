@@ -28,6 +28,7 @@ func (c *Class) ensureHeader() {
 	}
 	// Type parameters first: everything else may mention them.
 	c.TypeParams = typeParamsOf(d.TypeParams, c.Doc, r)
+	ImplyMapKeyBounds(c.TypeParams, d)
 	for _, tp := range c.TypeParams {
 		r.params[tp.Name] = tp
 	}
@@ -473,6 +474,7 @@ func (r *resolver) buildMethod(c *Class, d *ast.MethodDecl) *Method {
 		rr.reportDocErrors(m.Doc)
 	}
 	m.TypeParams = typeParamsOf(d.TypeParams, m.Doc, rr)
+	ImplyMapKeyBounds(m.TypeParams, signatureNodes(d.Params, d.ReturnType)...)
 	rr = rr.withParams(m.TypeParams)
 	m.Params = rr.buildParams(d.Params, m.Doc)
 	m.NativeReturn = rr.native(d.ReturnType)

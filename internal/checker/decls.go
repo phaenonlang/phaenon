@@ -76,8 +76,8 @@ func traitUseSpan(cl *program.Class) ast.Span {
 	return cl.Span
 }
 
-// checkUntyped reports missing declared types in Phaenon files (P2516,
-// a warning until the stdlib and collections land).
+// checkUntyped reports missing declared types in Phaenon files (P2516, an
+// error: "mixed is written, never inferred silently", collections.md §7).
 func (c *Checker) checkUntyped(f *program.File, decls []*ast.Param, params []*program.Param, ret ast.TypeExpr, retT types.Type, name string, span ast.Span) {
 	if f.Mode != lexer.ModePhaenon {
 		return

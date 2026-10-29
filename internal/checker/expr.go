@@ -256,6 +256,10 @@ func (x *fnCtx) checkStringable(t types.Type, span ast.Span) {
 		case types.Mixed:
 			x.report(span, P2312, "mixed cannot be converted to string")
 			return
+		case types.Bytes:
+			// design/strings.md §2: text and binary never mix silently.
+			x.report(span, P2530, "bytes is not text: ->text() decodes it as UTF-8, ->hex() or ->base64() spells it out")
+			return
 		case types.Array, types.Shape:
 			x.report(span, P2312, "array cannot be converted to string")
 			return
@@ -963,8 +967,23 @@ func (x *fnCtx) cast(e *ast.Cast, env *state) types.Type {
 			x.report(e.S, P2309, "cannot cast %s to float", x.typeName(t))
 		}
 		return types.TFloat
+	case token.T_BYTES_CAST:
+		// (bytes) retypes a string as binary data, free at runtime; it is
+		// how a PHP API's binary-in-a-string enters the typed world and
+		// how the stdlib builds a bytes value (design/strings.md §2).
+		for _, m := range types.Members(t) {
+			switch m.(type) {
+			case types.String, types.StringLit, types.ClassString, types.Bytes, types.Unknown, types.Mixed:
+			default:
+				x.report(e.S, P2309, "cannot cast %s to bytes: only a string holds binary data", x.typeName(t))
+				return types.TBytes
+			}
+		}
+		return types.TBytes
 	case token.T_STRING_CAST:
-		x.checkStringable(t, e.Expr.Span())
+		// (string) is the explicit, unchecked conversion of bytes for the
+		// PHP APIs that take binary in a string parameter (strings.md §5).
+		x.checkStringable(types.Subtract(t, types.TBytes, x.p()), e.Expr.Span())
 		if lit, ok := types.IsIntLit(t); ok {
 			return types.StringLit{V: strconv.FormatInt(lit, 10)}
 		}
@@ -1044,7 +1063,7 @@ func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Typ
 	l := x.expr(e.Left, env, nil)
 	r := x.expr(e.Right, env, nil)
 	if e.Op == token.T_IS_IDENTICAL || e.Op == token.T_IS_NOT_IDENTICAL {
-		if !types.IsMixed(l) && !types.IsMixed(r) && !types.Overlaps(l, r, x.p()) && !x.nativeOverlap(e.Left, l, e.Right, r, env) {
+		if !types.IsMixed(l) && !types.IsMixed(r) && !types.Overlaps(l, r, x.p()) && (!x.nativeOverlap(e.Left, l, e.Right, r, env) || bytesAgainstText(l, r)) {
 			word := "false"
 			if e.Op == token.T_IS_NOT_IDENTICAL {
 				word = "true"
@@ -1057,6 +1076,26 @@ func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Typ
 }
 
 // binaryTypes computes the result of an operator on typed operands.
+// bytesAgainstText reports a comparison of binary data with text. Both are
+// PHP strings, so the native types overlap and the comparison may even be
+// true at runtime; the type confusion is still the finding (strings.md §2).
+func bytesAgainstText(l, r types.Type) bool {
+	has := func(t types.Type) (b, text bool) {
+		for _, m := range types.Members(t) {
+			switch m.(type) {
+			case types.Bytes:
+				b = true
+			case types.String, types.StringLit, types.ClassString:
+				text = true
+			}
+		}
+		return
+	}
+	lb, lt := has(l)
+	rb, rt := has(r)
+	return (lb && rt) || (rb && lt)
+}
+
 func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Type {
 	span := e.Span()
 	switch op {

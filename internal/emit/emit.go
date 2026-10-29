@@ -111,6 +111,9 @@ type emitter struct {
 	// name, with the short name each is called by in this file ("" when the
 	// name is taken and the FQCN is used): roadmap D11.
 	imports map[string]string
+	// ownImports are the compiler-introduced classes the file already
+	// imports itself: used by their alias, not added to the use list.
+	ownImports map[string]bool
 }
 
 func (e *emitter) replace(s ast.Span, text string) {
@@ -193,7 +196,7 @@ func (e *emitter) prologue(f *ast.File) {
 func (e *emitter) useStatements() string {
 	var names []string
 	for fqcn, short := range e.imports {
-		if short != "" {
+		if short != "" && !e.ownImports[fqcn] {
 			names = append(names, fqcn)
 		}
 	}
@@ -231,6 +234,7 @@ func namespaceEnd(f *ast.File) int {
 func (e *emitter) importShort(fqcn string, res *program.Resolver) string {
 	if e.imports == nil {
 		e.imports = map[string]string{}
+		e.ownImports = map[string]bool{}
 	}
 	if short, seen := e.imports[fqcn]; seen {
 		if short == "" {
@@ -241,7 +245,16 @@ func (e *emitter) importShort(fqcn string, res *program.Resolver) string {
 	short := fqcn[strings.LastIndex(fqcn, "\\")+1:]
 	taken := namespaceEnd(e.opts.File.AST) == -2
 	for alias, target := range res.Scope().Imports() {
-		if strings.EqualFold(alias, short) && !strings.EqualFold(target, fqcn) {
+		if strings.EqualFold(target, fqcn) {
+			// The file imports the class itself: use its name, add nothing.
+			if written := importAlias(e.opts.File.AST, fqcn); written != "" {
+				alias = written
+			}
+			e.imports[fqcn] = alias
+			e.ownImports[fqcn] = true
+			return alias
+		}
+		if strings.EqualFold(alias, short) {
 			taken = true
 		}
 	}
@@ -259,6 +272,36 @@ func (e *emitter) importShort(fqcn string, res *program.Resolver) string {
 	}
 	e.imports[fqcn] = short
 	return short
+}
+
+// importAlias is the name a file's own use statement gives fqcn, as
+// written (the scope keeps it lower-cased), or "" when the file does not
+// import it.
+func importAlias(f *ast.File, fqcn string) string {
+	alias := ""
+	ast.Inspect(f, func(n ast.Node) bool {
+		u, ok := n.(*ast.Use)
+		if !ok {
+			return alias == ""
+		}
+		for _, item := range u.Items {
+			var parts []string
+			if u.Prefix != nil {
+				parts = append(parts, u.Prefix.Parts...)
+			}
+			parts = append(parts, item.Name.Parts...)
+			if !strings.EqualFold(strings.Join(parts, "\\"), fqcn) {
+				continue
+			}
+			if item.Alias != nil {
+				alias = item.Alias.Name
+			} else {
+				alias = parts[len(parts)-1]
+			}
+		}
+		return false
+	})
+	return alias
 }
 
 // declaresStrictTypes reports whether the first statement is a declare with

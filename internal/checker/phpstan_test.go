@@ -6,6 +6,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,10 +140,12 @@ func usesPhaenonSyntax(src []byte) bool {
 	for _, s := range f.Stmts {
 		ast.Inspect(s, func(n ast.Node) bool {
 			switch n := n.(type) {
-			case *ast.TypeParam, *ast.IsExpr, *ast.AsExpr, *ast.TypeAlias, *ast.ClosureType:
+			case *ast.TypeParam, *ast.IsExpr, *ast.AsExpr, *ast.TypeAlias, *ast.ClosureType, *ast.TupleType:
 				found = true
+			case *ast.Cast:
+				found = n.Op == token.T_BYTES_CAST
 			case *ast.NamedType:
-				if len(n.TypeArgs) > 0 || strings.Contains(n.Name.Parts[0], "-") {
+				if len(n.TypeArgs) > 0 || strings.Contains(n.Name.Parts[0], "-") || strings.EqualFold(n.Name.Parts[0], "bytes") {
 					found = true
 				}
 			}

@@ -249,6 +249,7 @@ function str_split(string $string, int $length = 1): array {}
 function get_object_vars(object $object): array {}
 
 /**
+ * @param string|bytes $string
  * @return int<0, max>
  */
 function strlen(string $string): int {}

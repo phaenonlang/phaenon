@@ -262,7 +262,7 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 			word = "true"
 			x.condValueType = types.TTrue
 		}
-		if !x.nativeOverlap(e.Left, lt, e.Right, rt, env) {
+		if !x.nativeOverlap(e.Left, lt, e.Right, rt, env) || bytesAgainstText(lt, rt) {
 			x.report(e.S, P2305, "strict comparison between %s and %s is always %s", x.typeName(lt), x.typeName(rt), word)
 		}
 	}

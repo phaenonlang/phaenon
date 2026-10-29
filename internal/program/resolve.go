@@ -611,6 +611,55 @@ func nativeTypeParams(tps []*ast.TypeParam, r *resolver) []*TypeParam {
 	return out
 }
 
+// ImplyMapKeyBounds gives an unbounded type parameter that a declaration
+// uses as a map key the bound map's keys have: `map<K, V>` in a generic
+// declaration means `K of int|string` (design/collections.md §2). Runs
+// before the declaration's types are resolved, since a parameter's bound
+// travels with every type that mentions it.
+func ImplyMapKeyBounds(tps []*TypeParam, roots ...ast.Node) {
+	if len(tps) == 0 {
+		return
+	}
+	byName := make(map[string]*TypeParam, len(tps))
+	for _, tp := range tps {
+		if tp.Bound == nil {
+			byName[tp.Name] = tp
+		}
+	}
+	if len(byName) == 0 {
+		return
+	}
+	for _, root := range roots {
+		ast.Inspect(root, func(n ast.Node) bool {
+			t, ok := n.(*ast.NamedType)
+			if !ok || len(t.TypeArgs) != 2 || len(t.Name.Parts) != 1 || !strings.EqualFold(t.Name.Parts[0], "map") {
+				return true
+			}
+			if k, ok := t.TypeArgs[0].(*ast.NamedType); ok && len(k.Name.Parts) == 1 && k.Name.Kind == ast.NameUnqualified {
+				if tp := byName[k.Name.Parts[0]]; tp != nil {
+					tp.Bound = types.TArrayKey
+				}
+			}
+			return true
+		})
+	}
+}
+
+// signatureNodes lists the type expressions of a parameter list and a
+// return type as walkable nodes.
+func signatureNodes(params []*ast.Param, ret ast.TypeExpr) []ast.Node {
+	var out []ast.Node
+	for _, p := range params {
+		if p.Type != nil {
+			out = append(out, p.Type)
+		}
+	}
+	if ret != nil {
+		out = append(out, ret)
+	}
+	return out
+}
+
 // typeParamsOf prefers Phaenon syntax over docblock templates.
 func typeParamsOf(native []*ast.TypeParam, doc *docblock.Doc, r *resolver) []*TypeParam {
 	if len(native) > 0 {
@@ -633,6 +682,7 @@ func (r *resolver) fileAlias(name string, args []types.Type) (types.Type, bool) 
 		a.state = 1
 		ar := r.p.newResolver(a.File, a.Scope, nil, a.Decl.S)
 		a.Params = nativeTypeParams(a.Decl.TypeParams, ar)
+		ImplyMapKeyBounds(a.Params, a.Decl)
 		a.Type = ar.withParams(a.Params).native(a.Decl.Type)
 		a.state = 2
 	}
@@ -774,6 +824,7 @@ func (fn *Function) ensure() {
 		r.reportDocErrors(fn.Doc)
 	}
 	fn.TypeParams = typeParamsOf(fn.Decl.TypeParams, fn.Doc, r)
+	ImplyMapKeyBounds(fn.TypeParams, signatureNodes(fn.Decl.Params, fn.Decl.ReturnType)...)
 	r = r.withParams(fn.TypeParams)
 	fn.Params = r.buildParams(fn.Decl.Params, fn.Doc)
 	fn.Return = r.buildReturn(fn.Decl.ReturnType, fn.Doc)

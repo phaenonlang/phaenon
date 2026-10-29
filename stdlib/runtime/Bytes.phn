@@ -1,0 +1,125 @@
+namespace Phaenon;
+
+/**
+ * The binary functions of the Phaenon stdlib (design/strings.md §2, §4). A
+ * `bytes` value is a PHP string kept apart from text: it has no `.`, no
+ * interpolation and no Str methods, and `(bytes) $raw` is how binary data
+ * held in a PHP string enters the type, free at runtime. Every function
+ * takes the bytes first; only text() scans. In Phaenon source these are
+ * the methods of a bytes value: `$b->hex()` compiles to `Bytes::hex($b)`.
+ */
+final class Bytes
+{
+    private function __construct()
+    {
+    }
+
+    /**
+     * @throws \ValueError when $hex is not an even number of hex digits
+     */
+    public static function fromHex(string $hex): bytes
+    {
+        $b = @hex2bin($hex);
+        if (false === $b) {
+            throw new \ValueError('Bytes::fromHex(): not a hexadecimal string');
+        }
+
+        return $b;
+    }
+
+    /**
+     * @throws \ValueError when $b64 is not base64 (standard or URL-safe alphabet)
+     */
+    public static function fromBase64(string $b64): bytes
+    {
+        $b = base64_decode(strtr($b64, '-_', '+/'), true);
+        if (false === $b) {
+            throw new \ValueError('Bytes::fromBase64(): not a base64 string');
+        }
+
+        return (bytes) $b;
+    }
+
+    public static function length(bytes $b): int
+    {
+        return strlen($b);
+    }
+
+    public static function isEmpty(bytes $b): bool
+    {
+        return 0 === strlen($b);
+    }
+
+    public static function slice(bytes $b, int $start, ?int $length = null): bytes
+    {
+        return substr($b, $start, $length);
+    }
+
+    public static function concat(bytes ...$parts): bytes
+    {
+        return (bytes) implode('', $parts);
+    }
+
+    public static function hex(bytes $b): string
+    {
+        return bin2hex($b);
+    }
+
+    public static function base64(bytes $b, bool $urlSafe = false): string
+    {
+        $s = base64_encode($b);
+
+        return $urlSafe ? rtrim(strtr($s, '+/', '-_'), '=') : $s;
+    }
+
+    /**
+     * The bytes decoded as UTF-8 text.
+     *
+     * @throws \ValueError when the bytes are not valid UTF-8
+     */
+    public static function text(bytes $b): string
+    {
+        if (!mb_check_encoding($b, 'UTF-8')) {
+            throw new \ValueError('Bytes::text(): not valid UTF-8');
+        }
+
+        return (string) $b;
+    }
+
+    /**
+     * The bytes decoded as UTF-8 text, every invalid sequence replaced by U+FFFD.
+     */
+    public static function textLossy(bytes $b): string
+    {
+        $substitute = mb_substitute_character();
+        mb_substitute_character(0xFFFD);
+        try {
+            return mb_scrub($b, 'UTF-8');
+        } finally {
+            mb_substitute_character(is_bool($substitute) ? null : $substitute);
+        }
+    }
+
+    /**
+     * Constant-time comparison, for secrets and signatures.
+     */
+    public static function equals(bytes $a, bytes $b): bool
+    {
+        return hash_equals($a, $b);
+    }
+
+    /**
+     * The byte at $i, 0–255; negative indexes count from the end.
+     *
+     * @throws \OutOfRangeException
+     */
+    public static function at(bytes $b, int $i): int
+    {
+        $n = strlen($b);
+        if ($i < -$n || $i >= $n) {
+            throw new \OutOfRangeException(sprintf('Bytes::at(): index %d out of range for %d bytes', $i, $n));
+        }
+
+        return ord(substr($b, $i, 1));
+    }
+}
