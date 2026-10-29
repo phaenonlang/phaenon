@@ -14,7 +14,8 @@ type checker for the PHP subset plus the PHPStan docblock vocabulary; on the fir
 libraries it reports exactly what PHPStan reports at level 10. M3 done — generics are syntax:
 `class Box<T>`, `list<T>`, `map<K, V>`, `class<T>`, `Closure(T): U`, `is` / `as`, `type` aliases;
 they compile to PHP with PHPStan docblocks, and `phn migrate` lifts PHPStan's docblock generics
-into that syntax.
+into that syntax. Three Tequila libraries build from `.phn` with their suites passing; the checker
+reads the extensions the local `php` has loaded (ext-mongodb and friends) from its reflection.
 
 ## Type checking
 
@@ -22,6 +23,7 @@ into that syntax.
 phn check src tests            # diagnostics with codes, source lines and carets; exit 1 on errors
 phn check --json src           # one JSON object per diagnostic, for editors
 phn build src                  # type-checks first; a file with errors is not written
+phn build --emit-on-error src  # …unless asked to: a codebase adopting the checker builds while it fixes
 ```
 
 The checker reads the rest of the program without configuration: project files, vendor code
@@ -99,7 +101,7 @@ every other edit keeps line numbers exact. Design: `design/generics.md`, decisio
 ## CLI
 
 ```sh
-phn build [--out DIR] [--check] [--no-types] path...   # type-check and compile .phn → .php
+phn build [--out DIR] [--check] [--no-types] [--emit-on-error] path...   # type-check and compile .phn → .php
 phn check [--json] [--no-deprecations] path...         # type-check .phn (and .php) files
 phn migrate path...                                    # rewrite .php as .phn
 phn lex   [--php] file                    # token stream

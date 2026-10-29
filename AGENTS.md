@@ -29,7 +29,8 @@ squash merges).
 |---|---|---|
 | `tequila/reflection` | `~/labs/tequila/reflector`, branch `phaenon-dogfood` (local only) | M1: built from `.phn`; its phpunit, PHPStan 10 and php-cs-fixer pass |
 | `tequila/object-mapper` | `~/labs/tequila/object-mapper`, branch `phaenon-dogfood` (local only) | M2: `phn check src` = 0 findings. M3: migrated with real generics (51 `.phn`), suite + PHPStan + cs pass. `tools/phpstan` is the parity PHPStan |
-| later | `mongodb-odm` (M3), `core` (M4), `nats` (M5), `php-service-template` (M6), `iam` (M7) | `../design/roadmap.md` §3 |
+| `tequila/mongodb-odm` | `~/labs/tequila/mongodb-odm`, branch `phaenon-dogfood` (local only) | M3: migrated (124 `.phn`), suite + PHPStan 8 + cs pass; 41 level-9/10 findings remain on a level-8 library (vault `open-items`). Needs ext-mongodb in the local `php` |
+| later | `core` (M4), `nats` (M5), `php-service-template` (M6), `iam` (M7) | `../design/roadmap.md` §3 |
 
 ## Where to look things up
 
