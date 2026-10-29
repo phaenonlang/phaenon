@@ -17,12 +17,13 @@ The workspace is `~/labs/phaenon/`; the other repos are siblings, reached as `..
 |---|---|---|---|---|
 | **phaenon** | `.` | `phaenonlang/phaenon` | The compiler `phn`: lexer, parser, checker, emitter, migrate; embedded PHP signatures | [Build and test](#build-and-test) |
 | **design** | `../design` | `phaenonlang/design` | The language design and every decision: `language-overview.md` (scope), `generics.md` (decisions §11), `checker.md` (decisions §9, open §10), `roadmap.md` (decisions D1–D8, milestones M0–M7, working method §4) | Markdown only |
-| **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `\Phaenon\Type`, behind reified type parameters and structural `is` / `as` | `composer install`, `composer test`, `composer stan` |
+| **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `\Phaenon\Type`, behind structural `is` / `as` | `composer install`, `composer test`, `composer stan` |
 | **jetbrains** | `../jetbrains` | `phaenonlang/jetbrains` | PhpStorm plugin: `.phn` read as PHP code without the open tag (Kotlin, Gradle); no Phaenon-only syntax yet | `./gradlew test`, `./gradlew buildPlugin` |
 | **php-src** | `../php-src` | clone of `php/php-src` | **Read-only reference.** The scanner and grammar the lexer and parser port, the `.phpt` corpus of the conformance suite, the source of `stdlib/php-src` | Never modify, build or change its git state |
 
-**Tequila dogfood targets** — the PHP platform behind tequila.dev, the codebase Phaenon must run. Those repos follow
-their own rules (`~/labs/tequila/platform/CLAUDE.md`: Conventional Commits, squash merges).
+**Tequila dogfood targets** — the PHP platform behind tequila.dev, the codebase Phaenon must run.
+Those repos follow their own rules (`~/labs/tequila/platform/CLAUDE.md`: Conventional Commits,
+squash merges).
 
 | Package | Repo | Role |
 |---|---|---|
@@ -56,7 +57,7 @@ internal/docblock     PHPDoc tags and the PHPStan/Psalm type grammar
 internal/types        the type lattice (PHPStan semantics): subtyping, narrowing, printing
 internal/program      program model: project files, Composer vendor code (lazy), stubs + overlay
 internal/checker      the type checker behind `phn check`
-internal/emit         patch-based, line-preserving emitter; generics erasure, reified lowering
+internal/emit         patch-based, line-preserving emitter; generics erasure, is/as lowering
 internal/migrate      .php → .phn: tag stripping, then generic docblocks lifted into syntax
 internal/conformance  suites over the php-src corpus with `php` as the oracle
 stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime declaration
@@ -85,8 +86,8 @@ README explains the Composer workflow. Dogfood targets call `phn` from `PATH`.
   every feature. A feature starts as a section in a `../design` doc and as golden tests that fail;
   it is done when the dogfood target's own suite passes on compiled output. Checklist, including
   how a milestone is closed: vault `working-method`.
-- **A milestone starts only on a maintainer's go-ahead: ask before starting one** or changing the roadmap's order. Finish the current step,
-  report, and let him choose.
+- **A milestone starts, and the roadmap's order changes, only on a maintainer's go-ahead.** Finish
+  the current step, report, and wait for the choice.
 - Weigh every choice against "can Tequila still run on it?": compatibility with Symfony, PHPStan,
   Composer and extensions is the hard constraint.
 - For anything that is PHP, `php` is the oracle; for what Phaenon adds, golden files are.
@@ -126,11 +127,12 @@ README explains the Composer workflow. Dogfood targets call `phn` from `PATH`.
 
 ### Git and commits
 
-- Commit only when the developer running the session asks. Stage by path, never `git add -A` / `git add .` / `git commit -a`,
-  and account for every line of `git status --short`: parallel sessions leave work in these trees.
-- **Commit messages read as human-written prose.** A short subject sentence (an `Area: ` prefix is
-  fine, a Conventional Commits type is not), a body wrapped near 72 columns that says what changed
-  and why. **No attribution lines, no `Co-Authored-By`, no "Generated with"** — the repositories
-  will be open source. The same rule holds in `design`, `runtime` and `jetbrains`.
+- Commit only when the developer running the session asks. Stage by path, never `git add -A` /
+  `git add .` / `git commit -a`, and account for every line of `git status --short`: parallel
+  sessions leave work in these trees.
+- **Commit messages:** a short subject sentence (an `Area: ` prefix is fine, a Conventional Commits
+  type is not) and a body that says what changed and why. **No attribution lines, no
+  `Co-Authored-By`, no "Generated with"** — the repositories will be open source. The same rule holds
+  in `design`, `runtime` and `jetbrains`.
 - `go.mod`'s module line is `github.com/phaenonlang/phaenon`; GoLand has rewritten it before (vault
   `gotcha-goland-rewrites-go-mod`).
