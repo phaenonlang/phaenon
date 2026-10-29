@@ -79,11 +79,7 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
     {
     }
 
-    /**
-     * @template ClassType of object
-     * @param ReflectorInterface<ClassType, \UnitEnum> $reflector
-     */
-    public function __construct(private ReflectorInterface $reflector, string $name = '')
+    public function __construct<ClassType of object>(private ReflectorInterface<ClassType, \UnitEnum> $reflector, string $name = '')
     {
     }
 

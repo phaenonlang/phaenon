@@ -9,8 +9,6 @@
 86: kept @return list<int>: it erases to a different type than the declared iterable
 102: kept @param int: it erases to a different type than the declared (none)
 103: kept @return iterable<string>: the declaration has no return type to refine
-110: kept @template ClassType: a promoted property uses it, and a property cannot carry a method type parameter; make it a class type parameter
-111: kept @param ReflectorInterface<ClassType, \UnitEnum>: it mentions a type parameter that stayed in the docblock
 126: kept @phpstan-param positive-int: no Phaenon spelling for it
 157: kept @param non-empty-array<string, \stdClass>: no Phaenon spelling for it
 158: kept @param \Closure(int, int=): int: no Phaenon spelling for it
