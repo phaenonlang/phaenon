@@ -359,7 +359,7 @@ func (l *lifter) classDecl(c *ast.ClassDecl, outer scope) {
 	if c.Name != nil {
 		d := l.findDoc(c.Doc, c.S.Start)
 		if d != nil {
-			l.templates(d, c.TypeParams, c.Name.S.End, sc, nil)
+			l.templates(d, c.TypeParams, c.Name.S.End, sc)
 			for _, g := range d.groups {
 				switch g.name {
 				case "@extends", "@template-extends":
@@ -388,7 +388,7 @@ func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
 	sc := outer.child()
 	d := l.findDoc(fn.Doc, fn.S.Start)
 	if d != nil {
-		l.templates(d, fn.TypeParams, fn.Name.S.End, sc, nil)
+		l.templates(d, fn.TypeParams, fn.Name.S.End, sc)
 	}
 	for _, tp := range fn.TypeParams {
 		sc[tp.Name.Name] = l.astAtoms(tp.Bound, sc)
@@ -406,7 +406,7 @@ func (l *lifter) methodDecl(m *ast.MethodDecl, outer scope) {
 	sc := outer.child()
 	d := l.findDoc(m.Doc, m.S.Start)
 	if d != nil {
-		l.templates(d, m.TypeParams, m.Name.S.End, sc, promotedMentions(d, m.Params))
+		l.templates(d, m.TypeParams, m.Name.S.End, sc)
 	}
 	for _, tp := range m.TypeParams {
 		sc[tp.Name.Name] = l.astAtoms(tp.Bound, sc)
@@ -418,25 +418,6 @@ func (l *lifter) methodDecl(m *ast.MethodDecl, outer scope) {
 	l.paramDocs(m.Params, lifted, sc)
 	l.finish(d)
 	l.stmts(m.Body, sc)
-}
-
-// promotedMentions lists the names the @param types of promoted
-// parameters mention: a method type parameter cannot flow into a property,
-// so such a template stays in the docblock.
-func promotedMentions(d *doc, params []*ast.Param) map[string]bool {
-	promoted := map[string]bool{}
-	for _, p := range params {
-		if p.Modifiers != 0 {
-			promoted[p.Var.Name] = true
-		}
-	}
-	names := map[string]bool{}
-	for _, g := range d.groups {
-		if g.name == "@param" && len(g.parsed.Params) == 1 && promoted[g.parsed.Params[0].Name] {
-			collectNames(g.parsed.Params[0].Type, names)
-		}
-	}
-	return names
 }
 
 func collectNames(t *docblock.TypeNode, into map[string]bool) {
@@ -493,9 +474,11 @@ func (l *lifter) propertyDecl(p *ast.PropertyDecl, sc scope) {
 }
 
 // templates lifts the @template tags of a declaration into `<...>` after
-// the name at nameEnd, and records the parameters in sc. Names in blocked
-// stay in the docblock.
-func (l *lifter) templates(d *doc, native []*ast.TypeParam, nameEnd int, sc scope, blocked map[string]bool) {
+// the name at nameEnd, and records the parameters in sc. A constructor's
+// template that types a promoted property is lifted like any other: the
+// property then holds a value of that type for some argument, which the
+// checker and PHPStan infer per use (design/generics.md §11.2).
+func (l *lifter) templates(d *doc, native []*ast.TypeParam, nameEnd int, sc scope) {
 	var params []string
 	for _, g := range d.groups {
 		switch g.name {
@@ -515,10 +498,6 @@ func (l *lifter) templates(d *doc, native []*ast.TypeParam, nameEnd int, sc scop
 		}
 		if len(native) > 0 {
 			keep("the declaration already has type parameters")
-			continue
-		}
-		if blocked[t.Name] {
-			keep("a promoted property uses it, and a property cannot carry a method type parameter; make it a class type parameter")
 			continue
 		}
 		p := t.Name

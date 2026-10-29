@@ -15,9 +15,8 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 - ~~**`phn migrate` for generics**~~ — done 2026-10-28 (`generics.md` §11.1); object-mapper
   migrated. Left behind by it:
-  - A constructor-level `@template` used only by a promoted property stays a docblock (three
-    places: `AttributeReader`, `ObjectMapper`, the two `AttributeBased*Factory`); whether those
-    classes become generic is a per-class design decision for a maintainer, not a mechanical one.
+  - ~~A constructor-level `@template` used only by a promoted property stays a docblock~~ — lifted
+    natively since 2026-10-29 (`generics.md` §11.2).
   - `tequila/object-mapper` `tests/` carry 16 findings that PHPStan never saw (its `paths` is
     `src` only): Symfony container `get()` typing (needs a phpstan-symfony-like overlay) and
     untyped closure parameters in fixtures. The tests are built with `phn build --no-types tests`.
@@ -27,13 +26,11 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   reports the same sites, the repo runs at level 8. Open for a maintainer: raise the library to
   level max on `main` (the Phaenon findings are the worklist), or give `phn` a knob for implicit
   `mixed`. Until then `composer build` passes `--emit-on-error`.
-- **Should `phn build` emit on type errors by default?** `tsc` does (`noEmitOnError: false`), M2
-  chose to withhold. `--emit-on-error` exists since 2026-10-29; the default is a maintainer's call.
-- **Existential templates** (`@template T` used once, in one promoted `@param Foo<T>`): migrate
-  keeps them with a note (nine in mongodb-odm, three in object-mapper). A bare `Foo` in Phaenon
-  means the same to the checker (foreign templates are inferred), but the emitted PHP would then
-  lack type arguments and PHPStan reports `missingType.generics` on the output. Decide: a
-  spelling for "any arguments" that emits a docblock PHPStan accepts, or keep the templates.
+- ~~**Should `phn build` emit on type errors by default?**~~ — decided 2026-10-29 (roadmap D10): no
+  output for a file with type errors; `--emit-on-error` is the opt-in for a codebase adopting the
+  checker.
+- ~~**Existential templates**~~ — decided 2026-10-29 (`generics.md` §11.2): a constructor's type
+  parameter may type a promoted property; migrate lifts them natively, no new spelling.
 - **Erasure that follows the overridden signature**: `DateTimeNormalizer::denormalize(mixed
   $value)` with `@param UTCDateTime $value` must stay `mixed` natively because the interface's
   parameter is a type parameter erased to `mixed`. Phaenon could let the override declare
