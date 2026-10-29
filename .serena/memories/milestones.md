@@ -29,14 +29,18 @@ The roadmap puts the editor plugins in M6.
 
 | **M3** correction (2026-10-29) | `reified` removed end to end (keyword, `P3005`/`P3006`, hidden constructor parameters, `$__T`, synthesised constructors, `Type::from()`/`instantiate()`); `class<T>` is the native type of `T::class`; PHPStan's hyphenated names are docblock vocabulary again, not syntax; inferred type arguments are checked against their bounds | reflector and object-mapper rebuilt with `class<T>`: 0 findings, both suites, PHPStan and cs pass; output of object-mapper byte-identical | design `generics.md` §11.2, roadmap D9 |
 
+| **M4** first slice (2026-10-30) | Method syntax on `list` / `map` / `string` receivers → `Seq::` / `Map::` / `Str::` static calls (`internal/checker/stdlib.go`, emitter `stdlibCall`), the stdlib written in Phaenon (`stdlib/runtime/Seq.phn`, `Map.phn`, `Str.phn`, read as stubs and compiled for the PHPStan golden), tuple type `(A, B)`, `bytes` primitive, generated PHP imports its classes (D11) | Emit golden `internal/emit/testdata/collections.phn` passes PHPStan max; checker golden `collections.phn`; the three dogfood repos still at 0 findings after the loop-body bug fix (findings inside loops were lost before — `fixpoint` discarded them but the dedupe set remembered them) | `2b9b220` · design `collections.md`, `strings.md` (reviewed), roadmap D11 |
+
 ## Next — a maintainer's choice
 
 Recorded 2026-10-28 when the migrate step landed, unchanged by the 2026-10-29 correction. Whoever lands the next one updates this section
 and [[open-items]].
 
-1. **M4 — collections and strings**: `list<T>` / `map<K, V>` as first-class types with literals,
-   `array` as a legacy type, `\Phaenon\*` stdlib, string methods, `bytes`; target `tequila/core`.
-   M4 also settles `P2516`'s severity and shapes ([[open-items]]).
+1. **M4 — collections and strings** (started 2026-10-30, go-ahead given): the first slice is in
+   (row above). Left: `bytes` semantics (`P2530`, the binary producers in the overlay, `(bytes)`
+   cast), `P2516` as an error, `map`'s key bound `P2518`, `Bytes.phn`, the runtime package built
+   from the `.phn` stdlib, migrate lifting `array{A, B}` to `(A, B)`, the PhpStorm plugin following
+   the method syntax, then the `tequila/core` dogfood.
 2. ~~`tequila/mongodb-odm` as the next generics dogfood target~~ — done 2026-10-29 up to the
    level-8 question above; then `tequila/core` with M4.
 

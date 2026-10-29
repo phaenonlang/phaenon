@@ -53,6 +53,19 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   types in `.phn`.
 - **Shapes vs classes** (`checker.md` §10) — whether shapes survive as a language feature.
 
+## M4 — left after the first slice (2026-10-30)
+
+- `?->` on a list / map / string receiver is refused (`P2519`); lowering it needs a temporary or
+  a `match`, decide the spelling.
+- A `\Stringable` receiver does not get the `Str` methods yet (`strings.md` §6 says it should).
+- `phn build --no-types` cannot lower method syntax (no receiver types): it leaves `$xs->map()`
+  in the output. Either refuse such files without types, or drop `--no-types`.
+- `phn migrate`: `array{A, B}` (positional shape) → `(A, B)`.
+- The runtime package `../runtime` does not yet carry `Seq`, `Map`, `Str`: build it from
+  `stdlib/runtime/*.phn` with `phn` (one source), then [[gotcha-runtime-stub-drift]] is moot.
+- `Bytes.phn`, the `(bytes)` cast, `P2530`, the overlay's binary producers (`strings.md` §2, §5).
+- `P2516` to an error, `P2518` (`map` key bound) — `collections.md` §7.
+
 ## M6 — tooling, analysis rules
 
 - **Throw analysis** — dead `catch` blocks, `@throws` checking (PHPStan `catch.neverThrown`;
