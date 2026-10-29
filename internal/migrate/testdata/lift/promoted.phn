@@ -1,0 +1,20 @@
+namespace Lift;
+
+use Closure;
+
+/**
+ * The docblock above an attribute still belongs to the class; a promoted
+ * property's own `@var` is lifted; a closure in a union is spelled last.
+ */
+#[\Attribute(\Attribute::TARGET_CLASS)]
+final readonly class Binding<T of object>
+{
+    public function __construct(
+        public class<T> $class,
+        public T|Closure(): T $instance,
+        public map<string, int> $weights = [],
+        /** @var list<string> the tags */
+        public list<string> $tags = [],
+    ) {
+    }
+}
