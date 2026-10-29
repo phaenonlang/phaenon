@@ -17,9 +17,14 @@ function count(Countable|array $value, int $mode = COUNT_NORMAL): int {}
  * @template R
  * @param callable(V): R $callback
  * @param array<K, V> $array
- * @return array<K, R>
+ * @return ($array is list ? list<R> : array<K, R>)
  */
 function array_map(?callable $callback, array $array, array ...$arrays): array {}
+
+/**
+ * @phpstan-assert-if-true list<mixed> $array
+ */
+function array_is_list(array $array): bool {}
 
 /**
  * @template K of array-key
@@ -78,14 +83,16 @@ function array_unique(array $array, int $flags = SORT_STRING): array {}
 /**
  * @template V
  * @param array<V> $array
- * @return V|null
+ * @param-out ($array is list ? list<V> : array<V>) $array
+ * @return ($array is non-empty-array ? V : V|null)
  */
 function array_pop(array &$array): mixed {}
 
 /**
  * @template V
  * @param array<V> $array
- * @return V|null
+ * @param-out ($array is list ? list<V> : array<V>) $array
+ * @return ($array is non-empty-array ? V : V|null)
  */
 function array_shift(array &$array): mixed {}
 
@@ -227,7 +234,7 @@ function array_key_first(array $array): int|string|null {}
 function array_key_last(array $array): int|string|null {}
 
 /**
- * @return list<string>
+ * @return ($limit is int<min, -1> ? list<string> : non-empty-list<string>)
  */
 function explode(string $separator, string $string, int $limit = PHP_INT_MAX): array {}
 
@@ -245,3 +252,37 @@ function get_object_vars(object $object): array {}
  * @return int<0, max>
  */
 function strlen(string $string): int {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param callable(V, K): bool $callback
+ * @return V|null
+ */
+function array_find(array $array, callable $callback): mixed {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param callable(V, K): bool $callback
+ * @return K|null
+ */
+function array_find_key(array $array, callable $callback): mixed {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param callable(V, K): bool $callback
+ */
+function array_any(array $array, callable $callback): bool {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param callable(V, K): bool $callback
+ */
+function array_all(array $array, callable $callback): bool {}

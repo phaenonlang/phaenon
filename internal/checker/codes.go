@@ -70,7 +70,7 @@ var (
 	P2209 = Code{"P2209", Error, "a never function returns"}
 	P2210 = Code{"P2210", Error, "static property accessed through an instance"}
 	P2211 = Code{"P2211", Error, "constant value does not match its type"}
-	P2212 = Code{"P2212", Error, "assigned value does not match the docblock type"}
+	P2212 = Code{"P2212", Error, "the @var type is not a subtype of the assigned value's type"}
 
 	// P2 — expressions
 	P2301 = Code{"P2301", Error, "invalid operand types"}
@@ -123,7 +123,7 @@ var (
 	// P3005 and P3006 belonged to reified type parameters, removed on
 	// 2026-10-29 (design/generics.md §11.2); the codes stay reserved.
 	P3007 = Code{"P3007", Error, "generic property redeclared"}
-	P3008 = Code{"P3008", Error, "class type parameter in a static member"}
+	P3008 = Code{"P3008", Error, "class type parameter in a static property"}
 	P3009 = Code{"P3009", Error, "type arguments on a non-generic callee"}
 
 	// P4 — interop

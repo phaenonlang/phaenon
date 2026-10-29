@@ -549,9 +549,45 @@ func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) ty
 	return x.propertyType(obj, name, e, env, lenient)
 }
 
+// enumCaseProperty types `Suit::Hearts->value` and `->name` as the
+// literals they are, as PHPStan does.
+func (x *fnCtx) enumCaseProperty(obj types.Type, name string) (types.Type, bool) {
+	if name != "value" && name != "name" {
+		return nil, false
+	}
+	var out []types.Type
+	for _, m := range types.Members(obj) {
+		ec, ok := m.(types.EnumCase)
+		if !ok {
+			return nil, false
+		}
+		if name == "name" {
+			out = append(out, types.StringLit{V: ec.Case})
+			continue
+		}
+		cl := x.p().Class(ec.Class)
+		if cl == nil {
+			return nil, false
+		}
+		cl.Signature()
+		cs := cl.FindCase(ec.Case)
+		if cs == nil || cs.Value == nil {
+			return nil, false
+		}
+		out = append(out, x.expr(cs.Value, newEnv(), nil))
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return types.MakeUnion(out...), true
+}
+
 // propertyType looks up a property on an object type.
 func (x *fnCtx) propertyType(obj types.Type, name string, e *ast.PropertyFetch, env *state, lenient bool) types.Type {
 	span := e.Name.Span()
+	if lit, ok := x.enumCaseProperty(obj, name); ok {
+		return lit
+	}
 	if e.NullSafe {
 		if !types.IsNullable(obj) && !types.IsMixed(obj) {
 			x.report(e.S, P2307, "?-> on %s, which is never null", x.typeName(obj))
@@ -952,6 +988,16 @@ func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Typ
 	}
 	l := x.expr(e.Left, env, nil)
 	r := x.expr(e.Right, env, nil)
+	if e.Op == token.T_IS_IDENTICAL || e.Op == token.T_IS_NOT_IDENTICAL {
+		if !types.IsMixed(l) && !types.IsMixed(r) && !types.Overlaps(l, r, x.p()) && !x.nativeOverlap(e.Left, l, e.Right, r, env) {
+			word := "false"
+			if e.Op == token.T_IS_NOT_IDENTICAL {
+				word = "true"
+			}
+			x.report(e.S, P2305, "strict comparison between %s and %s is always %s", x.typeName(l), x.typeName(r), word)
+		}
+		return types.TBool
+	}
 	return x.binaryTypes(e.Op, l, r, e)
 }
 
@@ -1026,14 +1072,7 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		x.arithResult(l, r, span, "shift")
 		return types.TInt
 	case token.T_IS_IDENTICAL, token.T_IS_NOT_IDENTICAL:
-		if !types.IsMixed(l) && !types.IsMixed(r) && !types.Overlaps(l, r, x.p()) {
-			word := "false"
-			if op == token.T_IS_NOT_IDENTICAL {
-				word = "true"
-			}
-			x.report(span, P2305, "strict comparison between %s and %s is always %s", x.typeName(l), x.typeName(r), word)
-		}
-		return types.TBool
+		return types.TBool // binary() reports the impossible comparisons
 	case token.T_IS_EQUAL, token.T_IS_NOT_EQUAL:
 		return types.TBool
 	case token.Kind('<'), token.Kind('>'), token.T_IS_SMALLER_OR_EQUAL, token.T_IS_GREATER_OR_EQUAL:
@@ -1195,6 +1234,7 @@ func (x *fnCtx) maybeUndefined(e ast.Expr, env *state) bool {
 
 func (x *fnCtx) ternary(e *ast.Ternary, env *state, expected types.Type) types.Type {
 	thenEnv, elseEnv := x.cond(e.Cond, env)
+	cv := x.condValueType
 	var thenT types.Type
 	if e.Then == nil {
 		// c ?: b — the value of c when truthy.
@@ -1203,17 +1243,20 @@ func (x *fnCtx) ternary(e *ast.Ternary, env *state, expected types.Type) types.T
 		thenT = x.expr(e.Then, thenEnv, expected)
 	}
 	elseT := x.expr(e.Else, elseEnv, expected)
-	if thenEnv.dead && !elseEnv.dead && e.Then != nil {
+	// A condition the types decide takes one branch, as PHPStan does;
+	// the other is still checked.
+	alwaysTrue, alwaysFalse := types.Equal(cv, types.TTrue), types.Equal(cv, types.TFalse)
+	if thenEnv.dead && !elseEnv.dead && e.Then != nil || alwaysFalse && !elseEnv.dead {
 		*env = *elseEnv
-	} else if elseEnv.dead && !thenEnv.dead {
+	} else if elseEnv.dead && !thenEnv.dead || alwaysTrue && !thenEnv.dead {
 		*env = *thenEnv
 	} else {
 		*env = *join(thenEnv, elseEnv)
 	}
-	if thenEnv.dead {
+	if thenEnv.dead || alwaysFalse {
 		return elseT
 	}
-	if elseEnv.dead {
+	if elseEnv.dead || alwaysTrue {
 		return thenT
 	}
 	return types.MakeUnion(thenT, elseT)
@@ -1256,6 +1299,9 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		expected := x.targetType(e.Target, env)
 		vt := x.expr(e.Value, env, expected)
 		x.assignTo(e.Target, vt, env, e.S)
+		if v, ok := e.Target.(*ast.Variable); ok {
+			env.setNative(v.Name, x.nativeOf(e.Value, env))
+		}
 		return vt
 	}
 	if e.Op == token.T_COALESCE_EQUAL {
@@ -1577,6 +1623,10 @@ func arrayWithEntry(s types.Shape, key types.Type, vt types.Type) types.Type {
 			}
 			return s
 		}
+	}
+	if len(s.Entries) == 0 && !s.Unsealed {
+		// `$r = []; $r[$k] = $v`: the first entry sets the key and value types.
+		return types.Array{Key: key, Value: vt, NonEmpty: true}
 	}
 	return types.Array{Key: types.MakeUnion(shapeKeys(s), key), Value: types.MakeUnion(shapeValues(s), vt), NonEmpty: true}
 }

@@ -113,7 +113,7 @@ func (p *Parser) statement() ast.Stmt {
 		return &ast.Continue{S: p.span(start), Levels: levels}
 	case token.T_RETURN:
 		p.next()
-		r := &ast.Return{}
+		r := &ast.Return{Doc: doc}
 		if p.startsExpr() {
 			r.Expr = p.expr()
 		}
@@ -264,6 +264,9 @@ func (p *Parser) statement() ast.Stmt {
 		}
 	case token.T_ATTRIBUTE:
 		attrs := p.attributes()
+		if p.docComment == "" {
+			p.docComment = doc // a declaration's docblock sits above its attributes
+		}
 		switch {
 		case p.at(token.T_FUNCTION) && p.isFunctionDecl():
 			return p.functionDecl(attrs)
@@ -720,7 +723,12 @@ func (p *Parser) params() []*ast.Param {
 
 func (p *Parser) param() *ast.Param {
 	start := p.tok().Start
+	doc := p.takeDoc()
 	pr := &ast.Param{Attrs: p.attributes()}
+	if doc == "" {
+		doc = p.takeDoc()
+	}
+	pr.Doc = doc
 	pr.Modifiers = p.modifiers()
 	if !p.at(token.T_VARIABLE) && !p.at(token.T_ELLIPSIS) &&
 		!p.at(token.T_AMPERSAND_FOLLOWED_BY_VAR_OR_VARARG) && !p.at(token.T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG) {

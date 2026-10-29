@@ -280,6 +280,38 @@ func (p *Program) Variances(name string) []types.Variance {
 // Exists implements types.Hierarchy.
 func (p *Program) Exists(name string) bool { return p.Class(name) != nil }
 
+// TraitUsers returns the loaded classes that use the trait, sorted by name.
+func (p *Program) TraitUsers(trait string) []*Class {
+	var out []*Class
+	for _, c := range p.classes {
+		c.ensureHeader()
+		for _, t := range c.Traits {
+			if strings.EqualFold(t, trait) {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// IsCallableName implements types.Hierarchy: 'strval' names a function,
+// 'Foo::bar' a static method.
+func (p *Program) IsCallableName(name string) bool {
+	name = strings.TrimPrefix(name, "\\")
+	if cls, method, ok := strings.Cut(name, "::"); ok {
+		c := p.Class(cls)
+		if c == nil {
+			return false
+		}
+		c.Signature()
+		m := c.FindMethod(method)
+		return m != nil && m.Static
+	}
+	return p.Function(name) != nil
+}
+
 // ------------------------------------------------------------------ files and scopes
 
 // File is one parsed source file and its namespace scopes.

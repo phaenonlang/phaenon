@@ -411,6 +411,8 @@ func Erase(t Type) Type {
 		return TIterable
 	case EnumCase:
 		return NewClass(t.Class)
+	case Conditional:
+		return Erase(MakeUnion(t.Then, t.Else))
 	case Class:
 		return NewClass(t.Name)
 	case Callable:

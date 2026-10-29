@@ -168,26 +168,79 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 	}
 	doc := docblock.Parse(s.Doc)
 	assign, isAssign := s.Expr.(*ast.Assign)
-	if !isAssign || len(doc.Vars) == 0 {
-		x.expr(s.Expr, env, nil)
-		return
+	var v *ast.Variable
+	isVar := false
+	if isAssign {
+		v, isVar = assign.Target.(*ast.Variable)
 	}
-	v, isVar := assign.Target.(*ast.Variable)
 	var declared types.Type
+	target := ""
+	if isVar {
+		target = v.Name
+	}
 	for _, vt := range doc.Vars {
-		if vt.Name == "" || (isVar && vt.Name == v.Name) {
+		if isAssign && (vt.Name == "" || vt.Name == target) {
 			declared = x.res.Doc(vt.Type)
 		}
 	}
+	x.varTags(doc, env, target)
 	if declared == nil {
 		x.expr(s.Expr, env, nil)
 		return
 	}
 	vt := x.expr(assign.Value, env, declared)
-	if !types.IsAcceptable(vt, declared, x.p()) && !types.IsMixed(vt) {
-		x.report(s.S, P2212, "@var %s does not match the assigned %s", x.typeName(declared), x.typeName(vt))
+	// A literal value must fit the tag; any other value's PHP type must be
+	// narrowed by it, never widened or contradicted (PHPStan's
+	// varTag.nativeType).
+	native := x.nativeOf(assign.Value, env)
+	if native == nil {
+		native = vt
+	}
+	switch {
+	case isLiteralExpr(assign.Value):
+		if !types.IsAcceptable(vt, declared, x.p()) {
+			x.report(s.S, P2212, "@var %s does not accept the assigned %s", x.typeName(declared), x.typeName(vt))
+		}
+	case !types.IsMixed(native) && !types.IsSubtype(declared, native, x.p()):
+		x.report(s.S, P2212, "@var %s is not a subtype of the assigned %s", x.typeName(declared), x.typeName(native))
 	}
 	x.assignTo(assign.Target, declared, env, s.S)
+	if isVar {
+		env.setNative(v.Name, native)
+	}
+}
+
+// varTags applies the named `@var T $x` tags of a docblock above a
+// statement to the variables they name, as PHPStan does: $x is retyped for
+// what follows, its PHP type staying what it was. The variable the
+// statement assigns (target) is handled by the caller.
+func (x *fnCtx) varTags(doc *docblock.Doc, env *state, target string) {
+	for _, vt := range doc.Vars {
+		if vt.Name == "" || vt.Name == target {
+			continue
+		}
+		v := &ast.Variable{Name: vt.Name}
+		if info, defined := env.get(vt.Name); defined {
+			native := info.native
+			if native == nil {
+				native = info.t // what PHP knew stays the PHP type
+			}
+			x.narrowPathNative(env, v, x.res.Doc(vt.Type), native, false)
+		}
+	}
+}
+
+// isLiteralExpr reports whether e is written out in full — a literal, a
+// constant, a `new` — so that a `@var` above it is checked for acceptance
+// rather than narrowing.
+func isLiteralExpr(e ast.Expr) bool {
+	switch e := e.(type) {
+	case *ast.Paren:
+		return isLiteralExpr(e.Expr)
+	case *ast.ArrayLit, *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.ConstFetch, *ast.ClassConstFetch, *ast.New:
+		return true
+	}
+	return false
 }
 
 func (x *fnCtx) unsetIndex(t *ast.Index, env *state) {
@@ -510,6 +563,16 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 
 func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
 	defer func() { env.dead = true }()
+	var declared types.Type // an unnamed `@var T` above the return types the value
+	if s.Doc != "" {
+		doc := docblock.Parse(s.Doc)
+		x.varTags(doc, env, "")
+		for _, vt := range doc.Vars {
+			if vt.Name == "" {
+				declared = x.res.Doc(vt.Type)
+			}
+		}
+	}
 	if s.Expr == nil {
 		if x.hasReturn && !x.generator {
 			switch x.returnType.(type) {
@@ -531,6 +594,18 @@ func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
 		expected = x.generatorReturn()
 	}
 	t := x.expr(s.Expr, env, expected)
+	if declared != nil && s.Expr != nil {
+		native := x.nativeOr(s.Expr, t, env)
+		switch {
+		case isLiteralExpr(s.Expr):
+			if !types.IsAcceptable(t, declared, x.p()) {
+				x.report(s.S, P2212, "@var %s does not accept the returned %s", x.typeName(declared), x.typeName(t))
+			}
+		case !types.IsMixed(native) && !types.IsSubtype(declared, native, x.p()):
+			x.report(s.S, P2212, "@var %s is not a subtype of the returned %s", x.typeName(declared), x.typeName(native))
+		}
+		t = declared
+	}
 	if !x.hasReturn {
 		x.returnTypes = append(x.returnTypes, t)
 		return
@@ -666,6 +741,14 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 			t = types.Array{Key: types.TInt, Value: t, List: true}
 		}
 		env.set(p.Name, t)
+		native := p.NativeType
+		if native == nil {
+			native = types.TMixed
+		}
+		if p.Variadic {
+			native = types.Array{Key: types.TInt, Value: native, List: true}
+		}
+		env.setNative(p.Name, native)
 		if p.ByRef {
 			x.byRef[p.Name] = true
 		}
@@ -772,6 +855,18 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 	}
 	c.generator = bodyHasYield(e.Body)
 	c.stmts(e.Body, cenv)
+	// What the body assigns to a by-reference use is what the enclosing
+	// scope may see once the closure has run.
+	for _, u := range e.Uses {
+		if !u.ByRef {
+			continue
+		}
+		if inner, ok := cenv.get(u.Var.Name); ok {
+			if outer, ok := env.get(u.Var.Name); ok {
+				env.set(u.Var.Name, types.MakeUnion(outer.t, inner.t))
+			}
+		}
+	}
 	ret := c.returnType
 	if !cenv.dead && c.hasReturn && !c.generator {
 		switch ret.(type) {

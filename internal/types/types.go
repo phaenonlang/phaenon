@@ -33,6 +33,9 @@ type Hierarchy interface {
 	// Variances returns the variance of each type parameter of a class,
 	// nil when the class is unknown or not generic.
 	Variances(name string) []Variance
+	// IsCallableName reports whether a string literal names a function
+	// ('strval') or a static method ('Foo::bar'), so that it is a callable.
+	IsCallableName(name string) bool
 	// Exists reports whether the class is known at all.
 	Exists(name string) bool
 }

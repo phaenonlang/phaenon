@@ -523,6 +523,10 @@ func (c *Checker) constType(k *program.Constant) types.Type {
 		c.diags = savedDiags
 	}
 	if k.Type != nil {
+		// `const array M = [...]`: the value says more than the declaration.
+		if t != nil && !types.IsMixed(t) && types.IsAcceptable(t, k.Type, ctx.p()) {
+			return t
+		}
 		return k.Type
 	}
 	return t

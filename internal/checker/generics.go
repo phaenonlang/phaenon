@@ -380,20 +380,10 @@ func (c *Checker) checkGenericClass(cl *program.Class) {
 			break
 		}
 	}
-	// Class parameters are instance-only: a static member cannot see one.
-	for _, m := range cl.Methods {
-		if m.Class != cl || !m.Static || m.Decl == nil {
-			continue
-		}
-		for i, p := range m.Params {
-			if i < len(m.Decl.Params) && m.Decl.Params[i].Type != nil && ctx.mentionsClassParam(p.NativeType) {
-				c.report(m.Decl.Params[i].Type.Span(), P3008, "type parameter of class %s used in static method %s(): declare the method's own <T>", cl.Name, m.Name)
-			}
-		}
-		if m.Decl.ReturnType != nil && ctx.mentionsClassParam(m.NativeReturn) {
-			c.report(m.Decl.ReturnType.Span(), P3008, "type parameter of class %s used in static method %s(): declare the method's own <T>", cl.Name, m.Name)
-		}
-	}
+	// A static property is one slot shared by every instantiation, so no
+	// class parameter can type it. A static method may use one: late static
+	// binding resolves it (`static::aggregateClass(): class<T>`, the idiom
+	// of design/generics.md §11.2).
 	for _, p := range cl.Props {
 		if p.Class == cl && p.Static && p.NativeType != nil && ctx.mentionsClassParam(p.NativeType) {
 			c.report(p.Span, P3008, "type parameter of class %s used in static property $%s", cl.Name, p.Name)
@@ -481,15 +471,26 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	target := x.testType(e.Type, "is")
 	x.condValueType = types.TBool
 	then, els = env.clone(), env.clone()
-	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) {
-		if types.IsSubtype(t, target, x.p()) {
-			x.report(e.S, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
-		} else if !types.Overlaps(t, target, x.p()) {
-			x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
+	if nt := x.nativeOr(e.Expr, t, env); !types.IsMixed(t) && !isParamType(t) && !isParamType(target) {
+		switch {
+		case types.IsSubtype(t, target, x.p()):
+			x.condValueType = types.TTrue
+			if !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p()) {
+				x.report(e.S, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
+			}
+		case !types.Overlaps(t, target, x.p()):
+			x.condValueType = types.TFalse
+			if !types.IsMixed(nt) && !types.Overlaps(nt, target, x.p()) {
+				x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
+			}
 		}
 	}
-	x.narrowPath(then, e.Expr, types.Intersect(t, target, x.p()), true)
-	x.narrowPath(els, e.Expr, x.subtract(t, target, x.p()), false)
+	var nthen, nels types.Type
+	if nold := x.nativeVar(e.Expr, env); nold != nil {
+		nthen, nels = types.Intersect(nold, target, x.p()), x.subtract(nold, target, x.p())
+	}
+	x.narrowPathNative(then, e.Expr, types.Intersect(t, target, x.p()), nthen, true)
+	x.narrowPathNative(els, e.Expr, x.subtract(t, target, x.p()), nels, false)
 	return then, els
 }
 
@@ -505,8 +506,8 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	t := x.expr(e.Expr, env, nil)
 	target := x.testType(e.Type, "as")
 	result := target
-	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) {
-		if !types.Overlaps(t, target, x.p()) {
+	if nt := x.nativeOr(e.Expr, t, env); !types.IsMixed(t) && !isParamType(t) && !isParamType(target) {
+		if !types.Overlaps(t, target, x.p()) && !types.IsMixed(nt) && !types.Overlaps(nt, target, x.p()) {
 			x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
 		} else {
 			result = types.Intersect(t, target, x.p())

@@ -26,7 +26,7 @@ func TestStubs(t *testing.T) {
 		t.Errorf("strlen params %+v", fn.Params[0])
 	}
 	am := p.Function("\\array_map").Signature()
-	if len(am.TypeParams) != 3 || types.Print(am.Return) != "array<K, R>" || types.Print(am.Params[0].Type) != "callable(V): R" {
+	if len(am.TypeParams) != 3 || types.Print(am.Return) != "($array is list ? list<R> : array<K, R>)" || types.Print(am.Params[0].Type) != "callable(V): R" {
 		t.Errorf("array_map: %d params, returns %s, callback %s", len(am.TypeParams), types.Print(am.Return), types.Print(am.Params[0].Type))
 	}
 	rc := p.Class("ReflectionClass")

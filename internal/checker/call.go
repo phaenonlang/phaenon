@@ -372,6 +372,9 @@ func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) t
 		}
 		for _, cl := range classes {
 			meth := cl.FindMethod(name)
+			if meth == nil && cl.Kind == ast.KindTrait {
+				meth = x.traitUserMethod(cl, name)
+			}
 			if meth == nil {
 				if cl.FindMethod("__call") != nil {
 					x.argsOnly(e.Args, env)
@@ -496,6 +499,9 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 	var out []types.Type
 	for _, cl := range classes {
 		meth := cl.FindMethod(name)
+		if meth == nil && cl.Kind == ast.KindTrait {
+			meth = x.traitUserMethod(cl, name)
+		}
 		if meth == nil {
 			if cl.FindMethod("__callStatic") != nil || (!x.static && cl.FindMethod("__call") != nil && (viaParent || viaSelf)) {
 				x.argsOnly(e.Args, env)
@@ -540,22 +546,42 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 	return t
 }
 
+// traitUserMethod finds a method a trait body calls on $this/self/static
+// among the classes using the trait, as PHPStan does by analysing a trait
+// in the context of each user. The first user that has it decides.
+func (x *fnCtx) traitUserMethod(trait *program.Class, name string) *program.Method {
+	for _, u := range x.p().TraitUsers(trait.Name) {
+		u.Signature()
+		if m := u.FindMethod(name); m != nil {
+			return m
+		}
+	}
+	return nil
+}
+
 // ------------------------------------------------------------------ new
 
 func (x *fnCtx) newExpr(e *ast.New, env *state) types.Type {
 	if e.Anon != nil {
 		cl := x.p().DeclareAnonymous(x.file, x.res.Scope(), e.Anon)
 		x.c.checkClass(cl)
+		args := e.Args
+		if args == nil {
+			args = e.Anon.Args // `new class (...) extends …`
+		}
 		if ctor := cl.FindMethod("__construct"); ctor != nil {
 			sig := &signature{name: "class@anonymous::__construct()", params: ctor.Params, ret: types.TVoid, decl: ctor.Class}
-			x.checkCall(sig, e.Args, env, e.S, nil)
+			x.checkCall(sig, args, env, e.S, nil)
 		} else {
-			x.argsOnly(e.Args, env)
+			x.argsOnly(args, env)
 		}
 		return types.Class{Name: cl.Name}
 	}
 	var cl *program.Class
 	var recv types.Type
+	// viaString: the class comes from a class<T> value, whose runtime class
+	// is any subclass of T, so T itself being abstract says nothing.
+	viaString := false
 	switch c := e.Class.(type) {
 	case *ast.Name:
 		raw := x.res.ClassName(c)
@@ -578,12 +604,14 @@ func (x *fnCtx) newExpr(e *ast.New, env *state) types.Type {
 		for _, m := range types.Members(ct) {
 			switch m := m.(type) {
 			case types.ClassString:
+				viaString = true
 				if m.Of != nil {
 					out = append(out, m.Of)
 				} else {
 					out = append(out, types.TObject)
 				}
 			case types.StringLit:
+				viaString = true
 				out = append(out, types.Class{Name: m.V})
 			case types.Class, types.Static, types.This:
 				out = append(out, m)
@@ -605,7 +633,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state) types.Type {
 		return recv
 	}
 	_, viaParam := recv.(types.Param)
-	if !cl.IsInstantiable() && !viaParam {
+	if !cl.IsInstantiable() && !viaParam && !viaString {
 		what := "abstract class"
 		switch {
 		case cl.Kind == ast.KindInterface:
@@ -642,7 +670,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state) types.Type {
 		}
 	}
 	if ctor == nil {
-		if e.Args != nil && len(e.Args.Args) > 0 {
+		if e.Args != nil && len(e.Args.Args) > 0 && !(viaString && !cl.IsInstantiable()) {
 			x.report(e.Args.S, P2102, "class %s has no constructor but %d arguments are given", cl.Name, len(e.Args.Args))
 		}
 		x.argsOnly(e.Args, env)
@@ -897,8 +925,8 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		if !ok || !inferable[tps[i].Name] || tp.Bound == nil {
 			continue
 		}
-		if _, unknown := v.(types.Unknown); unknown {
-			continue
+		if _, unknown := v.(types.Unknown); unknown || types.IsMixed(v) {
+			continue // mixed may still fit; the argument itself is reported where it is passed
 		}
 		bound := types.Substitute(tp.Bound, subst)
 		if !types.IsSubtype(v, bound, x.p()) {
@@ -924,12 +952,37 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			x.report(b.arg.S, P2103, "argument %d ($%s) of %s expects %s, %s given", b.idx+1, b.param.Name, sig.name, x.typeName(pt), x.typeName(at))
 		}
 	}
+	argByName := map[string]types.Type{}
+	for i, b := range bindings {
+		if argTypes[i] != nil {
+			argByName[b.param.Name] = argTypes[i]
+		}
+	}
+	for _, p := range sig.params {
+		// An omitted argument is its default, when that is a literal or a
+		// global constant (anything else would need the callee's scope).
+		if _, given := argByName[p.Name]; given || p.Default == nil {
+			continue
+		}
+		name, isConst := constName(p.Default)
+		if name == "unknown" { // php-src's stubs write `= UNKNOWN` for a default they cannot spell
+			continue
+		}
+		if isConst || isLiteralExpr(p.Default) {
+			saved := x.c.diags
+			argByName[p.Name] = x.expr(p.Default, newEnv(), nil)
+			x.c.diags = saved
+		}
+	}
 	// By-reference parameters define or retype their arguments.
 	for i, b := range bindings {
 		if !b.param.ByRef {
 			continue
 		}
 		out := b.param.Out
+		if out != nil {
+			out = x.evalConditional(types.Substitute(types.Substitute(out, rename), subst), argByName)
+		}
 		if out == nil {
 			out = types.Substitute(types.Substitute(b.param.Type, rename), subst)
 			if argTypes[i] != nil && !types.IsMixed(argTypes[i]) && !x.maybeUndefined(b.arg.Value, env) {
@@ -951,12 +1004,6 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	ret = finalizeParams(ret, tps)
 	if sig.recv != nil {
 		ret = replaceStatic(ret, sig.recv)
-	}
-	argByName := map[string]types.Type{}
-	for i, b := range bindings {
-		if argTypes[i] != nil {
-			argByName[b.param.Name] = argTypes[i]
-		}
 	}
 	return x.evalConditional(ret, argByName)
 }
