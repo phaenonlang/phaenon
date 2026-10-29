@@ -18,6 +18,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/printer"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/stdlib"
 )
 
 func main() {
@@ -187,6 +188,21 @@ func typeCheck(files []string, opts checker.Options) []checker.Diagnostic {
 	}
 	var diags []checker.Diagnostic
 	if len(files) > 0 {
+		// The extensions the local php has loaded beyond php-src's: php is
+		// the oracle for what exists (PHN_PHP names another binary).
+		php := os.Getenv("PHN_PHP")
+		if php == "" {
+			php = "php"
+		}
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			cacheDir = os.TempDir()
+		}
+		embedded := stdlib.EmbeddedExtensions()
+		if _, err := p.LoadExtensions(php, cacheDir, func(lower string) bool { return embedded[lower] }); err != nil {
+			diags = append(diags, checker.Diagnostic{File: files[0], Line: 1, Col: 1, Severity: checker.Warning, Code: "P4007",
+				Message: "PHP extensions could not be read (" + err.Error() + "); only php-src's extensions are known"})
+		}
 		if l, err := program.FindComposer(filepath.Dir(files[0])); err == nil {
 			p.AddLoader(l)
 		} else {

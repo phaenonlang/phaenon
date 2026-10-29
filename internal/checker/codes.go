@@ -133,4 +133,5 @@ var (
 	P4004 = Code{"P4004", Warning, "unknown class in a docblock"}
 	P4005 = Code{"P4005", Warning, "Composer autoload maps not found"}
 	P4006 = Code{"P4006", Warning, "deprecated"}
+	P4007 = Code{"P4007", Warning, "PHP extensions could not be read"}
 )
