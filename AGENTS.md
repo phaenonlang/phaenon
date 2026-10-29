@@ -130,9 +130,10 @@ README explains the Composer workflow. Dogfood targets call `phn` from `PATH`.
 - Commit only when the developer running the session asks. Stage by path, never `git add -A` /
   `git add .` / `git commit -a`, and account for every line of `git status --short`: parallel
   sessions leave work in these trees.
-- **Commit messages:** a short subject sentence (an `Area: ` prefix is fine, a Conventional Commits
-  type is not) and a body that says what changed and why. **No attribution lines, no
-  `Co-Authored-By`, no "Generated with"** — the repositories will be open source. The same rule holds
-  in `design`, `runtime` and `jetbrains`.
+- **Commit messages follow [Conventional Commits](https://www.conventionalcommits.org):** `type(scope):
+  subject`, the scope a package or area (`feat(checker):`, `fix(emit):`, `docs(design):`), `!` for
+  a breaking change to the language or the CLI, and a body that says what changed and why. **No
+  attribution lines, no `Co-Authored-By`, no "Generated with"** — the repositories will be open
+  source. The same rule holds in `design`, `runtime` and `jetbrains`.
 - `go.mod`'s module line is `github.com/phaenonlang/phaenon`; GoLand has rewritten it before (vault
   `gotcha-goland-rewrites-go-mod`).

@@ -51,8 +51,9 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 - ~~Symfony DI warning for reified services~~ — moot since 2026-10-29: `reified` is gone
   (`generics.md` §11.2).
-- **`$x is class<User>` lowers to the runtime** (`Type::classString(...)->check()`); PHP can do it
-  natively (`\is_string($x) && \is_a($x, User::class, true)`), as `is int` already does.
+- ~~`$x is class<User>` lowered to the runtime~~ — native since 2026-10-29: `\is_string($x) &&
+  \is_a($x, User::class, true)`; bare `class` tests `class_exists || interface_exists`. Only a
+  non-class argument (`class<object>`, a union) still uses the runtime descriptor.
 
 - **`--runtime-guards=boundary|all|off`** (`generics.md` §6) — not built.
 - **Descriptor hoisting** — `static $__t ??= Type::list(...)` for `is` / `as` in hot paths.
