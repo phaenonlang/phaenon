@@ -36,6 +36,24 @@ func Overlay() []Stub {
 	return walk(overlay, "overlay", ".php")
 }
 
+// EmbeddedExtensions names the extensions whose stubs are embedded, as
+// get_loaded_extensions() spells them lower-cased ("core", "standard",
+// "spl", "pdo_odbc"); the rest of a php's extensions are read from its
+// reflection (program.LoadExtensions).
+func EmbeddedExtensions() map[string]bool {
+	out := map[string]bool{"core": true}
+	entries, err := fs.ReadDir(phpSrc, "php-src/ext")
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			out[e.Name()] = true
+		}
+	}
+	return out
+}
+
 // Runtime returns the declarations of the phaenon/runtime package
 // (`\Phaenon\Type`), which compiled code may depend on.
 func Runtime() []Stub {
