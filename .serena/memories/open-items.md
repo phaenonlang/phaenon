@@ -21,7 +21,26 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   - `tequila/object-mapper` `tests/` carry 16 findings that PHPStan never saw (its `paths` is
     `src` only): Symfony container `get()` typing (needs a phpstan-symfony-like overlay) and
     untyped closure parameters in fixtures. The tests are built with `phn build --no-types tests`.
-- `tequila/mongodb-odm` is the next generics target ([[dogfood]]).
+- **`tequila/mongodb-odm`** (2026-10-29, [[dogfood]]): migrated and built on `phaenon-dogfood`; the
+  checker reports 40 findings in `src`, all of PHPStan's level-9/10 kind (`mixed` from Symfony
+  config arrays and untyped `array` parameters flowing into typed ones) — PHPStan at level max
+  reports the same sites, the repo runs at level 8. Open for a maintainer: raise the library to
+  level max on `main` (the Phaenon findings are the worklist), or give `phn` a knob for implicit
+  `mixed`. Until then `composer build` passes `--emit-on-error`.
+- **Should `phn build` emit on type errors by default?** `tsc` does (`noEmitOnError: false`), M2
+  chose to withhold. `--emit-on-error` exists since 2026-10-29; the default is a maintainer's call.
+- **Existential templates** (`@template T` used once, in one promoted `@param Foo<T>`): migrate
+  keeps them with a note (nine in mongodb-odm, three in object-mapper). A bare `Foo` in Phaenon
+  means the same to the checker (foreign templates are inferred), but the emitted PHP would then
+  lack type arguments and PHPStan reports `missingType.generics` on the output. Decide: a
+  spelling for "any arguments" that emits a docblock PHPStan accepts, or keep the templates.
+- **Erasure that follows the overridden signature**: `DateTimeNormalizer::denormalize(mixed
+  $value)` with `@param UTCDateTime $value` must stay `mixed` natively because the interface's
+  parameter is a type parameter erased to `mixed`. Phaenon could let the override declare
+  `UTCDateTime $value` and erase it to the parent's erased type with a generated `@param`. Design
+  question for `generics.md`.
+- Trait **properties** used on `$this` in a trait body are not yet looked up in the using classes
+  (methods are, since 2026-10-29).
 
 ## M4 — collections and strings
 
@@ -72,6 +91,9 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - ~~**Runtime stub drift**~~ — `classString()` and `resource()` added to the stub 2026-10-28; nothing
   checks the stub against `../runtime/src/Type.php` yet ([[gotcha-runtime-stub-drift]]).
 - ~~**`checker.md` §8 item 5**~~ — fixed 2026-10-28.
+- ~~**`treatPhpDocTypesAsCertain`**~~ — decided 2026-10-29 (`checker.md` §9 *Docblock types are
+  not certain*): impossibility diagnostics need the PHP types to agree; the parity harness runs
+  PHPStan with the option off.
 - **`design` repo tracks GoLand files** — `.idea/*.xml`, `.idea/.gitignore` and a `go.mod` reading
   `module design` (found 2026-10-28; cf. [[gotcha-goland-rewrites-go-mod]]). Whether to untrack them is a
   maintainer's call.

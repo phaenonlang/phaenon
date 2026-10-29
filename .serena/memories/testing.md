@@ -1,7 +1,7 @@
 ---
 type: reference
 tags: [phaenon, testing]
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Test environment
@@ -20,7 +20,8 @@ suites, and the tools they shell out to. Without its variable a suite **skips**,
 | `PHAENON_PHPT_FILTER` | `internal/conformance` | Only `.phpt` paths containing this substring | e.g. `Zend/tests`, `ext/standard/tests` |
 | `PHAENON_SHOW_DIFFS` | printer round trip, execution suites | How many differences to print (default 25) | e.g. `100` |
 | `PHAENON_SHOW_FALSE_ACCEPT` | `TestParserAgainstPHP` | Lists (up to 30) files PHP rejects but Phaenon parses | any non-empty |
-| `PHAENON_PHPSTAN` | `TestPHPStanParity` (checker), `TestGenerics` (emit) | **Path to a PHPStan binary**; runs it at level max | `/Users/petr/labs/tequila/object-mapper/tools/phpstan/vendor/bin/phpstan` |
+| `PHAENON_PHPSTAN` | `TestPHPStanParity` (checker), `TestGenerics` (emit) | **Path to a PHPStan binary**; runs it at level max — the parity run with `treatPhpDocTypesAsCertain: false`, Tequila's profile (`../design/checker.md` §9) | `/Users/petr/labs/tequila/object-mapper/tools/phpstan/vendor/bin/phpstan` |
+| `PHN_PHP` | `phn` itself (not a test variable) | The `php` whose loaded extensions are reflected into stubs; default `php` on `PATH` | unset |
 | `PHAENON_UPDATE` | `TestGenerics` (emit) | Rewrites the expected `.php` goldens from the current output | `1` |
 | `PHAENON_GOLDEN` | `TestGolden` (checker) | Only golden files whose name contains this substring | e.g. `generics` |
 | `PHAENON_COMPOSER_PROJECT` | `internal/program` | A Composer project to exercise the vendor reader | e.g. `/Users/petr/labs/tequila/object-mapper` |
@@ -50,6 +51,16 @@ recorded results were established with it.
 
 The PHPStan behaviour the emitter is built around — one docblock tag per line — was verified
 against 2.2 ([[gotcha-phpstan-one-tag-per-line]]).
+
+## Extension stubs
+
+`phn check` and `phn build` ask the local `php` for its loaded extensions and generate a stub for
+each one php-src does not cover (ext-mongodb, redis, amqp, apcu, igbinary, msgpack here), from
+`ReflectionExtension`. The stubs are cached under the user cache directory —
+`~/Library/Caches/phaenon/ext/<name>-<version>-php<version>.php` on macOS — and regenerated when
+the extension or PHP version changes; delete the directory to force it. `TestExtensionStubsParse`
+(`internal/program`) generates a stub for every loaded extension and parses it, so a php with an
+exotic extension is worth running the suite on. Without `php` the checker warns `P4007` once.
 
 ## Toolchain
 

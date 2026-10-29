@@ -25,6 +25,8 @@ The roadmap puts the editor plugins in M6.
 
 | **M3** migrate step | `phn migrate` lifts generic docblocks into syntax (`internal/migrate/generics.go`); prose-only `@param $x`; parent generic signatures inherited by plain overrides | `tequila/reflection` and `tequila/object-mapper` (51 `.phn`) migrated with real generics: both suites, PHPStan and php-cs-fixer pass on compiled output; lift golden `internal/migrate/testdata/lift/` | see `git log` after `2680bec` · design (`generics.md` §11.1) · reflector / object-mapper `phaenon-dogfood` |
 
+| **M3** mongodb-odm (2026-10-29) | `tequila/mongodb-odm` (124 `.phn`) migrated and built on `phaenon-dogfood`; on the way: extension stubs from `php`'s reflection (`internal/program/extension.go`), PHP-type certainty for impossibility diagnostics (`internal/checker/native.go`), `@var` semantics, a dozen inference fixes, `phn build --emit-on-error` | Suite 162 tests, PHPStan 8 and cs pass on the output; `phn check` 150 → 41 findings (39 in `src`, all level-9/10 `mixed`, the library runs at 8 — a maintainer's call, [[open-items]]); reflector and object-mapper `src` still 0 | design `checker.md` §9 (2026-10-29 entries), roadmap M3 dated bullet · mongodb-odm `90a9a67` |
+
 | **M3** correction (2026-10-29) | `reified` removed end to end (keyword, `P3005`/`P3006`, hidden constructor parameters, `$__T`, synthesised constructors, `Type::from()`/`instantiate()`); `class<T>` is the native type of `T::class`; PHPStan's hyphenated names are docblock vocabulary again, not syntax; inferred type arguments are checked against their bounds | reflector and object-mapper rebuilt with `class<T>`: 0 findings, both suites, PHPStan and cs pass; output of object-mapper byte-identical | design `generics.md` §11.2, roadmap D9 |
 
 ## Next — a maintainer's choice
@@ -35,6 +37,7 @@ and [[open-items]].
 1. **M4 — collections and strings**: `list<T>` / `map<K, V>` as first-class types with literals,
    `array` as a legacy type, `\Phaenon\*` stdlib, string methods, `bytes`; target `tequila/core`.
    M4 also settles `P2516`'s severity and shapes ([[open-items]]).
-2. `tequila/mongodb-odm` as the next generics dogfood target (roadmap M3 line).
+2. ~~`tequila/mongodb-odm` as the next generics dogfood target~~ — done 2026-10-29 up to the
+   level-8 question above; then `tequila/core` with M4.
 
 ← [[Home]]
