@@ -23,9 +23,9 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - **`tequila/mongodb-odm`** (2026-10-29, [[dogfood]]): migrated and built on `phaenon-dogfood`; the
   checker reports 40 findings in `src`, all of PHPStan's level-9/10 kind (`mixed` from Symfony
   config arrays and untyped `array` parameters flowing into typed ones) — PHPStan at level max
-  reports the same sites, the repo runs at level 8. Open for a maintainer: raise the library to
-  level max on `main` (the Phaenon findings are the worklist), or give `phn` a knob for implicit
-  `mixed`. Until then `composer build` passes `--emit-on-error`.
+  reports the same sites, the repo runs at level 8. Decided 2026-10-29: the library goes to level
+  max on `main` — PR tequila/mongodb-odm#45 (open); after the merge, rebase the dogfood branch and
+  drop `--emit-on-error` from its `composer build`.
 - ~~**Should `phn build` emit on type errors by default?**~~ — decided 2026-10-29 (roadmap D10): no
   output for a file with type errors; `--emit-on-error` is the opt-in for a codebase adopting the
   checker.

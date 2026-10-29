@@ -49,9 +49,13 @@ push dogfood work without a maintainer's go-ahead.
   `tests`, PHPStan **level 8**, `treatPhpDocTypesAsCertain: false`). Branch **`phaenon-dogfood`**
   (local only), one commit `90a9a67` *build: compile the library from Phaenon (.phn) sources* on
   top of `main` at `d6ad41c`: 124 `.phn` with the generated `.php` beside them.
-- `phn migrate` kept 44 tags: array shapes (no spelling yet), nine constructor-level templates that
-  only type promoted properties ([[open-items]] *existential templates*), four `@param` tags whose
-  type erases differently from the declaration (`mixed`/`iterable`).
+- `phn migrate` keeps 30 tags: array shapes (no spelling yet), four `@param` tags whose type erases
+  differently from the declaration (`mixed`/`iterable`), two `@return` tags with prose. The nine
+  constructor templates typing promoted properties are syntax since the same day (`generics.md`
+  §11.2; branch commit after `90a9a67`).
+- PR [tequila/mongodb-odm#45](https://github.com/tequila/mongodb-odm/pull/45) raises `main` to
+  PHPStan level max (2026-10-29, open); once merged, the dogfood branch rebases onto it and the 41
+  findings should go.
 - `phn check src tests`: 41 findings (39 in `src`), all of PHPStan's level-9/10 kind — `mixed`
   out of Symfony config arrays and untyped `array` parameters passed to typed ones; PHPStan at
   level max reports the same sites. Therefore `composer build` = `phn build --emit-on-error src
