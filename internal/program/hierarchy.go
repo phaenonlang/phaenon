@@ -227,6 +227,15 @@ func (c *Class) ensureMembers() {
 				Type: c.BackingType, NativeType: c.BackingType, Span: c.Span, File: c.File})
 		}
 	}
+	// The enum interfaces carry the same properties, as PHPStan knows them.
+	switch c.Name {
+	case "UnitEnum":
+		c.addProp(&Property{Name: "name", Class: c, Vis: Public, SetVis: Private, Readonly: true, Magic: true,
+			Type: types.String{NonEmpty: true}, NativeType: types.TString, Span: c.Span, File: c.File})
+	case "BackedEnum":
+		c.addProp(&Property{Name: "value", Class: c, Vis: Public, SetVis: Private, Readonly: true, Magic: true,
+			Type: types.TArrayKey, NativeType: types.TArrayKey, Span: c.Span, File: c.File})
+	}
 	// Promoted constructor parameters are properties.
 	if ctor := c.methods["__construct"]; ctor != nil && ctor.Decl != nil {
 		for i, ap := range ctor.Decl.Params {
@@ -314,19 +323,26 @@ func (c *Class) inheritDocTypes() {
 				if cp == nil {
 					continue
 				}
-				hasDoc := cp.NativeType == nil && !types.IsMixed(cp.Type) || cp.NativeType != nil && !types.Equal(cp.Type, cp.NativeType)
+				hasDoc := cp.NativeType == nil && !types.IsMixed(cp.Type) || cp.NativeType != nil && !types.Equal(cp.Type, cp.NativeType) || ownNative(cp.NativeType)
 				if hasDoc || pp.Type == nil || !nativeMatches(cp.NativeType, erasedNative(pp.NativeType, pm, a)) {
 					continue
 				}
 				cp.Type = types.Substitute(pp.Type, subst)
 			}
-			hasDocReturn := m.Return != nil && (m.NativeReturn == nil || !types.Equal(m.Return, m.NativeReturn))
+			hasDocReturn := m.Return != nil && (m.NativeReturn == nil || !types.Equal(m.Return, m.NativeReturn)) || ownNative(m.NativeReturn)
 			if !hasDocReturn && pm.Return != nil && nativeMatches(m.NativeReturn, erasedNative(pm.NativeReturn, pm, a)) {
 				m.Return = types.Substitute(pm.Return, subst)
 			}
 			break
 		}
 	}
+}
+
+// ownNative reports whether a declared type says more than its PHP erasure
+// (`class<T>`, `list<int>`, `T`): such a Phaenon signature is the method's
+// own typing and inherits nothing from the method it overrides.
+func ownNative(t types.Type) bool {
+	return t != nil && !types.Equal(types.Erase(t), t)
 }
 
 // paramNamed returns the parameter called name, or nil.

@@ -138,6 +138,12 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 	case *ast.Paren:
 		x.narrowPath(env, p.Expr, t, define)
 		return
+	case *ast.Assign:
+		// `null !== ($x = f())` narrows what was assigned.
+		if p.Op == token.Kind('=') {
+			x.narrowPath(env, p.Target, t, define)
+		}
+		return
 	case *ast.Variable:
 		if p.Name == "this" {
 			env.setPath("$this", t)
@@ -154,12 +160,55 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 			return
 		}
 		// Narrowing keeps the member paths: the object is the same one.
-		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define}
+		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define, native: narrowNative(info.native, t, x.p())}
 		return
 	}
 	if key, ok := pathKey(e); ok {
 		env.setPath(key, t)
 	}
+}
+
+// narrowPathNative is narrowPath with the variable's PHP type narrowed by
+// the same operation: nt is what the operation leaves of the PHP type, nil
+// when the variable was certain.
+func (x *fnCtx) narrowPathNative(env *state, e ast.Expr, t, nt types.Type, define bool) {
+	x.narrowPath(env, e, t, define)
+	if v, ok := variableOf(e); ok {
+		if info, ok := env.get(v.Name); ok {
+			if nt != nil {
+				if _, never := nt.(types.Never); never || types.Equal(nt, t) {
+					nt = nil
+				}
+			}
+			info.native = nt
+			env.vars[v.Name] = info
+		}
+	}
+}
+
+// nativeVar is the PHP type recorded for a variable expression, nil for
+// anything else or for a certain variable.
+func (x *fnCtx) nativeVar(e ast.Expr, env *state) types.Type {
+	if v, ok := variableOf(e); ok {
+		if info, ok := env.get(v.Name); ok {
+			return info.native
+		}
+	}
+	return nil
+}
+
+func variableOf(e ast.Expr) (*ast.Variable, bool) {
+	switch e := e.(type) {
+	case *ast.Paren:
+		return variableOf(e.Expr)
+	case *ast.Assign:
+		if e.Op == token.Kind('=') {
+			return variableOf(e.Target)
+		}
+	case *ast.Variable:
+		return e, e.Name != "this"
+	}
+	return nil, false
 }
 
 // pathType returns the current type of a path without side effects.
@@ -179,10 +228,14 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 	x.condValueType = types.TBool
 	if strict && !types.IsMixed(lt) && !types.IsMixed(rt) && !types.Overlaps(lt, rt, x.p()) {
 		word := "false"
+		x.condValueType = types.TFalse
 		if negate {
 			word = "true"
+			x.condValueType = types.TTrue
 		}
-		x.report(e.S, P2305, "strict comparison between %s and %s is always %s", x.typeName(lt), x.typeName(rt), word)
+		if !x.nativeOverlap(e.Left, lt, e.Right, rt, env) {
+			x.report(e.S, P2305, "strict comparison between %s and %s is always %s", x.typeName(lt), x.typeName(rt), word)
+		}
 	}
 	then, els = env.clone(), env.clone()
 	// count($x) === 0 and friends.
@@ -209,8 +262,12 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 			return
 		}
 		if strict || isNullType(other) {
-			x.narrowPath(then, target, types.Intersect(targetT, other, x.p()), true)
-			x.narrowPath(els, target, x.subtract(targetT, other, x.p()), false)
+			var nthen, nels types.Type
+			if nold := x.nativeVar(target, env); nold != nil {
+				nthen, nels = types.Intersect(nold, other, x.p()), x.subtract(nold, other, x.p())
+			}
+			x.narrowPathNative(then, target, types.Intersect(targetT, other, x.p()), nthen, true)
+			x.narrowPathNative(els, target, x.subtract(targetT, other, x.p()), nels, false)
 			if !strict {
 				// == null is truthiness-like.
 				x.narrowPath(then, target, types.Falsy(targetT), true)
@@ -379,17 +436,28 @@ func (x *fnCtx) instanceofCond(e *ast.Instanceof, env *state) (then, els *state)
 	if target == nil {
 		return then, els
 	}
-	if !types.IsMixed(t) {
+	if nt := x.nativeOr(e.Expr, t, env); !types.IsMixed(t) {
 		if _, isObject := target.(types.Object); !isObject {
-			if types.IsSubtype(t, target, x.p()) && !isParamType(t) {
-				x.report(e.S, P2306, "%s is always an instance of %s", x.typeName(t), x.typeName(target))
-			} else if !types.Overlaps(t, target, x.p()) {
-				x.report(e.S, P2306, "%s is never an instance of %s", x.typeName(t), x.typeName(target))
+			switch {
+			case types.IsSubtype(t, target, x.p()) && !isParamType(t):
+				x.condValueType = types.TTrue
+				if !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p()) {
+					x.report(e.S, P2306, "%s is always an instance of %s", x.typeName(t), x.typeName(target))
+				}
+			case !types.Overlaps(t, target, x.p()):
+				x.condValueType = types.TFalse
+				if !types.IsMixed(nt) && !types.Overlaps(nt, target, x.p()) {
+					x.report(e.S, P2306, "%s is never an instance of %s", x.typeName(t), x.typeName(target))
+				}
 			}
 		}
 	}
-	x.narrowPath(then, e.Expr, types.Intersect(t, target, x.p()), true)
-	x.narrowPath(els, e.Expr, x.subtract(t, target, x.p()), false)
+	var nthen, nels types.Type
+	if nold := x.nativeVar(e.Expr, env); nold != nil {
+		nthen, nels = types.Intersect(nold, target, x.p()), x.subtract(nold, target, x.p())
+	}
+	x.narrowPathNative(then, e.Expr, types.Intersect(t, target, x.p()), nthen, true)
+	x.narrowPathNative(els, e.Expr, x.subtract(t, target, x.p()), nels, false)
 	return then, els
 }
 

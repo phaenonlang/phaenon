@@ -619,6 +619,7 @@ func (n *Attribute) Span() Span { return n.S }
 // Param is a function/method/closure/hook parameter, possibly a promoted property.
 type Param struct {
 	S         Span
+	Doc       string // a preceding doc comment: `/** @var T */` on a promoted property
 	Attrs     []*AttrGroup
 	Modifiers Modifier // constructor promotion
 	Type      TypeExpr
@@ -889,6 +890,7 @@ type (
 	}
 	Return struct {
 		S    Span
+		Doc  string // a preceding `/** @var T $x */`
 		Expr Expr
 	}
 	Global struct {

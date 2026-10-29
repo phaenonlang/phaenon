@@ -22,7 +22,64 @@ func IsAcceptable(arg, param Type, h Hierarchy) bool {
 		}
 		return m
 	})
-	return !Equal(widened, arg) && subtype(widened, param, h, 0)
+	if !Equal(widened, arg) && subtype(widened, param, h, 0) {
+		return true
+	}
+	return acceptsMaybe(arg, param, h, 0)
+}
+
+// acceptsMaybe is the acceptance PHPStan grants a general array against an
+// array shape: `array<string, string>` for `array{spec: string}` passes when
+// the keys and values can be the shape's, since the array may well be one.
+// Everything else is decided by subtyping; mixed values are not accepted.
+func acceptsMaybe(arg, param Type, h Hierarchy, depth int) bool {
+	if depth > 8 {
+		return false
+	}
+	if subtype(arg, param, h, depth) {
+		return true
+	}
+	for _, a := range Members(arg) {
+		ok := false
+		for _, p := range Members(param) {
+			if subtype(a, p, h, depth) || arrayMaybe(a, p, h, depth) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayMaybe(a, p Type, h Hierarchy, depth int) bool {
+	arr, ok := a.(Array)
+	if !ok {
+		return false
+	}
+	switch p := p.(type) {
+	case Array:
+		if p.List && !arr.List {
+			return false
+		}
+		return acceptsMaybe(arr.Key, p.Key, h, depth+1) && !IsMixed(arr.Value) && acceptsMaybe(arr.Value, p.Value, h, depth+1)
+	case Shape:
+		for _, e := range p.Entries {
+			if !Overlaps(arr.Key, shapeKeyType(e), h) {
+				if e.Optional {
+					continue
+				}
+				return false
+			}
+			if !acceptsMaybe(arr.Value, e.Type, h, depth+1) && !Overlaps(arr.Value, e.Type, h) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // Overlaps reports whether a and b can share a value (used for `===`
@@ -139,6 +196,15 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 				return true
 			}
 		}
+		if it, ok := a.(Iterable); ok {
+			// iterable<K, V> is array<K, V>|Traversable<K, V>; an array's keys
+			// are array-key whatever the iterable's say.
+			k := it.Key
+			if IsMixed(k) {
+				k = TArrayKey
+			}
+			return subtype(Array{Key: k, Value: it.Value}, b, h, depth+1) && subtype(NewClass("Traversable"), b, h, depth+1)
+		}
 		// A bool is true|false, an int range may split across members.
 		switch a := a.(type) {
 		case Bool:
@@ -204,6 +270,9 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 		return ok
 	case StringLit:
 		switch b := b.(type) {
+		case Callable:
+			// 'strval' and 'Foo::bar' are callables when they name one.
+			return !b.Closure && h != nil && h.IsCallableName(a.V)
 		case String:
 			return stringLitFits(a.V, b)
 		case ClassString:

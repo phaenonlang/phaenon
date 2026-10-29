@@ -710,6 +710,14 @@ func (r *resolver) buildParams(ps []*ast.Param, doc *docblock.Doc) []*Param {
 				}
 			}
 		}
+		if docT == nil && ap.Doc != "" {
+			// `/** @var T */` on a promoted property types the parameter too.
+			for _, vt := range docblock.Parse(ap.Doc).Vars {
+				if vt.Name == "" || vt.Name == p.Name {
+					docT = r.docType(vt.Type)
+				}
+			}
+		}
 		native := p.NativeType
 		if p.Variadic && native != nil {
 			// The native variadic type describes one element too.
@@ -771,7 +779,11 @@ func (fn *Function) Signature() *Function {
 // type of its value as computed by the checker's evaluator.
 func (p *Program) ConstantType(c *Constant) types.Type {
 	if c.Type != nil {
-		return c.Type
+		// `const array M = [...]` says less than the value; the evaluator
+		// returns the value's type when it fits the declaration.
+		if _, isArray := types.Erase(c.Type).(types.Array); !isArray {
+			return c.Type
+		}
 	}
 	if c.evaled == 2 {
 		return c.evalType

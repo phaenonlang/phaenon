@@ -14,9 +14,10 @@ import (
 )
 
 // PHPStan parity (opt-in): PHAENON_PHPSTAN=/path/to/phpstan runs PHPStan at
-// level max over every golden file (written as .php with the open tag on
-// line 1, so line numbers match) and demands that every line PHPStan
-// flags is one the golden file expects a diagnostic on. The checker may be
+// level max, with treatPhpDocTypesAsCertain off, over every golden file
+// (written as .php with the open tag on line 1, so line numbers match) and
+// demands that every line PHPStan flags is one the golden file expects a
+// diagnostic on. The checker may be
 // stricter than PHPStan; it may not be more lenient. Lines PHPStan does
 // not flag but the corpus expects are listed for information. Files are
 // analysed one at a time: PHPStan can crash on deliberately invalid code,
@@ -71,7 +72,14 @@ func TestPHPStanParity(t *testing.T) {
 			for _, w := range parseWants(string(src)) {
 				wants[w.line] = true
 			}
-			cmd := exec.Command(phpstan, "analyse", "--level", "max", "--no-progress", "--error-format", "json", "--no-ansi", dir)
+			// Tequila's profile (design/checker.md §9): docblock types are not
+			// certain, so a check against what PHP may still hand over is not
+			// reported as impossible by either side.
+			neon := "parameters:\n    treatPhpDocTypesAsCertain: false\n"
+			if err := os.WriteFile(filepath.Join(dir, "phpstan.neon"), []byte(neon), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(phpstan, "analyse", "-c", filepath.Join(dir, "phpstan.neon"), "--level", "max", "--no-progress", "--error-format", "json", "--no-ansi", dir)
 			cmd.Dir = dir
 			out, _ := cmd.Output() // exit status 1 means findings, which is expected
 			var report struct {

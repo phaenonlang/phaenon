@@ -126,9 +126,35 @@ final class Erased<T of User>
         return $x is T; // want P3003
     }
 
-    public static function create(T $x): void // want P3008
+    public static ?T $shared = null; // want P3008
+}
+
+// Late static binding carries T into a static method: the class<T> getter
+// idiom of design/generics.md §11.2.
+abstract class Keyed<T of User>
+{
+    abstract public static function model(): class<T>;
+
+    public function make(): T
     {
+        $class = static::model();
+        return new $class();
     }
+}
+
+final class AdminKeyed extends Keyed<Admin>
+{
+    public static function model(): class<Admin>
+    {
+        return Admin::class;
+    }
+}
+
+function keyed(AdminKeyed $k): void
+{
+    takesUser($k->make());
+    takesString(AdminKeyed::model());
+    takesInt(AdminKeyed::model()); // want P2103
 }
 
 class Base<T>

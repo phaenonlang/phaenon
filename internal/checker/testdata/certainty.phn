@@ -1,0 +1,256 @@
+namespace Cert;
+
+// What PHP declares behind a refined type (design/checker.md §9): a check
+// is impossible only when the PHP types say so too; a `@var` narrows what
+// PHP declares and never widens it; and what PHPStan knows of literals,
+// constants, the enum interfaces, traits and anonymous classes.
+
+function takesInt(int $i): void
+{
+}
+
+function takesString(string $s): void
+{
+}
+
+function parameter(mixed $v): array|bool|null
+{
+    return is_array($v) || is_bool($v) ? $v : null;
+}
+
+function service(mixed $v): ?object
+{
+    return is_object($v) ? $v : null;
+}
+
+function number(mixed $v): int
+{
+    return is_int($v) ? $v : 0;
+}
+
+/**
+ * @template T of object
+ */
+abstract class Normalizer
+{
+    /**
+     * @param T $value
+     */
+    abstract public function normalize(object $value): string;
+}
+
+/**
+ * @extends Normalizer<\UnitEnum>
+ */
+final class EnumNormalizer extends Normalizer
+{
+    public function normalize(object $value): string
+    {
+        // Erasure lets any object in: the guard is not dead code, and the
+        // inherited type still types what follows it.
+        if (!$value instanceof \UnitEnum) {
+            throw new \InvalidArgumentException('enum expected');
+        }
+        if ($value instanceof \BackedEnum) {
+            return (string) $value->value;
+        }
+
+        return $value->name;
+    }
+}
+
+final class Document
+{
+    public function __construct(public string $id)
+    {
+    }
+}
+
+function varTags(mixed $m): void
+{
+    /** @var list<string> $names */
+    $names = parameter($m);
+    takesString($names[0]);
+    /** @var Document $doc */
+    $doc = service($m);
+    takesString($doc->id);
+    /** @var array<string, int> $counts */
+    $counts = [];
+    $counts['a'] = 1;
+    takesInt($counts['a']);
+    /** @var int|string $wide */
+    $wide = number($m); // want P2212
+    /** @var string $wrong */
+    $wrong = number($m); // want P2212
+    /** @var list<int> $bad */
+    $bad = ['a']; // want P2212
+    /** @var int $m */
+    takesInt($m);
+    echo $wide, $wrong, count($bad);
+}
+
+function returned(mixed $m): array
+{
+    /** @var array<string, mixed> */
+    return parameter($m);
+}
+
+function nullCheck(mixed $m): int
+{
+    /** @var array<string, mixed> $data */
+    $data = parameter($m);
+    if (null === $data) { // PHP may still hand back null: not always false
+        return 0;
+    }
+
+    return count($data);
+}
+
+function tagged(?Document $d): string
+{
+    /** @var Document $d */
+    if ($d instanceof Document) { // the PHP type stays ?Document: not always true
+        return $d->id;
+    }
+
+    return '';
+}
+
+abstract class Shape
+{
+}
+
+/**
+ * @param class-string<Shape> $class
+ * @param class-string<\Countable> $countable
+ */
+function factory(string $class, string $countable): Shape
+{
+    $c = new $countable(); // a class<T> names a concrete class, whatever T is
+    takesInt(count($c));
+
+    return new $class();
+}
+
+function enums(\UnitEnum $u, \BackedEnum $b): string
+{
+    return $u->name . $b->value;
+}
+
+enum Scalar: string
+{
+    case Str = 's';
+    case Int = 'i';
+}
+
+final class Casts
+{
+    private const array BY_NAME = [Scalar::Str->value => 'strval', Scalar::Int->value => 'intval'];
+
+    public function callback(): callable
+    {
+        return self::BY_NAME['s'];
+    }
+
+    public function apply(string $name): mixed
+    {
+        return call_user_func(self::BY_NAME[$name] ?? 'strval', 1);
+    }
+}
+
+/**
+ * @param array<string, int> $counts
+ * @return array<string, int>
+ */
+function doubled(array $counts): array
+{
+    $out = [];
+    foreach ($counts as $name => $n) {
+        if ('total' === $name) {
+            $out['total'] = 0;
+            continue;
+        }
+        $out[$name] = $n * 2;
+    }
+
+    return $out;
+}
+
+function overlay(string $path): float
+{
+    $parts = explode('/', $path);
+    takesString($parts[0]);
+    $first = array_shift($parts);
+    takesString($first);
+    $two = microtime();
+    takesString($two);
+
+    return microtime(true);
+}
+
+/**
+ * @param list<string> $parts
+ */
+function shifting(array $parts): void
+{
+    while (null !== ($part = array_shift($parts))) {
+        takesString($part);
+    }
+}
+
+function captured(): void
+{
+    $seen = [];
+    $record = static function (string $s) use (&$seen): void {
+        $seen[] = $s;
+    };
+    $record('a');
+    foreach ($seen as $s) {
+        takesString($s);
+    }
+}
+
+interface Named
+{
+    public function name(): string;
+}
+
+function anonymous(string $name): Named
+{
+    return new class ($name) implements Named {
+        public function __construct(private readonly string $name)
+        {
+        }
+
+        public function name(): string
+        {
+            return $this->name;
+        }
+    };
+}
+
+/**
+ * @param iterable<Document> $docs
+ * @return list<Document>
+ */
+function materialize(iterable $docs): array
+{
+    return iterator_to_array($docs, false);
+}
+
+trait Assertions
+{
+    public function assertNamed(Document $d): void
+    {
+        $this->check('' !== $d->id); // a method of the class using the trait
+    }
+}
+
+final class DocumentTest
+{
+    use Assertions;
+
+    public function check(bool $ok): void
+    {
+    }
+}

@@ -13,6 +13,11 @@ import (
 type varInfo struct {
 	t     types.Type
 	maybe bool // might not be defined on some path
+	// native is the PHP-declared type behind t when a docblock or a generic
+	// refined it, nil when t is certain. Impossibility diagnostics (an
+	// instanceof that is always true, a === that is always false) need both
+	// types to agree, as PHPStan does with treatPhpDocTypesAsCertain off.
+	native types.Type
 }
 
 // state is the abstract state at one program point: the type of every
@@ -52,6 +57,50 @@ func (e *state) setMaybe(name string, t types.Type) {
 func (e *state) get(name string) (varInfo, bool) {
 	v, ok := e.vars[name]
 	return v, ok
+}
+
+// setNative records the PHP-declared type behind a variable's refined type;
+// nil, or a type equal to the refined one, marks the variable certain.
+func (e *state) setNative(name string, native types.Type) {
+	v, ok := e.vars[name]
+	if !ok {
+		return
+	}
+	if native == nil || types.Equal(native, v.t) {
+		v.native = nil
+	} else {
+		v.native = native
+	}
+	e.vars[name] = v
+}
+
+// joinNative merges the native types of a variable at a join point.
+func joinNative(a, b varInfo) types.Type {
+	if a.native == nil && b.native == nil {
+		return nil
+	}
+	na, nb := a.native, b.native
+	if na == nil {
+		na = a.t
+	}
+	if nb == nil {
+		nb = b.t
+	}
+	return types.MakeUnion(na, nb)
+}
+
+// narrowNative narrows the native type along with the refined one; a
+// native type the narrowing leaves nothing of, or equal to the refined
+// type, marks the variable certain.
+func narrowNative(native, t types.Type, p *program.Program) types.Type {
+	if native == nil {
+		return nil
+	}
+	n := types.Intersect(native, t, p)
+	if _, never := n.(types.Never); never || types.Equal(n, t) {
+		return nil
+	}
+	return n
 }
 
 func (e *state) unset(name string) {
@@ -100,14 +149,14 @@ func join(a, b *state) *state {
 	n := newEnv()
 	for k, va := range a.vars {
 		if vb, ok := b.vars[k]; ok {
-			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe}
+			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb)}
 		} else {
-			n.vars[k] = varInfo{t: va.t, maybe: true}
+			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native}
 		}
 	}
 	for k, vb := range b.vars {
 		if _, ok := a.vars[k]; !ok {
-			n.vars[k] = varInfo{t: vb.t, maybe: true}
+			n.vars[k] = varInfo{t: vb.t, maybe: true, native: vb.native}
 		}
 	}
 	for k, ta := range a.paths {
@@ -175,14 +224,11 @@ func widenType(t types.Type) types.Type {
 		case types.BoolLit:
 			return types.TBool
 		case types.Shape:
-			values := types.TNever // an empty shape has no values
-			if len(m.Entries) > 0 {
-				values = widenType(shapeValues(m))
-			}
-			if m.List {
-				return types.Array{Key: types.TInt, Value: values, List: true}
-			}
 			if len(m.Entries) == 0 {
+				return m // `[]` has no keys to widen; the first entry decides them
+			}
+			values := widenType(shapeValues(m))
+			if m.List {
 				return types.Array{Key: types.TInt, Value: values, List: true}
 			}
 			return types.Array{Key: widenType(shapeKeys(m)), Value: values}
