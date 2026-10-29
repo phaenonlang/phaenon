@@ -188,6 +188,13 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 			c.Params = append(c.Params, types.CallableParam{Type: r.native(pt)})
 		}
 		return c
+	case *ast.TupleType:
+		// (A, B) is the sealed positional shape array{A, B}.
+		sh := types.Shape{List: true}
+		for i, el := range t.Elems {
+			sh.Entries = append(sh.Entries, types.ShapeEntry{IsInt: true, IntKey: int64(i), Type: r.native(el)})
+		}
+		return sh
 	}
 	return types.TMixed
 }
@@ -205,12 +212,18 @@ func (r *resolver) classType(name string, args []types.Type) types.Type {
 	switch name {
 	case "self":
 		if r.class != nil {
-			return types.Class{Name: r.class.Name, Args: r.selfArgs()}
+			if len(args) == 0 {
+				args = r.selfArgs() // self<$this> keeps what it says
+			}
+			return types.Class{Name: r.class.Name, Args: args}
 		}
 		return types.TObject
 	case "static":
 		if r.class != nil {
-			return types.Static{Of: &types.Class{Name: r.class.Name, Args: r.selfArgs()}}
+			if len(args) == 0 {
+				args = r.selfArgs()
+			}
+			return types.Static{Of: &types.Class{Name: r.class.Name, Args: args}}
 		}
 		return types.TObject
 	case "parent":
@@ -259,6 +272,8 @@ func (r *resolver) keyword(lower string, args []types.Type, node *docblock.TypeN
 		return types.TFloat, true
 	case "string":
 		return types.TString, true
+	case "bytes":
+		return types.TBytes, true
 	case "bool", "boolean":
 		return types.TBool, true
 	case "true":
@@ -345,9 +360,9 @@ func (r *resolver) keyword(lower string, args []types.Type, node *docblock.TypeN
 	case "value-of":
 		return types.TMixed, true
 	case "static":
-		return r.classType("static", nil), true
+		return r.classType("static", args), true
 	case "self":
-		return r.classType("self", nil), true
+		return r.classType("self", args), true
 	case "parent":
 		return r.classType("parent", nil), true
 	case "$this":

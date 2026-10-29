@@ -103,7 +103,11 @@ func (p *Program) LoadStubs() error {
 		}
 	}
 	for _, s := range stdlib.Runtime() {
-		if _, err := p.AddFile("<stub>/"+s.Path, s.Src, lexer.ModePHP, false); err != nil {
+		mode := lexer.ModePHP
+		if strings.HasSuffix(s.Path, ".phn") {
+			mode = lexer.ModePhaenon // the stdlib is written in Phaenon
+		}
+		if _, err := p.AddFile("<stub>/"+s.Path, s.Src, mode, false); err != nil {
 			return fmt.Errorf("%s: %w", s.Path, err)
 		}
 	}
@@ -321,6 +325,11 @@ type File struct {
 	AST     *ast.File
 	Mode    lexer.Mode
 	Checked bool
+	// MethodTargets records the calls whose receiver is a list, map, string
+	// or bytes value: the checker resolves each to a stdlib class
+	// (`Phaenon\Seq`, …) and the emitter rewrites it as the static call
+	// (design/collections.md §3.1).
+	MethodTargets map[*ast.MethodCall]string
 	// Scopes maps statement ranges to the namespace scope in force there.
 	Scopes  []ScopedRange
 	lines   []int

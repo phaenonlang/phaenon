@@ -225,6 +225,15 @@ func (p *Printer) typ(t ast.TypeExpr) {
 		if t.Parenthesised {
 			p.w(")")
 		}
+	case *ast.TupleType:
+		p.w("(")
+		for i, m := range t.Elems {
+			if i > 0 {
+				p.w(", ")
+			}
+			p.typ(m)
+		}
+		p.w(")")
 	case *ast.ClosureType:
 		p.w("Closure(")
 		for i, m := range t.Params {

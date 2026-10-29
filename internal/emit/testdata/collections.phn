@@ -1,0 +1,71 @@
+namespace App;
+
+use Closure;
+
+// Method syntax on lists, maps and strings compiles to the stdlib's static
+// calls, the class imported by the compiler (design/collections.md §3.1,
+// roadmap D11); a tuple (A, B) erases to the shape array{A, B}.
+
+final class User
+{
+    public function __construct(public readonly string $name, public readonly int $age, public readonly bool $active)
+    {
+    }
+}
+
+function emails(list<User> $users): list<string>
+{
+    return $users
+        ->filter(fn (User $u) => $u->active)
+        ->map(fn (User $u) => $u->name->lower() . '@example.com');
+}
+
+function byName(list<User> $users): map<string, User>
+{
+    return $users->keyBy(fn (User $u) => $u->name);
+}
+
+function oldest(list<User> $users): ?User
+{
+    return $users->sortBy(fn (User $u) => -$u->age)->first();
+}
+
+function pairs(list<string> $names, list<int> $ages): list<(string, int)>
+{
+    return $names->zip($ages);
+}
+
+function describe(list<(string, int)> $pairs): string
+{
+    $lines = [];
+    foreach ($pairs as [$name, $age]) {
+        $lines[] = $name->padEnd(10) . $age;
+    }
+
+    return $lines->isEmpty() ? '-' : $lines->join("\n");
+}
+
+function ages(map<string, User> $users): map<string, int>
+{
+    return $users->map(fn (User $u) => $u->age)->filter(fn (int $age) => $age >= 18);
+}
+
+function keys(map<string, int> $counts): string
+{
+    return $counts->keys()->sort()->join(', ');
+}
+
+function slug(string $title): string
+{
+    return $title->trim()->lower()->replace(' ', '-');
+}
+
+function initials(string $name): string
+{
+    return $name->split(' ')->map(fn (string $part) => $part->slice(0, 1)->upper())->join('');
+}
+
+function nullable(?string $s): int
+{
+    return $s === null ? 0 : $s->length();
+}

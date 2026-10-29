@@ -292,13 +292,13 @@ func (x *fnCtx) fixpoint(entry *state, body func(head *state) (end, exit *state)
 	head := entry.clone()
 	var exit *state
 	var breaks []*state
-	savedDiags := x.c.diags
+	savedDiags := x.c.mark()
 	for i := 0; i < 5; i++ {
 		x.breakEnvs, x.continueEnvs = nil, nil
 		if i < 4 {
 			// Diagnostics of non-final iterations are discarded: the
 			// types are still converging.
-			x.c.diags = savedDiags
+			x.c.rollback(savedDiags)
 		}
 		end, ex := body(head.clone())
 		exit = ex
@@ -413,6 +413,17 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 			x.assignTo(s.Key, k, head, s.Key.Span())
 		}
 		x.assignTo(s.Value, v, head, s.Value.Span())
+		if nit := x.nativeOf(s.Expr, head); nit != nil {
+			// The loop variables hold what PHP's view of the iterable yields.
+			if nk, nv, ok := types.IterableKV(nit, x.p()); ok {
+				if kv, isVar := s.Key.(*ast.Variable); isVar {
+					head.setNative(kv.Name, nk)
+				}
+				if vv, isVar := s.Value.(*ast.Variable); isVar {
+					head.setNative(vv.Name, nv)
+				}
+			}
+		}
 		x.stmt(s.Body, head)
 		if nonEmpty {
 			exit = head // at least one iteration ran
@@ -741,9 +752,11 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 			t = types.Array{Key: types.TInt, Value: t, List: true}
 		}
 		env.set(p.Name, t)
-		native := p.NativeType
-		if native == nil {
-			native = types.TMixed
+		// What PHP holds the parameter to: the erasure of what was written
+		// (list<Foo> is an array to PHP, class<T> a string).
+		native := types.TMixed
+		if p.NativeType != nil {
+			native = types.Erase(p.NativeType)
 		}
 		if p.Variadic {
 			native = types.Array{Key: types.TInt, Value: native, List: true}

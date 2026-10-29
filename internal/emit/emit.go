@@ -107,6 +107,10 @@ type emitter struct {
 	src   []byte
 	opts  Options
 	edits []edit
+	// imports are the classes the compiler introduced, by fully qualified
+	// name, with the short name each is called by in this file ("" when the
+	// name is taken and the FQCN is used): roadmap D11.
+	imports map[string]string
 }
 
 func (e *emitter) replace(s ast.Span, text string) {
@@ -173,7 +177,88 @@ func (e *emitter) prologue(f *ast.File) {
 	if e.opts.StrictTypes && !declaresStrictTypes(f) {
 		sb.WriteString("declare(strict_types=1); ")
 	}
+	// The imports the lowering asked for go after the namespace statement,
+	// on its line; a file without one gets them on this line.
+	if uses := e.useStatements(); uses != "" {
+		if end := namespaceEnd(f); end >= 0 {
+			e.insert(end, " "+uses)
+		} else {
+			sb.WriteString(uses + " ")
+		}
+	}
 	e.insert(0, sb.String())
+}
+
+// useStatements renders the compiler's imports, sorted.
+func (e *emitter) useStatements() string {
+	var names []string
+	for fqcn, short := range e.imports {
+		if short != "" {
+			names = append(names, fqcn)
+		}
+	}
+	sort.Strings(names)
+	var sb strings.Builder
+	for i, n := range names {
+		if i > 0 {
+			sb.WriteString(" ")
+		}
+		sb.WriteString("use " + n + ";")
+	}
+	return sb.String()
+}
+
+// namespaceEnd is the offset after the file's single unbraced namespace
+// statement, -1 when the file has none, -2 when imports cannot be placed
+// (braced or several namespaces: importShort then falls back to the FQCN).
+func namespaceEnd(f *ast.File) int {
+	end := -1
+	for _, s := range f.Stmts {
+		if ns, ok := s.(*ast.Namespace); ok {
+			if ns.Braced || end != -1 {
+				return -2
+			}
+			end = ns.S.End
+		}
+	}
+	return end
+}
+
+// importShort returns the name a compiler-introduced class is called by in
+// this file: its short name, imported with `use`, unless that name is taken
+// by a user import or a class of the namespace, or imports cannot be placed
+// — then the fully qualified name (roadmap D11).
+func (e *emitter) importShort(fqcn string, res *program.Resolver) string {
+	if e.imports == nil {
+		e.imports = map[string]string{}
+	}
+	if short, seen := e.imports[fqcn]; seen {
+		if short == "" {
+			return "\\" + fqcn
+		}
+		return short
+	}
+	short := fqcn[strings.LastIndex(fqcn, "\\")+1:]
+	taken := namespaceEnd(e.opts.File.AST) == -2
+	for alias, target := range res.Scope().Imports() {
+		if strings.EqualFold(alias, short) && !strings.EqualFold(target, fqcn) {
+			taken = true
+		}
+	}
+	for other, s := range e.imports {
+		if s == short && other != fqcn {
+			taken = true
+		}
+	}
+	if e.opts.Program.Class(res.Scope().Prefix()+short) != nil {
+		taken = true
+	}
+	if taken {
+		e.imports[fqcn] = ""
+		return "\\" + fqcn
+	}
+	e.imports[fqcn] = short
+	return short
 }
 
 // declaresStrictTypes reports whether the first statement is a declare with

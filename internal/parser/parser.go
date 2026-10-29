@@ -355,12 +355,22 @@ func (p *Parser) typeExpr() ast.TypeExpr {
 	return first
 }
 
-// unionMember parses a type or a parenthesised intersection.
+// unionMember parses a type, a parenthesised intersection (A&B) or, in
+// Phaenon, a tuple (A, B).
 func (p *Parser) unionMember() ast.TypeExpr {
 	start := p.tok().Start
 	if p.at(token.Kind('(')) && !p.atClosureTypeStart() {
 		p.next()
 		first := p.singleType()
+		if p.mode == lexer.ModePhaenon && p.at(token.Kind(',')) {
+			tt := &ast.TupleType{Elems: []ast.TypeExpr{first}}
+			for p.accept(token.Kind(',')) {
+				tt.Elems = append(tt.Elems, p.typeExpr())
+			}
+			p.expect(token.Kind(')'))
+			tt.S = p.span(start)
+			return tt
+		}
 		t := p.intersectionRest(start, first, true)
 		p.expect(token.Kind(')'))
 		t.S = p.span(start)

@@ -116,7 +116,7 @@ func (x *fnCtx) nativeMember(obj ast.Expr, nullSafe bool, env *state, member fun
 		if native == nil {
 			native = types.TMixed
 		}
-		native = x.bindReceiver(native, m, decl)
+		native = types.Erase(x.bindReceiver(native, m, decl))
 		if refined != nil && !types.Equal(native, x.bindReceiver(refined, m, decl)) {
 			differs = true
 		}

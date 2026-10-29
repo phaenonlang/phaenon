@@ -53,7 +53,7 @@ func hasGenerics(f *ast.File) bool {
 			return false
 		}
 		switch n := n.(type) {
-		case *ast.TypeParam, *ast.TypeAlias, *ast.IsExpr, *ast.AsExpr, *ast.ClosureType:
+		case *ast.TypeParam, *ast.TypeAlias, *ast.IsExpr, *ast.AsExpr, *ast.ClosureType, *ast.TupleType:
 			found = true
 		case *ast.NamedType:
 			if len(n.TypeArgs) > 0 || isAliasCandidate(n) {
@@ -264,6 +264,8 @@ func (l *lowering) erase(t ast.TypeExpr, sc *scope) string {
 		return s
 	case *ast.ClosureType:
 		return "\\Closure"
+	case *ast.TupleType:
+		return "array"
 	}
 	return "mixed"
 }
@@ -371,6 +373,12 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 			return "(" + s + ")"
 		}
 		return s
+	case *ast.TupleType:
+		var parts []string
+		for _, m := range t.Elems {
+			parts = append(parts, l.docType(m, sc))
+		}
+		return "array{" + strings.Join(parts, ", ") + "}"
 	case *ast.ClosureType:
 		var parts []string
 		for _, m := range t.Params {
@@ -428,7 +436,7 @@ func (l *lowering) needsDoc(t ast.TypeExpr, sc *scope) bool {
 			}
 		}
 		return false
-	case *ast.ClosureType:
+	case *ast.ClosureType, *ast.TupleType:
 		return true
 	}
 	return false
@@ -894,6 +902,10 @@ func (l *lowering) walk(root ast.Node, sc *scope) error {
 			err = l.walkOr(err, n.Args, sc)
 			return false
 		case *ast.MethodCall:
+			if cls, ok := l.f.MethodTargets[n]; ok {
+				err = l.stdlibCall(n, cls, sc)
+				return false
+			}
 			err = l.walkOr(err, n.Object, sc)
 			if _, isIdent := n.Name.(*ast.Ident); !isIdent {
 				err = l.walkOr(err, n.Name, sc)
@@ -1198,7 +1210,7 @@ func (l *lowering) asExpr(n *ast.AsExpr, sc *scope) error {
 
 // typeValue renders a type as a \Phaenon\Type expression.
 func (l *lowering) typeValue(t types.Type, sc *scope, at ast.Node) (string, error) {
-	rt := RuntimeType
+	rt := l.e.importShort(strings.TrimPrefix(RuntimeType, "\\"), sc.res)
 	switch v := t.(type) {
 	case nil:
 		return rt + "::mixed()", nil
@@ -1322,3 +1334,34 @@ func phpString(s string) string {
 }
 
 var _ = fmt.Sprintf
+
+// ------------------------------------------------------------------ stdlib method syntax
+
+// stdlibCall rewrites `$xs->map($f)` as `Seq::map($xs, $f)` (design/collections.md
+// §3.1): the receiver becomes the first argument and the class is imported
+// (roadmap D11). The receiver's text stays where it is, so a chain written
+// over several lines keeps its lines.
+func (l *lowering) stdlibCall(n *ast.MethodCall, cls string, sc *scope) error {
+	id, ok := n.Name.(*ast.Ident)
+	if !ok || n.Args == nil {
+		return l.errorf(n, "cannot compile this method call on a %s value", strings.ToLower(cls[strings.LastIndex(cls, "\\")+1:]))
+	}
+	obj := n.Object.Span()
+	rel := bytes.Index(l.e.src[obj.End:], []byte("->"))
+	if rel < 0 {
+		return l.errorf(n, "cannot find the -> of this call")
+	}
+	arrow := obj.End + rel
+	l.e.insert(obj.Start, l.e.importShort(cls, sc.res)+"::"+id.Name+"(")
+	if len(n.Args.Args) > 0 {
+		comma := ","
+		if arrow == obj.End {
+			comma = ", "
+		}
+		l.e.insert(obj.End, comma)
+	}
+	gone := ast.Span{Start: arrow, End: n.Args.S.Start + 1} // `->name<…>(`
+	l.e.replace(gone, strings.Repeat("\n", bytes.Count(l.e.src[gone.Start:gone.End], []byte("\n"))))
+	err := l.walk(n.Object, sc)
+	return l.walkOr(err, n.Args, sc)
+}

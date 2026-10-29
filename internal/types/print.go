@@ -263,6 +263,8 @@ func (pr *printer) print(t Type, nested bool) {
 		}
 	case Resource:
 		b.WriteString("resource")
+	case Bytes:
+		b.WriteString("bytes")
 	case Union:
 		if nested {
 			b.WriteString("(")
@@ -403,8 +405,8 @@ func Erase(t Type) Type {
 		return TInt
 	case FloatLit:
 		return TFloat
-	case String, StringLit, ClassString:
-		return TString
+	case String, StringLit, ClassString, Bytes:
+		return TString // bytes is a PHP string with a Phaenon type
 	case Array, Shape:
 		return TArray
 	case Iterable:

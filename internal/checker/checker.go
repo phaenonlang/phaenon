@@ -30,6 +30,8 @@ type Diagnostic struct {
 	Severity Severity
 	Code     string
 	Message  string
+	key      string // the dedupe key, so a rollback can forget the diagnostic
+
 }
 
 func (d Diagnostic) String() string {
@@ -147,7 +149,20 @@ func (c *Checker) report(span ast.Span, code Code, format string, args ...any) {
 	}
 	c.seen[key] = true
 	c.diags = append(c.diags, Diagnostic{File: c.file.Path, Line: line, Col: col, EndLine: endLine, EndCol: endCol + 1,
-		Severity: code.Severity, Code: code.ID, Message: msg})
+		Severity: code.Severity, Code: code.ID, Message: msg, key: key})
+}
+
+// mark returns the number of diagnostics so far; rollback(mark) discards
+// the ones reported since and forgets them, so a later pass over the same
+// code — a loop's next iteration, the real evaluation after a lenient one —
+// can report them again.
+func (c *Checker) mark() int { return len(c.diags) }
+
+func (c *Checker) rollback(mark int) {
+	for _, d := range c.diags[mark:] {
+		delete(c.seen, d.key)
+	}
+	c.diags = c.diags[:mark]
 }
 
 // ------------------------------------------------------------------ per file
@@ -263,6 +278,10 @@ type fnCtx struct {
 	returnTypes []types.Type
 	// sawReturnValue is set when a `return expr;` was seen.
 	sawReturnValue bool
+	// shortCircuit marks `$a?->b` expressions whose null, if any, comes from
+	// $a alone: b itself is not nullable, so a member reached through them
+	// is reached on a non-null object or not at all (PHP skips the chain).
+	shortCircuit map[ast.Expr]bool
 	// condValueType is the type of the last condition cond() evaluated
 	// (the short ternary `c ?: d` needs it).
 	condValueType types.Type
@@ -513,14 +532,14 @@ func (c *Checker) constType(k *program.Constant) types.Type {
 	// Diagnostics inside vendor constants are not reported: suppress by
 	// checking silently.
 	silent := !k.File.Checked
-	var savedDiags []Diagnostic
+	savedDiags := 0
 	if silent {
-		savedDiags = c.diags
+		savedDiags = c.mark()
 	}
 	ctx := c.newCtx(k.File, k.Scope, k.Class, true)
 	t := ctx.expr(k.Value, newEnv(), k.Type)
 	if silent {
-		c.diags = savedDiags
+		c.rollback(savedDiags)
 	}
 	if k.Type != nil {
 		// `const array M = [...]`: the value says more than the declaration.

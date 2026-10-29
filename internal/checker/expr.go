@@ -535,8 +535,13 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) types.Type {
 	if key, ok := pathKey(e); ok {
 		if t, ok := env.getPath(key); ok {
-			// still type the object for side effects / diagnostics? The
-			// object is a stable path; skip re-checking.
+			// The member was narrowed: its type is known without re-checking
+			// the object; only a ?-> on a never-null object is still worth a word.
+			if e.NullSafe {
+				if obj := x.pathType(e.Object, env); !types.IsNullable(obj) && !types.IsMixed(obj) {
+					x.report(e.S, P2307, "?-> on %s, which is never null", x.typeName(obj))
+				}
+			}
 			return t
 		}
 	}
@@ -546,7 +551,54 @@ func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) ty
 		x.expr(e.Name, env, nil)
 		return types.TMixed
 	}
+	if !e.NullSafe && types.IsNullable(obj) && !types.IsMixed(obj) {
+		if x.shortCircuit[e.Object] {
+			// `$a?->b->c`: PHP skips the whole chain when $a is null, and b
+			// itself is never null.
+			t := x.propertyType(types.StripNull(obj), name, e, env, lenient)
+			x.markShortCircuit(e, t)
+			return types.Nullable(t)
+		}
+		if inNullsafeChain(e.Object) {
+			// b may be null on its own: that is reported, and the chain's
+			// null is still an outcome.
+			return types.Nullable(x.propertyType(obj, name, e, env, lenient))
+		}
+	}
 	return x.propertyType(obj, name, e, env, lenient)
+}
+
+// inNullsafeChain reports a ?-> further down e's object chain, whose null
+// PHP carries through the rest of the chain.
+func inNullsafeChain(e ast.Expr) bool {
+	for {
+		switch n := e.(type) {
+		case *ast.PropertyFetch:
+			if n.NullSafe {
+				return true
+			}
+			e = n.Object
+		case *ast.MethodCall:
+			if n.NullSafe {
+				return true
+			}
+			e = n.Object
+		default:
+			return false
+		}
+	}
+}
+
+// markShortCircuit records that e's own value is never null, so a chain
+// continuing from it may skip the null its ?-> introduced.
+func (x *fnCtx) markShortCircuit(e ast.Expr, own types.Type) {
+	if types.IsNullable(own) || types.IsMixed(own) {
+		return
+	}
+	if x.shortCircuit == nil {
+		x.shortCircuit = map[ast.Expr]bool{}
+	}
+	x.shortCircuit[e] = true
 }
 
 // enumCaseProperty types `Suit::Hearts->value` and `->name` as the
@@ -645,8 +697,11 @@ func (x *fnCtx) propertyType(obj types.Type, name string, e *ast.PropertyFetch, 
 		return types.TMixed
 	}
 	t := types.MakeUnion(out...)
-	if e.NullSafe && types.IsNullable(obj) {
-		t = types.Nullable(t)
+	if e.NullSafe {
+		x.markShortCircuit(e, t) // the member's own type, before ?-> adds its null
+		if types.IsNullable(obj) {
+			t = types.Nullable(t)
+		}
 	}
 	return t
 }
@@ -1020,7 +1075,7 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 	case token.Kind('+'):
 		if isArrayType(l) || isArrayType(r) {
 			if isArrayType(l) && isArrayType(r) {
-				return types.MakeUnion(l, r)
+				return arrayPlus(l, r)
 			}
 			if !types.IsMixed(l) && !types.IsMixed(r) {
 				x.report(span, P2301, "cannot add %s and %s", x.typeName(l), x.typeName(r))
@@ -1367,9 +1422,9 @@ func (x *fnCtx) targetType(target ast.Expr, env *state) types.Type {
 			return x.bindReceiver(pr.Type, recv, pr.Class)
 		}
 	case *ast.StaticPropertyFetch:
-		savedDiags := x.c.diags
+		savedDiags := x.c.mark()
 		_, pr := x.staticPropertyFetch(t, env)
-		x.c.diags = savedDiags
+		x.c.rollback(savedDiags)
 		if pr != nil {
 			return pr.Type
 		}
@@ -1391,9 +1446,9 @@ func (x *fnCtx) lookupPropertyForWrite(t *ast.PropertyFetch, env *state) (*progr
 	if !ok {
 		return nil, nil
 	}
-	savedDiags := x.c.diags
+	savedDiags := x.c.mark()
 	obj := x.expr(t.Object, env.clone(), nil)
-	x.c.diags = savedDiags
+	x.c.rollback(savedDiags)
 	for _, cl := range x.classesOf(types.StripNull(obj), t.Object.Span()) {
 		if pr := cl.FindProperty(name); pr != nil {
 			return pr, obj
@@ -1695,4 +1750,60 @@ func (x *fnCtx) removed(span ast.Span, what, instead string) {
 	if x.file.Mode == lexer.ModePhaenon {
 		x.report(span, P1001, "%s is not available in Phaenon; use %s", what, instead)
 	}
+}
+
+// arrayPlus types `$a + $b` on arrays: the left operand's entries, then the
+// right's for the keys the left lacks. Two sealed shapes merge entry by
+// entry; anything else is the union of keys and of values.
+func arrayPlus(l, r types.Type) types.Type {
+	var out []types.Type
+	for _, lm := range types.Members(l) {
+		for _, rm := range types.Members(r) {
+			ls, lok := lm.(types.Shape)
+			rs, rok := rm.(types.Shape)
+			if lok && rok && !ls.Unsealed && !rs.Unsealed {
+				merged := types.Shape{Entries: append([]types.ShapeEntry{}, ls.Entries...)}
+				for _, e := range rs.Entries {
+					if !hasShapeEntry(merged, e) {
+						merged.Entries = append(merged.Entries, e)
+					}
+				}
+				out = append(out, merged)
+				continue
+			}
+			lk, lv, lne := arrayKV(lm)
+			rk, rv, rne := arrayKV(rm)
+			out = append(out, types.Array{Key: types.MakeUnion(lk, rk), Value: types.MakeUnion(lv, rv), NonEmpty: lne || rne})
+		}
+	}
+	return types.MakeUnion(out...)
+}
+
+func hasShapeEntry(s types.Shape, e types.ShapeEntry) bool {
+	for _, have := range s.Entries {
+		if have.IsInt == e.IsInt && have.IntKey == e.IntKey && have.Key == e.Key {
+			return true
+		}
+	}
+	return false
+}
+
+// arrayKV is an array-like member's key and value types, never for an
+// empty shape, and whether it is known to be non-empty.
+func arrayKV(m types.Type) (key, value types.Type, nonEmpty bool) {
+	switch m := m.(type) {
+	case types.Array:
+		return m.Key, m.Value, m.NonEmpty
+	case types.Shape:
+		if len(m.Entries) == 0 && !m.Unsealed {
+			return types.TNever, types.TNever, false
+		}
+		for _, e := range m.Entries {
+			if !e.Optional {
+				nonEmpty = true
+			}
+		}
+		return shapeKeys(m), shapeValues(m), nonEmpty
+	}
+	return types.TArrayKey, types.TMixed, false
 }

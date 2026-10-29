@@ -96,7 +96,7 @@ func narrowNative(native, t types.Type, p *program.Program) types.Type {
 	if native == nil {
 		return nil
 	}
-	n := types.Intersect(native, t, p)
+	n := types.Intersect(native, types.Erase(t), p) // list<Foo> narrows PHP's view to array, not to list<Foo>
 	if _, never := n.(types.Never); never || types.Equal(n, t) {
 		return nil
 	}
@@ -292,11 +292,7 @@ func pathKey(e ast.Expr) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		sep := "->"
-		if e.NullSafe {
-			sep = "?->"
-		}
-		return base + sep + id.Name, true
+		return base + "->" + id.Name, true // ?-> addresses the same member
 	case *ast.StaticPropertyFetch:
 		n, ok := e.Class.(*ast.Name)
 		if !ok {

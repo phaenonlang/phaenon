@@ -53,7 +53,7 @@ function array_values(array $array): array {}
  * @template K of array-key
  * @template V
  * @param array<K, V> ...$arrays
- * @return array<K, V>
+ * @return ($arrays is list<list<V>> ? list<V> : array<K, V>)
  */
 function array_merge(array ...$arrays): array {}
 
@@ -68,7 +68,7 @@ function array_slice(array $array, int $offset, ?int $length = null, bool $prese
  * @template K of array-key
  * @template V
  * @param array<K, V> $array
- * @return array<K, V>
+ * @return ($preserve_keys is true ? array<K, V> : ($array is list ? list<V> : array<K, V>))
  */
 function array_reverse(array $array, bool $preserve_keys = false): array {}
 
@@ -286,3 +286,43 @@ function array_any(array $array, callable $callback): bool {}
  * @param callable(V, K): bool $callback
  */
 function array_all(array $array, callable $callback): bool {}
+
+/**
+ * @template V
+ * @param array<V> $array
+ * @param-out list<V> $array
+ */
+function sort(array &$array, int $flags = SORT_REGULAR): true {}
+
+/**
+ * @template V
+ * @param array<V> $array
+ * @param-out list<V> $array
+ */
+function rsort(array &$array, int $flags = SORT_REGULAR): true {}
+
+/**
+ * @template V
+ * @param array<V> $array
+ * @param callable(V, V): int $callback
+ * @param-out list<V> $array
+ */
+function usort(array &$array, callable $callback): true {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param callable(V, V): int $callback
+ * @param-out array<K, V> $array
+ */
+function uasort(array &$array, callable $callback): true {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param callable(K, K): int $callback
+ * @param-out array<K, V> $array
+ */
+function uksort(array &$array, callable $callback): true {}

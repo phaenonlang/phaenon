@@ -1094,6 +1094,8 @@ func (l *lifter) astAtoms(t ast.TypeExpr, sc scope) atoms {
 		out[strings.Join(parts, "&")] = true
 	case *ast.ClosureType:
 		out["closure"] = true
+	case *ast.TupleType:
+		out["array"] = true
 	}
 	return normalise(out)
 }

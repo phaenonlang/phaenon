@@ -196,6 +196,11 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 				return true
 			}
 		}
+		if ap, ok := a.(Param); ok && ap.Bound != nil {
+			// A type parameter fits a union its bound fits (K of int|string
+			// against int|string), which no single member shows.
+			return subtype(ap.Bound, b, h, depth+1)
+		}
 		if it, ok := a.(Iterable); ok {
 			// iterable<K, V> is array<K, V>|Traversable<K, V>; an array's keys
 			// are array-key whatever the iterable's say.
@@ -256,6 +261,9 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 			return false
 		}
 		return subtype(a.Bound, b, h, depth+1)
+	case Bytes:
+		_, ok := b.(Bytes)
+		return ok
 	case BoolLit:
 		_, ok := b.(Bool)
 		return ok

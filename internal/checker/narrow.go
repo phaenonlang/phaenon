@@ -147,9 +147,21 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 		x.narrowPath(env, p.Expr, t, define)
 		return
 	case *ast.Assign:
-		// `null !== ($x = f())` narrows what was assigned.
+		// `null !== ($x = $m?->f)` narrows what was assigned, and what it
+		// was assigned from.
 		if p.Op == token.Kind('=') {
 			x.narrowPath(env, p.Target, t, define)
+			x.narrowPath(env, p.Value, t, false)
+		}
+		return
+	case *ast.PropertyFetch:
+		// A non-null `$m?->f` says $m is not null.
+		if p.NullSafe && nonNullType(t) {
+			x.narrowPath(env, p.Object, types.StripNull(x.pathType(p.Object, env)), false)
+		}
+	case *ast.MethodCall:
+		if p.NullSafe && nonNullType(t) {
+			x.narrowPath(env, p.Object, types.StripNull(x.pathType(p.Object, env)), false)
 		}
 		return
 	case *ast.Binary:
@@ -230,9 +242,9 @@ func variableOf(e ast.Expr) (*ast.Variable, bool) {
 
 // pathType returns the current type of a path without side effects.
 func (x *fnCtx) pathType(e ast.Expr, env *state) types.Type {
-	saved := x.c.diags
+	saved := x.c.mark()
 	t := x.exprLenient(e, env.clone())
-	x.c.diags = saved
+	x.c.rollback(saved)
 	return t
 }
 
@@ -578,9 +590,12 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 		case types.StringLit:
 			cls = types.Class{Name: c.V}
 		case types.ClassString:
+			cls = types.TObject // some class: the subject is an object, or a class-string
 			if c.Of != nil {
 				cls = c.Of
 			}
+		case types.String:
+			cls = types.TObject
 		}
 		then, els = env.clone(), env.clone()
 		x.condValueType = types.TBool
@@ -816,9 +831,9 @@ func (x *fnCtx) calleeOf(e ast.Expr, env *state) (callee, bool) {
 			return callee{}, false
 		}
 		obj := x.pathType(e.Object, env)
-		saved := x.c.diags
+		saved := x.c.mark()
 		classes := x.classesOf(types.StripNull(obj), e.Object.Span())
-		x.c.diags = saved
+		x.c.rollback(saved)
 		for _, cl := range classes {
 			if m := cl.FindMethod(name); m != nil {
 				return x.methodCallee(m, types.StripNull(obj), e.Args, e.Object), true
@@ -848,9 +863,9 @@ func (x *fnCtx) calleeOf(e ast.Expr, env *state) (callee, bool) {
 				}
 			}
 		} else {
-			saved := x.c.diags
+			saved := x.c.mark()
 			classes = x.classesOf(x.pathType(e.Class, env), e.Class.Span())
-			x.c.diags = saved
+			x.c.rollback(saved)
 		}
 		for _, cl := range classes {
 			if m := cl.FindMethod(name); m != nil {
@@ -959,4 +974,12 @@ func (x *fnCtx) applyAsserts(ce callee, env *state) (then, els *state) {
 		}
 	}
 	return then, els
+}
+
+// nonNullType reports a type that excludes null and is not empty or mixed.
+func nonNullType(t types.Type) bool {
+	if _, never := t.(types.Never); never || t == nil {
+		return false
+	}
+	return !types.IsNullable(t) && !types.IsMixed(t)
 }

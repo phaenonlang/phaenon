@@ -34,6 +34,9 @@ type signature struct {
 	decl       *program.Class // declaring class of a method
 	never      bool
 	deprecated bool
+	// known holds argument types computed before the call is checked (the
+	// receiver of a stdlib method call), so the expression is not typed twice.
+	known map[ast.Expr]types.Type
 }
 
 // ------------------------------------------------------------------ function calls
@@ -324,6 +327,22 @@ func (x *fnCtx) argsOnly(args *ast.ArgList, env *state) {
 
 func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) types.Type {
 	obj := x.expr(e.Object, env, nil)
+	if !e.NullSafe && types.IsNullable(obj) && !types.IsMixed(obj) {
+		if x.shortCircuit[e.Object] {
+			// `$a?->b()->c()`: PHP skips the whole chain when $a is null.
+			t := x.methodCallOn(e, types.StripNull(obj), env, expected)
+			x.markShortCircuit(e, t)
+			return types.Nullable(t)
+		}
+		if inNullsafeChain(e.Object) {
+			return types.Nullable(x.methodCallOn(e, obj, env, expected))
+		}
+	}
+	return x.methodCallOn(e, obj, env, expected)
+}
+
+// methodCallOn checks the call on a receiver already typed.
+func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expected types.Type) types.Type {
 	name, ok := identName(e.Name)
 	if !ok {
 		x.expr(e.Name, env, nil)
@@ -346,6 +365,9 @@ func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) t
 	if types.IsMixed(base) {
 		x.argsOnly(e.Args, env)
 		return types.TMixed
+	}
+	if cls, ambiguous := stdlibReceiver(base); cls != "" || ambiguous {
+		return x.stdlibMethod(e, cls, name, obj, env, expected)
 	}
 	if !types.IsObjectLike(base) {
 		if c, isCallable := base.(types.Callable); isCallable && c.Closure {
@@ -411,8 +433,11 @@ func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) t
 	if _, isNever := t.(types.Never); isNever {
 		env.dead = true
 	}
-	if e.NullSafe && types.IsNullable(obj) {
-		t = types.Nullable(t)
+	if e.NullSafe {
+		x.markShortCircuit(e, t) // the result's own type, before ?-> adds its null
+		if types.IsNullable(obj) {
+			t = types.Nullable(t)
+		}
 	}
 	return t
 }
@@ -876,12 +901,16 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		pt := paramType(b.param)
 		var at types.Type
 		if b.param.ByRef {
-			at = x.exprLenient(b.arg.Value, env)
+			if at = sig.known[b.arg.Value]; at == nil {
+				at = x.exprLenient(b.arg.Value, env)
+			}
 			if !isWritable(b.arg.Value) {
 				x.report(b.arg.S, P2112, "argument %d of %s is by reference and needs a variable", b.idx+1, sig.name)
 			}
 		} else {
-			at = x.expr(b.arg.Value, env, pt)
+			if at = sig.known[b.arg.Value]; at == nil {
+				at = x.expr(b.arg.Value, env, pt)
+			}
 		}
 		argTypes[i] = at
 		if len(inferable) > 0 && !isCallableType(at) {
@@ -901,10 +930,15 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			continue
 		}
 		pt := paramType(b.param)
-		at := x.expr(b.arg.Value, env, pt)
+		at, isKnown := sig.known[b.arg.Value]
+		if !isKnown {
+			at = x.expr(b.arg.Value, env, pt)
+		}
 		argTypes[i] = at
 		if len(inferable) > 0 {
-			unify(pt, at, subst, inferable, x.p())
+			// Against the declared type, not the one substituted so far: a
+			// closure returning int widens an A first bound to the literal 0.
+			unify(types.Substitute(b.param.Type, rename), at, subst, inferable, x.p())
 		}
 	}
 	// Infer from the expected type too (contextual typing of the return).
@@ -953,10 +987,27 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		}
 	}
 	argByName := map[string]types.Type{}
+	var bag []types.Type // the arguments a variadic parameter received, as one list
+	bagParam := ""
 	for i, b := range bindings {
-		if argTypes[i] != nil {
-			argByName[b.param.Name] = argTypes[i]
+		if argTypes[i] == nil {
+			continue
 		}
+		if b.param.Variadic {
+			bagParam = b.param.Name
+			if b.arg.Unpack {
+				if _, v, ok := types.IterableKV(argTypes[i], x.p()); ok {
+					bag = append(bag, v)
+				}
+			} else {
+				bag = append(bag, argTypes[i])
+			}
+			continue
+		}
+		argByName[b.param.Name] = argTypes[i]
+	}
+	if bagParam != "" {
+		argByName[bagParam] = types.Array{Key: types.TInt, Value: types.MakeUnion(bag...), List: true, NonEmpty: len(bag) > 0}
 	}
 	for _, p := range sig.params {
 		// An omitted argument is its default, when that is a literal or a
@@ -969,9 +1020,9 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			continue
 		}
 		if isConst || isLiteralExpr(p.Default) {
-			saved := x.c.diags
+			saved := x.c.mark()
 			argByName[p.Name] = x.expr(p.Default, newEnv(), nil)
-			x.c.diags = saved
+			x.c.rollback(saved)
 		}
 	}
 	// By-reference parameters define or retype their arguments.
@@ -1288,6 +1339,14 @@ func unify(param, arg types.Type, subst map[string]types.Type, inferable map[str
 			}
 			for i := range p.Params {
 				if i < len(ac.Params) && ac.Params[i].Type != nil {
+					// A callback may accept more than the position offers
+					// (int|string for K of string): a bound parameter that
+					// already fits is not widened.
+					if pp, isParam := p.Params[i].Type.(types.Param); isParam {
+						if cur, bound := subst[pp.Name]; bound && types.IsSubtype(cur, ac.Params[i].Type, h) {
+							continue
+						}
+					}
 					unify(p.Params[i].Type, ac.Params[i].Type, subst, inferable, h)
 				}
 			}
