@@ -1525,6 +1525,12 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 			base = types.Shape{}
 		}
 	}
+	// `$r[$a][$b] = $v` where $r[$a] may not exist yet: PHP creates the
+	// inner array, so the assignment starts from an empty one, not from
+	// the mixed an unknown offset reads as.
+	if _, nested := t.Array.(*ast.Index); nested && (types.IsMixed(base) || types.IsNullable(base) && types.IsMixed(types.StripNull(base))) {
+		base = types.Shape{}
+	}
 	var out []types.Type
 	for _, m := range types.Members(base) {
 		switch m := m.(type) {

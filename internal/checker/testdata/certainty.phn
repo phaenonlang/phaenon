@@ -254,3 +254,72 @@ final class DocumentTest
     {
     }
 }
+
+final class Spec
+{
+    public const string TTL = 'expireAfterSeconds';
+
+    /**
+     * @param array<string, mixed> $spec
+     * @param non-empty-array<string, int> $weights
+     */
+    public function narrowing(array $spec, array $weights, mixed $row): string
+    {
+        if (!is_int($spec[self::TTL])) {
+            return '';
+        }
+        $ttl = $spec[self::TTL] + 1;
+        if (!is_array($row) || !is_string($row['_id'] ?? null)) {
+            return '';
+        }
+        takesString($row['_id']);
+        takesString(array_key_first($weights));
+
+        return $ttl . $row['_id'];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return array<string, array<string, array{spec: string}>>
+     */
+    public function nested(array $rows): array
+    {
+        $record = [];
+        foreach ($rows as $row) {
+            if (!is_array($row['_id'] ?? null) || !is_string($row['_id']['c'] ?? null) || !is_string($row['_id']['i'] ?? null) || !is_string($row['spec'] ?? null)) {
+                continue;
+            }
+            $record[$row['_id']['c']][$row['_id']['i']] = ['spec' => $row['spec']];
+        }
+
+        return $record;
+    }
+
+    /**
+     * @phpstan-assert-if-true array<string, mixed> $value
+     */
+    public static function isDocument(mixed $value): bool
+    {
+        return is_array($value) && !array_is_list($value);
+    }
+
+    public function documents(mixed $value, string $name): int
+    {
+        if (!self::isDocument($value)) {
+            return 0;
+        }
+        $n = count($value);
+        if (class_exists($name)) {
+            takesClass($name);
+        }
+
+        return $n;
+    }
+}
+
+/**
+ * @param class-string $c
+ */
+function takesClass(string $c): void
+{
+}
