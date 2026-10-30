@@ -163,7 +163,6 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 		if p.NullSafe && nonNullType(t) {
 			x.narrowPath(env, p.Object, types.StripNull(x.pathType(p.Object, env)), false)
 		}
-		return
 	case *ast.Binary:
 		// `is_string($a['k'] ?? null)`: a type without null says the offset
 		// is set and of that type.
@@ -283,9 +282,12 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 		return then, els
 	}
 	narrowBy := func(target ast.Expr, targetT, other types.Type) {
-		if !isLiteralLike(other) {
+		if !isLiteralLike(other) || len(types.Members(other)) > 1 {
+			// `$x === $y` with a non-literal, or with one of several values
+			// (`$kind !== $person` where $person is null|A|B): the then
+			// branch intersects, the else branch learns nothing — $x may
+			// still be any one value $y is not.
 			if strict {
-				// `$x === $y` with non-literal: then-branch intersects.
 				x.narrowPath(then, target, types.Intersect(targetT, other, x.p()), true)
 			}
 			return

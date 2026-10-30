@@ -42,6 +42,8 @@ func TestPHPStanParity(t *testing.T) {
 		"classConstant.unused":      true,
 		"phpstan.dumpType":          true,
 		"catch.neverThrown":         true, // throw analysis is not in M2
+		"return.unusedType":         true, // unused-type analysis is tooling (M6)
+		"parameterByRef.unusedType": true,
 	}
 	files, _ := filepath.Glob(filepath.Join("testdata", "*.phn"))
 	vendorSrc, err := os.ReadFile(filepath.Join("testdata", "vendor", "Acme", "Repo.php"))

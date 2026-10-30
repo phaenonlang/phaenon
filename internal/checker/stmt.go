@@ -6,6 +6,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/docblock"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -239,6 +240,12 @@ func isLiteralExpr(e ast.Expr) bool {
 		return isLiteralExpr(e.Expr)
 	case *ast.ArrayLit, *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.ConstFetch, *ast.ClassConstFetch, *ast.New:
 		return true
+	case *ast.Unary:
+		// `-1`, the default of parse_url's $component.
+		switch e.Expr.(type) {
+		case *ast.IntLit, *ast.FloatLit:
+			return e.Op == token.Kind('-') || e.Op == token.Kind('+')
+		}
 	}
 	return false
 }
@@ -943,6 +950,39 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 	return types.Callable{Closure: true, HasSig: true, Params: cps, Return: ret}
 }
 
+// classOfSubject returns the object expression of a `$x::class` match
+// subject, nil for any other subject.
+func classOfSubject(e ast.Expr) ast.Expr {
+	c, ok := e.(*ast.ClassConstFetch)
+	if !ok {
+		return nil
+	}
+	if id, ok := c.Name.(*ast.Ident); !ok || !strings.EqualFold(id.Name, "class") {
+		return nil
+	}
+	if _, isName := c.Class.(*ast.Name); isName {
+		return nil
+	}
+	return c.Class
+}
+
+// classNameConst resolves a `Foo::class` arm condition to the class name.
+func (x *fnCtx) classNameConst(e ast.Expr) (string, bool) {
+	c, ok := e.(*ast.ClassConstFetch)
+	if !ok {
+		return "", false
+	}
+	id, ok := c.Name.(*ast.Ident)
+	if !ok || !strings.EqualFold(id.Name, "class") {
+		return "", false
+	}
+	n, ok := c.Class.(*ast.Name)
+	if !ok {
+		return "", false
+	}
+	return x.res.ClassName(n), true
+}
+
 func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type {
 	subject := x.expr(e.Subject, env, nil)
 	isTrue := false
@@ -950,6 +990,12 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 		isTrue = true
 	}
 	remaining := subject
+	// `match ($event::class) { Opened::class => … }` narrows $event itself.
+	classOf := classOfSubject(e.Subject)
+	var classRemaining types.Type
+	if classOf != nil {
+		classRemaining = x.pathType(classOf, env)
+	}
 	var results []types.Type
 	var ends []*state
 	hasDefault := false
@@ -960,6 +1006,9 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 			hasDefault = true
 			if !isTrue {
 				x.narrowPath(armEnv, e.Subject, remaining, false)
+				if classOf != nil && classRemaining != nil {
+					x.narrowPath(armEnv, classOf, classRemaining, false)
+				}
 			}
 		} else if isTrue {
 			var thens []*state
@@ -987,6 +1036,19 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 			}
 			if isLiteralLike(ct) {
 				remaining = x.subtract(remaining, ct, x.p())
+			}
+			if classOf != nil && classRemaining != nil {
+				var classes []types.Type
+				for _, cond := range arm.Conds {
+					if name, ok := x.classNameConst(cond); ok {
+						classes = append(classes, types.NewClass(name))
+					}
+				}
+				if len(classes) == len(arm.Conds) && !impossible {
+					target := types.MakeUnion(classes...)
+					x.narrowPath(armEnv, classOf, types.Intersect(classRemaining, target, x.p()), false)
+					classRemaining = x.subtract(classRemaining, target, x.p())
+				}
 			}
 		}
 		results = append(results, x.expr(arm.Body, armEnv, expected))

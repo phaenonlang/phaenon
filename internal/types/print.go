@@ -179,6 +179,20 @@ func (pr *printer) print(t Type, nested bool) {
 		b.WriteString("}")
 	case Object:
 		b.WriteString("object")
+	case ObjectShape:
+		b.WriteString("object{")
+		for i, e := range t.Entries {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(e.Key)
+			if e.Optional {
+				b.WriteString("?")
+			}
+			b.WriteString(": ")
+			pr.print(e.Type, false)
+		}
+		b.WriteString("}")
 	case Class:
 		pr.class(t.Name)
 		if len(t.Args) > 0 {
@@ -415,6 +429,8 @@ func Erase(t Type) Type {
 		return NewClass(t.Class)
 	case Conditional:
 		return Erase(MakeUnion(t.Then, t.Else))
+	case ObjectShape:
+		return TObject
 	case Class:
 		return NewClass(t.Name)
 	case Callable:

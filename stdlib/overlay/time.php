@@ -8,3 +8,8 @@
  * @return ($as_float is true ? float : string)
  */
 function microtime(bool $as_float = false): string|float {}
+
+/**
+ * @return ($as_number is true ? int : array{int, int})
+ */
+function hrtime(bool $as_number = false): array|int|float|false {}

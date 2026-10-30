@@ -300,6 +300,20 @@ func (p *Program) TraitUsers(trait string) []*Class {
 	return out
 }
 
+// PropertyType implements types.Hierarchy.
+func (p *Program) PropertyType(class, name string) (types.Type, bool) {
+	cl := p.Class(class)
+	if cl == nil {
+		return nil, false
+	}
+	cl.Signature()
+	pr := cl.FindProperty(name)
+	if pr == nil || pr.Static {
+		return nil, false
+	}
+	return pr.Type, true
+}
+
 // IsCallableName implements types.Hierarchy: 'strval' names a function,
 // 'Foo::bar' a static method.
 func (p *Program) IsCallableName(name string) bool {

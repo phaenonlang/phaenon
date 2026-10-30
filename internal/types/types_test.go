@@ -27,6 +27,9 @@ func (h mapHierarchy) IsSubclassOf(sub, super string) bool {
 func (h mapHierarchy) IsFinal(name string) bool         { return h.final[strings.ToLower(name)] }
 func (h mapHierarchy) Variances(name string) []Variance { return h.vars[strings.ToLower(name)] }
 func (h mapHierarchy) IsCallableName(name string) bool  { return false }
+func (h mapHierarchy) PropertyType(class, name string) (Type, bool) {
+	return nil, false
+}
 func (h mapHierarchy) Exists(name string) bool {
 	_, ok := h.parents[strings.ToLower(name)]
 	return ok

@@ -29,3 +29,8 @@ function grapheme_str_split(string $string, int $length = 1): array|false {}
  * @return ($substitute_character is null ? string|int : bool)
  */
 function mb_substitute_character(string|int|null $substitute_character = null): string|int|bool {}
+
+/**
+ * @return ($component is int<0, max> ? string|int|null|false : array{scheme?: string, host?: string, port?: int<0, 65535>, user?: string, pass?: string, path?: string, query?: string, fragment?: string}|false)
+ */
+function parse_url(string $url, int $component = -1): int|string|array|null|false {}

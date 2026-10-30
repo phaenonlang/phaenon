@@ -38,6 +38,10 @@ type Hierarchy interface {
 	IsCallableName(name string) bool
 	// Exists reports whether the class is known at all.
 	Exists(name string) bool
+	// PropertyType is the declared type of a class's instance property,
+	// false when the class or the property is unknown. Object shapes
+	// (`object{records: list<string>}`) are matched against it.
+	PropertyType(class, name string) (Type, bool)
 }
 
 // Variance of a class type parameter.
@@ -136,6 +140,10 @@ type (
 	Resource struct{}
 	// Bytes is binary data, a PHP string kept apart from text (design/strings.md §2).
 	Bytes struct{}
+	// ObjectShape is PHPStan's object{prop: T, …}: an object known by the
+	// properties it has, usually intersected with a class
+	// (`AbstractLogger&object{records: list<string>}`). Erases to object.
+	ObjectShape struct{ Entries []ShapeEntry }
 	// Union and Intersection are normalised: flat, no duplicates, at least two members.
 	Union        struct{ Types []Type }
 	Intersection struct{ Types []Type }
@@ -180,6 +188,7 @@ func (ClassString) typeNode()  {}
 func (Array) typeNode()        {}
 func (Shape) typeNode()        {}
 func (Object) typeNode()       {}
+func (ObjectShape) typeNode()  {}
 func (Class) typeNode()        {}
 func (Static) typeNode()       {}
 func (This) typeNode()         {}
@@ -273,6 +282,17 @@ func Equal(a, b Type) bool {
 	case Array:
 		b, ok := b.(Array)
 		return ok && a.List == b.List && a.NonEmpty == b.NonEmpty && Equal(a.Key, b.Key) && Equal(a.Value, b.Value)
+	case ObjectShape:
+		b, ok := b.(ObjectShape)
+		if !ok || len(a.Entries) != len(b.Entries) {
+			return false
+		}
+		for i := range a.Entries {
+			if a.Entries[i].Key != b.Entries[i].Key || a.Entries[i].Optional != b.Entries[i].Optional || !Equal(a.Entries[i].Type, b.Entries[i].Type) {
+				return false
+			}
+		}
+		return true
 	case Shape:
 		b, ok := b.(Shape)
 		if !ok || a.Unsealed != b.Unsealed || a.List != b.List || len(a.Entries) != len(b.Entries) {
@@ -515,6 +535,23 @@ func simplifyUnion(ms []Type) []Type {
 	if countLiterals(out) > 8 {
 		out = widenLiterals(out)
 	}
+	// `[]` next to a non-empty array of the same shape is that array, as
+	// after `$r = []; foreach (…) { $r[$k] = $v; }`.
+	for i, m := range out {
+		sh, ok := m.(Shape)
+		if !ok || len(sh.Entries) > 0 || sh.Unsealed {
+			continue
+		}
+		for j, o := range out {
+			if arr, ok := o.(Array); ok && arr.NonEmpty && (!arr.List || sh.List) {
+				arr.NonEmpty = false
+				out[j] = arr
+				out = append(out[:i], out[i+1:]...)
+				break
+			}
+		}
+		break
+	}
 	// Drop members that are plain subtypes of another member (literal-level
 	// reasoning only; class hierarchies are handled by callers that have one).
 	var res []Type
@@ -608,7 +645,7 @@ func absorbs(o, m Type) bool {
 		}
 	case Object:
 		switch m.(type) {
-		case Class, Static, This, EnumCase:
+		case Class, Static, This, EnumCase, ObjectShape:
 			return true
 		}
 	case Class:
@@ -636,7 +673,17 @@ func absorbs(o, m Type) bool {
 			}
 			return structuralSub(m.Key, o.Key) && structuralSub(m.Value, o.Value)
 		case Shape:
-			return !o.NonEmpty || len(m.Entries) > 0
+			// array{0: string, 1?: int} is not a list<array{…}>: the shape
+			// fits only when every entry fits the array's key and value.
+			if o.NonEmpty && len(m.Entries) == 0 || o.List && !m.List && !shapeIsList(m) || m.Unsealed {
+				return false
+			}
+			for _, e := range m.Entries {
+				if !structuralSub(shapeKeyType(e), o.Key) || !structuralSub(e.Type, o.Value) {
+					return false
+				}
+			}
+			return true
 		}
 	case Callable:
 		if m, ok := m.(Callable); ok && !o.HasSig && (!o.Closure || m.Closure) {
@@ -935,7 +982,7 @@ func kindOf(t Type) kind {
 		return kindString
 	case Array, Shape:
 		return kindArray
-	case Class, Object, Static, This, EnumCase:
+	case Class, Object, Static, This, EnumCase, ObjectShape:
 		return kindObject
 	case Resource:
 		return kindResource
