@@ -86,9 +86,11 @@ push dogfood work without a maintainer's go-ahead.
   `tools/`, not in the root autoload, and are out of the dogfood's scope (116 findings); 66
   `P2202` return types, mostly `mixed`. Suspected checker gaps still to look at: the few
   `P2105 … on never`, `P2302`, `P2402`.
-- The tooling directories are skipped with `phn check --exclude tests/PHPStan --exclude tests/Upgrade
-  --exclude src/PHPStan --exclude src/Upgrade src tests` (flag added 2026-10-31): **777 files,
-  388 errors** at the end of the overnight session.
+- The analyser directories are skipped with `phn check --exclude tests/PHPStan --exclude
+  tests/Upgrade --exclude tests/Types --exclude src/PHPStan --exclude src/Upgrade src tests`
+  (`tests/Types` holds `assertType()` cases for PHPStan; flag added 2026-10-31): **775 files, 363
+  errors** at the end of the overnight session, 189 of them `mixed`-related level-9 strictness,
+  16 `bytes` into `string`.
 - Next: work the remaining findings down (level-9 `mixed` strictness dominates: `mixed` into
   `string`/`array`/`resource`, `array` into `array<string, mixed>`), decide the `bytes`-in-PHP
   question ([[open-items]]), then `phn build` and the suite on compiled output.
