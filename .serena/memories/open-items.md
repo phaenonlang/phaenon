@@ -70,9 +70,8 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 ## tequila/core dogfood (2026-10-30)
 
-- `phn check` has no exclude configuration: core's `tests/PHPStan`, `tests/Upgrade`, `src/PHPStan`,
-  `src/Upgrade` use PHPStan's and Rector's classes from `tools/`, unknown to the root autoload
-  (116 findings). Decide: an `--exclude` flag, a `phaenon.json`, or paths listed by hand.
+- ~~`phn check` has no exclude configuration~~ — `--exclude PATH` (repeatable) on `build` and
+  `check` since 2026-10-31; a project file (`phaenon.json`) can come when the Composer plugin does.
 - `bytes` in **PHP-mode** files: the overlay's producers (`random_bytes()`, `Binary::getData()`)
   make plain `.php` code report `bytes` into `string` (13 in core), which PHPStan never will.
   Decide whether a `.php` file sees `bytes` as `string` (strings.md §5 says "a PHP caller sees
