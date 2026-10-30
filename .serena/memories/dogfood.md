@@ -96,13 +96,17 @@ push dogfood work without a maintainer's go-ahead.
   (`2c5754b`: `AbstractUuidAggregateId::fromBinary(bytes)`, `mixed $level` in the test loggers).
   **314** after the twelve `bytes` into vendor `string` got their `(string)` (`016fb9c`), as
   decided (strings.md §5).
-- `main` is being raised to PHPStan level max in a separate worktree
-  (`~/labs/tequila/core-stan-max`, branch `chore/phpstan-level-max`, ~408 findings at level max
-  on 8352ca6, mostly `mixed` in tests), as mongodb-odm was in its PR #45, so the dogfood has a
-  level-max baseline to compare against.
-- Next: work the remaining findings down (level-9 `mixed` strictness dominates: `mixed` into
-  `string`/`array`/`resource`, `array` into `array<string, mixed>`), rebase the dogfood branch on
-  the level-max `main` once merged, then `phn build` and the suite on compiled output.
+- **`main` is at PHPStan level max since 2026-10-30** (PR #199, 399 findings fixed the way
+  mongodb-odm's #45 did; #200 followed symfony/rate-limiter 8.1.10's corrected sliding window,
+  which five tests had asserted the old way; #201 `pass_filenames: false` on the hooks). The
+  dogfood branch was **re-migrated on that `main`** rather than rebased (every `.php` is replaced
+  by a `.phn`, so a rebase conflicts on each file #199 touched): `4c84116` migration (812 files),
+  then the two type commits replayed (`499b29b`, `10240ba`); the pre-level-max branch is kept as
+  `phaenon-dogfood-pre-levelmax` until nothing is missed. **777 files, 175 errors** (116 `P2103`,
+  32 `P2202`): the level-max work on `main` removed 139 findings the checker had reported first.
+- Next: work the 175 down (`mixed` into typed parameters and `array` into `array<string, mixed>`
+  still dominate; `P2105 … on never` and `P2402` are suspected checker gaps), then `phn build`
+  and the suite on compiled output.
 
 ## Next targets (roadmap §3)
 
