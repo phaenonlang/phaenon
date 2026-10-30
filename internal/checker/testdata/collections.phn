@@ -57,7 +57,43 @@ function strings(string $s, ?string $maybe): void
     takesString($s->split(',')->first() ?? '');
     takesInt($s->upper()); // want P2103
     $maybe->length(); // want P2105
-    takesString($maybe?->length()); // want P2519
+    takesString($maybe?->length()); // want P2103
+    takesInt($maybe?->length() ?? 0);
+}
+
+final class Id implements \Stringable
+{
+    public function __construct(private readonly string $value)
+    {
+    }
+
+    public function __toString(): string
+    {
+        return $this->value;
+    }
+
+    public function own(): int
+    {
+        return 1;
+    }
+}
+
+function stringable(Id $id, string|Id $either, ?Id $maybe): void
+{
+    takesInt($id->own());
+    takesString($id->upper());
+    takesString($either->trim());
+    takesInt($maybe?->length() ?? 0);
+    takesString($maybe?->upper()); // want P2103
+    $id->frobnicate(); // want P2006
+}
+
+function nullsafe(?string $s, ?User $u, list<string> $xs, ?Id $id): void
+{
+    takesInt($s?->length() ?? 0);
+    takesString($u?->name->upper() ?? '');
+    takesString($xs->first()?->upper()); // want P2519
+    takesString($id?->own()); // want P2103
 }
 
 function tuples((string, int) $pair, list<(string, int)> $pairs): (int, string)

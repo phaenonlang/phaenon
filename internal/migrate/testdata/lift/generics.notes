@@ -10,5 +10,7 @@
 102: kept @param int: it erases to a different type than the declared (none)
 103: kept @return iterable<string>: the declaration has no return type to refine
 126: kept @phpstan-param positive-int: no Phaenon spelling for it
-157: kept @param non-empty-array<string, \stdClass>: no Phaenon spelling for it
-158: kept @param \Closure(int, int=): int: no Phaenon spelling for it
+158: kept @param array{name: string, age: int}: no Phaenon spelling for it
+159: kept @param array{string}: no Phaenon spelling for it
+169: kept @param non-empty-array<string, \stdClass>: no Phaenon spelling for it
+170: kept @param \Closure(int, int=): int: no Phaenon spelling for it

@@ -89,3 +89,27 @@ function nullable(?string $s): int
 {
     return $s === null ? 0 : Str::length($s);
 }
+
+function nullsafe(?string $s, ?User $u): string
+{
+    $n = null === $s ? null : Str::length($s);
+
+    return ((null === $u?->name ? null : Str::upper($u->name)) ?? '-') . ($n ?? 0);
+}
+
+final class Id implements \Stringable
+{
+    public function __construct(private readonly string $value)
+    {
+    }
+
+    public function __toString(): string
+    {
+        return $this->value;
+    }
+}
+
+function prefixed(Id $id): bool
+{
+    return Str::startsWith($id, 'u-');
+}

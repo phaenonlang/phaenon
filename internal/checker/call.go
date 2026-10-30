@@ -366,8 +366,11 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 		x.argsOnly(e.Args, env)
 		return types.TMixed
 	}
-	if cls, ambiguous := stdlibReceiver(base); cls != "" || ambiguous {
+	if cls, ambiguous := x.stdlibReceiver(base); cls != "" || ambiguous {
 		return x.stdlibMethod(e, cls, name, obj, env, expected)
+	}
+	if x.stringableFallback(base, name) {
+		return x.stdlibMethod(e, "Phaenon\\Str", name, obj, env, expected)
 	}
 	if !types.IsObjectLike(base) {
 		if c, isCallable := base.(types.Callable); isCallable && c.Closure {

@@ -78,7 +78,7 @@ PHAENON_PHPSTAN=$HOME/labs/tequila/object-mapper/tools/phpstan/vendor/bin/phpsta
 PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite emitter goldens
 ```
 
-`phn` itself: `phn build|check|migrate|lex|print` — run `phn` without arguments for usage; the
+`phn` itself: `phn build|check|migrate|stdlib|lex|print` — run `phn` without arguments for usage; the
 README explains the Composer workflow. Dogfood targets call `phn` from `PATH`.
 
 ## How work is done
