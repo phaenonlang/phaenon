@@ -44,7 +44,8 @@ and [[open-items]].
    first pass over the PHP sources, 754 → 538, the checker gaps it showed fixed with the fixture
    `tequila-core.phn`. The PhpStorm plugin parses Phaenon syntax and completes the method syntax
    (2026-10-31, `../jetbrains` `f7a05b0`). Left for M4: the core findings (11 on 774 files on
-   2026-10-31, re-migrated on the level-max `main`, mostly level-9 strictness), its `phn build` and suite on compiled output, generated plugin stubs.
+   2026-10-31, all deliberate; `phn build` + PHPStan max + cs + the suite of 1188 tests pass on the
+   compiled output, re-migrated on the level-max `main`, mostly level-9 strictness), its `phn build` and suite on compiled output, generated plugin stubs.
 2. ~~`tequila/mongodb-odm` as the next generics dogfood target~~ — done 2026-10-29 up to the
    level-8 question above; then `tequila/core` with M4.
 
