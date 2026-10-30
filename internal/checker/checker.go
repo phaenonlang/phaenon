@@ -516,6 +516,20 @@ func (x *fnCtx) canAccess(vis program.Visibility, decl *program.Class) bool {
 		if x.class == nil {
 			return false
 		}
+		if x.class.Kind == ast.KindTrait {
+			if strings.EqualFold(decl.Name, x.class.Name) || decl.Kind == ast.KindTrait {
+				return true // the trait's own members, or another trait's
+			}
+			// A trait's body runs in its users: `static::getContainer()` in a
+			// trait of KernelTestCase subclasses is fine when every user is one.
+			users := x.p().TraitUsers(x.class.Name)
+			for _, u := range users {
+				if !u.IsSubclassOf(decl.Name) && !decl.IsSubclassOf(u.Name) {
+					return false
+				}
+			}
+			return true
+		}
 		return x.class.IsSubclassOf(decl.Name) || decl.IsSubclassOf(x.class.Name)
 	default:
 		return x.class != nil && strings.EqualFold(x.class.Name, decl.Name)

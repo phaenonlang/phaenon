@@ -372,8 +372,12 @@ func (x *fnCtx) forStmt(s *ast.For, env *state) {
 			x.loopCond = false
 		}
 		x.stmt(s.Body, t)
-		for _, e := range s.Step {
-			x.expr(e, t, nil)
+		// `continue` runs the step too: `for ($i = 1; ; ++$i) { … continue; }`
+		// does not loop on $i = 1.
+		for _, c := range append([]*state{t}, x.continueEnvs...) {
+			for _, e := range s.Step {
+				x.expr(e, c, nil)
+			}
 		}
 		return t, f
 	})
@@ -987,6 +991,16 @@ func (x *fnCtx) classNameConst(e ast.Expr) (string, bool) {
 
 func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type {
 	subject := x.expr(e.Subject, env, nil)
+	switch s := subject.(type) {
+	case types.This:
+		if s.Of != nil {
+			subject = *s.Of // `match ($this)` in an enum: the cases are the subject
+		}
+	case types.Static:
+		if s.Of != nil {
+			subject = *s.Of
+		}
+	}
 	isTrue := false
 	if n, ok := constName(e.Subject); ok && n == "true" {
 		isTrue = true

@@ -155,3 +155,13 @@ final class Generator implements Iterator
     /** @return TReturn */
     public function getReturn(): mixed {}
 }
+
+/**
+ * The outer iterator forwards unknown method calls to the inner one
+ * (`getSubPathname()` of a RecursiveDirectoryIterator); the stub does not
+ * declare the forwarding.
+ */
+class RecursiveIteratorIterator implements OuterIterator
+{
+    public function __call(string $name, array $arguments): mixed {}
+}

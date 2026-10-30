@@ -392,3 +392,89 @@ final class Holder2
         $this->exported = new \ArrayObject([1]); // want P2201
     }
 }
+
+final class Hasher
+{
+    public const int VERSION = 1;
+
+    /** @param positive-int $version */
+    public function __construct(private int $version = self::VERSION)
+    {
+    }
+}
+
+/** @param callable(): mixed $f */
+function callsBack(callable $f): void
+{
+}
+
+final class Generatorish
+{
+    public function generate(): int
+    {
+        return 1;
+    }
+
+    public function register(): void
+    {
+        callsBack([$this, 'generate']);
+        /** @var callable(): mixed $cb */
+        $cb = [$this, 'generate'];
+        callsBack($cb);
+    }
+}
+
+enum Suit
+{
+    case Hearts;
+    case Spades;
+
+    public function colour(): string
+    {
+        return match ($this) {
+            self::Hearts => 'red',
+            self::Spades => 'black',
+        };
+    }
+}
+
+interface Refusal
+{
+}
+
+function enumProperty(Refusal $refusal): string
+{
+    return $refusal instanceof \UnitEnum ? $refusal->name : $refusal::class;
+}
+
+abstract class KernelCase
+{
+    protected static function container(): Ctx
+    {
+        return new Ctx('c');
+    }
+}
+
+trait AssertsThings
+{
+    public function id(): string
+    {
+        return static::container()->id;
+    }
+}
+
+final class ACase extends KernelCase
+{
+    use AssertsThings;
+}
+
+function continueRunsTheStep(bool $t): int
+{
+    for ($attempt = 1; ; ++$attempt) {
+        if ($t && $attempt < 3) {
+            continue;
+        }
+
+        return $attempt;
+    }
+}
