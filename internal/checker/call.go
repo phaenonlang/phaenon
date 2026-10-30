@@ -37,6 +37,14 @@ type signature struct {
 	// known holds argument types computed before the call is checked (the
 	// receiver of a stdlib method call), so the expression is not typed twice.
 	known map[ast.Expr]types.Type
+	// stub marks a php-src declaration: its by-reference parameters are
+	// read-write unless the overlay says @param-out (PHPStan's functionMap
+	// makes the same distinction), where user code's are writes.
+	stub bool
+}
+
+func isStubFile(f *program.File) bool {
+	return f != nil && strings.HasPrefix(f.Path, "<stub>/")
 }
 
 // ------------------------------------------------------------------ function calls
@@ -68,7 +76,7 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	if fn.Deprecated && x.c.opts.Deprecations {
 		x.report(n.S, P4006, "function %s() is deprecated", fn.Name)
 	}
-	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams}
+	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File)}
 	sig.explicit = x.explicitArgs(e.TypeArgs, fn.TypeParams, fn.Name+"()", e.S)
 	if e.Args != nil && e.Args.FirstClassCallable {
 		return x.callableOf(sig)
@@ -439,7 +447,7 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 			if meth.Deprecated && x.c.opts.Deprecations {
 				x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated", meth.Class.Name, name)
 			}
-			sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return,
+			sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File),
 				typeParams: meth.TypeParams, recv: m, decl: meth.Class}
 			sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 			if e.Args != nil && e.Args.FirstClassCallable {
@@ -579,7 +587,7 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 		if meth.Deprecated && x.c.opts.Deprecations {
 			x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated", meth.Class.Name, name)
 		}
-		sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return,
+		sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File),
 			typeParams: meth.TypeParams, recv: recv, decl: meth.Class}
 		sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 		if e.Args != nil && e.Args.FirstClassCallable {
@@ -611,7 +619,7 @@ func (x *fnCtx) traitUserMethod(trait *program.Class, name string) *program.Meth
 
 // ------------------------------------------------------------------ new
 
-func (x *fnCtx) newExpr(e *ast.New, env *state) types.Type {
+func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type {
 	if e.Anon != nil {
 		cl := x.p().DeclareAnonymous(x.file, x.res.Scope(), e.Anon)
 		x.c.checkClass(cl)
@@ -736,9 +744,17 @@ func (x *fnCtx) newExpr(e *ast.New, env *state) types.Type {
 		sig.subst = map[string]types.Type{}
 		x.checkCall(sig, e.Args, env, e.S, nil)
 		args := make([]types.Type, len(cl.TypeParams))
+		var want types.Class
+		if exp, ok := expected.(types.Class); ok && strings.EqualFold(exp.Name, c.Name) && len(exp.Args) == len(cl.TypeParams) {
+			want = exp // `$this->bag = new Bag()`: the property says what the bag holds
+		}
 		for i, tp := range cl.TypeParams {
 			if t, ok := sig.subst[tp.Name]; ok {
-				args[i] = t
+				// Generalised, as PHPStan does: new ArrayObject(['a']) is
+				// ArrayObject<int, string>, not ArrayObject<0, 'a'>.
+				args[i] = widenType(t)
+			} else if want.Name != "" {
+				args[i] = want.Args[i]
 			} else if tp.Default != nil {
 				args[i] = tp.Default
 			} else if tp.Bound != nil {
@@ -1034,6 +1050,12 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			x.report(b.arg.S, P2103, "argument %d ($%s) of %s expects %s, %s given", b.idx+1, b.param.Name, sig.name, x.typeName(pt), x.typeName(at))
 		}
 	}
+	for _, b := range bindings {
+		// `render($event)` may change what $event->getResponse() answers.
+		if key, ok := pathKey(b.arg.Value); ok {
+			env.invalidateCalls(key)
+		}
+	}
 	argByName := map[string]types.Type{}
 	var bag []types.Type // the arguments a variadic parameter received, as one list
 	bagParam := ""
@@ -1084,8 +1106,12 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		}
 		if out == nil {
 			out = types.Substitute(types.Substitute(b.param.Type, rename), subst)
-			if types.IsMixed(out) && argTypes[i] != nil && !types.IsMixed(argTypes[i]) && !x.maybeUndefined(b.arg.Value, env) {
-				continue // an untyped reference: the caller's type is all that is known
+			defined := argTypes[i] != nil && !x.maybeUndefined(b.arg.Value, env)
+			if sig.stub && defined {
+				continue // php-src reads and writes the reference (sort, end, ksort): the type stays
+			}
+			if types.IsMixed(out) && defined && !types.IsMixed(argTypes[i]) {
+				out = types.TMixed // user code's untyped reference: PHPStan says mixed afterwards
 			}
 			// A typed reference may now hold anything of its type: `$seen = null;
 			// record($seen)` with `?Context &$seen` leaves ?Context, as PHPStan does.

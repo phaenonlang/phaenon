@@ -433,7 +433,9 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 		}
 		x.stmt(s.Body, head)
 		if nonEmpty {
-			exit = head // at least one iteration ran
+			// At least one iteration ran: the exit is the last one's end, or
+			// a `continue` in it.
+			exit = joinAll(append([]*state{head}, x.continueEnvs...)...)
 		}
 		return head, exit
 	})

@@ -412,7 +412,10 @@ func (x *fnCtx) ordering(e *ast.Binary, env *state) (then, els *state) {
 	rt := x.expr(e.Right, env, nil)
 	x.condValueType = types.TBool
 	then, els = env.clone(), env.clone()
-	if li, ok := lt.(types.Int); ok {
+	// A range from a docblock (`@param positive-int`) is not certain: PHP
+	// may still pass what the check refuses (checker.md §9).
+	certain := types.Equal(x.nativeOr(e.Left, lt, env), lt) && types.Equal(x.nativeOr(e.Right, rt, env), rt)
+	if li, ok := lt.(types.Int); ok && certain {
 		if ri, ok := rt.(types.Int); ok {
 			if always, value := orderingOutcome(e.Op, li, ri); always {
 				x.report(e.S, P2402, "comparison between %s and %s is always %v", x.typeName(lt), x.typeName(rt), value)

@@ -252,3 +252,143 @@ function callPathInvalidated(Manager $dm): void
         }
     }
 }
+
+function continueReachesTheExit(bool $check, string $extra): int
+{
+    $specs = ['events.json' => 1];
+    if ('' !== $extra) {
+        $specs['openapi.json'] = 2;
+    }
+    $stale = [];
+    foreach ($specs as $file => $spec) {
+        if ($check) {
+            if (1 === $spec) {
+                $stale[] = $file;
+            }
+
+            continue;
+        }
+        takesString($file);
+    }
+    if ($check && [] !== $stale) {
+        return 1;
+    }
+
+    return $check ? 2 : 0;
+}
+
+/** @param list<callable> $listeners */
+function callableArrays(array $listeners, callable $one): void
+{
+    foreach ($listeners as $listener) {
+        if (\is_array($listener) && $listener[0] instanceof Ctx) {
+            takesString($listener[1]);
+        }
+    }
+    if (\is_string($one)) {
+        takesString($one);
+    }
+}
+
+/** @param non-empty-string|null $s */
+function nonEmptyAfterCompare(?string $s, string $t): ?string
+{
+    if ('' !== $t) {
+        $s = $t;
+    }
+
+    return $s;
+}
+
+/** @param positive-int $tokens */
+function docblockRangeIsNotCertain(int $tokens): void
+{
+    if ($tokens < 1) {
+        throw new \InvalidArgumentException('at least one');
+    }
+    takesInt($tokens);
+}
+
+/** @param list<int> $xs */
+function stubReferencesKeepTheType(array $xs): void
+{
+    $last = end($xs);
+    takesInt($last === false ? 0 : $last);
+    ksort($xs);
+    takesInt($xs[0]);
+}
+
+function untypedReference(&$x): void // want P2516
+{
+    $x = 1;
+}
+
+function userReferenceIsMixed(): void
+{
+    $carrier = [];
+    untypedReference($carrier);
+    sink($carrier['k'] ?? null);
+    if (\is_string($carrier)) {
+        takesString($carrier);
+    }
+}
+
+final class Responder
+{
+    public function respond(Manager $m): void
+    {
+        $m->add(new Ctx('r'));
+    }
+}
+
+function passingInvalidatesCallPaths(Manager $dm, Responder $r): void
+{
+    if (null === $dm->flush()) {
+        $r->respond($dm);
+        $result = $dm->flush();
+        if ($result instanceof Ctx) {
+            takesString($result->id);
+        }
+    }
+}
+
+function nullableTupleElement(): (?Ctx, string)
+{
+    return [null, 'x'];
+}
+
+final class Box<T>
+{
+    /** @param list<T> $items */
+    public function __construct(private array $items)
+    {
+    }
+
+    public function same(): self<T>
+    {
+        return new self($this->items);
+    }
+}
+
+final class Bag<K of int|string, V>
+{
+    /** @param array<K, V> $items */
+    public function __construct(private array $items = [])
+    {
+    }
+}
+
+final class Holder2
+{
+    private Bag<int, string> $bag;
+    private \ArrayObject<int, string> $exported;
+
+    public function __construct()
+    {
+        $this->bag = new Bag();
+        $this->exported = new \ArrayObject();
+        $this->exported = new \ArrayObject([]);
+        $this->exported = new \ArrayObject(['a']);
+        $this->exported = new \ArrayObject([1]); // want P2201
+    }
+}

@@ -541,6 +541,9 @@ func classSub(a, b Class, h Hierarchy, depth int) bool {
 		vars = h.Variances(a.Name)
 	}
 	for i := range a.Args {
+		if _, never := a.Args[i].(Never); never {
+			continue // `new ArrayObject([])` is ArrayObject<never, never>: fits any argument
+		}
 		v := Invariant
 		if i < len(vars) {
 			v = vars[i]
