@@ -30,7 +30,7 @@ squash merges).
 | `tequila/reflection` | `~/labs/tequila/reflector`, branch `phaenon-dogfood` (local only) | M1: built from `.phn`; its phpunit, PHPStan 10 and php-cs-fixer pass |
 | `tequila/object-mapper` | `~/labs/tequila/object-mapper`, branch `phaenon-dogfood` (local only) | M2: `phn check src` = 0 findings. M3: migrated with real generics (51 `.phn`), suite + PHPStan + cs pass. `tools/phpstan` is the parity PHPStan |
 | `tequila/mongodb-odm` | `~/labs/tequila/mongodb-odm`, branch `phaenon-dogfood` (local only) | M3: migrated (125 `.phn`), suite + PHPStan max + cs pass, `phn check` 0 errors (`main` went to level max for it). Needs ext-mongodb in the local `php` |
-| `tequila/core` | worktree `~/labs/tequila/core-phaenon-dogfood`, branch `phaenon-dogfood` (local only) | M4: migrated (812 `.phn`) on a `main` at PHPStan level max; `phn check` 11 findings, all PHPStan rules deliberately not matched (vault `dogfood`, `open-items`); the analyser tooling directories and the files `phpstan.neon` excludes are excluded too |
+| `tequila/core` | worktree `~/labs/tequila/core-phaenon-dogfood`, branch `phaenon-dogfood` (local only) | M4: migrated (812 `.phn`) on a `main` at PHPStan level max; suite (1188 tests), PHPStan max and cs pass on the compiled output; `phn check` 11 findings, all PHPStan rules deliberately not matched (vault `dogfood`, `open-items`); the analyser tooling directories and the files `phpstan.neon` excludes are excluded from the check |
 | later | `nats` (M5), `php-service-template` (M6), `iam` (M7) | `../design/roadmap.md` §3 |
 
 ## Where to look things up
