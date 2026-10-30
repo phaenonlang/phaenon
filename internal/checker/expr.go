@@ -715,6 +715,18 @@ func (x *fnCtx) propertyType(obj types.Type, name string, e *ast.PropertyFetch, 
 			continue
 		}
 		classes := x.classesOf(m, e.Object.Span())
+		if _, inter := m.(types.Intersection); inter && len(classes) > 1 {
+			// `Refusal&UnitEnum`: the property is found on any member.
+			var having []*program.Class
+			for _, cl := range classes {
+				if cl.FindProperty(name) != nil || allowsDynamic(cl) {
+					having = append(having, cl)
+				}
+			}
+			if len(having) > 0 {
+				classes = having
+			}
+		}
 		for _, cl := range classes {
 			pr := cl.FindProperty(name)
 			if pr == nil {

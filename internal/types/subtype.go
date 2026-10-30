@@ -388,6 +388,16 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 				}
 			}
 			return true
+		case Callable:
+			// [$object, 'method'] / ['Class', 'method'] is a callable array;
+			// whether the method exists is the call's business (PHPStan
+			// accepts the shape too).
+			if b.Closure || len(a.Entries) != 2 || !a.List && !shapeIsList(a) {
+				return false
+			}
+			first, second := a.Entries[0].Type, a.Entries[1].Type
+			_, isStr := second.(StringLit)
+			return (IsObjectLike(first) || subtype(first, TString, h, depth+1)) && (isStr || subtype(second, TString, h, depth+1))
 		}
 		return false
 	case Iterable:

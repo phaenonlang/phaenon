@@ -855,11 +855,22 @@ func (fn *Function) Signature() *Function {
 // type of its value as computed by the checker's evaluator.
 func (p *Program) ConstantType(c *Constant) types.Type {
 	if c.Type != nil {
-		// `const array M = [...]` says less than the value; the evaluator
-		// returns the value's type when it fits the declaration.
-		if _, isArray := types.Erase(c.Type).(types.Array); !isArray {
+		// `const int VERSION = 1` or `const array M = [...]` says less than
+		// the value: the value's type is returned when it fits the
+		// declaration (a default `= self::VERSION` is then the literal 1).
+		if c.evaled == 2 && c.evalType != nil && types.IsSubtype(c.evalType, c.Type, p) {
+			return c.evalType
+		}
+		if c.evaled != 0 || p.ConstType == nil {
 			return c.Type
 		}
+		c.evaled = 1
+		c.evalType = p.ConstType(c)
+		c.evaled = 2
+		if c.evalType != nil && !types.IsMixed(c.evalType) && types.IsSubtype(c.evalType, c.Type, p) {
+			return c.evalType
+		}
+		return c.Type
 	}
 	if c.evaled == 2 {
 		return c.evalType
