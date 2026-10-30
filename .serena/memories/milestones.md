@@ -39,8 +39,11 @@ Recorded 2026-10-28 when the migrate step landed, unchanged by the 2026-10-29 co
 and [[open-items]].
 
 1. **M4 — collections and strings** (started 2026-10-30, go-ahead given): three slices are in
-   (rows above). Left: the runtime package's tests over `phn stdlib` output, the PhpStorm plugin
-   following the method syntax, then the `tequila/core` dogfood.
+   (rows above); the runtime package carries `Seq`, `Map`, `Str`, `Bytes` with 95 tests
+   (2026-10-30, `../runtime` `34ab0b3`). The `tequila/core` dogfood has started ([[dogfood]]):
+   first pass over the PHP sources, 754 → 538, the checker gaps it showed fixed with the fixture
+   `tequila-core.phn`. Left: the PhpStorm plugin following the method syntax (in progress), then
+   core's exclusions, migrate, suite.
 2. ~~`tequila/mongodb-odm` as the next generics dogfood target~~ — done 2026-10-29 up to the
    level-8 question above; then `tequila/core` with M4.
 

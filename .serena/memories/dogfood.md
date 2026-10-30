@@ -64,11 +64,32 @@ push dogfood work without a maintainer's go-ahead.
 - Needs ext-mongodb loaded in the `php` on `PATH`: the checker reflects it into a stub
   ([[testing]] § Extension stubs).
 
+## `tequila/core` — M4, started 2026-10-30
+
+- Repo `~/labs/tequila/core` has the developer's own branches and worktrees checked out, so the
+  dogfood lives in a **git worktree**: `~/labs/tequila/core-phaenon-dogfood`, branch
+  `phaenon-dogfood` off `origin/main` at `8352ca6` (1.0.0-beta.8), `composer install` done.
+  Local only, nothing committed there yet.
+- The library is PHPStan **level 8** (`treatPhpDocTypesAsCertain: false`), 548 PHP files in
+  `src/` + `tests/`; `phn check src tests` reads 810 files in about a second.
+- First pass, plain PHP (no migrate yet): 754 → **538 errors** after a day of checker fixes
+  (`checker.md` §9, 2026-10-30 bullet; fixture `internal/checker/testdata/tequila-core.phn`).
+  What is left, by kind: ~250 `P2103` and ~40 `P2312`, mostly level-9 strictness core never ran
+  at (`mixed` into `string`/`array`/`resource`, `array` into `array<string, mixed>`), 13 of
+  them `bytes` into `string` (the new overlay typing `random_bytes`, `hash(…, true)`,
+  `Binary::getData()`); 73 `P2001` + 17 `P2002` + a dozen `P2006`/`P2005` in `tests/PHPStan`,
+  `tests/Upgrade`, `src/PHPStan`, `src/Upgrade` — PHPStan's and Rector's own classes live in
+  `tools/`, not in the root autoload, and are out of the dogfood's scope (116 findings); 66
+  `P2202` return types, mostly `mixed`. Suspected checker gaps still to look at: the few
+  `P2105 … on never`, `P2302`, `P2402`.
+- Next: decide the exclusion of the tooling directories (an exclude option for `phn check`, or
+  listing paths), then `phn migrate`, then the suite on compiled output.
+
 ## Next targets (roadmap §3)
 
 | Milestone | Target |
 |---|---|
-| M4 | `tequila/core` — the heaviest array user |
+| M4 | `tequila/core` — the heaviest array user (started, section above) |
 | M5 | `tequila/nats` (sans-I/O core + non-blocking transport), `tq-cli` fan-outs |
 | M6 | `php-service-template` ships `.phn` by default |
 | M7 | `iam` first, then the rest of the services through the template |

@@ -68,6 +68,22 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - ~~`P2516` to an error, `P2518` (`map` key bound)~~ — done 2026-10-30 (`P2516` had been an error
   since the checker landed; the comment said otherwise).
 
+## tequila/core dogfood (2026-10-30)
+
+- `phn check` has no exclude configuration: core's `tests/PHPStan`, `tests/Upgrade`, `src/PHPStan`,
+  `src/Upgrade` use PHPStan's and Rector's classes from `tools/`, unknown to the root autoload
+  (116 findings). Decide: an `--exclude` flag, a `phaenon.json`, or paths listed by hand.
+- `bytes` in **PHP-mode** files: the overlay's producers (`random_bytes()`, `Binary::getData()`)
+  make plain `.php` code report `bytes` into `string` (13 in core), which PHPStan never will.
+  Decide whether a `.php` file sees `bytes` as `string` (strings.md §5 says "a PHP caller sees
+  string").
+- `@phpstan-assert-if-true =\Closure(mixed): Response $arm` — the `=` (exact type) prefix is not
+  parsed (`P4001`).
+- Runtime package review notes (from its test suite, 2026-10-30): `Str::indexOf($s, $n, $from)`
+  throws PHP's `ValueError` when `$from` is past the end; `Str::replaceAll` with an empty key
+  makes `strtr` warn; `Seq::unique` compares loosely (`[1, '1']` → `[1]`). None judged a bug;
+  guards in the `.phn` sources if wanted.
+
 ## M6 — tooling, analysis rules
 
 - **Throw analysis** — dead `catch` blocks, `@throws` checking (PHPStan `catch.neverThrown`;
