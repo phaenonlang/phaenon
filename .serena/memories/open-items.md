@@ -72,12 +72,9 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 - ~~`phn check` has no exclude configuration~~ — `--exclude PATH` (repeatable) on `build` and
   `check` since 2026-10-31; a project file (`phaenon.json`) can come when the Composer plugin does.
-- **`bytes` into a `string` parameter that PHP code declares** (restated 2026-10-31; the earlier
-  "PHP-mode files" framing was wrong, every file in core is `.phn`): `Uuid::fromBinary(string)`,
-  `MessageId::fromBinary(string)`, `assertStringContainsString()` take binary in `string` because
-  PHP has no other word; twelve calls in core, eight of them `Uuid::fromBinary($binary->getData())`.
-  Today each needs `(string)`; the alternative is that a `string` declared in a PHP-mode file
-  accepts `bytes` (strings.md §5, open bullet). A maintainer's decision.
+- ~~`bytes` into a `string` parameter that PHP code declares~~ — decided 2026-10-31: an explicit
+  `(string)` at the boundary (strings.md §5); the twelve sites in core cast (`016fb9c` on its
+  dogfood branch).
 - ~~`@phpstan-assert-if-true =T` prefix~~ — parsed since 2026-10-31 (exact form; checker.md §9).
 - ~~`json_encode(…, JSON_THROW_ON_ERROR)` typed `string|false`~~ — `string` since 2026-10-31.
 - ~~Runtime package review notes~~ — guarded 2026-10-31 in the `.phn` sources: `Str::indexOf`

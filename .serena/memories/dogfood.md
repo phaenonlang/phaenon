@@ -94,7 +94,8 @@ push dogfood work without a maintainer's go-ahead.
   exact assert form, `strcmp` in the overlay, and two commits on the branch: the migration itself
   (`0589e1a`, hooks skipped: no compiled PHP to run them on) and the types the checker asked for
   (`2c5754b`: `AbstractUuidAggregateId::fromBinary(bytes)`, `mixed $level` in the test loggers).
-  Twelve `bytes` into vendor `string` remain, pending the decision in [[open-items]].
+  **314** after the twelve `bytes` into vendor `string` got their `(string)` (`016fb9c`), as
+  decided (strings.md §5).
 - `main` is being raised to PHPStan level max in a separate worktree
   (`~/labs/tequila/core-stan-max`, branch `chore/phpstan-level-max`, ~408 findings at level max
   on 8352ca6, mostly `mixed` in tests), as mongodb-odm was in its PR #45, so the dogfood has a
