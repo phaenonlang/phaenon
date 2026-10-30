@@ -128,9 +128,16 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 ## PhpStorm plugin (`../jetbrains`)
 
 - No Phaenon-only syntax yet: generics, `is` / `as`, `type` aliases show as PHP syntax errors.
-- **M4 ships with editor support for the method syntax** (decided 2026-10-30, `collections.md`
-  §7): completion and resolution of `Seq`/`Map`/`Str`/`Bytes` methods on `list`, `map`,
-  `string` and `bytes` receivers, and the tuple type `(A, B)`.
+- ~~**M4 ships with editor support for the method syntax**~~ — done 2026-10-31 (`../jetbrains`
+  `43db968`, `bbb8bc4`, `f7a05b0`): Phaenon syntax is erased to whitespace tokens in front of
+  PhpStorm's parser (`PhaenonLexer`, eager function bodies), `$x is Foo` becomes `instanceof`,
+  `(bytes)` a string cast; `list`/`map`/`string`/`bytes`/`\Stringable` receivers get
+  `Seq`/`Map`/`Str`/`Bytes` completion, resolution and chain typing through bundled pseudo-classes
+  (`src/main/resources/stubs/phaenon/Phaenon/Internal/*Methods.php`) and a `PhpTypeProvider4`;
+  29 tests, verifier compatible with 2025.1. Left: the pseudo-class stubs are **hand-written from
+  `stdlib/runtime/*.phn` and will drift** — generate them (a `phn` subcommand); `is`/`as` do not
+  narrow beyond a class name; user generics' type arguments (`Box<User>`) are dropped; `type`
+  aliases are erased whole; the provider uses undocumented PhpStorm API (noted in its README).
 - The implied `declare(strict_types=1)` is not modelled.
 - Editor colouring relies on the internal extension point `com.jetbrains.php.baseLexerProvider`.
 
