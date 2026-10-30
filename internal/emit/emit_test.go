@@ -69,8 +69,8 @@ func TestNoStrictTypes(t *testing.T) {
 func TestErrors(t *testing.T) {
 	cases := map[string]string{
 		"<?php\necho 1;":            "A.phn:1: Phaenon files do not start with <?php",
-		"function f<T>(T $x): T {}": "A.phn:1: generics need type information",
-		"$y = $x is int;":           "A.phn:1: generics need type information",
+		"function f<T>(T $x): T {}": "A.phn:1: Phaenon syntax needs type information",
+		"$y = $x is int;":           "A.phn:1: Phaenon syntax needs type information",
 		"echo 1\necho 2;":           "A.phn:2: ",
 	}
 	for in, want := range cases {

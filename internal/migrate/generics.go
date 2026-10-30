@@ -819,6 +819,25 @@ func render(n *docblock.TypeNode) (string, bool) {
 			args = append(args, s)
 		}
 		return name + "<" + strings.Join(args, ", ") + ">", true
+	case docblock.KindShape:
+		// A positional, sealed array{A, B} is the tuple (A, B)
+		// (design/collections.md §2.4). One element stays: `(A)` would
+		// read as a cast. Named keys stay docblock vocabulary.
+		if n.Unsealed || len(n.Entries) < 2 || !(strings.EqualFold(n.Name, "array") || strings.EqualFold(n.Name, "list")) {
+			return "", false
+		}
+		var elems []string
+		for i, en := range n.Entries {
+			if en.Optional || (en.HasKey && !(en.IsInt && en.IntKey == int64(i))) {
+				return "", false
+			}
+			s, ok := render(en.Type)
+			if !ok {
+				return "", false
+			}
+			elems = append(elems, s)
+		}
+		return "(" + strings.Join(elems, ", ") + ")", true
 	case docblock.KindNullable:
 		inner, ok := render(n.Args[0])
 		if !ok {
@@ -1015,6 +1034,12 @@ func (l *lifter) docAtoms(n *docblock.TypeNode, sc scope) atoms {
 		}
 		sort.Strings(parts)
 		out[strings.Join(parts, "&")] = true
+	case docblock.KindShape:
+		if strings.EqualFold(n.Name, "object") {
+			out["object"] = true
+		} else {
+			out["array"] = true
+		}
 	case docblock.KindCallable:
 		if strings.ToLower(strings.TrimPrefix(n.Name, "\\")) == "closure" {
 			out["closure"] = true

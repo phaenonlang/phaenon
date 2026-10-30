@@ -153,6 +153,18 @@ function firstOf(array $items): ?object
 }
 
 /**
+ * @param array{string, int} $pair
+ * @param list<array{string, int}> $pairs
+ * @param array{name: string, age: int} $named
+ * @param array{string} $single
+ * @return array{int, string}
+ */
+function tuples(array $pair, array $pairs, array $named, array $single): array
+{
+    return [$pair[1], $pair[0]];
+}
+
+/**
  * @param array<int, string> $map
  * @param non-empty-array<string, \stdClass> $objects
  * @param \Closure(int, int=): int $withOptional

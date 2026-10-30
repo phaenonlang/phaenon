@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/checker"
@@ -32,6 +33,8 @@ func main() {
 		checkCmd(os.Args[2:])
 	case "migrate":
 		migrateCmd(os.Args[2:])
+	case "stdlib":
+		stdlibCmd(os.Args[2:])
 	case "lex":
 		lex(os.Args[2:])
 	case "print":
@@ -44,17 +47,18 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, strings.TrimSpace(`
 usage:
-  phn build [--out DIR] [--check] [--no-types] [--emit-on-error] <path>...
+  phn build [--out DIR] [--check] [--emit-on-error] <path>...
                                                            type-check and compile .phn files to .php
   phn check [--json] [--no-deprecations] <path>...         type-check .phn files, write nothing
   phn migrate [--keep-docblocks] <path>...                 rewrite .php files as .phn; lift generic docblocks into syntax
+  phn stdlib --out DIR [--check]                           write the compiled stdlib (Seq.php, Map.php, Str.php, Bytes.php) into DIR
   phn lex   [--php] <file>                                 dump the token stream
   phn print [--php] <file>                                 parse and pretty-print
 
 build writes Foo.php next to Foo.phn, or under DIR (mirroring the path given) with --out;
 a file with type errors is not written unless --emit-on-error is given (the exit status still
 reports the errors). --check writes nothing and fails when any output is missing or stale.
---no-types skips the type checker.
+stdlib materialises the classes behind the method syntax, as the phaenon/runtime package ships them.
 check reads vendor code through the nearest vendor/composer autoload maps.
 --php reads the file as plain PHP (with <?php tags) instead of Phaenon.`))
 	os.Exit(2)
@@ -103,7 +107,6 @@ func build(args []string) {
 	fs := flag.NewFlagSet("build", flag.ExitOnError)
 	out := fs.String("out", "", "write outputs under this directory instead of beside the sources")
 	check := fs.Bool("check", false, "verify outputs are up to date; write nothing")
-	noTypes := fs.Bool("no-types", false, "skip the type checker")
 	emitOnError := fs.Bool("emit-on-error", false, "write files that have type errors too; the exit status still reports them")
 	fs.Parse(args)
 	if fs.NArg() == 0 {
@@ -111,15 +114,12 @@ func build(args []string) {
 	}
 	files := collect(fs.Args(), ".phn")
 	failed, written, stale := 0, 0, 0
-	var broken map[string]bool
-	if !*noTypes {
-		diags := typeCheck(files, checker.Options{})
-		broken = map[string]bool{}
-		for _, d := range diags {
-			printDiag(d)
-			if d.Severity == checker.Error {
-				broken[d.File] = true
-			}
+	diags := typeCheck(files, checker.Options{})
+	broken := map[string]bool{}
+	for _, d := range diags {
+		printDiag(d)
+		if d.Severity == checker.Error {
+			broken[d.File] = true
 		}
 	}
 	for _, in := range files {
@@ -133,10 +133,7 @@ func build(args []string) {
 		if err != nil {
 			fail("%v", err)
 		}
-		opts := emit.Options{SourceName: in, StrictTypes: true}
-		if loadedChecker != nil {
-			opts.Program, opts.File = loadedProgram, loadedProgram.File(in)
-		}
+		opts := emit.Options{SourceName: in, StrictTypes: true, Program: loadedProgram, File: loadedProgram.File(in)}
 		php, err := emit.File(src, opts)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -174,6 +171,55 @@ func build(args []string) {
 		fmt.Printf("%d files up to date\n", len(files))
 	default:
 		fmt.Printf("%d files compiled, %d written\n", len(files), written)
+	}
+}
+
+// ------------------------------------------------------------------ stdlib
+
+func stdlibCmd(args []string) {
+	fs := flag.NewFlagSet("stdlib", flag.ExitOnError)
+	out := fs.String("out", "", "directory to write the compiled stdlib into")
+	check := fs.Bool("check", false, "verify the files there are up to date; write nothing")
+	fs.Parse(args)
+	if *out == "" || fs.NArg() != 0 {
+		usage()
+	}
+	compiled, err := emit.Stdlib()
+	if err != nil {
+		fail("%v", err)
+	}
+	names := make([]string, 0, len(compiled))
+	for name := range compiled {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	written, stale := 0, 0
+	for _, name := range names {
+		dst := filepath.Join(*out, name)
+		cur, readErr := os.ReadFile(dst)
+		if readErr == nil && bytes.Equal(cur, compiled[name]) {
+			continue
+		}
+		if *check {
+			fmt.Fprintf(os.Stderr, "%s: stale or missing\n", dst)
+			stale++
+			continue
+		}
+		if err := os.MkdirAll(*out, 0o755); err != nil {
+			fail("%v", err)
+		}
+		if err := os.WriteFile(dst, compiled[name], 0o644); err != nil {
+			fail("%v", err)
+		}
+		written++
+	}
+	switch {
+	case *check && stale > 0:
+		fail("%d of %d stdlib files are stale; run `phn stdlib --out %s`", stale, len(names), *out)
+	case *check:
+		fmt.Printf("%d stdlib files up to date\n", len(names))
+	default:
+		fmt.Printf("%d stdlib files, %d written\n", len(names), written)
 	}
 }
 

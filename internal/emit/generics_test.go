@@ -31,19 +31,15 @@ func TestGenerics(t *testing.T) {
 	var runtimeStubs []string
 	if phpstan != "" || php != "" {
 		dir := t.TempDir()
-		rp := program.New()
-		if err := rp.LoadStubs(); err != nil {
+		compiled, err := Stdlib()
+		if err != nil {
 			t.Fatal(err)
 		}
 		for _, s := range stdlib.Runtime() {
 			name, src := filepath.Base(s.Path), s.Src
 			if strings.HasSuffix(name, ".phn") {
-				f := rp.File("<stub>/" + s.Path)
-				compiled, err := Tree(src, f.AST, Options{SourceName: name, StrictTypes: true, Program: rp, File: f})
-				if err != nil {
-					t.Fatalf("%s: %v", name, err)
-				}
-				name, src = strings.TrimSuffix(name, ".phn")+".php", compiled
+				name = strings.TrimSuffix(name, ".phn") + ".php"
+				src = compiled[name]
 			}
 			path := filepath.Join(dir, name)
 			os.WriteFile(path, src, 0o644)
@@ -70,7 +66,7 @@ func TestGenerics(t *testing.T) {
 					t.Errorf("checker: %s:%d: %s: %s", d.File, d.Line, d.Code, d.Message)
 				}
 			}
-			got, err := Tree(src, f.AST, Options{SourceName: path, StrictTypes: true, Program: p, File: f})
+			got, err := File(src, Options{SourceName: path, StrictTypes: true, Program: p, File: f})
 			if err != nil {
 				t.Fatal(err)
 			}

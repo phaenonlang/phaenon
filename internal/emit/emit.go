@@ -65,6 +65,10 @@ func (e *Error) Error() string {
 
 // File compiles one .phn source to PHP.
 func File(src []byte, opts Options) ([]byte, error) {
+	if opts.File != nil && opts.File.AST != nil {
+		// The checker's tree: its records (method targets, …) key on nodes.
+		return Tree(src, opts.File.AST, opts)
+	}
 	f, err := parser.Parse(src, lexer.ModePhaenon)
 	if err != nil {
 		if pe, ok := err.(*parser.Error); ok {

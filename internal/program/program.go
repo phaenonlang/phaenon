@@ -319,6 +319,12 @@ func (p *Program) IsCallableName(name string) bool {
 // ------------------------------------------------------------------ files and scopes
 
 // File is one parsed source file and its namespace scopes.
+// MethodTarget is the emitter's instruction for one method-syntax call.
+type MethodTarget struct {
+	Class string
+	Guard bool
+}
+
 type File struct {
 	Path    string
 	Src     []byte
@@ -326,10 +332,10 @@ type File struct {
 	Mode    lexer.Mode
 	Checked bool
 	// MethodTargets records the calls whose receiver is a list, map, string
-	// or bytes value: the checker resolves each to a stdlib class
-	// (`Phaenon\Seq`, …) and the emitter rewrites it as the static call
-	// (design/collections.md §3.1).
-	MethodTargets map[*ast.MethodCall]string
+	// or bytes value (or a \Stringable for the Str methods): the stdlib
+	// class the emitter rewrites the call to, and whether the receiver may
+	// be null (`?->`, or a short-circuited chain) so the call is guarded.
+	MethodTargets map[*ast.MethodCall]MethodTarget
 	// Scopes maps statement ranges to the namespace scope in force there.
 	Scopes  []ScopedRange
 	lines   []int
