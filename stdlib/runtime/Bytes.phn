@@ -96,7 +96,7 @@ final class Bytes
         try {
             return mb_scrub($b, 'UTF-8');
         } finally {
-            mb_substitute_character(is_bool($substitute) ? null : $substitute);
+            mb_substitute_character($substitute);
         }
     }
 

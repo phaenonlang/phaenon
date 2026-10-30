@@ -90,8 +90,15 @@ final class Str
         return mb_substr((string) $s, $start, $length);
     }
 
+    /**
+     * @throws \ValueError when $separator is empty: split by chars() for code points
+     */
     public static function split(string|\Stringable $s, string $separator, int $limit = PHP_INT_MAX): list<string>
     {
+        if ('' === $separator) {
+            throw new \ValueError('Str::split(): the separator must not be empty; chars() splits into code points');
+        }
+
         return explode($separator, (string) $s, $limit);
     }
 
@@ -137,9 +144,9 @@ final class Str
 
     public static function graphemes(string|\Stringable $s): list<string>
     {
-        $parts = grapheme_str_split((string) $s);
+        preg_match_all('/\X/u', (string) $s, $m);
 
-        return false === $parts ? [] : $parts;
+        return $m[0];
     }
 
     public static function graphemeLength(string|\Stringable $s): int
