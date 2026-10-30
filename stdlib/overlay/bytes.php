@@ -43,6 +43,14 @@ function hash_equals(#[\SensitiveParameter] string $known_string, #[\SensitivePa
 function strcmp(string $string1, string $string2): int {}
 
 /**
+ * The signature is binary; PHP writes it into an untyped reference, so a
+ * program checks what came back (PHPStan says mixed as well).
+ *
+ * @param-out mixed $signature
+ */
+function openssl_sign(string $data, &$signature, #[\SensitiveParameter] $private_key, string|int $algorithm = OPENSSL_ALGO_SHA1, int $padding = 0, int $salt_length = OPENSSL_RSA_PSS_SALTLEN_AUTO): bool {}
+
+/**
  * @param string|bytes $string1
  * @param string|bytes $string2
  */

@@ -1,0 +1,410 @@
+namespace Inf;
+
+final class Assert
+{
+    /** @phpstan-assert true $condition */
+    public static function assertTrue(mixed $condition): void
+    {
+    }
+
+    /** @phpstan-assert !null $actual */
+    public static function assertNotNull(mixed $actual): void
+    {
+    }
+}
+
+final class Id
+{
+}
+
+final class User
+{
+    public function __construct(public string $name, public ?string $nick = null)
+    {
+    }
+}
+
+interface Shape2
+{
+}
+
+final class Circle implements Shape2
+{
+    public int $r = 1;
+}
+
+final class Invokable
+{
+    public function __invoke(int $x): string
+    {
+        return (string) $x;
+    }
+}
+
+/**
+ * @extends \Traversable<int, User>
+ */
+interface Frames extends \Traversable
+{
+}
+
+final class Fin
+{
+    public function with(): static
+    {
+        return new self();
+    }
+}
+
+final class Envelope
+{
+    public function last(string $class): ?User
+    {
+        return null;
+    }
+}
+
+/**
+ * @template T of Id
+ */
+abstract class Aggregate
+{
+    /**
+     * @param T $id
+     */
+    final public function __construct(protected Id $id)
+    {
+    }
+
+    final public static function make(Id $id): void
+    {
+        $self = new static($id);
+        $self->touch();
+    }
+
+    /**
+     * @param T $id
+     */
+    final public static function rebuild(Id $id): static
+    {
+        return new static($id);
+    }
+
+    public function touch(): void
+    {
+    }
+}
+
+/**
+ * @template T of Aggregate<Id>
+ */
+abstract class Repo
+{
+    /**
+     * @return class-string<T>
+     */
+    abstract protected static function aggregateClass(): string;
+
+    /**
+     * @return T
+     */
+    public function get(Id $id): Aggregate
+    {
+        $class = static::aggregateClass();
+
+        return $class::rebuild($id);
+    }
+}
+
+function takesString(string $s): void
+{
+}
+
+function takesInt(int $i): void
+{
+}
+
+/** @param int<0, max> $i */
+function takesNonNegative(int $i): void
+{
+}
+
+function takesFloat(float $f): void
+{
+}
+
+/** @param non-empty-string $s */
+function takesNonEmpty(string $s): void
+{
+}
+
+function takesCallable(callable $c): void
+{
+}
+
+/** @param list<string> $l */
+function takesList(array $l): void
+{
+}
+
+function takesId(Id $id): void
+{
+}
+
+/** @param array<string, null> $m */
+function takesNullMap(array $m): void
+{
+}
+
+/** @param array<string, array<string, mixed>> $w */
+function takesW(array $w): void
+{
+}
+
+/** @param array<string, string> $h */
+function takesHeaders(array $h): void
+{
+}
+
+/**
+ * @template T
+ * @param T $x
+ * @return T
+ */
+function identity(mixed $x): mixed
+{
+    return $x;
+}
+
+/**
+ * The closure sees its declared parameter type narrowed by what the caller passes.
+ *
+ * @param list<array{id: int, name: string}> $rows
+ * @param list<class-string<User>> $classes
+ */
+function closureParams(array $rows, array $classes): void
+{
+    takesList(array_map(static fn (array $row): string => $row['name'], $rows));
+    array_map(static fn (array $row): int => $row['id'] + 1, $rows);
+    foreach (array_map(static fn (string $c): User => new $c('x'), $classes) as $u) {
+        takesString($u->name);
+    }
+}
+
+/**
+ * A closure's body refines its declared return type.
+ */
+function closureReturns(): void
+{
+    $make = function (int $port) {
+        $server = stream_socket_server('tcp://127.0.0.1:'.$port, $errno, $error);
+        if (false === $server) {
+            exit(1);
+        }
+
+        return $server;
+    };
+    $s = $make(0);
+    fclose($s);
+    $rows = array_map(static fn (int $n): array => ['n' => $n, 'label' => (string) $n], [1, 2]);
+    takesInt($rows[0]['n']);
+    takesString($rows[0]['label']);
+}
+
+function minMax(int $a, int $b, string $s, float $f): void
+{
+    takesInt(max(1, $a - $b));
+    takesFloat(min(1.0, max(0.0, (float) $s)));
+    takesNonNegative(max(0, \strlen($s) - 10));
+    takesNonNegative(max(0, $a));
+    takesFloat(max(0.0, $f));
+}
+
+function formats(string $s): void
+{
+    takesNonEmpty(sprintf('publish %s', $s));
+    takesNonEmpty(sprintf('%s', $s)); // want P2103
+}
+
+function assertions(string $old): void
+{
+    Assert::assertTrue(class_exists($old) || interface_exists($old));
+    new \ReflectionClass($old);
+}
+
+function constants(): void
+{
+    if (\PHP_INT_SIZE < 8) {
+        echo 'small';
+    }
+    if (1 === \PHP_ZTS) {
+        echo 'zts';
+    }
+    takesString(\PHP_OS);
+    takesString((string) parse_url('http://a:b@c/', \PHP_URL_USER));
+}
+
+/** @param array<string, mixed> $data */
+function offsets(array $data): void
+{
+    foreach (['service', 'collection'] as $field) {
+        if (!is_string($data[$field] ?? null)) {
+            throw new \InvalidArgumentException();
+        }
+    }
+    takesString($data['service']);
+    takesString($data['collection']);
+}
+
+function destructuring(mixed $reply): void
+{
+    if (!\is_array($reply) || !\is_string($reply[0] ?? null) || !\is_array($reply[1] ?? null)) {
+        return;
+    }
+    [$cursor, $keys] = $reply;
+    takesString($cursor);
+    takesInt(count($keys));
+}
+
+function paths(Envelope $e): void
+{
+    Assert::assertNotNull($e->last(User::class));
+    takesString($e->last(User::class)->name);
+}
+
+function offsetCapture(string $contents): void
+{
+    if (1 === preg_match('/^(\d+)/', $contents, $m, \PREG_OFFSET_CAPTURE)) {
+        takesInt($m[0][1]);
+        takesString($m[0][0]);
+    }
+    if (preg_match_all('/a/', $contents, $all, \PREG_SET_ORDER) > 0) {
+        foreach ($all as $set) {
+            takesString($set[0]);
+        }
+    }
+}
+
+/**
+ * @param array<string, int> $failModes
+ * @param list<string> $declared
+ * @param list<mixed> $keys
+ */
+function callableStrings(array $failModes, array $declared, array $keys): void
+{
+    $undeclared = array_values(array_diff(array_map('strval', array_keys($failModes)), $declared));
+    takesList($undeclared);
+    takesList(array_values(array_filter($keys, '\\is_string')));
+}
+
+/** @param array<string, int> $counts */
+function zipped(array $counts): void
+{
+    $pairs = array_map(static fn (string $key, int $value): array => [$key, $value], array_keys($counts), array_values($counts));
+    takesInt(count($pairs));
+}
+
+/**
+ * @param list<?string> $maybe
+ * @param list<User> $users
+ */
+function filtered(array $maybe, array $users): void
+{
+    takesList(array_values(array_filter($maybe, static fn (?string $a): bool => null !== $a && '' !== $a)));
+    foreach (array_filter($users, static fn (User $u): bool => null !== $u->nick) as $u) {
+        takesString($u->nick); // want P2103
+    }
+}
+
+function varOnIf(mixed $data): void
+{
+    \assert(is_array($data));
+    /** @var array<string, mixed> $data */
+    if (isset($data['x'])) {
+        takesInt(count($data));
+    }
+    foreach ($data as $k => $v) {
+        takesString($k);
+    }
+}
+
+function frames(Frames $frames): void
+{
+    foreach ($frames as $f) {
+        takesString($f->name);
+    }
+}
+
+function mixedIntoT(mixed $m): void
+{
+    identity($m);
+}
+
+function callables(Invokable $i): void
+{
+    takesCallable($i);
+    takesCallable(new class {
+        public function __invoke(): void
+        {
+        }
+    });
+}
+
+/**
+ * @param list<int|float> $costs
+ * @param list<Shape2> $shapes
+ */
+function callableParams(array $costs, array $shapes): void
+{
+    array_map(static fn (float $ms): string => number_format($ms), $costs);
+    array_map(static fn (Circle $c): int => $c->r, $shapes); // want P2103
+}
+
+/**
+ * @template T of Id
+ * @param class-string<T>|null $command
+ * @return list<array{key: string, command: ($command is null ? Id : T)}>
+ */
+function scheduled(?string $command = null): array
+{
+    return [];
+}
+
+function conditional(): void
+{
+    $s = scheduled(Id::class);
+    takesId($s[0]['command']);
+    new Fin()->with();
+}
+
+/**
+ * @param list<string> $classes
+ * @param array<string, array<string, mixed>> $w
+ * @param array<string, string> $headers
+ */
+function overlays(string $name, array $classes, array $w, array $headers): void
+{
+    takesString((string) getenv($name));
+    takesInt(count(getenv()));
+    takesList(array_map('strval', range(1, 3)));
+    takesNullMap(array_fill_keys($classes, null));
+    takesW(array_replace($w, $w));
+    takesHeaders(array_change_key_case($headers, \CASE_UPPER));
+    $p = proc_open(['x'], [], $pipes);
+    if (false !== $p) {
+        foreach ($pipes as $pipe) {
+            fclose($pipe);
+        }
+    }
+    takesString(new \DateTimeImmutable()->getTimezone()->getName());
+    $t = new \ReflectionMethod(User::class, '__construct')->getReturnType();
+    if ($t instanceof \ReflectionUnionType) {
+        foreach ($t->getTypes() as $m) {
+            takesString($m->allowsNull() ? 'y' : 'n');
+        }
+    }
+    $n = filter_var($name, \FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if (false !== $n) {
+        takesInt($n);
+    }
+}

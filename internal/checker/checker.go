@@ -491,8 +491,8 @@ func replaceStatic(t types.Type, recv types.Type) types.Type {
 func staticOf(recv types.Type) types.Type {
 	return types.Map(types.StripNull(recv), func(m types.Type) types.Type {
 		switch m := m.(type) {
-		case types.Class, types.Static, types.This:
-			return m
+		case types.Class, types.Static, types.This, types.Param:
+			return m // static of a class-string<T> receiver is T
 		case types.EnumCase:
 			return types.Class{Name: m.Class}
 		case types.ClassString:

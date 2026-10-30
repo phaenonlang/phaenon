@@ -131,10 +131,31 @@ func (e *state) invalidatePrefix(prefix string) {
 // `$dm->flush()` is no longer null once `$dm->add($x)` has run.
 func (e *state) invalidateCalls(receiver string) {
 	for k := range e.paths {
-		if strings.HasPrefix(k, receiver+"->") && strings.Contains(k[len(receiver):], "()") {
+		if strings.HasPrefix(k, receiver+"->") && strings.Contains(k[len(receiver):], "(") {
 			delete(e.paths, k)
 		}
 	}
+}
+
+// constantArgKey spells a constant argument for a method-call path: a
+// literal, a constant or a class constant (`Stamp::class`).
+func constantArgKey(e ast.Expr) (string, bool) {
+	switch e := e.(type) {
+	case *ast.StringLit:
+		return "'" + program.StringValue(e) + "'", true
+	case *ast.IntLit:
+		return e.Raw, true
+	case *ast.ConstFetch:
+		return strings.ToLower(strings.Join(e.Name.Parts, "\\")), true
+	case *ast.ClassConstFetch:
+		n, ok := e.Class.(*ast.Name)
+		id, isIdent := e.Name.(*ast.Ident)
+		if !ok || !isIdent {
+			return "", false
+		}
+		return strings.ToLower(strings.Join(n.Parts, "\\")) + "::" + id.Name, true
+	}
+	return "", false
 }
 
 // invalidateMembers drops every property narrowing (after a call that may
@@ -304,11 +325,26 @@ func pathKey(e ast.Expr) (string, bool) {
 		}
 		return base + "->" + id.Name, true // ?-> addresses the same member
 	case *ast.MethodCall:
-		// `$e->getPrevious()`: a call without arguments is a path PHPStan
-		// narrows too (assertInstanceOf(..., $e->getPrevious())); it holds
-		// until the receiver is reassigned.
-		if e.Args == nil || len(e.Args.Args) > 0 || e.Args.FirstClassCallable {
+		// `$e->getPrevious()`, `$envelope->last(Stamp::class)`: a call whose
+		// arguments are constants is a path PHPStan narrows too
+		// (assertNotNull($envelope->last(X::class))); it holds until the
+		// receiver is used otherwise.
+		if e.Args == nil || e.Args.FirstClassCallable {
 			return "", false
+		}
+		var argKeys []string
+		for _, a := range e.Args.Args {
+			if a.Unpack || a.Value == nil {
+				return "", false
+			}
+			k, ok := constantArgKey(a.Value)
+			if !ok {
+				return "", false
+			}
+			if a.Name != nil {
+				k = a.Name.Name + ":" + k
+			}
+			argKeys = append(argKeys, k)
 		}
 		base, ok := pathKey(e.Object)
 		if !ok {
@@ -318,7 +354,7 @@ func pathKey(e ast.Expr) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		return base + "->" + id.Name + "()", true
+		return base + "->" + id.Name + "(" + strings.Join(argKeys, ",") + ")", true
 	case *ast.StaticPropertyFetch:
 		n, ok := e.Class.(*ast.Name)
 		if !ok {

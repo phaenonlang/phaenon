@@ -234,9 +234,16 @@ func IterableKV(t Type, h Hierarchy) (key, value Type, ok bool) {
 			ks = append(ks, TMixed)
 			vs = append(vs, TMixed)
 		case Class:
-			if h != nil && !h.IsSubclassOf(m.Name, "Traversable") {
-				ok = false
-				continue
+			if h != nil {
+				if k, v, found := h.IteratorArgs(m); found {
+					ks = append(ks, k)
+					vs = append(vs, v)
+					continue
+				}
+				if !h.IsSubclassOf(m.Name, "Traversable") {
+					ok = false
+					continue
+				}
 			}
 			k, v := classIterableKV(m)
 			ks = append(ks, k)

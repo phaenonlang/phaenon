@@ -10,6 +10,10 @@ const PHP_INT_MAX = 9223372036854775807;
 const PHP_INT_MIN = -9223372036854775807 - 1;
 /** @var 4|8 */
 const PHP_INT_SIZE = 8;
+/** @var 0|1 */
+const PHP_ZTS = 0;
+/** @var 0|1 */
+const PHP_DEBUG = 0;
 
 // The CLI SAPI's streams: no stub declares them.
 /** @var resource */

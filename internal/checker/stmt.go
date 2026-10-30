@@ -31,6 +31,11 @@ func (x *fnCtx) stmts(ss []ast.Stmt, env *state) {
 
 // stmt checks one statement.
 func (x *fnCtx) stmt(s ast.Stmt, env *state) {
+	if d := statementDoc(s); d != "" {
+		// `/** @var array<string, mixed> $data */` before an if, a loop or a
+		// try retypes the variable from there on, as PHPStan reads it.
+		x.varTags(docblock.Parse(d), env, "")
+	}
 	switch s := s.(type) {
 	case *ast.ExprStmt:
 		x.exprStmt(s, env)
@@ -202,7 +207,7 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 		if !types.IsAcceptable(vt, declared, x.p()) {
 			x.report(s.S, P2212, "@var %s does not accept the assigned %s", x.typeName(declared), x.typeName(vt))
 		}
-	case !types.IsMixed(native) && !types.IsSubtype(declared, native, x.p()):
+	case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native), x.p()):
 		x.report(s.S, P2212, "@var %s is not a subtype of the assigned %s", x.typeName(declared), x.typeName(native))
 	}
 	x.assignTo(assign.Target, declared, env, s.S)
@@ -229,6 +234,42 @@ func (x *fnCtx) varTags(doc *docblock.Doc, env *state, target string) {
 			x.narrowPathNative(env, v, x.res.Doc(vt.Type), native, false)
 		}
 	}
+}
+
+// statementDoc is the doc comment before a statement that carries no
+// assignment (the assignment kinds read theirs themselves).
+func statementDoc(s ast.Stmt) string {
+	switch s := s.(type) {
+	case *ast.If:
+		return s.Doc
+	case *ast.While:
+		return s.Doc
+	case *ast.DoWhile:
+		return s.Doc
+	case *ast.For:
+		return s.Doc
+	case *ast.Switch:
+		return s.Doc
+	case *ast.Try:
+		return s.Doc
+	case *ast.Echo:
+		return s.Doc
+	case *ast.Unset:
+		return s.Doc
+	}
+	return ""
+}
+
+// withoutTypeArgs is the PHP type behind t: a class without its type
+// arguments. A @var tag is checked against what PHP knows, so `@var
+// Meta<object>` may widen an inferred Meta<Dog> (PHPStan's varTag.nativeType).
+func withoutTypeArgs(t types.Type) types.Type {
+	return types.MapDeep(t, func(m types.Type) types.Type {
+		if c, ok := m.(types.Class); ok && len(c.Args) > 0 {
+			return types.Class{Name: c.Name}
+		}
+		return m
+	})
 }
 
 // isLiteralExpr reports whether e is written out in full — a literal, a
@@ -625,13 +666,13 @@ func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
 			if !types.IsAcceptable(t, declared, x.p()) {
 				x.report(s.S, P2212, "@var %s does not accept the returned %s", x.typeName(declared), x.typeName(t))
 			}
-		case !types.IsMixed(native) && !types.IsSubtype(declared, native, x.p()):
+		case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native), x.p()):
 			x.report(s.S, P2212, "@var %s is not a subtype of the returned %s", x.typeName(declared), x.typeName(native))
 		}
 		t = declared
 	}
+	x.returnTypes = append(x.returnTypes, t)
 	if !x.hasReturn {
-		x.returnTypes = append(x.returnTypes, t)
 		return
 	}
 	switch x.returnType.(type) {
@@ -826,12 +867,16 @@ func (x *fnCtx) closureParams(decls []*ast.Param, expected types.Type) ([]*progr
 	for i, d := range decls {
 		p := &program.Param{Name: d.Var.Name, NativeType: x.res.Native(d.Type), HasDefault: d.Default != nil, Default: d.Default, ByRef: d.ByRef, Variadic: d.Variadic, Span: d.S}
 		p.Type = p.NativeType
-		if p.Type == nil && exp != nil {
+		var want types.Type // what the caller passes, from the expected signature
+		if exp != nil {
 			if i < len(exp.Params) {
-				p.Type = exp.Params[i].Type
+				want = exp.Params[i].Type
 			} else if n := len(exp.Params); n > 0 && exp.Params[n-1].Variadic {
-				p.Type = exp.Params[n-1].Type
+				want = exp.Params[n-1].Type
 			}
+		}
+		if p.Type == nil && want != nil {
+			p.Type = want
 		}
 		if p.Type == nil {
 			p.Type = types.TMixed
@@ -839,10 +884,26 @@ func (x *fnCtx) closureParams(decls []*ast.Param, expected types.Type) ([]*progr
 		if d.Default != nil && isNullConst(d.Default) {
 			p.Type = types.Nullable(p.Type)
 		}
+		declared := p.Type
+		// The body sees the declared type narrowed by what the caller passes:
+		// `fn (array $row) => $row['id']` over list<array{id: int}> reads an
+		// int, `fn (string $c)` over list<class-string<Foo>> a class-string
+		// (PHPStan does the same). The closure's own signature keeps the
+		// declared type.
+		if p.NativeType != nil && want != nil && !types.IsMixed(want) && !mentionsParam(want) {
+			if r := types.Intersect(declared, want, x.p()); !isNeverType(r) {
+				p.Type = r
+			}
+		}
 		params = append(params, p)
-		cps = append(cps, types.CallableParam{Name: p.Name, Type: p.Type, Optional: p.HasDefault, Variadic: p.Variadic, ByRef: p.ByRef})
+		cps = append(cps, types.CallableParam{Name: p.Name, Type: declared, Optional: p.HasDefault, Variadic: p.Variadic, ByRef: p.ByRef})
 	}
 	return params, cps
+}
+
+func isNeverType(t types.Type) bool {
+	_, ok := t.(types.Never)
+	return ok
 }
 
 func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.Type {
@@ -915,8 +976,27 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		default:
 			ret = types.TVoid
 		}
+	} else {
+		ret = refinedReturn(ret, c.returnTypes, c.generator, x.p())
 	}
 	return types.Callable{Closure: true, HasSig: true, Params: cps, Return: ret}
+}
+
+// refinedReturn is a closure's declared return type narrowed to what its
+// body returns when that fits: `function (): array { return ['a' => 1]; }`
+// is a closure returning array{a: 1}, as PHPStan types it.
+func refinedReturn(declared types.Type, returned []types.Type, generator bool, h types.Hierarchy) types.Type {
+	if generator || len(returned) == 0 {
+		return declared
+	}
+	if _, isVoid := declared.(types.Void); isVoid {
+		return declared
+	}
+	u := types.MakeUnion(returned...)
+	if types.IsSubtype(u, declared, h) {
+		return u
+	}
+	return declared
 }
 
 func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) types.Type {
@@ -950,6 +1030,7 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 		if _, isVoid := ret.(types.Void); !isVoid && !types.IsAcceptable(bt, ret, x.p()) {
 			x.report(e.Body.Span(), P2202, "arrow function should return %s but returns %s", x.typeName(ret), x.typeName(bt))
 		}
+		ret = refinedReturn(ret, []types.Type{bt}, false, x.p())
 	} else {
 		ret = bt
 	}

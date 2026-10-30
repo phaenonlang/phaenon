@@ -19,6 +19,13 @@ var overlay embed.FS
 //go:embed all:runtime
 var runtime embed.FS
 
+//go:embed constants.php
+var constants []byte
+
+// Constants returns the values of the constants php-src's stubs leave
+// UNKNOWN, read once from PHP for the embedded extensions.
+func Constants() []byte { return constants }
+
 // Stub is one embedded signature file.
 type Stub struct {
 	Path string // e.g. "php-src/ext/standard/basic_functions.stub.php"
