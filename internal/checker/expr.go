@@ -65,7 +65,7 @@ func (x *fnCtx) expr(e ast.Expr, env *state, expected types.Type) types.Type {
 	case *ast.StaticCall:
 		return x.staticCall(e, env, expected)
 	case *ast.New:
-		return x.newExpr(e, env)
+		return x.newExpr(e, env, expected)
 	case *ast.Clone:
 		return x.cloneExpr(e, env)
 	case *ast.Unary:
@@ -1116,6 +1116,7 @@ func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Typ
 	}
 	l := x.expr(e.Left, env, nil)
 	r := x.expr(e.Right, env, nil)
+	x.certainOperands = types.Equal(x.nativeOr(e.Left, l, env), l) && types.Equal(x.nativeOr(e.Right, r, env), r)
 	if e.Op == token.T_IS_IDENTICAL || e.Op == token.T_IS_NOT_IDENTICAL {
 		if !types.IsMixed(l) && !types.IsMixed(r) && !types.Overlaps(l, r, x.p()) && (!x.nativeOverlap(e.Left, l, e.Right, r, env) || bytesAgainstText(l, r)) {
 			word := "false"
@@ -1226,7 +1227,9 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 	case token.Kind('<'), token.Kind('>'), token.T_IS_SMALLER_OR_EQUAL, token.T_IS_GREATER_OR_EQUAL:
 		if li, ok := l.(types.Int); ok {
 			if ri, ok := r.(types.Int); ok {
-				if always, value := orderingOutcome(op, li, ri); always {
+				if always, value := orderingOutcome(op, li, ri); always && x.certainOperands {
+					// `@param positive-int $n` over `int $n`: `$n < 1` is a check
+					// a PHP caller can still fail (checker.md §9).
 					x.report(span, P2402, "comparison between %s and %s is always %v", x.typeName(l), x.typeName(r), value)
 				}
 			}

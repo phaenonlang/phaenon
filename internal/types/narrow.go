@@ -132,6 +132,17 @@ func Intersect(t, target Type, h Hierarchy) Type {
 	var out []Type
 	for _, m := range Members(t) {
 		for _, tg := range Members(target) {
+			if c, ok := m.(Callable); ok && !c.Closure {
+				// is_array($callable): the array form; is_string: the name.
+				switch tg.(type) {
+				case Array, Shape:
+					out = append(out, CallableArray)
+					continue
+				case String:
+					out = append(out, String{Callable: true})
+					continue
+				}
+			}
 			switch {
 			case subtype(m, tg, h, 0):
 				out = append(out, m)
@@ -145,6 +156,12 @@ func Intersect(t, target Type, h Hierarchy) Type {
 	return MakeUnion(out...)
 }
 
+// CallableArray is the array form of a callable: [$object|'Class', 'method'].
+var CallableArray Type = Shape{List: true, Entries: []ShapeEntry{
+	{IsInt: true, IntKey: 0, Type: MakeUnion(TObject, TString)},
+	{IsInt: true, IntKey: 1, Type: TString},
+}}
+
 // Subtract narrows t to the members not of type target (the "else" branch).
 func Subtract(t, target Type, h Hierarchy) Type {
 	if IsMixed(t) {
@@ -157,6 +174,12 @@ func Subtract(t, target Type, h Hierarchy) Type {
 		}
 		// bool minus true is false; int minus 0 splits the range.
 		switch mm := m.(type) {
+		case String:
+			if lit, ok := target.(StringLit); ok && lit.V == "" && !mm.NonEmpty {
+				mm.NonEmpty = true // `'' !== $s` leaves a non-empty-string
+				out = append(out, mm)
+				continue
+			}
 		case Bool:
 			if subtype(TTrue, target, h, 0) {
 				out = append(out, TFalse)

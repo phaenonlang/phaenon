@@ -102,6 +102,13 @@ func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 			return
 		}
 		lower := strings.ToLower(name)
+		if (lower == "self" || lower == "static") && given > 0 {
+			if cl := x.res.Class(); cl != nil {
+				cl.Signature()
+				x.checkArity(t, lower, cl.TypeParams, given) // `self<T>` in a generic class
+				return
+			}
+		}
 		if ar, ok := keywordArity[lower]; ok {
 			if given < ar[0] || given > ar[1] {
 				x.report(t.S, P3001, "%s takes %s, %d given", lower, arityText(ar[0], ar[1]), given)
@@ -118,6 +125,11 @@ func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 	name := x.res.ClassName(t.Name)
 	switch name {
 	case "self", "static", "parent":
+		if cl := x.res.Class(); cl != nil && given > 0 && name != "parent" {
+			cl.Signature()
+			x.checkArity(t, name, cl.TypeParams, given) // `self<T>` in a generic class
+			return
+		}
 		if given > 0 {
 			x.report(t.S, P3001, "%s takes no type arguments", name)
 		}

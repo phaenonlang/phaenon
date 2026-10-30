@@ -251,17 +251,21 @@ func isWordByte(b byte) bool {
 
 // fnCtx is the context of one function-like body.
 type fnCtx struct {
-	c          *Checker
-	file       *program.File
-	class      *program.Class
-	static     bool // no $this
-	returnType types.Type
-	hasReturn  bool // a declared return type exists
-	name       string
-	generator  bool
-	res        *program.Resolver
-	byRef      map[string]bool
-	arrow      bool
+	// certainOperands says the last binary comparison's operands have the
+	// PHP types they were inferred with (no docblock refinement), so an
+	// outcome the ranges decide is reportable.
+	certainOperands bool
+	c               *Checker
+	file            *program.File
+	class           *program.Class
+	static          bool // no $this
+	returnType      types.Type
+	hasReturn       bool // a declared return type exists
+	name            string
+	generator       bool
+	res             *program.Resolver
+	byRef           map[string]bool
+	arrow           bool
 	// method/function being checked (for @phpstan-assert, by-ref params)
 	method   *program.Method
 	function *program.Function

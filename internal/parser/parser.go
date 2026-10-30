@@ -361,7 +361,12 @@ func (p *Parser) unionMember() ast.TypeExpr {
 	start := p.tok().Start
 	if p.at(token.Kind('(')) && !p.atClosureTypeStart() {
 		p.next()
-		first := p.singleType()
+		var first ast.TypeExpr
+		if p.mode == lexer.ModePhaenon && p.at(token.Kind('?')) {
+			first = p.typeExpr() // a tuple whose first element is nullable: (?T, string)
+		} else {
+			first = p.singleType()
+		}
 		if p.mode == lexer.ModePhaenon && p.at(token.Kind(',')) {
 			tt := &ast.TupleType{Elems: []ast.TypeExpr{first}}
 			for p.accept(token.Kind(',')) {
