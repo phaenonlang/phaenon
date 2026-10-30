@@ -76,3 +76,11 @@ requirements. `phn` is not installed on `PATH`: build it from the repo (`AGENTS.
 `PATH` before running a dogfood target's `composer build` ([[dogfood]]).
 
 ← [[Home]]
+
+## Generated files kept fresh by tests (2026-10-31)
+
+- `TestRuntimePackageFresh` (`internal/emit`) compares the compiled stdlib with `../runtime/src`;
+  `TestPluginStubsFresh` compares the generated pseudo-classes with
+  `../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`. Both skip without the checkout;
+  `phn stdlib --out ../runtime/src --plugin-stubs ../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`
+  rewrites both (`--check` to verify).

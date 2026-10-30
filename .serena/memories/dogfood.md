@@ -122,7 +122,11 @@ push dogfood work without a maintainer's go-ahead.
   a written `\ArrayObject<int, Metric>` replaces a stale `@var`. The rule tests' fixture line
   numbers moved by four (the compiled fixtures have no four-line header): adjusted on the branch
   (`tests/PHPStan/*RuleTest.phn`). Branch: 5 local commits, compiled `.php` committed as in odm.
-- Next: generated plugin stubs (`*Methods.php` from `stdlib/runtime/*.phn`).
+- Gotcha: PHPStan's temp cache (`sys_get_temp_dir()/phpstan`) can break and make the pre-commit
+  hook fail with `opendir … Failed to open directory` warnings while `composer phpstan` itself
+  reports no errors; `rm -rf` that directory (it is regenerated). Seen twice on 2026-10-31.
+- The plugin's pseudo-classes are generated from the stdlib sources since 2026-10-31
+  (`phn stdlib --plugin-stubs ../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`).
 
 ## Next targets (roadmap §3)
 
