@@ -219,3 +219,33 @@ function lifted(string $c, string $id, int|string $k, int $n, \Closure $f, ?\Clo
     }
     return null;
 }
+
+/** @template Model */
+final class Keyed
+{
+    /** @var \ArrayObject<int, Model> */
+    private \ArrayObject $items;
+
+    public function __construct()
+    {
+        $this->items = new \ArrayObject();
+    }
+
+    /**
+     * @param list<Model> $rows
+     * @param \Closure(Model): (\stdClass|string) $keyOf the sort key of a row, or the value that is its cursor
+     */
+    public function keys(array $rows, \Closure $keyOf): int
+    {
+        $n = 0;
+        foreach ($rows as $row) {
+            $k = $keyOf($row);
+            $n += $k instanceof \stdClass ? 1 : \strlen($k);
+        }
+        foreach ($this->items as $item) {
+            $rows[] = $item;
+        }
+
+        return $n + \count($rows);
+    }
+}

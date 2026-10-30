@@ -394,7 +394,11 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 		}
 		s := "\\Closure(" + strings.Join(parts, ", ") + ")"
 		if t.Return != nil {
-			s += ": " + l.docType(t.Return, sc)
+			ret := l.docType(t.Return, sc)
+			if _, union := t.Return.(*ast.UnionType); union {
+				ret = "(" + ret + ")" // `Closure(U): (A|B)`: without the parentheses PHPStan reads `(Closure(U): A)|B`
+			}
+			s += ": " + ret
 		}
 		return s
 	}
@@ -512,6 +516,7 @@ func (l *lowering) addDoc(declStart int, doc string, tags []string) {
 		return
 	}
 	tags = l.fillTypes(doc, idx, tags)
+	tags = l.replaceVar(doc, idx, tags)
 	tags = missingTags(doc, tags)
 	if len(tags) == 0 {
 		return
@@ -578,6 +583,49 @@ func (l *lowering) fillTypes(doc string, idx int, tags []string) []string {
 				if len(lf) >= 2 && strings.HasPrefix(strings.TrimLeft(lf[1], "&."), "$") {
 					at := idx + off + strings.Index(line, "@param") + len("@param")
 					l.e.replace(ast.Span{Start: at, End: at}, " "+strings.Join(fields[1:len(fields)-1], " "))
+					found = true
+				}
+				break
+			}
+			off += len(line)
+		}
+		if !found {
+			rest = append(rest, tag)
+		}
+	}
+	return rest
+}
+
+// replaceVar rewrites the type of a `@var` the docblock already has with the
+// one the declaration's type arguments say: `private \ArrayObject<int,
+// Metric> $exported` is the type, a `@var \ArrayObject<int, mixed>` left
+// above it by an earlier edit is not (the checker reads the syntax too).
+func (l *lowering) replaceVar(doc string, idx int, tags []string) []string {
+	var rest []string
+	for _, tag := range tags {
+		fields := strings.Fields(tag)
+		if len(fields) < 2 || fields[0] != "@var" {
+			rest = append(rest, tag)
+			continue
+		}
+		off := 0
+		found := false
+		for _, line := range strings.SplitAfter(doc, "\n") {
+			text := strings.TrimLeft(strings.TrimSpace(line), "/* ")
+			if strings.HasPrefix(text, "@var") {
+				// The type runs from the first word after @var to the
+				// variable name or the end of the line (`*/` excluded); it may
+				// hold spaces of its own (`array<int, string>`).
+				tagAt := strings.Index(line, "@var")
+				after := line[tagAt+len("@var"):]
+				typeStart := len(after) - len(strings.TrimLeft(after, " \t"))
+				rest := strings.TrimRight(strings.TrimSuffix(strings.TrimRight(after[typeStart:], " \t\r\n"), "*/"), " \t")
+				if i := strings.Index(rest, " $"); i >= 0 {
+					rest = rest[:i]
+				}
+				if rest != "" && !strings.HasPrefix(rest, "$") {
+					typeAt := idx + off + tagAt + len("@var") + typeStart
+					l.e.replace(ast.Span{Start: typeAt, End: typeAt + len(rest)}, strings.Join(fields[1:], " "))
 					found = true
 				}
 				break

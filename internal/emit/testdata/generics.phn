@@ -179,3 +179,31 @@ function lifted<T of object>(class<T> $c, string $id, int|string $k, int $n, Clo
     }
     return null;
 }
+
+final class Keyed<Model>
+{
+    /** @var \ArrayObject<int, mixed> */
+    private \ArrayObject<int, Model> $items;
+
+    public function __construct()
+    {
+        $this->items = new \ArrayObject();
+    }
+
+    /**
+     * @param $keyOf the sort key of a row, or the value that is its cursor
+     */
+    public function keys(list<Model> $rows, Closure(Model): \stdClass|string $keyOf): int
+    {
+        $n = 0;
+        foreach ($rows as $row) {
+            $k = $keyOf($row);
+            $n += $k instanceof \stdClass ? 1 : \strlen($k);
+        }
+        foreach ($this->items as $item) {
+            $rows[] = $item;
+        }
+
+        return $n + \count($rows);
+    }
+}
