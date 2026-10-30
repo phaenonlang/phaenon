@@ -172,7 +172,9 @@ func (c *Class) ensureMembers() {
 			native := r.native(m.Type)
 			for _, item := range m.Props {
 				var docT types.Type
-				if doc != nil {
+				if doc != nil && !nativeHasTypeArgs(m.Type) {
+					// `\ArrayObject<int, Metric>` written as syntax is the type;
+					// a `@var` beside it (left by a migration) is not read.
 					for _, v := range doc.Vars {
 						if v.Name == "" || v.Name == item.Var.Name {
 							docT = r.docType(v.Type)
@@ -752,6 +754,33 @@ func (c *Class) Unimplemented() []*Method {
 // IsInstantiable reports whether `new` is allowed on the class.
 func (c *Class) IsInstantiable() bool {
 	return c.Kind == ast.KindClass && !c.Abstract
+}
+
+// nativeHasTypeArgs reports a native type written with Phaenon's type
+// arguments (`Foo<T>`, `list<T>`, `map<K, V>`, a tuple), which no docblock
+// refines; a plain `array` is still what its @var says.
+func nativeHasTypeArgs(t ast.TypeExpr) bool {
+	switch t := t.(type) {
+	case *ast.NamedType:
+		return len(t.TypeArgs) > 0
+	case *ast.NullableType:
+		return nativeHasTypeArgs(t.Type)
+	case *ast.UnionType:
+		for _, m := range t.Types {
+			if nativeHasTypeArgs(m) {
+				return true
+			}
+		}
+	case *ast.IntersectionType:
+		for _, m := range t.Types {
+			if nativeHasTypeArgs(m) {
+				return true
+			}
+		}
+	case *ast.TupleType:
+		return true
+	}
+	return false
 }
 
 // SuperArgs maps the type arguments of c (args, in c's parameter order) to

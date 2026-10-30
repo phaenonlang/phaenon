@@ -801,15 +801,30 @@ func (r *resolver) buildParams(ps []*ast.Param, doc *docblock.Doc) []*Param {
 		if p.Type == nil {
 			p.Type = types.TMixed
 		}
-		// `= null` makes the type implicitly nullable (PHP's legacy rule).
-		if ap.Default != nil && !types.IsNullable(p.Type) {
-			if cf, ok := ap.Default.(*ast.ConstFetch); ok && len(cf.Name.Parts) == 1 && strings.EqualFold(cf.Name.Parts[0], "null") {
-				p.Type = types.Nullable(p.Type)
-			}
+		// `= null` makes the type implicitly nullable (PHP's legacy rule), and
+		// a docblock saying `string` on a `?string $x = null` does not take
+		// the null away (PHPStan adds it back from the default).
+		if ap.Default != nil && !types.IsNullable(p.Type) && isNullLiteral(ap.Default) {
+			p.Type = types.Nullable(p.Type)
 		}
 		out = append(out, p)
 	}
 	return out
+}
+
+// isNullLiteral reports the constant null, which the parser leaves as a
+// bare name.
+func isNullLiteral(e ast.Expr) bool {
+	var n *ast.Name
+	switch e := e.(type) {
+	case *ast.Name:
+		n = e
+	case *ast.ConstFetch:
+		n = e.Name
+	default:
+		return false
+	}
+	return len(n.Parts) == 1 && strings.EqualFold(n.Parts[0], "null")
 }
 
 func (r *resolver) buildReturn(native ast.TypeExpr, doc *docblock.Doc) types.Type {

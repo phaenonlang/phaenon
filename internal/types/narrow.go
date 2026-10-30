@@ -157,7 +157,7 @@ func Intersect(t, target Type, h Hierarchy) Type {
 }
 
 // CallableArray is the array form of a callable: [$object|'Class', 'method'].
-var CallableArray Type = Shape{List: true, Entries: []ShapeEntry{
+var CallableArray Type = Shape{List: true, Callable: true, Entries: []ShapeEntry{
 	{IsInt: true, IntKey: 0, Type: MakeUnion(TObject, TString)},
 	{IsInt: true, IntKey: 1, Type: TString},
 }}

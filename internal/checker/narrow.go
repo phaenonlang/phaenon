@@ -504,7 +504,10 @@ func (x *fnCtx) instanceofCond(e *ast.Instanceof, env *state) (then, els *state)
 	if target == nil {
 		return then, els
 	}
-	if nt := x.nativeOr(e.Expr, t, env); !types.IsMixed(t) {
+	_, literalClass := e.Class.(*ast.Name)
+	if nt := x.nativeOr(e.Expr, t, env); !types.IsMixed(t) && literalClass {
+		// `$x instanceof $class` with a class-string<Foo> tests for a
+		// subclass the string names: never decided here, as PHPStan.
 		if _, isObject := target.(types.Object); !isObject {
 			switch {
 			case types.IsSubtype(t, target, x.p()) && !isParamType(t):
@@ -542,8 +545,7 @@ func isParamType(t types.Type) bool {
 func (x *fnCtx) instanceofTarget(e *ast.Instanceof, env *state) types.Type {
 	switch c := e.Class.(type) {
 	case *ast.Name:
-		raw := x.res.ClassName(c)
-		if raw == "parent" && x.class != nil {
+		if specialClassName(c) == "parent" && x.class != nil {
 			if pc := x.class.ParentClass(); pc != nil {
 				return types.Class{Name: pc.Name}
 			}
@@ -816,6 +818,9 @@ func (x *fnCtx) methodAssert(e *ast.MethodCall, env *state) (then, els *state, o
 		return nil, nil, false
 	}
 	obj := x.pathType(e.Object, env)
+	if then, els, ok := x.reflectionNarrow(e, name, obj, env); ok {
+		return then, els, true
+	}
 	var m *program.Method
 	for _, cl := range x.classesOf(types.StripNull(obj), e.Object.Span()) {
 		if mm := cl.FindMethod(name); mm != nil {
@@ -1006,7 +1011,7 @@ func (x *fnCtx) applyAsserts(ce callee, env *state) (then, els *state) {
 			continue
 		}
 		t := types.Substitute(types.Substitute(res.Doc(a.Type), ce.classSubst), subst)
-		if b, ok := t.(types.BoolLit); ok && a.Var != "this" && !a.IfTrue && !a.IfFalse {
+		if b, ok := t.(types.BoolLit); ok && a.Var != "this" && !a.IfTrue && !a.IfFalse && !a.Negated {
 			// `@phpstan-assert true $condition` (PHPUnit's assertTrue): the
 			// argument is a condition that holds from here on.
 			saved := x.c.mark()
@@ -1040,6 +1045,34 @@ func (x *fnCtx) applyAsserts(ce callee, env *state) (then, els *state) {
 		}
 	}
 	return then, els
+}
+
+// reflectionNarrow types `$r->isSubclassOf(Foo::class)` and
+// `$r->implementsInterface(Foo::class)` on a ReflectionClass: true means
+// the reflected class is a Foo, so $r is ReflectionClass<Foo> from there
+// (PHPStan's type-specifying extension does the same).
+func (x *fnCtx) reflectionNarrow(e *ast.MethodCall, name string, obj types.Type, env *state) (then, els *state, ok bool) {
+	switch strings.ToLower(name) {
+	case "issubclassof", "implementsinterface":
+	default:
+		return nil, nil, false
+	}
+	if e.Args == nil || len(e.Args.Args) != 1 || e.Args.FirstClassCallable {
+		return nil, nil, false
+	}
+	rc, isClass := types.StripNull(obj).(types.Class)
+	if !isClass || !strings.EqualFold(rc.Name, "ReflectionClass") {
+		return nil, nil, false
+	}
+	cls, isLit := x.classNameConst(e.Args.Args[0].Value)
+	if !isLit {
+		return nil, nil, false
+	}
+	x.methodCall(e, env, nil)
+	x.condValueType = types.TBool
+	then, els = env.clone(), env.clone()
+	x.narrowPath(then, e.Object, types.Class{Name: "ReflectionClass", Args: []types.Type{types.Class{Name: cls}}}, false)
+	return then, els, true
 }
 
 // nonNullType reports a type that excludes null and is not empty or mixed.

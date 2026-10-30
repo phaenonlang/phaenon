@@ -11,6 +11,107 @@ final class Assert
     public static function assertNotNull(mixed $actual): void
     {
     }
+
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @phpstan-assert T $actual
+     */
+    public static function assertInstanceOf(string $class, mixed $actual): void
+    {
+    }
+}
+
+final class Kernel
+{
+    public function reflect(): void
+    {
+        $r = new \ReflectionClass($this);
+        takesString($r->getName());
+    }
+}
+
+/**
+ * @template T of object
+ */
+abstract class BaseRepo
+{
+    /**
+     * @param array<string, mixed> $d
+     * @return T
+     */
+    protected function hydrate(array $d): object
+    {
+        throw new \LogicException('abstract in spirit');
+    }
+}
+
+/**
+ * @template T of object
+ * @extends BaseRepo<T>
+ */
+abstract class EventRepo extends BaseRepo
+{
+    protected function hydrate(array $d): object
+    {
+        $e = parent::hydrate($d);
+
+        return $e;
+    }
+}
+
+final class Exported
+{
+    /** @var \ArrayObject<int, User> */
+    private \ArrayObject $exported;
+
+    public function __construct()
+    {
+        $this->exported = new \ArrayObject();
+    }
+
+    public function first(): ?User
+    {
+        foreach ($this->exported as $u) {
+            return $u;
+        }
+
+        return null;
+    }
+}
+
+final class Conn
+{
+    public function multi(): Conn|bool
+    {
+        return $this;
+    }
+
+    public function set(string $k, string $v): Conn|bool
+    {
+        return $this;
+    }
+}
+
+/** @template T */
+final class Cmd
+{
+}
+
+final class Checker
+{
+    public function check(string $c): ?User
+    {
+        return null;
+    }
+}
+
+final class Holder
+{
+    public static function checker(): Checker
+    {
+        return new Checker();
+    }
 }
 
 final class Id
@@ -407,4 +508,165 @@ function overlays(string $name, array $classes, array $w, array $headers): void
     if (false !== $n) {
         takesInt($n);
     }
+}
+
+function optional(string $a, ?string $content = null): void
+{
+}
+
+function namedNullable(?string $maybe): void
+{
+    optional('x', content: null === $maybe ? null : $maybe);
+}
+
+/**
+ * @param array<mixed> $value
+ * @return list<string>
+ */
+function roles(array $value): array
+{
+    return array_values(array_filter($value, is_string(...)));
+}
+
+function chain(Conn $c): void
+{
+    $c->multi()->set('a', 'b'); // want P2105
+}
+
+/** @param array{audience: string|null, audiences: string|list<string>} $c */
+function takesShape(array $c): void
+{
+}
+
+function shapeExtra(): void
+{
+    $cfg = ['audience' => 'a', 'audiences' => ['b'], 'allowed_callers' => ['c']];
+    takesShape($cfg);
+}
+
+function byRefUse(): void
+{
+    $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $error);
+    if (false === $server) {
+        return;
+    }
+    $drop = static function () use (&$server): void {
+        if (null !== $server) {
+            fclose($server);
+            $server = null;
+        }
+    };
+    $drop();
+}
+
+/**
+ * @param list<array{command: Cmd<mixed>}> $pending
+ * @param class-string<Cmd<mixed>> $class
+ * @return list<array{command: Cmd<mixed>}>
+ */
+function instanceofVar(array $pending, string $class): array
+{
+    return array_values(array_filter($pending, static fn (array $d): bool => $d['command'] instanceof $class));
+}
+
+function staticPaths(string $audit): void
+{
+    Assert::assertTrue(null !== Holder::checker()->check($audit)?->nick);
+    $check = Holder::checker()->check($audit);
+    takesString($check->name);
+}
+
+/** @param list<object> $events */
+function eventAt(array $events, int $i): User
+{
+    Assert::assertInstanceOf(User::class, $events[$i]);
+
+    return $events[$i];
+}
+
+final class Mapper
+{
+    /**
+     * @template T of object
+     * @param array<string, mixed> $d
+     * @param class-string<T> $c
+     * @return T
+     */
+    public function fromDatabase(array $d, string $c): object
+    {
+        return new $c();
+    }
+}
+
+/**
+ * @template T of Cmd
+ * @param class-string<T>|null $cmd
+ */
+function shadowed(Mapper $m, ?string $cmd = null): void
+{
+    takesString($m->fromDatabase([], User::class)->name);
+}
+
+final class Dispatcher
+{
+    /** @return list<callable> */
+    public function listeners(): array
+    {
+        return [];
+    }
+
+    public function priority(callable $listener): int
+    {
+        return 0;
+    }
+}
+
+function callableArrays(Dispatcher $d, User $u): int
+{
+    foreach ($d->listeners() as $listener) {
+        if (\is_array($listener) && $listener[0] instanceof User) {
+            return $d->priority($listener);
+        }
+    }
+
+    return 0;
+}
+
+final class Locator
+{
+    public const EXCEPTION = 1;
+    public const NULL_ON_INVALID = 2;
+
+    /**
+     * @template B of 1|2
+     * @param B $behavior
+     * @return (B is 1 ? object : object|null)
+     */
+    public function get(string $id, int $behavior = self::EXCEPTION): ?object
+    {
+        return null;
+    }
+}
+
+function takesObject(object $o): void
+{
+}
+
+function defaults(Locator $l): void
+{
+    takesObject($l->get('a'));
+    takesObject($l->get('a', Locator::NULL_ON_INVALID)); // want P2103
+}
+
+/** @param \ReflectionClass<object> $r */
+function reflects(\ReflectionClass $r): void
+{
+    if ($r->isSubclassOf(User::class)) {
+        takesUserClass($r);
+    }
+}
+
+/** @param \ReflectionClass<User> $r */
+function takesUserClass(\ReflectionClass $r): void
+{
 }

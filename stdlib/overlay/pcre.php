@@ -23,3 +23,12 @@ function preg_replace(string|array $pattern, string|array $replacement, string|a
  * @return ($subject is array ? array<int|string, string>|null : string|null)
  */
 function preg_replace_callback(string|array $pattern, callable $callback, string|array $subject, int $limit = -1, &$count = null, int $flags = 0): string|array|null {}
+
+/**
+ * The callback receives the match the way preg_match() fills $matches.
+ *
+ * @param callable(array<int|string, string>): string $callback
+ * @param-out int $count
+ * @return ($subject is array ? array<string>|null : string|null)
+ */
+function preg_replace_callback(string|array $pattern, callable $callback, string|array $subject, int $limit = -1, &$count = null, int $flags = 0): string|array|null {}

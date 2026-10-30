@@ -311,6 +311,20 @@ func (c *Checker) newCtx(f *program.File, scope *program.Scope, class *program.C
 	return x
 }
 
+// specialClassName is "self", "static" or "parent" when the class name is
+// written so (the resolver maps self and parent to class names, which the
+// callers here must not confuse with a class named outright), else "".
+func specialClassName(n *ast.Name) string {
+	if len(n.Parts) != 1 || n.Kind != ast.NameUnqualified {
+		return ""
+	}
+	switch l := strings.ToLower(n.Parts[0]); l {
+	case "self", "static", "parent":
+		return l
+	}
+	return ""
+}
+
 func selfArgs(c *program.Class) []types.Type {
 	if len(c.TypeParams) == 0 {
 		return nil
