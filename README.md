@@ -101,8 +101,8 @@ every other edit keeps line numbers exact. Design: `design/generics.md`, decisio
 ## CLI
 
 ```sh
-phn build [--out DIR] [--check] [--emit-on-error] path...   # type-check and compile .phn → .php
-phn check [--json] [--no-deprecations] path...         # type-check .phn (and .php) files
+phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... path...   # type-check and compile .phn → .php
+phn check [--json] [--no-deprecations] [--exclude PATH]... path...              # type-check .phn (and .php) files
 phn migrate path...                                    # rewrite .php as .phn
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Seq, Map, Str, Bytes), as phaenon/runtime ships it
 phn lex   [--php] file                    # token stream
