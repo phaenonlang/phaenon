@@ -47,9 +47,10 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, strings.TrimSpace(`
 usage:
-  phn build [--out DIR] [--check] [--emit-on-error] <path>...
+  phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... <path>...
                                                            type-check and compile .phn files to .php
-  phn check [--json] [--no-deprecations] <path>...         type-check .phn files, write nothing
+  phn check [--json] [--no-deprecations] [--exclude PATH]... <path>...
+                                                           type-check .phn files, write nothing
   phn migrate [--keep-docblocks] <path>...                 rewrite .php files as .phn; lift generic docblocks into syntax
   phn stdlib --out DIR [--check]                           write the compiled stdlib (Seq.php, Map.php, Str.php, Bytes.php) into DIR
   phn lex   [--php] <file>                                 dump the token stream
@@ -58,6 +59,7 @@ usage:
 build writes Foo.php next to Foo.phn, or under DIR (mirroring the path given) with --out;
 a file with type errors is not written unless --emit-on-error is given (the exit status still
 reports the errors). --check writes nothing and fails when any output is missing or stale.
+--exclude skips a path under the ones given (fixtures another analyser owns); it may be repeated.
 stdlib materialises the classes behind the method syntax, as the phaenon/runtime package ships them.
 check reads vendor code through the nearest vendor/composer autoload maps.
 --php reads the file as plain PHP (with <?php tags) instead of Phaenon.`))
@@ -67,6 +69,28 @@ check reads vendor code through the nearest vendor/composer autoload maps.
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
+}
+
+// excludes holds the --exclude paths of build and check: directories (or
+// files) under the given paths that are not the project's own code to
+// check, such as fixtures for another analyser.
+var excludes []string
+
+func excludeFlag(fs *flag.FlagSet) {
+	fs.Func("exclude", "skip this path; may be repeated", func(s string) error {
+		excludes = append(excludes, filepath.Clean(s))
+		return nil
+	})
+}
+
+func excluded(path string) bool {
+	path = filepath.Clean(path)
+	for _, e := range excludes {
+		if path == e || strings.HasPrefix(path, e+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // collect expands paths to the files with one of the given extensions, walking directories.
@@ -82,12 +106,20 @@ func collect(paths []string, exts ...string) []string {
 			fail("%v", err)
 		}
 		if !info.IsDir() {
-			files = append(files, p)
+			if !excluded(p) {
+				files = append(files, p)
+			}
 			continue
 		}
 		filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				fail("%v", err)
+			}
+			if excluded(path) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 			if d.IsDir() && d.Name() == "vendor" && path != p {
 				return filepath.SkipDir
@@ -108,6 +140,7 @@ func build(args []string) {
 	out := fs.String("out", "", "write outputs under this directory instead of beside the sources")
 	check := fs.Bool("check", false, "verify outputs are up to date; write nothing")
 	emitOnError := fs.Bool("emit-on-error", false, "write files that have type errors too; the exit status still reports them")
+	excludeFlag(fs)
 	fs.Parse(args)
 	if fs.NArg() == 0 {
 		usage()
@@ -287,6 +320,7 @@ func checkCmd(args []string) {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "print diagnostics as JSON lines")
 	noDeprecations := fs.Bool("no-deprecations", false, "do not report deprecated calls")
+	excludeFlag(fs)
 	fs.Parse(args)
 	if fs.NArg() == 0 {
 		usage()
