@@ -511,8 +511,7 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 	var recv types.Type
 	var classes []*program.Class
 	if n, ok := e.Class.(*ast.Name); ok {
-		raw := x.res.ClassName(n)
-		if raw == "parent" && x.class != nil {
+		if specialClassName(n) == "parent" && x.class != nil {
 			if pc := x.class.ParentClass(); pc != nil {
 				recv, classes = types.Class{Name: pc.Name, Args: x.class.ParentArgs}, []*program.Class{pc}
 			} else {
@@ -816,11 +815,10 @@ func (x *fnCtx) staticPropertyFetch(e *ast.StaticPropertyFetch, env *state) (typ
 	var classes []*program.Class
 	var recv types.Type
 	if n, ok := e.Class.(*ast.Name); ok {
-		raw := x.res.ClassName(n)
-		if raw == "parent" && x.class != nil {
+		if specialClassName(n) == "parent" && x.class != nil {
 			if pc := x.class.ParentClass(); pc != nil {
 				classes = []*program.Class{pc}
-				recv = types.Class{Name: pc.Name}
+				recv = types.Class{Name: pc.Name, Args: x.class.ParentArgs}
 			}
 		} else {
 			t, cl := x.classRefType(n, n.S)
@@ -860,6 +858,15 @@ func (x *fnCtx) staticPropertyFetch(e *ast.StaticPropertyFetch, env *state) (typ
 	return types.TMixed, nil
 }
 
+// shapeValueTypes lists a shape's entry types.
+func shapeValueTypes(m types.Shape) []types.Type {
+	out := make([]types.Type, 0, len(m.Entries))
+	for _, e := range m.Entries {
+		out = append(out, e.Type)
+	}
+	return out
+}
+
 func (x *fnCtx) index(e *ast.Index, env *state) types.Type {
 	if key, ok := pathKey(e); ok {
 		if t, ok := env.getPath(key); ok {
@@ -892,10 +899,15 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 				if !lenient && !m.Unsealed && certain {
 					x.report(e.Index.Span(), P2313, "offset %s does not exist on %s", x.typeName(idx), x.typeName(m))
 				}
-				if m.Unsealed || !certain {
+				switch {
+				case m.Unsealed:
 					out = append(out, types.TMixed)
-				} else {
+				case certain:
 					out = append(out, types.TNull)
+				default:
+					// A key the shape may or may not have: one of its values,
+					// or nothing (`$counts[$key] ?? 0` on `[]` starts at 0).
+					out = append(out, types.MakeUnion(append(shapeValueTypes(m), types.TNull)...))
 				}
 				continue
 			}

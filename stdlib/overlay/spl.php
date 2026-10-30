@@ -163,5 +163,11 @@ final class Generator implements Iterator
  */
 class RecursiveIteratorIterator implements OuterIterator
 {
+    // The directory iterator's path methods, forwarded to the inner iterator
+    // by __call(): typed here because that is what a recursive walk reads.
+    public function getSubPath(): string {}
+
+    public function getSubPathname(): string {}
+
     public function __call(string $name, array $arguments): mixed {}
 }

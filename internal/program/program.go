@@ -26,9 +26,13 @@ type Program struct {
 	classes   map[string]*Class
 	functions map[string]*Function
 	constants map[string]*Constant
-	files     map[string]*File
-	order     []*File
-	loaders   []Loader
+	// classAliases maps a name class_alias() gives a class to the class, as
+	// PHP's autoloader would have run it (`class_alias(New::class,
+	// Old::class)` keeps a moved class reachable under its old name).
+	classAliases map[string]string
+	files        map[string]*File
+	order        []*File
+	loaders      []Loader
 	// missing remembers names no loader could find, so the lookup is not
 	// repeated for every use.
 	missing map[string]bool
@@ -70,12 +74,13 @@ type Loader interface {
 // New creates an empty program.
 func New() *Program {
 	return &Program{
-		classes:   map[string]*Class{},
-		functions: map[string]*Function{},
-		constants: map[string]*Constant{},
-		files:     map[string]*File{},
-		missing:   map[string]bool{},
-		patches:   map[string]*ast.ClassDecl{},
+		classes:      map[string]*Class{},
+		classAliases: map[string]string{},
+		functions:    map[string]*Function{},
+		constants:    map[string]*Constant{},
+		files:        map[string]*File{},
+		missing:      map[string]bool{},
+		patches:      map[string]*ast.ClassDecl{},
 	}
 }
 
@@ -172,10 +177,16 @@ func (p *Program) File(path string) *File { return p.files[path] }
 // with or without a leading backslash), loading it if a loader knows it.
 func (p *Program) Class(name string) *Class {
 	key := strings.ToLower(strings.TrimPrefix(name, "\\"))
+	if target, ok := p.classAliases[key]; ok && !strings.EqualFold(target, key) {
+		return p.Class(target) // the alias wins over a declaration kept for IDEs (`if (false) { class Old … }`)
+	}
 	if c, ok := p.classes[key]; ok {
 		return c
 	}
 	p.load(key)
+	if target, ok := p.classAliases[key]; ok && !strings.EqualFold(target, key) {
+		return p.Class(target) // the loaded file aliased the name
+	}
 	return p.classes[key]
 }
 
@@ -215,11 +226,18 @@ func (p *Program) load(lower string) {
 		if err != nil {
 			continue
 		}
-		if _, err := p.AddFile(path, src, lexer.ModePHP, false); err != nil {
+		mode := lexer.ModePHP
+		if strings.HasSuffix(path, ".phn") {
+			mode = lexer.ModePhaenon
+		}
+		if _, err := p.AddFile(path, src, mode, false); err != nil {
 			continue
 		}
 		if _, ok := p.classes[lower]; ok {
 			return
+		}
+		if target, ok := p.classAliases[lower]; ok && !strings.EqualFold(target, lower) {
+			return // the file declared the name as an alias
 		}
 	}
 	p.missing[lower] = true
@@ -253,6 +271,7 @@ func (p *Program) problem(f *File, s ast.Span, format string, args ...any) {
 
 // IsSubclassOf implements types.Hierarchy.
 func (p *Program) IsSubclassOf(sub, super string) bool {
+	sub, super = p.Canonical(sub), p.Canonical(super)
 	if strings.EqualFold(sub, super) {
 		return true
 	}
@@ -261,6 +280,26 @@ func (p *Program) IsSubclassOf(sub, super string) bool {
 		return false
 	}
 	return c.IsSubclassOf(super)
+}
+
+// Canonical is the class a name stands for: the class itself, or the one
+// class_alias() points the name at.
+func (p *Program) Canonical(name string) string {
+	key := strings.ToLower(strings.TrimPrefix(name, "\\"))
+	for i := 0; i < 8; i++ {
+		target, ok := p.classAliases[key]
+		if !ok || strings.EqualFold(target, key) {
+			break
+		}
+		name, key = target, strings.ToLower(target)
+	}
+	return name
+}
+
+// IsAlias reports a name class_alias() gives another class.
+func (p *Program) IsAlias(name string) bool {
+	_, ok := p.classAliases[strings.ToLower(strings.TrimPrefix(name, "\\"))]
+	return ok
 }
 
 // IsFinal implements types.Hierarchy.

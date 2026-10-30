@@ -47,6 +47,29 @@ func (e *state) clone() *state {
 func (e *state) set(name string, t types.Type) {
 	e.vars[name] = varInfo{t: t}
 	e.invalidatePrefix("$" + name)
+	e.invalidateMentions(name)
+}
+
+// invalidateMentions drops the paths that pass the variable as an argument
+// or use it as an index (`$e->last($x)`, `$events[$i]`): another value
+// addresses another member.
+func (e *state) invalidateMentions(name string) {
+	needle := "$" + name
+	for k := range e.paths {
+		for i := 0; i < len(k); {
+			j := strings.Index(k[i:], needle)
+			if j < 0 {
+				break
+			}
+			j += i
+			end := j + len(needle)
+			if j > 0 && strings.ContainsRune("([,", rune(k[j-1])) && end < len(k) && strings.ContainsRune(",)]", rune(k[end])) {
+				delete(e.paths, k)
+				break
+			}
+			i = end
+		}
+	}
 }
 
 // setMaybe marks a variable as possibly undefined (after a merge).
@@ -137,10 +160,32 @@ func (e *state) invalidateCalls(receiver string) {
 	}
 }
 
-// constantArgKey spells a constant argument for a method-call path: a
-// literal, a constant or a class constant (`Stamp::class`).
+// argPathKeys spells a call's arguments for a path, when every one is a
+// constant or a variable.
+func argPathKeys(args *ast.ArgList) ([]string, bool) {
+	var keys []string
+	for _, a := range args.Args {
+		if a.Unpack || a.Value == nil {
+			return nil, false
+		}
+		k, ok := constantArgKey(a.Value)
+		if !ok {
+			return nil, false
+		}
+		if a.Name != nil {
+			k = a.Name.Name + ":" + k
+		}
+		keys = append(keys, k)
+	}
+	return keys, true
+}
+
+// constantArgKey spells a constant or variable argument for a call path: a
+// literal, a constant, a class constant (`Stamp::class`) or `$x`.
 func constantArgKey(e ast.Expr) (string, bool) {
 	switch e := e.(type) {
+	case *ast.Variable:
+		return "$" + e.Name, true
 	case *ast.StringLit:
 		return "'" + program.StringValue(e) + "'", true
 	case *ast.IntLit:
@@ -332,19 +377,9 @@ func pathKey(e ast.Expr) (string, bool) {
 		if e.Args == nil || e.Args.FirstClassCallable {
 			return "", false
 		}
-		var argKeys []string
-		for _, a := range e.Args.Args {
-			if a.Unpack || a.Value == nil {
-				return "", false
-			}
-			k, ok := constantArgKey(a.Value)
-			if !ok {
-				return "", false
-			}
-			if a.Name != nil {
-				k = a.Name.Name + ":" + k
-			}
-			argKeys = append(argKeys, k)
+		argKeys, ok := argPathKeys(e.Args)
+		if !ok {
+			return "", false
 		}
 		base, ok := pathKey(e.Object)
 		if !ok {
@@ -355,6 +390,25 @@ func pathKey(e ast.Expr) (string, bool) {
 			return "", false
 		}
 		return base + "->" + id.Name + "(" + strings.Join(argKeys, ",") + ")", true
+	case *ast.StaticCall:
+		// `self::anchoring()`, `Foo::bar($x)`: a static call with constant
+		// or variable arguments is a path as a method call is.
+		if e.Args == nil || e.Args.FirstClassCallable {
+			return "", false
+		}
+		n, ok := e.Class.(*ast.Name)
+		if !ok {
+			return "", false
+		}
+		id, ok := e.Name.(*ast.Ident)
+		if !ok {
+			return "", false
+		}
+		argKeys, ok := argPathKeys(e.Args)
+		if !ok {
+			return "", false
+		}
+		return strings.ToLower(strings.Join(n.Parts, "\\")) + "::" + id.Name + "(" + strings.Join(argKeys, ",") + ")", true
 	case *ast.StaticPropertyFetch:
 		n, ok := e.Class.(*ast.Name)
 		if !ok {
@@ -371,6 +425,8 @@ func pathKey(e ast.Expr) (string, bool) {
 			return "", false
 		}
 		switch i := e.Index.(type) {
+		case *ast.Variable:
+			return base + "[$" + i.Name + "]", true // until $i is assigned again
 		case *ast.StringLit:
 			return base + "['" + program.StringValue(i) + "']", true
 		case *ast.IntLit:

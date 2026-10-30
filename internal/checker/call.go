@@ -94,6 +94,45 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	return x.specialReturn(lower, e, ret, env)
 }
 
+// ownsParam reports a type parameter of the code being checked: the class's
+// or the method's own, told from a foreign one of the same name (a `T` of
+// another class's constructor kept on a property) by its owner.
+func (x *fnCtx) ownsParam(p types.Param) bool {
+	if !x.inScope[p.Name] {
+		return false // a constructor's template kept open on a property, seen from elsewhere
+	}
+	own := ""
+	if x.class != nil {
+		own = x.class.Name
+	}
+	// Ours, or inherited with the signature from a parent or an interface
+	// (PHPStan reads the phpdoc down the hierarchy; such a parameter is in
+	// scope because the method's signature mentions it).
+	return p.Owner == "" || strings.EqualFold(p.Owner, own) || x.p().IsSubclassOf(own, p.Owner)
+}
+
+// closeForeignParams replaces, in an argument's type, the type parameters
+// nothing here can bind by their bounds: a promoted property typed with its
+// constructor's `@template T` (`DocumentMapper<T> $mapper`) is read as
+// DocumentMapper<T> so a call through it infers T, but passed on as a value
+// it is a DocumentMapper<object>, as PHPStan reads it. The caller's own
+// parameters and the callee's fresh ones stay.
+func (x *fnCtx) closeForeignParams(t types.Type) types.Type {
+	if !mentionsParam(t) {
+		return t
+	}
+	return types.MapDeep(t, func(m types.Type) types.Type {
+		p, ok := m.(types.Param)
+		if !ok || x.ownsParam(p) || strings.Contains(p.Name, "\x00") {
+			return m // ours (the class's or this method's), or the callee's
+		}
+		if p.Bound != nil {
+			return p.Bound
+		}
+		return types.TMixed
+	})
+}
+
 // expectsCallable reports a parameter type with a callable member.
 func expectsCallable(t types.Type) bool {
 	for _, m := range types.Members(t) {
@@ -127,6 +166,52 @@ func (x *fnCtx) namedCallable(name string) types.Type {
 	}
 	fn.Signature()
 	return x.callableOf(&signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File)})
+}
+
+// defaultType is the type of a parameter's default value as far as it can
+// be read without the callee's scope: a literal, a constant, a class
+// constant of the declaring class (`self::X`) or of a named class.
+func (x *fnCtx) defaultType(e ast.Expr, sig *signature) types.Type {
+	saved := x.c.mark()
+	defer x.c.rollback(saved) // a default the callee's scope alone can read is not this call's problem
+	switch d := e.(type) {
+	case *ast.IntLit, *ast.FloatLit, *ast.StringLit:
+		return x.exprLenient(d, newEnv())
+	case *ast.Name, *ast.ConstFetch:
+		var n *ast.Name
+		if nn, ok := d.(*ast.Name); ok {
+			n = nn
+		} else {
+			n = d.(*ast.ConstFetch).Name
+		}
+		if len(n.Parts) == 1 && n.Parts[0] == "UNKNOWN" {
+			return nil // php-src's placeholder
+		}
+		return x.constFetch(&ast.ConstFetch{S: e.Span(), Name: n})
+	case *ast.ClassConstFetch:
+		id, ok := d.Name.(*ast.Ident)
+		n, isName := d.Class.(*ast.Name)
+		if !ok || !isName {
+			return nil
+		}
+		var cl *program.Class
+		switch specialClassName(n) {
+		case "self", "static":
+			cl = sig.decl
+		case "":
+			if n.Kind == ast.NameFullyQualified {
+				cl = x.p().Class(strings.Join(n.Parts, "\\"))
+			}
+		}
+		if cl == nil {
+			return nil
+		}
+		cl.Signature()
+		if k := cl.FindConst(id.Name); k != nil {
+			return x.p().ConstantType(k)
+		}
+	}
+	return nil
 }
 
 // arrayMapOverSeveral adapts array_map's signature to a call with several
@@ -436,6 +521,16 @@ func (x *fnCtx) filteredValue(callback ast.Expr, value types.Type, env *state) t
 	case *ast.StringLit:
 		name := strings.ToLower(strings.TrimPrefix(program.StringValue(f), "\\"))
 		if target := predicateTarget(name); target != nil {
+			return types.Intersect(value, target, x.p())
+		}
+		return nil
+	case *ast.Call:
+		// is_string(...): the predicate as a first-class callable
+		n, ok := f.Callee.(*ast.Name)
+		if !ok || f.Args == nil || !f.Args.FirstClassCallable {
+			return nil
+		}
+		if target := predicateTarget(strings.ToLower(n.Parts[len(n.Parts)-1])); target != nil {
 			return types.Intersect(value, target, x.p())
 		}
 		return nil
@@ -779,7 +874,7 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 	var classes []*program.Class
 	viaParent, viaSelf := false, false
 	if n, isName := e.Class.(*ast.Name); isName {
-		raw := x.res.ClassName(n)
+		raw := specialClassName(n)
 		switch raw {
 		case "parent":
 			if x.class == nil {
@@ -935,8 +1030,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 	viaString := false
 	switch c := e.Class.(type) {
 	case *ast.Name:
-		raw := x.res.ClassName(c)
-		if raw == "parent" && x.class != nil {
+		if specialClassName(c) == "parent" && x.class != nil {
 			cl = x.class.ParentClass()
 			if cl == nil {
 				x.report(c.S, P2011, "class %s has no parent", x.class.Name)
@@ -1121,8 +1215,30 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			delete(inferable, tps[i].Name)
 		}
 	}
+	// foreign maps a type parameter the signature mentions but nobody owns
+	// here (see collectForeign) to the fresh identity it gets for this call.
+	foreign := map[string]types.Param{}
+	foreignKey := func(p types.Param) string { return p.Name + "|" + p.Owner }
+	renameForeign := func(t types.Type) types.Type {
+		if len(foreign) == 0 {
+			return t
+		}
+		return types.MapDeep(t, func(m types.Type) types.Type {
+			if p, ok := m.(types.Param); ok {
+				if f, ok := foreign[foreignKey(p)]; ok {
+					return f
+				}
+			}
+			return m
+		})
+	}
 	paramType := func(p *program.Param) types.Type {
 		t := types.Substitute(types.Substitute(p.Type, rename), subst)
+		if len(foreign) > 0 {
+			// A foreign parameter is bound under its fresh name: rename, then
+			// read the binding.
+			t = types.Substitute(renameForeign(t), freshOnly(subst))
+		}
 		if sig.recv != nil {
 			t = replaceStatic(t, sig.recv)
 		}
@@ -1132,13 +1248,22 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	// nor the current scope (a constructor's templates kept on a property,
 	// an interface's templates on an unparameterised receiver) are inferred
 	// here too, as PHPStan does.
+	// Each gets a fresh identity, as the callee's own do, so that a `T` of
+	// a constructor never collides with the caller's `T` by name.
 	collectForeign := func(t types.Type) {
 		types.Walk(t, func(m types.Type) {
-			if p, ok := m.(types.Param); ok && !strings.Contains(p.Name, "\x00") && !x.inScope[p.Name] && !inferable[p.Name] {
-				inferable[p.Name] = true
-				tps = append(tps, &program.TypeParam{Name: p.Name, Bound: p.Bound})
-				delete(subst, p.Name)
+			p, ok := m.(types.Param)
+			if !ok || strings.Contains(p.Name, "\x00") || x.ownsParam(p) {
+				return
 			}
+			if _, done := foreign[foreignKey(p)]; done {
+				return
+			}
+			x.c.callSeq++
+			fresh := types.Param{Name: fmt.Sprintf("%s\x00%d", p.Name, x.c.callSeq), Bound: p.Bound, Owner: p.Owner}
+			foreign[foreignKey(p)] = fresh
+			inferable[fresh.Name] = true
+			tps = append(tps, &program.TypeParam{Name: fresh.Name, Bound: p.Bound})
 		})
 	}
 	for _, p := range sig.params {
@@ -1286,6 +1411,7 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 				}
 			}
 		}
+		at = x.closeForeignParams(at)
 		argTypes[i] = at
 		if b.arg.Unpack {
 			_, v, ok := types.IterableKV(at, x.p())
@@ -1309,6 +1435,23 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			unify(paramType(b.param), argTypes[i], subst, inferable, x.p())
 		}
 	}
+	// A parameter left to its default binds its template parameter to the
+	// default's type: `get($id, B $behavior = self::EXCEPTION)` with
+	// `@return (B is 1 ? object : ?object)` decides on the constant.
+	if len(inferable) > 0 {
+		given := map[*program.Param]bool{}
+		for _, b := range bindings {
+			given[b.param] = true
+		}
+		for _, p := range sig.params {
+			if given[p] || !p.HasDefault || p.Default == nil {
+				continue
+			}
+			if dt := x.defaultType(p.Default, sig); dt != nil {
+				unify(paramType(p), dt, subst, inferable, x.p())
+			}
+		}
+	}
 	for i, b := range bindings {
 		if !isClosure(b.arg.Value) {
 			continue
@@ -1327,7 +1470,7 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	}
 	// Infer from the expected type too (contextual typing of the return).
 	if len(inferable) > 0 && expected != nil && sig.ret != nil {
-		unify(types.Substitute(types.Substitute(sig.ret, rename), subst), expected, subst, inferable, x.p())
+		unify(renameForeign(types.Substitute(types.Substitute(sig.ret, rename), subst)), expected, subst, inferable, x.p())
 	}
 	// Expose the results under the declared names too (new Foo() reads them).
 	for i, tp := range sig.typeParams {
@@ -1468,6 +1611,8 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		return types.TMixed
 	}
 	ret = types.Substitute(types.Substitute(ret, rename), subst)
+	ret = renameForeign(ret)
+	ret = types.Substitute(ret, freshOnly(subst))
 	ret = finalizeParams(ret, tps)
 	if sig.recv != nil {
 		ret = replaceStatic(ret, sig.recv)
@@ -1631,6 +1776,18 @@ func unify(param, arg types.Type, subst map[string]types.Type, inferable map[str
 		}
 		if _, isVoid := arg.(types.Void); isVoid {
 			return
+		}
+		// `new \ReflectionClass($this)`: T is the class, not a `$this` the
+		// callee's own static would be substituted for.
+		switch a := arg.(type) {
+		case types.This:
+			if a.Of != nil {
+				arg = *a.Of
+			}
+		case types.Static:
+			if a.Of != nil {
+				arg = *a.Of
+			}
 		}
 		if cur, ok := subst[p.Name]; ok {
 			if !types.IsSubtype(arg, cur, h) {
@@ -1854,6 +2011,21 @@ func kindMatches(param, arg types.Type) bool {
 
 // pipe types `left |> callee`: callee(left).
 func (x *fnCtx) pipe(e *ast.Binary, left types.Type, env *state) types.Type {
+	if fcc, ok := e.Right.(*ast.Call); ok && fcc.Args != nil && fcc.Args.FirstClassCallable {
+		if n, ok := fcc.Callee.(*ast.Name); ok {
+			if fn := x.lookupFunction(n); fn != nil {
+				// `$xs |> array_values(...)` is array_values($xs): a generic
+				// function infers its parameters from the operand.
+				fn.Signature()
+				sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File),
+					known: map[ast.Expr]types.Type{e.Left: left}}
+				args := &ast.ArgList{S: e.S, Args: []*ast.Arg{{S: e.Left.Span(), Value: e.Left}}}
+				call := &ast.Call{S: e.S, Callee: fcc.Callee, Args: args}
+				ret := x.checkCall(sig, args, env, e.S, nil)
+				return x.specialReturn(strings.ToLower(n.Parts[len(n.Parts)-1]), call, ret, env)
+			}
+		}
+	}
 	ct := x.expr(e.Right, env, nil)
 	for _, m := range types.Members(ct) {
 		if c, ok := m.(types.Callable); ok && c.HasSig {

@@ -98,7 +98,19 @@ func (c *Checker) checkUntyped(f *program.File, decls []*ast.Param, params []*pr
 
 // checkClass checks a class declaration: its header, its members and the
 // bodies of its methods and hooks.
+// scopeParams brings the type parameters a type mentions into scope.
+func scopeParams(ctx *fnCtx, t types.Type) {
+	types.Walk(t, func(m types.Type) {
+		if p, ok := m.(types.Param); ok {
+			ctx.inScope[p.Name] = true
+		}
+	})
+}
+
 func (c *Checker) checkClass(cl *program.Class) {
+	if c.p.IsAlias(cl.Name) {
+		return // a declaration kept for IDEs under `if (false)`: the alias is the class
+	}
 	key := "class:" + strings.ToLower(cl.Name)
 	if c.seen[key] {
 		return
@@ -420,6 +432,13 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	for _, tp := range m.TypeParams {
 		ctx.inScope[tp.Name] = true
 	}
+	// A signature inherited from a parent or an interface brings its
+	// templates into scope: `get(string $className)` under
+	// `get<T>(class<T> $className): Meta<T>` reads and returns T.
+	for _, p := range m.Params {
+		scopeParams(ctx, p.Type)
+	}
+	scopeParams(ctx, m.Return)
 	ctx.body(m.Params, d.Params, d.Body, d.Name.S)
 }
 

@@ -129,25 +129,32 @@ func (l *ComposerLoader) FindClass(lower string) (string, bool) {
 }
 
 // findCaseInsensitive walks dir through the segments, matching each
-// case-insensitively; the last segment gets ".php" appended.
+// case-insensitively; the last segment is the class's file, Foo.phn when
+// the project writes Phaenon (the source, where Foo.php is its output),
+// else Foo.php.
 func findCaseInsensitive(dir string, segs []string) (string, bool) {
 	cur := dir
 	for i, seg := range segs {
-		want := seg
-		if i == len(segs)-1 {
-			want += ".php"
-		}
 		entries, err := os.ReadDir(cur)
 		if err != nil {
 			return "", false
 		}
+		wants := []string{seg}
+		if i == len(segs)-1 {
+			wants = []string{seg + ".phn", seg + ".php"}
+		}
 		found := ""
-		for _, e := range entries {
-			if strings.EqualFold(e.Name(), want) {
-				found = e.Name()
-				if e.Name() == want {
-					break
+		for _, want := range wants {
+			for _, e := range entries {
+				if strings.EqualFold(e.Name(), want) {
+					found = e.Name()
+					if e.Name() == want {
+						break
+					}
 				}
+			}
+			if found != "" {
+				break
 			}
 		}
 		if found == "" {

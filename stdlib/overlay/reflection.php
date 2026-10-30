@@ -8,7 +8,10 @@
  */
 
 /**
- * @template T of object
+ * A ReflectionClass<Foo> is a ReflectionClass<object>: the parameter is
+ * covariant, as PHPStan declares it.
+ *
+ * @template-covariant T of object
  */
 class ReflectionClass
 {

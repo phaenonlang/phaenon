@@ -236,6 +236,20 @@ func (x *fnCtx) varTags(doc *docblock.Doc, env *state, target string) {
 	}
 }
 
+// paramsToBounds replaces every type parameter in t by its bound (mixed
+// when it has none).
+func paramsToBounds(t types.Type) types.Type {
+	return types.MapDeep(t, func(m types.Type) types.Type {
+		if p, ok := m.(types.Param); ok {
+			if p.Bound != nil {
+				return p.Bound
+			}
+			return types.TMixed
+		}
+		return m
+	})
+}
+
 // statementDoc is the doc comment before a statement that carries no
 // assignment (the assignment kinds read theirs themselves).
 func statementDoc(s ast.Stmt) string {
@@ -264,12 +278,7 @@ func statementDoc(s ast.Stmt) string {
 // arguments. A @var tag is checked against what PHP knows, so `@var
 // Meta<object>` may widen an inferred Meta<Dog> (PHPStan's varTag.nativeType).
 func withoutTypeArgs(t types.Type) types.Type {
-	return types.MapDeep(t, func(m types.Type) types.Type {
-		if c, ok := m.(types.Class); ok && len(c.Args) > 0 {
-			return types.Class{Name: c.Name}
-		}
-		return m
-	})
+	return types.Erase(t)
 }
 
 // isLiteralExpr reports whether e is written out in full — a literal, a
@@ -821,7 +830,9 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 		}
 		if i < len(decls) && decls[i].Default != nil {
 			dt := x.expr(decls[i].Default, newEnv(), p.Type)
-			if !types.IsAcceptable(dt, p.Type, x.p()) {
+			// A default for a parameter typed by a template is held to the
+			// template's bound: `B $behavior = 1` with `B of 1|2`.
+			if !types.IsAcceptable(dt, paramsToBounds(p.Type), x.p()) {
 				x.report(decls[i].Default.Span(), P2208, "default value %s does not match parameter $%s of type %s", x.typeName(dt), p.Name, x.typeName(p.Type))
 			}
 		}
@@ -901,6 +912,15 @@ func (x *fnCtx) closureParams(decls []*ast.Param, expected types.Type) ([]*progr
 	return params, cps
 }
 
+func closureHasByRefUse(e *ast.Closure) bool {
+	for _, u := range e.Uses {
+		if u.ByRef {
+			return true
+		}
+	}
+	return false
+}
+
 func isNeverType(t types.Type) bool {
 	_, ok := t.(types.Never)
 	return ok
@@ -941,6 +961,26 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		cenv.set(u.Var.Name, info.t)
 	}
 	c.generator = bodyHasYield(e.Body)
+	if closureHasByRefUse(e) {
+		// A by-reference use is whatever the body assigns to it as well:
+		// `use (&$server)` with `$server = null` inside is resource|null
+		// throughout (PHPStan types it so). One silent pass finds out.
+		saved := x.c.mark()
+		probe := cenv.clone()
+		c.stmts(e.Body, probe)
+		x.c.rollback(saved)
+		c.returnTypes = nil
+		for _, u := range e.Uses {
+			if !u.ByRef {
+				continue
+			}
+			if inner, ok := probe.get(u.Var.Name); ok {
+				if outer, ok := cenv.get(u.Var.Name); ok {
+					cenv.set(u.Var.Name, types.MakeUnion(outer.t, inner.t))
+				}
+			}
+		}
+	}
 	c.stmts(e.Body, cenv)
 	// What the body assigns to a by-reference use is what the enclosing
 	// scope may see once the closure has run.

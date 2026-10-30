@@ -300,12 +300,21 @@ func (p *Program) collect(f *File) {
 					}
 				}
 			case *ast.ExprStmt:
-				// define('NAME', value) at the top level.
+				// define('NAME', value) and class_alias(New::class, Old::class) at the top level.
 				if call, ok := s.Expr.(*ast.Call); ok {
-					if n, ok := call.Callee.(*ast.Name); ok && len(n.Parts) == 1 && strings.EqualFold(n.Parts[0], "define") &&
-						call.Args != nil && len(call.Args.Args) >= 2 {
-						if lit, ok := call.Args.Args[0].Value.(*ast.StringLit); ok {
-							p.declareConstant(f, scope, strings.TrimPrefix(StringValue(lit), "\\"), call.Args.Args[1].Value, s.S)
+					if n, ok := call.Callee.(*ast.Name); ok && len(n.Parts) == 1 && call.Args != nil && len(call.Args.Args) >= 2 {
+						switch strings.ToLower(n.Parts[0]) {
+						case "define":
+							if lit, ok := call.Args.Args[0].Value.(*ast.StringLit); ok {
+								p.declareConstant(f, scope, strings.TrimPrefix(StringValue(lit), "\\"), call.Args.Args[1].Value, s.S)
+							}
+						case "class_alias":
+							r := p.newResolver(f, scope, nil, s.S)
+							original, ok1 := classNameArg(call.Args.Args[0].Value, r)
+							alias, ok2 := classNameArg(call.Args.Args[1].Value, r)
+							if ok1 && ok2 {
+								p.classAliases[strings.ToLower(alias)] = original
+							}
 						}
 					}
 				}
@@ -426,6 +435,23 @@ func (p *Program) declareConstant(f *File, scope *Scope, fqn string, value ast.E
 	k := &Constant{Name: fqn, Value: value, File: f, Scope: scope, Span: span}
 	p.constants[key] = k
 	return k
+}
+
+// classNameArg reads a class name written as `Foo::class` or as a string
+// literal, as class_alias() takes them.
+func classNameArg(e ast.Expr, r *resolver) (string, bool) {
+	switch e := e.(type) {
+	case *ast.ClassConstFetch:
+		id, ok := e.Name.(*ast.Ident)
+		n, isName := e.Class.(*ast.Name)
+		if !ok || !isName || !strings.EqualFold(id.Name, "class") {
+			return "", false
+		}
+		return r.resolveClassName(n), true
+	case *ast.StringLit:
+		return strings.TrimPrefix(StringValue(e), "\\"), true
+	}
+	return "", false
 }
 
 // isUnknownValue reports php-src's UNKNOWN placeholder for a constant value.

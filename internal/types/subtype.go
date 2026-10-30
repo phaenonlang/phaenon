@@ -15,6 +15,17 @@ func IsAcceptable(arg, param Type, h Hierarchy) bool {
 	if subtype(arg, param, h, 0) {
 		return true
 	}
+	// A shape with keys the parameter's shape does not name is accepted,
+	// as PHPStan accepts it: the keys named are there with their types.
+	if as, ok := arg.(Shape); ok {
+		if ps, ok := param.(Shape); ok && !ps.Unsealed {
+			open := ps
+			open.Unsealed = true
+			if subtype(as, open, h, 0) {
+				return true
+			}
+		}
+	}
 	// mixed is accepted where a type parameter without a bound is expected:
 	// the parameter can be anything, including mixed (PHPStan's
 	// TemplateMixedType).
@@ -122,6 +133,10 @@ func overlap2(x, y Type, h Hierarchy) bool {
 	}
 	if IsMixed(x) || IsMixed(y) {
 		return true
+	}
+	// 'github.client' is no class-string: a literal decides by itself.
+	if lit, cs, ok := literalAndClassString(x, y); ok {
+		return h != nil && h.Exists(lit.V) && (cs.Of == nil || subtype(Class{Name: lit.V}, cs.Of, h, 0))
 	}
 	if ax, ok := x.(Array); ok {
 		if ay, ok := y.(Array); ok {
@@ -406,6 +421,9 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 			}
 			return true
 		case Callable:
+			if a.Callable {
+				return true // is_array($callable): the array form of a callable is still callable
+			}
 			// [$object, 'method'] / ['Class', 'method'] is a callable array;
 			// whether the method exists is the call's business (PHPStan
 			// accepts the shape too).
@@ -638,6 +656,22 @@ func callableSub(a, b Callable, h Hierarchy, depth int) bool {
 		return true // `callable(): mixed` takes a void closure too, as PHPStan does
 	}
 	return subtype(a.Return, b.Return, h, depth+1)
+}
+
+// literalAndClassString pairs a string literal with a class-string, in
+// either order.
+func literalAndClassString(x, y Type) (StringLit, ClassString, bool) {
+	if l, ok := x.(StringLit); ok {
+		if c, ok := y.(ClassString); ok {
+			return l, c, true
+		}
+	}
+	if l, ok := y.(StringLit); ok {
+		if c, ok := x.(ClassString); ok {
+			return l, c, true
+		}
+	}
+	return StringLit{}, ClassString{}, false
 }
 
 // paramAccepts reports whether a callable's parameter of type inner takes

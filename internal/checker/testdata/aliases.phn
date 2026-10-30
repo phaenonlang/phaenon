@@ -1,0 +1,40 @@
+namespace Ali;
+
+// class_alias() at the top level makes the old name the same class, as the
+// autoloader running this file would: PHPStan's reflection sees it the same
+// way. The declaration under `if (false)` exists for IDEs only. (Phaenon
+// syntax below keeps this file out of the raw-source parity run: PHPStan
+// cannot autoload the alias from a corpus file.)
+
+class Original
+{
+    public function name(): string
+    {
+        return 'o';
+    }
+}
+
+class_alias(Original::class, Legacy::class);
+
+if (false) { // want P2402
+    class Legacy extends Original
+    {
+    }
+}
+
+function takesLegacy(Legacy $l): void
+{
+}
+
+function takesOriginal(Original $o): void
+{
+}
+
+function aliasUse(Original $o, Legacy $l, list<Legacy> $many): void
+{
+    takesLegacy($o);
+    takesOriginal($l);
+    foreach ($many as $m) {
+        takesOriginal($m);
+    }
+}

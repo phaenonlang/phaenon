@@ -102,6 +102,7 @@ type (
 		Entries  []ShapeEntry
 		Unsealed bool
 		List     bool // list{int, string}
+		Callable bool // is_array($callable): the array form of a callable, still callable
 	}
 	ShapeEntry struct {
 		Key      string // "" with IntKey for integer keys
@@ -537,8 +538,9 @@ func simplifyUnion(ms []Type) []Type {
 	for _, i := range ints {
 		out = append(out, i)
 	}
-	// Too many literals widen to their primitive.
-	if countLiterals(out) > 8 {
+	// Too many literals widen to their primitive (PHPStan keeps them all; a
+	// foreach over a dozen field names must keep narrowing each offset).
+	if countLiterals(out) > 32 {
 		out = widenLiterals(out)
 	}
 	// `[]` next to a non-empty array of the same shape is that array, as
