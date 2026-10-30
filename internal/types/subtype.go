@@ -398,9 +398,48 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 		return false
 	case Object:
 		return false
+	case ObjectShape:
+		switch b := b.(type) {
+		case Object:
+			return true
+		case ObjectShape:
+			for _, want := range b.Entries {
+				found := false
+				for _, have := range a.Entries {
+					if have.Key == want.Key {
+						found = subtype(have.Type, want.Type, h, depth+1)
+						break
+					}
+				}
+				if !found && !want.Optional {
+					return false
+				}
+			}
+			return true
+		}
+		return false
 	case Class:
 		switch b := b.(type) {
 		case Object:
+			return true
+		case ObjectShape:
+			// A class is the shape when it declares every required property
+			// with a fitting type (an anonymous logger with $records).
+			if h == nil {
+				return false
+			}
+			for _, e := range b.Entries {
+				pt, ok := h.PropertyType(a.Name, e.Key)
+				if !ok {
+					if e.Optional {
+						continue
+					}
+					return false
+				}
+				if pt != nil && !subtype(pt, e.Type, h, depth+1) {
+					return false
+				}
+			}
 			return true
 		case Class:
 			return classSub(a, b, h, depth)
@@ -560,6 +599,9 @@ func callableSub(a, b Callable, h Hierarchy, depth int) bool {
 	}
 	if _, ok := b.Return.(Void); ok {
 		return true
+	}
+	if IsMixed(b.Return) {
+		return true // `callable(): mixed` takes a void closure too, as PHPStan does
 	}
 	return subtype(a.Return, b.Return, h, depth+1)
 }

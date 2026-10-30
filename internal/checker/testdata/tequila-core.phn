@@ -1,0 +1,254 @@
+namespace Core;
+
+// Checker gaps the tequila/core dogfood found (2026-10-30), one function
+// each: PHP functions the overlay now types, narrowings PHPStan has, PHP
+// semantics the inference missed.
+
+function takesString(string $s): void
+{
+}
+
+function takesInt(int $i): void
+{
+}
+
+function sink(mixed $m): void
+{
+}
+
+/** @param callable(): mixed $op */
+function retry(callable $op): void
+{
+}
+
+function voidClosureIsMixed(): void
+{
+    retry(fn () => takesInt(1));
+}
+
+function arrayCast(array|object $d, ?array $n): void
+{
+    sink((array) $d);
+    takesInt((array) $d); // want P2103
+    takesInt((array) $n); // want P2103
+}
+
+function overlaidFunctions(): void
+{
+    takesInt(hrtime(true) - 1);
+    [$s, $ns] = hrtime();
+    takesInt($s);
+    $parts = parse_url('http://h:80/p');
+    if (false === $parts) {
+        return;
+    }
+    takesString($parts['host'] ?? 'x');
+    takesInt($parts['port'] ?? 80);
+    takesString(fgets(STDIN) ?: '');
+}
+
+/** @param array<int, array<string, mixed>> $tags */
+function unknownKeyWrites(array $tags): void
+{
+    $out = [];
+    foreach ($tags as $tag) {
+        $out[$tag['handles']] = $tag; // want P2316
+    }
+    sink($out['k']['n']);
+}
+
+final class Ctx
+{
+    public function __construct(public string $id)
+    {
+    }
+}
+
+final class Holder
+{
+    public ?Ctx $current = null;
+    public Ctx $fixed;
+
+    public function __construct()
+    {
+        $this->fixed = new Ctx('f');
+    }
+}
+
+function coalesce(Holder $h, string $s): void
+{
+    takesString($h->current->id ?? '-');
+    takesString($h->fixed->id ?? '-');
+    takesString($s ?? '-'); // want P2308
+}
+
+enum Kind
+{
+    case Service;
+    case Person;
+    case Admin;
+}
+
+final class Actor
+{
+    public function __construct(public Kind $kind)
+    {
+    }
+}
+
+function oneOfSeveral(Actor $actor, Kind $attr): void
+{
+    $person = Kind::Service === $attr ? null : $attr;
+    if ($person !== $actor->kind) {
+        takesString($actor->kind->name);
+    }
+    if (Kind::Service !== $actor->kind) {
+        takesString($actor->kind->name);
+    }
+}
+
+interface Ext
+{
+}
+
+interface ConfExt
+{
+    public function conf(): int;
+}
+
+function intersectionMethod(Ext $e): void
+{
+    if ($e instanceof ConfExt) {
+        takesInt($e->conf());
+    }
+}
+
+abstract class Logger
+{
+    abstract public function log(string $m): void;
+}
+
+/** @return Logger&object{records: list<string>} */
+function recording(): Logger
+{
+    return new class () extends Logger {
+        /** @var list<string> */
+        public array $records = [];
+
+        public function log(string $m): void
+        {
+            $this->records[] = $m;
+        }
+    };
+}
+
+function objectShape(): void
+{
+    $l = recording();
+    $l->log('x');
+    takesString($l->records[0]);
+    takesInt($l->records); // want P2103
+    sink($l->nothing); // want P2005
+}
+
+final class Failure extends \RuntimeException
+{
+}
+
+function methodCallPath(\Throwable $e): void
+{
+    if ($e->getPrevious() instanceof Failure) {
+        takesString($e->getPrevious()->getMessage());
+    }
+    $e->getPrevious()->getMessage(); // want P2105
+}
+
+abstract class Event
+{
+}
+
+final class Opened extends Event
+{
+    public function __construct(public string $owner)
+    {
+    }
+}
+
+final class Posted extends Event
+{
+    public function __construct(public int $amount)
+    {
+    }
+}
+
+function matchOnClass(Event $event): string
+{
+    return match ($event::class) {
+        Opened::class => $event->owner,
+        Posted::class => (string) $event->amount,
+        default => '',
+    };
+}
+
+function record(?Ctx &$seen): void
+{
+    $seen = new Ctx('s');
+}
+
+/** @param array<string, string> $c */
+function fill(array &$c): void
+{
+    $c['k'] = 'v';
+}
+
+function byReference(): void
+{
+    $seen = null;
+    record($seen);
+    if ($seen instanceof Ctx) {
+        takesString($seen->id);
+    }
+    $carrier = [];
+    fill($carrier);
+    sink($carrier['k'] ?? '');
+}
+
+/** @return array<string, string|array{0: string, 1?: int}|list<array{0: string, 1?: int}>> */
+function shapeNotAbsorbed(): array
+{
+    return ['kernel.exception' => ['onKernelException', 1]];
+}
+
+/** @param list<Ctx> $more */
+function pushSpread(array $more): void
+{
+    $all = [];
+    foreach ([$more, $more] as $chunk) {
+        array_push($all, ...$chunk);
+    }
+    takesString($all[0]->id);
+    takesInt($all); // want P2103
+}
+
+final class Manager
+{
+    public function flush(): ?Ctx
+    {
+        return null;
+    }
+
+    public function add(Ctx $c): void
+    {
+    }
+}
+
+function callPathInvalidated(Manager $dm): void
+{
+    if (null === $dm->flush()) {
+        $dm->add(new Ctx('a'));
+        $result = $dm->flush();
+        if ($result instanceof Ctx) {
+            takesString($result->id);
+        }
+    }
+}

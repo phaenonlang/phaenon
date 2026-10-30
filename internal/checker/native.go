@@ -3,6 +3,7 @@ package checker
 import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -52,6 +53,21 @@ func (x *fnCtx) nativeOf(e ast.Expr, env *state) types.Type {
 			}
 			return nil, nil, nil
 		})
+	case *ast.Index:
+		// An element of a refined array (`@param array{body: string}` over
+		// a native `array`) is as uncertain as the array: PHP knows mixed.
+		if n := x.nativeOf(e.Array, env); n != nil {
+			return types.TMixed
+		}
+	case *ast.Binary:
+		if e.Op == token.T_COALESCE {
+			// Either side refined makes the result uncertain. The sides are
+			// not typed again here: typing has effects (a `?? throw` ends
+			// the flow), and PHP's own type of the result is not needed.
+			if x.nativeOf(e.Left, env) != nil || x.nativeOf(e.Right, env) != nil {
+				return types.TMixed
+			}
+		}
 	}
 	return nil
 }

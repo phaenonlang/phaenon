@@ -327,3 +327,23 @@ function uasort(array &$array, callable $callback): true {}
  * @param-out array<K, V> $array
  */
 function uksort(array &$array, callable $callback): true {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @template X
+ * @param array<K, V> $array
+ * @param X ...$values
+ * @param-out ($array is list ? non-empty-list<V|X> : non-empty-array<K, V|X>) $array
+ */
+function array_push(array &$array, mixed ...$values): int {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @template X
+ * @param array<K, V> $array
+ * @param X ...$values
+ * @param-out ($array is list ? non-empty-list<V|X> : non-empty-array<K, V|X>) $array
+ */
+function array_unshift(array &$array, mixed ...$values): int {}

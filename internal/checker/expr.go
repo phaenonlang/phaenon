@@ -410,6 +410,9 @@ func expectedShapeEntry(expected types.Type, key types.Type) (types.Type, bool) 
 }
 
 func normaliseKey(t types.Type) types.Type {
+	if types.IsMixed(t) {
+		return types.TArrayKey // PHP casts or refuses; the array gets int|string keys
+	}
 	switch k := t.(type) {
 	case types.BoolLit, types.Bool:
 		return types.TInt
@@ -638,6 +641,33 @@ func (x *fnCtx) enumCaseProperty(obj types.Type, name string) (types.Type, bool)
 	return types.MakeUnion(out...), true
 }
 
+// objectShapeProperty finds name in an object shape, or in the object
+// shapes of an intersection.
+func objectShapeProperty(m types.Type, name string) (types.Type, bool) {
+	var shapes []types.ObjectShape
+	switch m := m.(type) {
+	case types.ObjectShape:
+		shapes = append(shapes, m)
+	case types.Intersection:
+		for _, im := range m.Types {
+			if sh, ok := im.(types.ObjectShape); ok {
+				shapes = append(shapes, sh)
+			}
+		}
+	}
+	for _, sh := range shapes {
+		for _, e := range sh.Entries {
+			if e.Key == name {
+				if e.Optional {
+					return types.Nullable(e.Type), true
+				}
+				return e.Type, true
+			}
+		}
+	}
+	return nil, false
+}
+
 // propertyType looks up a property on an object type.
 func (x *fnCtx) propertyType(obj types.Type, name string, e *ast.PropertyFetch, env *state, lenient bool) types.Type {
 	span := e.Name.Span()
@@ -669,6 +699,19 @@ func (x *fnCtx) propertyType(obj types.Type, name string, e *ast.PropertyFetch, 
 	for _, m := range types.Members(base) {
 		if _, isObj := m.(types.Object); isObj {
 			out = append(out, types.TMixed)
+			continue
+		}
+		if t, ok := objectShapeProperty(m, name); ok {
+			// `Logger&object{records: list<string>}`: the shape names the
+			// property the class does not declare (PHPStan's object shapes).
+			out = append(out, t)
+			continue
+		}
+		if sh, isShape := m.(types.ObjectShape); isShape {
+			if !lenient {
+				x.report(span, P2005, "unknown property $%s on %s", name, x.typeName(sh))
+			}
+			out = append(out, types.TError)
 			continue
 		}
 		classes := x.classesOf(m, e.Object.Span())
@@ -839,7 +882,9 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 						continue
 					}
 				}
-				if !lenient {
+				if !lenient && cl.Kind != ast.KindInterface && !cl.Abstract {
+					// An interface or abstract class may be implemented by an
+					// ArrayAccess; PHPStan does not report either.
 					x.report(e.Array.Span(), P2302, "cannot use %s as an array", cl.Name)
 				}
 				handled = true
@@ -997,16 +1042,25 @@ func (x *fnCtx) cast(e *ast.Cast, env *state) types.Type {
 	case token.T_BOOL_CAST:
 		return types.TBool
 	case token.T_ARRAY_CAST:
+		if types.IsMixed(t) {
+			return types.TArray
+		}
+		var out []types.Type
 		for _, m := range types.Members(t) {
-			switch m.(type) {
+			switch m := m.(type) {
 			case types.Array, types.Shape:
-				return t
+				out = append(out, m)
+			case types.Null:
+				out = append(out, types.Shape{List: true})
+			default:
+				if types.IsObjectLike(m) {
+					out = append(out, types.Array{Key: types.TString, Value: types.TMixed})
+				} else {
+					out = append(out, types.Shape{List: true, Entries: []types.ShapeEntry{{IsInt: true, Type: m}}})
+				}
 			}
 		}
-		if types.IsObjectLike(t) {
-			return types.Array{Key: types.TString, Value: types.TMixed}
-		}
-		return types.TArray
+		return types.MakeUnion(out...)
 	case token.T_OBJECT_CAST:
 		return types.NewClass("stdClass")
 	case token.T_UNSET_CAST:
@@ -1306,8 +1360,14 @@ func (x *fnCtx) arithResult(l, r types.Type, span ast.Span, op string) types.Typ
 func (x *fnCtx) coalesce(e *ast.Binary, env *state, expected types.Type) types.Type {
 	left := x.exprLenient(e.Left, env)
 	switch e.Left.(type) {
-	case *ast.Variable, *ast.PropertyFetch, *ast.StaticPropertyFetch:
-		if !types.IsNullable(left) && !types.IsMixed(left) && !x.maybeUndefined(e.Left, env) {
+	case *ast.Variable:
+		// Only a variable: a property may be uninitialised, an offset may be
+		// missing, so `??` on those is isset() and PHPStan keeps quiet. A
+		// refined variable (a by-reference out, a docblock) is not certain
+		// either (checker.md §9).
+		native := x.nativeOf(e.Left, env)
+		certain := native == nil || !types.IsNullable(native) && !types.IsMixed(native)
+		if certain && !types.IsNullable(left) && !types.IsMixed(left) && !x.maybeUndefined(e.Left, env) {
 			x.report(e.Left.Span(), P2308, "left side of ?? is %s, which is never null", x.typeName(left))
 		}
 	}
@@ -1316,6 +1376,29 @@ func (x *fnCtx) coalesce(e *ast.Binary, env *state, expected types.Type) types.T
 	right := x.expr(e.Right, rightEnv, expected)
 	*env = *join(env, rightEnv)
 	return types.MakeUnion(types.StripNull(left), right)
+}
+
+// nullableChain reports a property or method chain one of whose receivers
+// may be null: `$this->current->id ?? $x` is null when $this->current is,
+// which `??` (isset semantics) swallows, as PHPStan does.
+func (x *fnCtx) nullableChain(e ast.Expr, env *state) bool {
+	for {
+		var obj ast.Expr
+		switch f := e.(type) {
+		case *ast.PropertyFetch:
+			obj = f.Object
+		case *ast.MethodCall:
+			obj = f.Object
+		case *ast.Index:
+			obj = f.Array
+		default:
+			return false
+		}
+		if t := x.exprLenient(obj, env); types.IsNullable(t) || types.IsMixed(t) {
+			return true
+		}
+		e = obj
+	}
 }
 
 func (x *fnCtx) maybeUndefined(e ast.Expr, env *state) bool {
@@ -1611,7 +1694,12 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 	base := x.exprLenient(t.Array, env)
 	var keyT types.Type
 	if t.Index != nil {
-		keyT = normaliseKey(x.expr(t.Index, env, nil))
+		raw := x.expr(t.Index, env, nil)
+		if types.IsMixed(raw) {
+			// PHPStan at level max: a mixed key may be anything PHP refuses.
+			x.report(t.Index.Span(), P2316, "possibly invalid array key type mixed")
+		}
+		keyT = normaliseKey(raw)
 	}
 	// Undefined variable used as an array: it becomes one.
 	if v, ok := t.Array.(*ast.Variable); ok {

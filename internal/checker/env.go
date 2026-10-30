@@ -127,6 +127,16 @@ func (e *state) invalidatePrefix(prefix string) {
 	}
 }
 
+// invalidateCalls drops the narrowed method-call paths under a receiver:
+// `$dm->flush()` is no longer null once `$dm->add($x)` has run.
+func (e *state) invalidateCalls(receiver string) {
+	for k := range e.paths {
+		if strings.HasPrefix(k, receiver+"->") && strings.Contains(k[len(receiver):], "()") {
+			delete(e.paths, k)
+		}
+	}
+}
+
 // invalidateMembers drops every property narrowing (after a call that may
 // mutate objects) but keeps offset narrowings on local arrays, which are
 // values.
@@ -293,6 +303,22 @@ func pathKey(e ast.Expr) (string, bool) {
 			return "", false
 		}
 		return base + "->" + id.Name, true // ?-> addresses the same member
+	case *ast.MethodCall:
+		// `$e->getPrevious()`: a call without arguments is a path PHPStan
+		// narrows too (assertInstanceOf(..., $e->getPrevious())); it holds
+		// until the receiver is reassigned.
+		if e.Args == nil || len(e.Args.Args) > 0 || e.Args.FirstClassCallable {
+			return "", false
+		}
+		base, ok := pathKey(e.Object)
+		if !ok {
+			return "", false
+		}
+		id, ok := e.Name.(*ast.Ident)
+		if !ok {
+			return "", false
+		}
+		return base + "->" + id.Name + "()", true
 	case *ast.StaticPropertyFetch:
 		n, ok := e.Class.(*ast.Name)
 		if !ok {

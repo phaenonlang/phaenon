@@ -326,6 +326,15 @@ func (x *fnCtx) argsOnly(args *ast.ArgList, env *state) {
 // ------------------------------------------------------------------ method calls
 
 func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) types.Type {
+	if key, ok := pathKey(e); ok {
+		if t, ok := env.getPath(key); ok {
+			return t // narrowed earlier (assertInstanceOf, instanceof, === null)
+		}
+	}
+	if base, ok := pathKey(e.Object); ok {
+		// A call may change what the receiver's other methods answer.
+		env.invalidateCalls(base)
+	}
 	obj := x.expr(e.Object, env, nil)
 	if !e.NullSafe && types.IsNullable(obj) && !types.IsMixed(obj) {
 		if x.shortCircuit[e.Object] {
@@ -394,6 +403,19 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 			x.argsOnly(e.Args, env)
 			out = append(out, types.TMixed)
 			continue
+		}
+		if _, inter := m.(types.Intersection); inter && len(classes) > 1 {
+			// `A&B`: the method is found on any member; only when none has
+			// it does every member report.
+			var having []*program.Class
+			for _, cl := range classes {
+				if cl.FindMethod(name) != nil || cl.FindMethod("__call") != nil {
+					having = append(having, cl)
+				}
+			}
+			if len(having) > 0 {
+				classes = having
+			}
 		}
 		for _, cl := range classes {
 			meth := cl.FindMethod(name)
@@ -805,6 +827,12 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			}
 			if a.Unpack {
 				unpacked = true
+				if n := len(sig.params); n > 0 && sig.params[n-1].Variadic && a.Name == nil {
+					// `f(...$xs)` into `X ...$values`: the elements are the
+					// arguments, typed and unified as such (array_push).
+					bindings = append(bindings, bound{a, sig.params[n-1], i})
+					continue
+				}
 				t := x.expr(a.Value, env, nil)
 				if _, _, ok := types.IterableKV(t, x.p()); !ok && !types.IsMixed(t) {
 					x.report(a.S, P2303, "cannot unpack %s", x.typeName(t))
@@ -916,6 +944,16 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			}
 		}
 		argTypes[i] = at
+		if b.arg.Unpack {
+			_, v, ok := types.IterableKV(at, x.p())
+			if !ok {
+				if !types.IsMixed(at) {
+					x.report(b.arg.S, P2303, "cannot unpack %s", x.typeName(at))
+				}
+				continue
+			}
+			at = v
+		}
 		if len(inferable) > 0 && !isCallableType(at) {
 			unify(pt, at, subst, inferable, x.p())
 		}
@@ -981,6 +1019,13 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		if at == nil {
 			continue
 		}
+		if b.arg.Unpack {
+			_, v, ok := types.IterableKV(at, x.p())
+			if !ok {
+				continue // reported where the argument was typed
+			}
+			at = v
+		}
 		if _, isVoid := at.(types.Void); isVoid {
 			x.report(b.arg.S, P2205, "result of a void function is used")
 			continue
@@ -1039,11 +1084,23 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		}
 		if out == nil {
 			out = types.Substitute(types.Substitute(b.param.Type, rename), subst)
-			if argTypes[i] != nil && !types.IsMixed(argTypes[i]) && !x.maybeUndefined(b.arg.Value, env) {
-				continue // keep the caller's more precise type
+			if types.IsMixed(out) && argTypes[i] != nil && !types.IsMixed(argTypes[i]) && !x.maybeUndefined(b.arg.Value, env) {
+				continue // an untyped reference: the caller's type is all that is known
 			}
+			// A typed reference may now hold anything of its type: `$seen = null;
+			// record($seen)` with `?Context &$seen` leaves ?Context, as PHPStan does.
 		}
 		x.assignTo(b.arg.Value, finalizeParams(out, tps), env, b.arg.S)
+		if v, ok := b.arg.Value.(*ast.Variable); ok {
+			// What a by-reference parameter writes is known from a docblock
+			// (@param-out, or the @param of an untyped reference): PHP
+			// guarantees only the declared type of the reference, if any.
+			native := types.TMixed
+			if b.param.NativeType != nil {
+				native = types.Erase(b.param.NativeType)
+			}
+			env.setNative(v.Name, native)
+		}
 	}
 	// Property narrowings survive calls, as in PHPStan: `$this->x`
 	// stays non-null across `$this->log()`.
@@ -1174,6 +1231,39 @@ func finalizeParams(t types.Type, tps []*program.TypeParam) types.Type {
 
 // unify infers template arguments by matching a parameter type against an
 // argument type.
+// fittingCallable picks, from a union made only of callable signatures,
+// the first one a callable argument of known arity can serve; nil when the
+// union or the argument is anything else.
+func fittingCallable(u types.Union, arg types.Type) types.Type {
+	ac, ok := arg.(types.Callable)
+	if !ok || !ac.HasSig {
+		return nil
+	}
+	required, accepts := 0, len(ac.Params)
+	for _, p := range ac.Params {
+		if p.Variadic {
+			accepts = 1 << 30
+		} else if !p.Optional {
+			required++
+		}
+	}
+	var first types.Type
+	for _, m := range u.Types {
+		c, ok := m.(types.Callable)
+		if !ok {
+			return nil
+		}
+		if !c.HasSig {
+			continue
+		}
+		given := len(c.Params)
+		if given >= required && given <= accepts && first == nil {
+			first = c
+		}
+	}
+	return first
+}
+
 func unify(param, arg types.Type, subst map[string]types.Type, inferable map[string]bool, h types.Hierarchy) {
 	if param == nil || arg == nil {
 		return
@@ -1199,6 +1289,13 @@ func unify(param, arg types.Type, subst map[string]types.Type, inferable map[str
 		pm := types.StripNull(p)
 		am := types.StripNull(arg)
 		if u, ok := pm.(types.Union); ok {
+			if alt := fittingCallable(u, am); alt != nil {
+				// `(callable(V): bool)|(callable(V, K): bool)|(callable(K): bool)`
+				// against one closure: the first alternative its arity fits
+				// binds, the others would bind the same parameter twice.
+				unify(alt, am, subst, inferable, h)
+				return
+			}
 			// Structured members first (class-string<T> against 'Foo');
 			// a bare T member only catches what nothing else matched.
 			bound := false
@@ -1233,6 +1330,13 @@ func unify(param, arg types.Type, subst map[string]types.Type, inferable map[str
 				unify(p.Key, a.Key, subst, inferable, h)
 				unify(p.Value, a.Value, subst, inferable, h)
 			case types.Shape:
+				if len(a.Entries) == 0 && !a.Unsealed {
+					// `[]` has no keys and no values: never, so that what a
+					// later argument adds (array_push's X) is all there is.
+					unify(p.Key, types.TNever, subst, inferable, h)
+					unify(p.Value, types.TNever, subst, inferable, h)
+					continue
+				}
 				unify(p.Key, shapeKeys(a), subst, inferable, h)
 				unify(p.Value, shapeValues(a), subst, inferable, h)
 			}

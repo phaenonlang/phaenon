@@ -450,7 +450,17 @@ func (r *resolver) docType(n *docblock.TypeNode) types.Type {
 	case docblock.KindShape:
 		lower := strings.ToLower(n.Name)
 		if lower == "object" {
-			return types.TObject
+			var entries []types.ShapeEntry
+			for _, e := range n.Entries {
+				if !e.HasKey || e.IsInt {
+					return types.TObject // positional entries make no object
+				}
+				entries = append(entries, types.ShapeEntry{Key: e.Key, Type: r.docType(e.Type), Optional: e.Optional})
+			}
+			if len(entries) == 0 {
+				return types.TObject
+			}
+			return types.ObjectShape{Entries: entries}
 		}
 		s := types.Shape{Unsealed: n.Unsealed, List: lower == "list" || lower == "non-empty-list"}
 		next := int64(0)

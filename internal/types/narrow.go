@@ -270,7 +270,7 @@ func ClassNames(t Type) []string {
 func IsObjectLike(t Type) bool {
 	for _, m := range Members(t) {
 		switch m := m.(type) {
-		case Class, Object, Static, This, EnumCase, Intersection, Unknown:
+		case Class, Object, Static, This, EnumCase, Intersection, Unknown, ObjectShape:
 		case Callable:
 			if !m.Closure {
 				return false
