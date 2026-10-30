@@ -964,6 +964,9 @@ func (x *fnCtx) applyAsserts(ce callee, env *state) (then, els *state) {
 		t := types.Substitute(types.Substitute(res.Doc(a.Type), ce.classSubst), subst)
 		cur := x.pathType(target, env)
 		narrowed := types.Intersect(cur, t, x.p())
+		if a.Exact {
+			narrowed = t
+		}
 		subtracted := x.subtract(cur, t, x.p())
 		if a.Negated {
 			narrowed, subtracted = subtracted, narrowed

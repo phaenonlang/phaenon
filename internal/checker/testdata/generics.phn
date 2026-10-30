@@ -158,3 +158,14 @@ function arrays(array $map, array $list, array $shape): void
     $copy['extra'] = 1;
     takesInt($copy['extra']);
 }
+
+/**
+ * A branch that narrows a type parameter joins back to the parameter: T|(T&int) is T.
+ */
+function tagged<T of int|string>(T $x): T
+{
+    $tag = is_int($x) ? 'i' : 's';
+    takesString($tag);
+
+    return $x;
+}

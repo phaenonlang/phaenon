@@ -97,13 +97,16 @@ type PropertyTag struct {
 	Write bool
 }
 
-// AssertTag is @phpstan-assert[-if-true|-if-false] T $var.
+// AssertTag is @phpstan-assert[-if-true|-if-false] [!|=]T $var. A `!`
+// negates the assertion; a `=` makes it exact: the variable becomes T
+// itself rather than the part of its current type that is a T.
 type AssertTag struct {
 	Type    *TypeNode
 	Var     string
 	IfTrue  bool
 	IfFalse bool
 	Negated bool
+	Exact   bool
 }
 
 // TagError records a tag that could not be parsed.
@@ -319,6 +322,9 @@ func (d *Doc) handle(t tagText) {
 		a := AssertTag{IfTrue: name == "@assert-if-true", IfFalse: name == "@assert-if-false"}
 		if strings.HasPrefix(text, "!") {
 			a.Negated = true
+			text = strings.TrimSpace(text[1:])
+		} else if strings.HasPrefix(text, "=") {
+			a.Exact = true
 			text = strings.TrimSpace(text[1:])
 		}
 		typ, rest, err := parseTypePrefix(text)

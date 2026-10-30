@@ -152,6 +152,18 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 		return types.TMixed
 	}
 	switch name {
+	case "json_encode":
+		// JSON_THROW_ON_ERROR among the flags makes the false return
+		// impossible (PHPStan's JsonThrowOnErrorDynamicReturnTypeExtension).
+		var flags ast.Expr
+		for i, a := range args.Args {
+			if (a.Name == nil && i == 1) || (a.Name != nil && a.Name.Name == "flags") {
+				flags = a.Value
+			}
+		}
+		if flags != nil && mentionsConst(flags, "json_throw_on_error") {
+			return types.Subtract(ret, types.TFalse, x.p())
+		}
 	case "get_class":
 		if len(args.Args) == 1 {
 			return types.ClassString{Of: types.StripNull(argType(0))}
@@ -224,6 +236,19 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 		return types.Array{Key: types.TInt, Value: types.TMixed, List: true}
 	}
 	return ret
+}
+
+// mentionsConst reports a constant expression (`A | B`, parentheses) that
+// names the constant, compared case-insensitively.
+func mentionsConst(e ast.Expr, name string) bool {
+	switch e := e.(type) {
+	case *ast.Binary:
+		return mentionsConst(e.Left, name) || mentionsConst(e.Right, name)
+	case *ast.Paren:
+		return mentionsConst(e.Expr, name)
+	}
+	n, ok := constName(e)
+	return ok && n == name
 }
 
 func keyOrArrayKey(k types.Type) types.Type {

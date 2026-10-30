@@ -37,6 +37,18 @@ function hash_pbkdf2(string $algo, #[\SensitiveParameter] string $password, stri
 function hash_equals(#[\SensitiveParameter] string $known_string, #[\SensitiveParameter] string $user_string): bool {}
 
 /**
+ * @param string|bytes $string1
+ * @param string|bytes $string2
+ */
+function strcmp(string $string1, string $string2): int {}
+
+/**
+ * @param string|bytes $string1
+ * @param string|bytes $string2
+ */
+function strncmp(string $string1, string $string2, int $length): int {}
+
+/**
  * @param string|bytes $string
  * @return ($binary is true ? bytes : string)
  */
