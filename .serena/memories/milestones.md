@@ -42,8 +42,9 @@ and [[open-items]].
    (rows above); the runtime package carries `Seq`, `Map`, `Str`, `Bytes` with 95 tests
    (2026-10-30, `../runtime` `34ab0b3`). The `tequila/core` dogfood has started ([[dogfood]]):
    first pass over the PHP sources, 754 → 538, the checker gaps it showed fixed with the fixture
-   `tequila-core.phn`. Left: the PhpStorm plugin following the method syntax (in progress), then
-   core's exclusions, migrate, suite.
+   `tequila-core.phn`. The PhpStorm plugin parses Phaenon syntax and completes the method syntax
+   (2026-10-31, `../jetbrains` `f7a05b0`). Left for M4: the core findings (363 on 775 files,
+   mostly level-9 strictness), its `phn build` and suite on compiled output, generated plugin stubs.
 2. ~~`tequila/mongodb-odm` as the next generics dogfood target~~ — done 2026-10-29 up to the
    level-8 question above; then `tequila/core` with M4.
 
