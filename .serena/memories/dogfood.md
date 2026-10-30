@@ -90,10 +90,18 @@ push dogfood work without a maintainer's go-ahead.
   tests/Upgrade --exclude tests/Types --exclude src/PHPStan --exclude src/Upgrade src tests`
   (`tests/Types` holds `assertType()` cases for PHPStan; flag added 2026-10-31): **775 files, 363
   errors** at the end of the overnight session, 189 of them `mixed`-related level-9 strictness,
-  16 `bytes` into `string`.
+  16 `bytes` into `string`; **325** on 2026-10-31 after `json_encode`/`JSON_THROW_ON_ERROR`, the
+  exact assert form, `strcmp` in the overlay, and two commits on the branch: the migration itself
+  (`0589e1a`, hooks skipped: no compiled PHP to run them on) and the types the checker asked for
+  (`2c5754b`: `AbstractUuidAggregateId::fromBinary(bytes)`, `mixed $level` in the test loggers).
+  Twelve `bytes` into vendor `string` remain, pending the decision in [[open-items]].
+- `main` is being raised to PHPStan level max in a separate worktree
+  (`~/labs/tequila/core-stan-max`, branch `chore/phpstan-level-max`, ~408 findings at level max
+  on 8352ca6, mostly `mixed` in tests), as mongodb-odm was in its PR #45, so the dogfood has a
+  level-max baseline to compare against.
 - Next: work the remaining findings down (level-9 `mixed` strictness dominates: `mixed` into
-  `string`/`array`/`resource`, `array` into `array<string, mixed>`), decide the `bytes`-in-PHP
-  question ([[open-items]]), then `phn build` and the suite on compiled output.
+  `string`/`array`/`resource`, `array` into `array<string, mixed>`), rebase the dogfood branch on
+  the level-max `main` once merged, then `phn build` and the suite on compiled output.
 
 ## Next targets (roadmap §3)
 

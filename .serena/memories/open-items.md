@@ -72,16 +72,20 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 - ~~`phn check` has no exclude configuration~~ — `--exclude PATH` (repeatable) on `build` and
   `check` since 2026-10-31; a project file (`phaenon.json`) can come when the Composer plugin does.
-- `bytes` in **PHP-mode** files: the overlay's producers (`random_bytes()`, `Binary::getData()`)
-  make plain `.php` code report `bytes` into `string` (13 in core), which PHPStan never will.
-  Decide whether a `.php` file sees `bytes` as `string` (strings.md §5 says "a PHP caller sees
-  string").
-- `@phpstan-assert-if-true =\Closure(mixed): Response $arm` — the `=` (exact type) prefix is not
-  parsed (`P4001`).
-- Runtime package review notes (from its test suite, 2026-10-30): `Str::indexOf($s, $n, $from)`
-  throws PHP's `ValueError` when `$from` is past the end; `Str::replaceAll` with an empty key
-  makes `strtr` warn; `Seq::unique` compares loosely (`[1, '1']` → `[1]`). None judged a bug;
-  guards in the `.phn` sources if wanted.
+- **`bytes` into a `string` parameter that PHP code declares** (restated 2026-10-31; the earlier
+  "PHP-mode files" framing was wrong, every file in core is `.phn`): `Uuid::fromBinary(string)`,
+  `MessageId::fromBinary(string)`, `assertStringContainsString()` take binary in `string` because
+  PHP has no other word; twelve calls in core, eight of them `Uuid::fromBinary($binary->getData())`.
+  Today each needs `(string)`; the alternative is that a `string` declared in a PHP-mode file
+  accepts `bytes` (strings.md §5, open bullet). A maintainer's decision.
+- ~~`@phpstan-assert-if-true =T` prefix~~ — parsed since 2026-10-31 (exact form; checker.md §9).
+- ~~`json_encode(…, JSON_THROW_ON_ERROR)` typed `string|false`~~ — `string` since 2026-10-31.
+- ~~Runtime package review notes~~ — guarded 2026-10-31 in the `.phn` sources: `Str::indexOf`
+  answers `null` for an offset outside the string, `Str::replaceAll` throws `ValueError` on an
+  empty search string, `Seq::unique` compares strictly (`../runtime` `619873b`).
+- PSR-3 `log($level)` implementations: `P2516` wants a type; `mixed $level` is the spelling (the
+  interface leaves it untyped, so `mixed` is what it is). No compiler change; core's test loggers
+  got it 2026-10-31.
 
 ## M6 — tooling, analysis rules
 
