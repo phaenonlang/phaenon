@@ -72,8 +72,12 @@ push dogfood work without a maintainer's go-ahead.
   Local only, nothing committed there yet.
 - The library is PHPStan **level 8** (`treatPhpDocTypesAsCertain: false`), 548 PHP files in
   `src/` + `tests/`; `phn check src tests` reads 810 files in about a second.
-- First pass, plain PHP (no migrate yet): 754 → **538 errors** after a day of checker fixes
-  (`checker.md` §9, 2026-10-30 bullet; fixture `internal/checker/testdata/tequila-core.phn`).
+- First pass, plain PHP: 754 → **538 errors** after a day of checker fixes (`checker.md` §9,
+  2026-10-30 bullets; fixture `internal/checker/testdata/tequila-core.phn`). Then **`phn migrate
+  src tests`**: 810 `.phn` (the `.php` removed in the worktree, uncommitted), 252 docblock tags
+  kept; the migrated tree checks at **502 errors**, 388 outside the tooling directories, 8 of them
+  `P2516` — the PSR-3 `log($level, …)` parameter of anonymous loggers, which Phaenon wants spelled
+  `mixed $level`.
   What is left, by kind: ~250 `P2103` and ~40 `P2312`, mostly level-9 strictness core never ran
   at (`mixed` into `string`/`array`/`resource`, `array` into `array<string, mixed>`), 13 of
   them `bytes` into `string` (the new overlay typing `random_bytes`, `hash(…, true)`,
@@ -83,7 +87,8 @@ push dogfood work without a maintainer's go-ahead.
   `P2202` return types, mostly `mixed`. Suspected checker gaps still to look at: the few
   `P2105 … on never`, `P2302`, `P2402`.
 - Next: decide the exclusion of the tooling directories (an exclude option for `phn check`, or
-  listing paths), then `phn migrate`, then the suite on compiled output.
+  listing paths), work the remaining findings down (level-9 `mixed` strictness dominates), then
+  `phn build` and the suite on compiled output.
 
 ## Next targets (roadmap §3)
 
