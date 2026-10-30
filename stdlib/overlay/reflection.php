@@ -204,3 +204,15 @@ interface BackedEnum extends UnitEnum
 
     public static function tryFrom(int|string $value): ?static;
 }
+
+class ReflectionUnionType extends ReflectionType
+{
+    /** @return list<ReflectionNamedType|ReflectionIntersectionType> */
+    public function getTypes(): array {}
+}
+
+class ReflectionIntersectionType extends ReflectionType
+{
+    /** @return list<ReflectionNamedType> */
+    public function getTypes(): array {}
+}

@@ -456,11 +456,39 @@ func (x *fnCtx) constFetch(e *ast.ConstFetch) types.Type {
 	ns, global := x.res.Scope().ResolveConst(e.Name)
 	for _, name := range []string{ns, global} {
 		if k := x.p().Constant(name); k != nil {
-			return x.p().ConstantType(k)
+			t := x.p().ConstantType(k)
+			if dynamicConstants[strings.ToLower(name)] {
+				// PHP_OS is a string, not this machine's 'Darwin'; a tag
+				// (`@var 4|8` on PHP_INT_SIZE) says what the values can be.
+				if k.Doc && k.Type != nil {
+					t = k.Type
+				} else {
+					t = widenType(t)
+				}
+			}
+			return t
 		}
 	}
 	x.report(e.S, P2003, "unknown constant %s", global)
 	return types.TError
+}
+
+// dynamicConstants are the constants whose value depends on the machine,
+// the build or the version of PHP: their type is known, their value is not
+// (PHPStan's dynamicConstantNames). PHP_INT_MAX and PHP_INT_MIN keep their
+// 64-bit values: defaults such as explode()'s limit are read from them.
+var dynamicConstants = map[string]bool{
+	"php_version": true, "php_major_version": true, "php_minor_version": true, "php_release_version": true,
+	"php_version_id": true, "php_extra_version": true, "php_windows_version_major": true,
+	"php_windows_version_minor": true, "php_windows_version_build": true, "php_zts": true, "php_debug": true,
+	"php_maxpathlen": true, "php_os": true, "php_os_family": true, "php_sapi": true, "php_eol": true,
+	"php_int_size": true, "php_float_dig": true,
+	"php_float_epsilon": true, "php_float_min": true, "php_float_max": true, "default_include_path": true,
+	"pear_install_dir": true, "pear_extension_dir": true, "php_extension_dir": true, "php_prefix": true,
+	"php_bindir": true, "php_binary": true, "php_mandir": true, "php_libdir": true, "php_datadir": true,
+	"php_sysconfdir": true, "php_localstatedir": true, "php_config_file_path": true,
+	"php_config_file_scan_dir": true, "php_shlib_suffix": true, "php_fd_setsize": true, "iconv_impl": true,
+	"libxml_version": true, "libxml_dotted_version": true, "openssl_version_number": true, "openssl_version_text": true,
 }
 
 func (x *fnCtx) magicConst(e *ast.MagicConst) types.Type {
@@ -1490,6 +1518,10 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 	if e.Op == token.Kind('=') {
 		expected := x.targetType(e.Target, env)
 		vt := x.expr(e.Value, env, expected)
+		if lit, ok := e.Target.(*ast.ArrayLit); ok {
+			x.destructure(lit, vt, env, e.S, e.Value)
+			return vt
+		}
 		x.assignTo(e.Target, vt, env, e.S)
 		if v, ok := e.Target.(*ast.Variable); ok {
 			env.setNative(v.Name, x.nativeOf(e.Value, env))
@@ -1622,7 +1654,7 @@ func (x *fnCtx) assignTo(target ast.Expr, vt types.Type, env *state, span ast.Sp
 	case *ast.Index:
 		x.assignIndex(t, vt, env, span)
 	case *ast.ArrayLit:
-		x.destructure(t, vt, env, span)
+		x.destructure(t, vt, env, span, nil)
 	case *ast.VariableVariable:
 		x.expr(t.Expr, env, nil)
 		x.removed(t.S, "variable variables ($$x)", "a map<string, mixed>")
@@ -1834,8 +1866,10 @@ func arrayWithEntry(s types.Shape, key types.Type, vt types.Type) types.Type {
 	return types.Array{Key: types.MakeUnion(shapeKeys(s), key), Value: types.MakeUnion(shapeValues(s), vt), NonEmpty: true}
 }
 
-// destructure handles [$a, 'k' => $b] = value.
-func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast.Span) {
+// destructure handles [$a, 'k' => $b] = value. src, when given, is the
+// value's expression: an offset narrowed on it (`is_array($reply[1] ??
+// null)`) is what the matching variable receives.
+func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast.Span, src ast.Expr) {
 	if t.Kind == ast.ArrayList {
 		x.removed(t.S, "list()", "[...] destructuring")
 	}
@@ -1853,7 +1887,20 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 			pos++
 		}
 		var elem types.Type
-		if types.IsMixed(vt) {
+		if src != nil {
+			var idx ast.Expr = item.Key
+			if idx == nil {
+				idx = &ast.IntLit{Raw: strconv.FormatInt(pos-1, 10)}
+			}
+			if key, ok := pathKey(&ast.Index{Array: src, Index: idx}); ok {
+				if nt, found := env.getPath(key); found {
+					elem = nt
+				}
+			}
+		}
+		if elem != nil {
+			// narrowed on the source
+		} else if types.IsMixed(vt) {
 			elem = types.TMixed
 		} else {
 			var out []types.Type

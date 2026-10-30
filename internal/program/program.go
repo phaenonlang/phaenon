@@ -102,6 +102,11 @@ func (p *Program) LoadStubs() error {
 			return fmt.Errorf("%s: %w", s.Path, err)
 		}
 	}
+	// The values behind the stubs' UNKNOWN constants (declareConstant fills
+	// them in; the @var types stay).
+	if _, err := p.AddFile("<stub>/constants.php", stdlib.Constants(), lexer.ModePHP, false); err != nil {
+		return fmt.Errorf("constants.php: %w", err)
+	}
 	for _, s := range stdlib.Runtime() {
 		mode := lexer.ModePHP
 		if strings.HasSuffix(s.Path, ".phn") {
@@ -283,6 +288,31 @@ func (p *Program) Variances(name string) []types.Variance {
 
 // Exists implements types.Hierarchy.
 func (p *Program) Exists(name string) bool { return p.Class(name) != nil }
+
+// IteratorArgs implements types.Hierarchy: the Traversable<K, V> arguments
+// a class inherits (`interface Stream extends \Traversable<int, Frame>`,
+// `class Bag implements IteratorAggregate<string, T>`).
+func (p *Program) IteratorArgs(c types.Class) (types.Type, types.Type, bool) {
+	cl := p.Class(c.Name)
+	if cl == nil {
+		return nil, nil, false
+	}
+	args, ok := cl.SuperArgs("Traversable", c.Args)
+	if !ok || len(args) != 2 {
+		return nil, nil, false
+	}
+	return args[0], args[1], true
+}
+
+// IsInvokable implements types.Hierarchy.
+func (p *Program) IsInvokable(name string) bool {
+	c := p.Class(name)
+	if c == nil {
+		return false
+	}
+	c.Signature()
+	return c.FindMethod("__invoke") != nil
+}
 
 // TraitUsers returns the loaded classes that use the trait, sorted by name.
 func (p *Program) TraitUsers(trait string) []*Class {

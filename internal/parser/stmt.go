@@ -68,16 +68,20 @@ func (p *Parser) statement() ast.Stmt {
 		p.next()
 		return &ast.Nop{S: p.span(start)}
 	case token.T_IF:
-		return p.ifStmt()
+		s := p.ifStmt()
+		if i, ok := s.(*ast.If); ok {
+			i.Doc = doc
+		}
+		return s
 	case token.T_WHILE:
 		p.next()
-		w := &ast.While{Cond: p.parenExpr()}
+		w := &ast.While{Doc: doc, Cond: p.parenExpr()}
 		w.Body, w.Alt = p.loopBody(token.T_ENDWHILE)
 		w.S = p.span(start)
 		return w
 	case token.T_DO:
 		p.next()
-		d := &ast.DoWhile{Body: p.statement()}
+		d := &ast.DoWhile{Doc: doc, Body: p.statement()}
 		p.expect(token.T_WHILE)
 		d.Cond = p.parenExpr()
 		p.semi()
@@ -86,7 +90,7 @@ func (p *Parser) statement() ast.Stmt {
 	case token.T_FOR:
 		p.next()
 		p.expect(token.Kind('('))
-		f := &ast.For{}
+		f := &ast.For{Doc: doc}
 		f.Init = p.forExprs(token.Kind(';'))
 		p.expect(token.Kind(';'))
 		f.Cond = p.forExprs(token.Kind(';'))
@@ -99,7 +103,11 @@ func (p *Parser) statement() ast.Stmt {
 	case token.T_FOREACH:
 		return p.foreachStmt()
 	case token.T_SWITCH:
-		return p.switchStmt()
+		s := p.switchStmt()
+		if sw, ok := s.(*ast.Switch); ok {
+			sw.Doc = doc
+		}
+		return s
 	case token.T_BREAK, token.T_CONTINUE:
 		k := p.next().Kind
 		var levels ast.Expr
@@ -158,14 +166,14 @@ func (p *Parser) statement() ast.Stmt {
 		}
 	case token.T_ECHO:
 		p.next()
-		e := &ast.Echo{Exprs: p.exprList()}
+		e := &ast.Echo{Doc: doc, Exprs: p.exprList()}
 		p.semi()
 		e.S = p.span(start)
 		return e
 	case token.T_UNSET:
 		p.next()
 		p.expect(token.Kind('('))
-		u := &ast.Unset{}
+		u := &ast.Unset{Doc: doc}
 		for !p.at(token.Kind(')')) {
 			u.Vars = append(u.Vars, p.expr())
 			if !p.accept(token.Kind(',')) {
@@ -202,7 +210,11 @@ func (p *Parser) statement() ast.Stmt {
 		d.S = p.span(start)
 		return d
 	case token.T_TRY:
-		return p.tryStmt()
+		s := p.tryStmt()
+		if t, ok := s.(*ast.Try); ok {
+			t.Doc = doc
+		}
+		return s
 	case token.T_GOTO:
 		p.next()
 		g := &ast.Goto{Label: p.stringIdent()}

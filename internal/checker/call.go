@@ -81,6 +81,9 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	if e.Args != nil && e.Args.FirstClassCallable {
 		return x.callableOf(sig)
 	}
+	if lower == "array_map" && e.Args != nil && len(e.Args.Args) > 2 {
+		x.arrayMapOverSeveral(sig, e.Args, env)
+	}
 	ret := x.checkCall(sig, e.Args, env, e.S, expected)
 	if _, isNever := ret.(types.Never); isNever {
 		env.dead = true
@@ -89,6 +92,79 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 		x.arrayPush(e, env)
 	}
 	return x.specialReturn(lower, e, ret, env)
+}
+
+// expectsCallable reports a parameter type with a callable member.
+func expectsCallable(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		if _, ok := m.(types.Callable); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// namedCallable is the signature behind a callable string: a function
+// ('strval', '\\is_string') or a static method ('Foo::bar'); nil when the
+// name is unknown.
+func (x *fnCtx) namedCallable(name string) types.Type {
+	name = strings.TrimPrefix(name, "\\")
+	if cls, meth, ok := strings.Cut(name, "::"); ok {
+		cl := x.p().Class(cls)
+		if cl == nil {
+			return nil
+		}
+		cl.Signature()
+		m := cl.FindMethod(meth)
+		if m == nil {
+			return nil
+		}
+		return x.callableOf(&signature{name: cl.Name + "::" + m.Name + "()", params: m.Params, ret: m.Return, typeParams: m.TypeParams, decl: m.Class, recv: types.Class{Name: cl.Name}})
+	}
+	fn := x.lookupFunction(&ast.Name{Parts: strings.Split(name, "\\"), Kind: ast.NameFullyQualified})
+	if fn == nil {
+		return nil
+	}
+	fn.Signature()
+	return x.callableOf(&signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File)})
+}
+
+// arrayMapOverSeveral adapts array_map's signature to a call with several
+// arrays: the callback takes one value of each, in order, and the result
+// is a list (keys are not preserved then).
+func (x *fnCtx) arrayMapOverSeveral(sig *signature, args *ast.ArgList, env *state) {
+	if len(sig.params) < 2 {
+		return
+	}
+	cb, ok := sig.params[0].Type.(types.Callable)
+	if !ok || !cb.HasSig {
+		return
+	}
+	known := map[ast.Expr]types.Type{}
+	var values []types.CallableParam
+	for _, a := range args.Args[1:] {
+		if a.Value == nil || a.Unpack || a.Name != nil {
+			return
+		}
+		t := x.expr(a.Value, env, nil)
+		known[a.Value] = t
+		_, v, ok := types.IterableKV(t, x.p())
+		if !ok {
+			v = types.TMixed
+		}
+		values = append(values, types.CallableParam{Type: v})
+	}
+	callback := *sig.params[0]
+	callback.Type = types.Callable{HasSig: true, Params: values, Return: cb.Return}
+	params := []*program.Param{&callback}
+	for _, p := range sig.params[1:] {
+		q := *p
+		q.Type = types.TArray
+		params = append(params, &q)
+	}
+	sig.params = params
+	sig.ret = types.Array{Key: types.TInt, Value: cb.Return, List: true}
+	sig.known = known
 }
 
 // arrayPush retypes the by-reference array of array_push / array_unshift
@@ -185,9 +261,14 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 	case "array_filter":
 		if a, ok := argType(0).(types.Array); ok {
 			if r, ok := ret.(types.Array); ok {
-				return types.Array{Key: r.Key, Value: r.Value, List: false, NonEmpty: false}
+				v := r.Value
+				if len(args.Args) == 2 && args.Args[1].Value != nil {
+					if nv := x.filteredValue(args.Args[1].Value, a.Value, env); nv != nil {
+						v = nv
+					}
+				}
+				return types.Array{Key: r.Key, Value: v, List: false, NonEmpty: false}
 			}
-			_ = a
 		}
 	case "array_values":
 		if r, ok := ret.(types.Array); ok {
@@ -223,8 +304,63 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 			}
 			return merged
 		}
-	case "sprintf", "vsprintf", "implode", "join", "str_repeat", "strtolower", "strtoupper", "ucfirst", "trim", "ltrim", "rtrim", "substr":
+	case "sprintf", "vsprintf":
+		// A format with text around its conversions never gives an empty
+		// string (PHPStan says non-falsy-string).
+		if len(args.Args) > 0 {
+			if lit, ok := args.Args[0].Value.(*ast.StringLit); ok && formatHasText(program.StringValue(lit)) {
+				return types.String{NonEmpty: true}
+			}
+		}
 		return ret
+	case "implode", "join", "str_repeat", "strtolower", "strtoupper", "ucfirst", "trim", "ltrim", "rtrim", "substr":
+		return ret
+	case "filter_var":
+		// The filter constant says what comes back, the flags whether
+		// failure is false or null (PHPStan's FilterVar extension).
+		if len(args.Args) == 0 {
+			return ret
+		}
+		var filter int64 = 516 // FILTER_DEFAULT
+		if len(args.Args) >= 2 {
+			lit, ok := argType(1).(types.Int)
+			if !ok || lit.Lo != lit.Hi {
+				return ret
+			}
+			filter = lit.Lo
+		}
+		var t types.Type
+		switch filter {
+		case 257: // FILTER_VALIDATE_INT
+			t = types.TInt
+		case 259: // FILTER_VALIDATE_FLOAT
+			t = types.TFloat
+		case 258: // FILTER_VALIDATE_BOOL
+			t = types.TBool
+		case 272, 273, 274, 275, 276, 277, 516: // REGEXP, URL, EMAIL, IP, MAC, DOMAIN, DEFAULT
+			t = types.TString
+		default:
+			return ret
+		}
+		var fail types.Type = types.TFalse
+		if len(args.Args) >= 3 && args.Args[2].Value != nil && mentionsConst(args.Args[2].Value, "filter_null_on_failure") {
+			fail = types.TNull
+		}
+		return types.MakeUnion(t, fail)
+	case "min", "max":
+		var ts []types.Type
+		if len(args.Args) == 1 {
+			_, v, ok := types.IterableKV(argType(0), x.p())
+			if !ok {
+				return ret
+			}
+			ts = []types.Type{v}
+		} else {
+			for i := range args.Args {
+				ts = append(ts, argType(i))
+			}
+		}
+		return minMaxType(name == "max", ts)
 	case "iterator_to_array":
 		preserve := len(args.Args) < 2 || isTrueLit(args.Args[1].Value)
 		k, v, _ := types.IterableKV(argType(0), x.p())
@@ -238,6 +374,131 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 	return ret
 }
 
+// pregMatchesType is what preg_match() / preg_match_all() leave in
+// $matches under the flags written at the call: PREG_OFFSET_CAPTURE pairs
+// every match with its offset, PREG_SET_ORDER lists the sets. nil when the
+// overlay's default applies.
+func pregMatchesType(sigName, param string, args *ast.ArgList) types.Type {
+	name := strings.ToLower(sigName)
+	if param != "matches" || (name != "preg_match()" && name != "preg_match_all()") || args == nil {
+		return nil
+	}
+	var flags ast.Expr
+	for i, a := range args.Args {
+		if (a.Name == nil && i == 3) || (a.Name != nil && a.Name.Name == "flags") {
+			flags = a.Value
+		}
+	}
+	if flags == nil {
+		return nil
+	}
+	offsets := mentionsConst(flags, "preg_offset_capture")
+	setOrder := mentionsConst(flags, "preg_set_order")
+	if !offsets && !setOrder {
+		return nil
+	}
+	var match types.Type = types.TString
+	if offsets {
+		match = types.Shape{List: true, Entries: []types.ShapeEntry{{IsInt: true, IntKey: 0, Type: types.TString}, {IsInt: true, IntKey: 1, Type: types.TInt}}}
+	}
+	group := types.Array{Key: types.TArrayKey, Value: match}
+	if name == "preg_match()" {
+		return group
+	}
+	if setOrder {
+		return types.Array{Key: types.TInt, Value: group, List: true}
+	}
+	return types.Array{Key: types.TArrayKey, Value: types.Array{Key: types.TInt, Value: match, List: true}}
+}
+
+// filteredValue is the value type array_filter() keeps under its callback:
+// what the callback's condition narrows the value to (`fn (?string $a) =>
+// null !== $a` keeps strings), or what a predicate name ('is_string')
+// asks for. nil when the callback says nothing usable.
+func (x *fnCtx) filteredValue(callback ast.Expr, value types.Type, env *state) types.Type {
+	var param string
+	var cond ast.Expr
+	switch f := callback.(type) {
+	case *ast.ArrowFunc:
+		if len(f.Params) != 1 {
+			return nil
+		}
+		param, cond = f.Params[0].Var.Name, f.Body
+	case *ast.Closure:
+		if len(f.Params) != 1 || len(f.Body) != 1 {
+			return nil
+		}
+		r, ok := f.Body[0].(*ast.Return)
+		if !ok || r.Expr == nil {
+			return nil
+		}
+		param, cond = f.Params[0].Var.Name, r.Expr
+	case *ast.StringLit:
+		name := strings.ToLower(strings.TrimPrefix(program.StringValue(f), "\\"))
+		if target := predicateTarget(name); target != nil {
+			return types.Intersect(value, target, x.p())
+		}
+		return nil
+	default:
+		return nil
+	}
+	saved := x.c.mark()
+	cenv := env.clone()
+	cenv.set(param, value)
+	then, _ := x.cond(cond, cenv)
+	x.c.rollback(saved) // the callback was checked as an argument already
+	if info, ok := then.get(param); ok {
+		return info.t
+	}
+	return nil
+}
+
+// minMaxType types min()/max() of the given arguments: the range the
+// result can lie in when every argument is an int (`max(1, $n)` is
+// int<1, max>), else the union of the arguments.
+func minMaxType(isMax bool, ts []types.Type) types.Type {
+	var ints []types.Int
+	for _, t := range ts {
+		for _, m := range types.Members(t) {
+			i, ok := m.(types.Int)
+			if !ok {
+				return types.MakeUnion(ts...)
+			}
+			ints = append(ints, i)
+		}
+	}
+	if len(ints) == 0 {
+		return types.MakeUnion(ts...)
+	}
+	lo, hi := ints[0].Lo, ints[0].Hi
+	for _, i := range ints[1:] {
+		if isMax {
+			lo, hi = max(lo, i.Lo), max(hi, i.Hi)
+		} else {
+			lo, hi = min(lo, i.Lo), min(hi, i.Hi)
+		}
+	}
+	return types.Int{Lo: lo, Hi: hi}
+}
+
+// formatHasText reports a printf format with literal text beside its
+// conversion specifications: 'publish %s' has, '%s' has not.
+func formatHasText(format string) bool {
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			return true
+		}
+		i++
+		if i < len(format) && format[i] == '%' {
+			return true // a literal percent sign
+		}
+		for i < len(format) && !((format[i] >= 'a' && format[i] <= 'z') || (format[i] >= 'A' && format[i] <= 'Z')) {
+			i++
+		}
+	}
+	return false
+}
+
 // mentionsConst reports a constant expression (`A | B`, parentheses) that
 // names the constant, compared case-insensitively.
 func mentionsConst(e ast.Expr, name string) bool {
@@ -246,6 +507,13 @@ func mentionsConst(e ast.Expr, name string) bool {
 		return mentionsConst(e.Left, name) || mentionsConst(e.Right, name)
 	case *ast.Paren:
 		return mentionsConst(e.Expr, name)
+	case *ast.ArrayLit:
+		for _, it := range e.Items {
+			if it != nil && it.Value != nil && mentionsConst(it.Value, name) {
+				return true
+			}
+		}
+		return false
 	}
 	n, ok := constName(e)
 	return ok && n == name
@@ -790,8 +1058,37 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 		}
 		return types.Class{Name: c.Name, Args: args}
 	}
+	if x.class != nil && len(x.class.TypeParams) > 0 && namesClass(recv, x.class.Name) {
+		// `new static($id)` inside the generic class: T is whatever the
+		// runtime class makes of it, so an argument is held to T's bound.
+		subst := x.memberSubst(recv, ctor.Class)
+		if subst == nil {
+			subst = map[string]types.Type{}
+		}
+		for _, tp := range x.class.TypeParams {
+			if tp.Bound != nil {
+				subst[tp.Name] = tp.Bound
+			} else {
+				subst[tp.Name] = types.TMixed
+			}
+		}
+		sig.subst = subst
+	}
 	x.checkCall(sig, e.Args, env, e.S, nil)
 	return result
+}
+
+// namesClass reports a static, $this or class type of the named class.
+func namesClass(t types.Type, name string) bool {
+	switch t := t.(type) {
+	case types.Static:
+		return t.Of != nil && strings.EqualFold(t.Of.Name, name)
+	case types.This:
+		return t.Of != nil && strings.EqualFold(t.Of.Name, name)
+	case types.Class:
+		return strings.EqualFold(t.Name, name)
+	}
+	return false
 }
 
 // ------------------------------------------------------------------ argument checking
@@ -983,6 +1280,11 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			if at = sig.known[b.arg.Value]; at == nil {
 				at = x.expr(b.arg.Value, env, pt)
 			}
+			if lit, ok := at.(types.StringLit); ok && expectsCallable(pt) {
+				if c := x.namedCallable(lit.V); c != nil {
+					at = c // 'strval' passed as a callback: its signature types the call
+				}
+			}
 		}
 		argTypes[i] = at
 		if b.arg.Unpack {
@@ -1129,6 +1431,9 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		if out != nil {
 			out = x.evalConditional(types.Substitute(types.Substitute(out, rename), subst), argByName)
 		}
+		if pm := pregMatchesType(sig.name, b.param.Name, args); pm != nil {
+			out = pm
+		}
 		if out == nil {
 			out = types.Substitute(types.Substitute(b.param.Type, rename), subst)
 			defined := argTypes[i] != nil && !x.maybeUndefined(b.arg.Value, env)
@@ -1174,16 +1479,19 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 // `T is Foo ? A : B`) once the arguments and type parameters are known.
 // An undecidable condition yields the union of both branches.
 func (x *fnCtx) evalConditional(t types.Type, args map[string]types.Type) types.Type {
-	switch c := t.(type) {
-	case types.Conditional:
+	return types.MapDeep(t, func(m types.Type) types.Type {
+		c, ok := m.(types.Conditional)
+		if !ok {
+			return m
+		}
+		// The branches were mapped already (MapDeep works bottom-up): a
+		// conditional inside a shape inside a list resolves as well.
 		subject := c.Subject
 		if c.ParamName != "" {
 			subject = args[c.ParamName]
 		}
-		then := x.evalConditional(c.Then, args)
-		els := x.evalConditional(c.Else, args)
 		if subject == nil || isParamType(subject) || types.IsMixed(subject) {
-			return types.MakeUnion(then, els)
+			return types.MakeUnion(c.Then, c.Else)
 		}
 		yes := types.IsSubtype(subject, c.Target, x.p())
 		no := !types.Overlaps(subject, c.Target, x.p())
@@ -1192,15 +1500,12 @@ func (x *fnCtx) evalConditional(t types.Type, args map[string]types.Type) types.
 		}
 		switch {
 		case yes:
-			return then
+			return c.Then
 		case no:
-			return els
+			return c.Else
 		}
-		return types.MakeUnion(then, els)
-	case types.Union:
-		return types.Map(c, func(m types.Type) types.Type { return x.evalConditional(m, args) })
-	}
-	return t
+		return types.MakeUnion(c.Then, c.Else)
+	})
 }
 
 // freshParams gives type parameters per-call identities: T becomes

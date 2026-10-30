@@ -60,10 +60,75 @@ func (p *Program) LoadExtensions(php, cacheDir string, embedded func(lower strin
 		}
 		loaded = append(loaded, e.Name)
 	}
+	// The values of the constants php defines: php-src's stubs declare most
+	// of them UNKNOWN (`const PHP_URL_USER = UNKNOWN` with a @var), and a
+	// conditional type decides on the value.
+	if src, err := cachedConstants(php, cacheDir, phpVersion); err != nil {
+		problems = append(problems, "constants: "+err.Error())
+	} else if _, err := p.AddFile("<ext>/constants.php", src, lexer.ModePHP, false); err != nil {
+		problems = append(problems, "constants: "+err.Error())
+	}
 	if len(problems) > 0 {
 		return loaded, fmt.Errorf("%s", strings.Join(problems, "; "))
 	}
 	return loaded, nil
+}
+
+// constantsScript prints every scalar constant php defines, by namespace.
+const constantsScript = `
+$out = [];
+foreach (get_defined_constants(true) as $ext => $cs) {
+    if ($ext === 'user') {
+        continue;
+    }
+    foreach ($cs as $n => $v) {
+        if (!is_scalar($v) && $v !== null) {
+            continue;
+        }
+        $i = strrpos($n, '\\');
+        $ns = $i === false ? '' : substr($n, 0, $i);
+        $short = $i === false ? $n : substr($n, $i + 1);
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $short) || in_array(strtolower($short), ['true', 'false', 'null'], true)) {
+            continue;
+        }
+        $out[$ns][] = 'const ' . $short . ' = ' . var_export($v, true) . ';';
+    }
+}
+echo "<?php\n";
+foreach ($out as $ns => $lines) {
+    echo $ns === '' ? "namespace {\n" : "namespace " . $ns . " {\n";
+    echo implode("\n", $lines), "\n}\n";
+}
+`
+
+// GenerateConstants renders the values of php's constants as PHP.
+func GenerateConstants(php string) ([]byte, error) {
+	cmd := exec.Command(php, "-r", constantsScript)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("reading the constants of %s: %v: %s", php, err, strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
+}
+
+func cachedConstants(php, cacheDir, phpVersion string) ([]byte, error) {
+	if cacheDir == "" {
+		return GenerateConstants(php)
+	}
+	path := filepath.Join(cacheDir, "phaenon", "ext", "constants-php"+fileSafe(phpVersion)+".php")
+	if src, err := os.ReadFile(path); err == nil {
+		return src, nil
+	}
+	src, err := GenerateConstants(php)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
+		_ = os.WriteFile(path, src, 0o644)
+	}
+	return src, nil
 }
 
 // LoadedExtensions asks php for its loaded extensions and its version.

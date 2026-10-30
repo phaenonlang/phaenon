@@ -15,6 +15,14 @@ func IsAcceptable(arg, param Type, h Hierarchy) bool {
 	if subtype(arg, param, h, 0) {
 		return true
 	}
+	// mixed is accepted where a type parameter without a bound is expected:
+	// the parameter can be anything, including mixed (PHPStan's
+	// TemplateMixedType).
+	if IsMixed(arg) {
+		if p, ok := param.(Param); ok && (p.Bound == nil || IsMixed(p.Bound)) {
+			return true
+		}
+	}
 	// int → float widening applies to every int member of the argument.
 	widened := Map(arg, func(m Type) Type {
 		if _, ok := m.(Int); ok {
@@ -114,6 +122,15 @@ func overlap2(x, y Type, h Hierarchy) bool {
 	}
 	if IsMixed(x) || IsMixed(y) {
 		return true
+	}
+	if ax, ok := x.(Array); ok {
+		if ay, ok := y.(Array); ok {
+			// array<string, V> is never a list (PHPStan says the same): the
+			// empty array they share does not make `$a is list` undecided.
+			if ax.List && !ay.List && !Overlaps(ay.Key, TInt, h) || ay.List && !ax.List && !Overlaps(ax.Key, TInt, h) {
+				return false
+			}
+		}
 	}
 	kx, ky := kindOf(x), kindOf(y)
 	if kx == kindAny || ky == kindAny {
@@ -461,10 +478,14 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 			}
 			return false
 		case Callable:
-			if h != nil && h.IsSubclassOf(a.Name, "Closure") {
+			if h != nil && (h.IsSubclassOf(a.Name, "Closure") || h.IsInvokable(a.Name)) {
 				return true
 			}
 			return false
+		case Static:
+			// `return new self()` where static is declared: in a final class
+			// self is static (PHPStan accepts it there and only there).
+			return h != nil && b.Of != nil && h.IsFinal(a.Name) && classSub(a, *b.Of, h, depth)
 		}
 		return false
 	case Static:
@@ -598,7 +619,7 @@ func callableSub(a, b Callable, h Hierarchy, depth int) bool {
 			continue
 		}
 		ap := a.Params[i]
-		if bp.Type != nil && ap.Type != nil && !subtype(bp.Type, ap.Type, h, depth+1) {
+		if bp.Type != nil && ap.Type != nil && !paramAccepts(bp.Type, ap.Type, h, depth+1) {
 			return false
 		}
 	}
@@ -617,6 +638,14 @@ func callableSub(a, b Callable, h Hierarchy, depth int) bool {
 		return true // `callable(): mixed` takes a void closure too, as PHPStan does
 	}
 	return subtype(a.Return, b.Return, h, depth+1)
+}
+
+// paramAccepts reports whether a callable's parameter of type inner takes
+// every value the expected signature passes (outer): acceptance rather
+// than subtyping, so int flows into float (PHP widens it) as PHPStan
+// allows.
+func paramAccepts(outer, inner Type, h Hierarchy, depth int) bool {
+	return IsAcceptable(outer, inner, h)
 }
 
 // intCovered reports whether range a is covered by the int members of ms.

@@ -206,6 +206,7 @@ type Constant struct {
 	Vis      Visibility
 	Final    bool
 	Type     types.Type // declared (native/docblock) type, nil = infer from Value
+	Doc      bool       // Type comes from a @var tag, which says more than the value
 	Value    ast.Expr
 	File     *File
 	Scope    *Scope
@@ -295,6 +296,7 @@ func (p *Program) collect(f *File) {
 					k := p.declareConstant(f, scope, scope.prefix()+c.Name.Name, c.Value, c.S)
 					if k != nil && k.Type == nil {
 						k.Type = docT
+						k.Doc = docT != nil
 					}
 				}
 			case *ast.ExprStmt:
@@ -411,12 +413,33 @@ func (s *Scope) Prefix() string { return s.prefix() }
 
 func (p *Program) declareConstant(f *File, scope *Scope, fqn string, value ast.Expr, span ast.Span) *Constant {
 	key := constKey(fqn)
-	if _, exists := p.constants[key]; exists && !p.override {
+	if existing, exists := p.constants[key]; exists && !p.override {
+		// php-src declares `const PHP_URL_USER = UNKNOWN` with a @var: the
+		// extension loaded into php knows the value, and the value is what
+		// a conditional type (`$component is int<0, max>`) decides on.
+		if isUnknownValue(existing.Value) && !isUnknownValue(value) {
+			existing.Value = value
+			existing.evaled, existing.evalType = 0, nil
+		}
 		return nil
 	}
 	k := &Constant{Name: fqn, Value: value, File: f, Scope: scope, Span: span}
 	p.constants[key] = k
 	return k
+}
+
+// isUnknownValue reports php-src's UNKNOWN placeholder for a constant value.
+func isUnknownValue(e ast.Expr) bool {
+	var n *ast.Name
+	switch e := e.(type) {
+	case *ast.Name: // the parser leaves a bare constant as a name
+		n = e
+	case *ast.ConstFetch:
+		n = e.Name
+	default:
+		return false
+	}
+	return len(n.Parts) == 1 && n.Parts[0] == "UNKNOWN"
 }
 
 // StringValue returns the value of a constant string literal (quotes

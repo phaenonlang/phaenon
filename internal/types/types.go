@@ -42,6 +42,12 @@ type Hierarchy interface {
 	// false when the class or the property is unknown. Object shapes
 	// (`object{records: list<string>}`) are matched against it.
 	PropertyType(class, name string) (Type, bool)
+	// IteratorArgs is the key and value type a class yields in foreach, from
+	// the Traversable<K, V> it implements, through its ancestors; ok is
+	// false when the class is unknown or not traversable.
+	IteratorArgs(c Class) (key, value Type, ok bool)
+	// IsInvokable reports a class with an __invoke() method: a callable.
+	IsInvokable(name string) bool
 }
 
 // Variance of a class type parameter.
@@ -1075,6 +1081,75 @@ func Map(t Type, f func(Type) Type) Type {
 		out = append(out, f(m))
 	}
 	return MakeUnion(out...)
+}
+
+// MapDeep rebuilds t bottom-up, applying f to every node after its parts
+// were mapped: array keys and values, shape entries, type arguments,
+// callable signatures, conditional branches, union and intersection members.
+func MapDeep(t Type, f func(Type) Type) Type {
+	if t == nil {
+		return nil
+	}
+	switch v := t.(type) {
+	case Union:
+		out := make([]Type, len(v.Types))
+		for i, m := range v.Types {
+			out[i] = MapDeep(m, f)
+		}
+		return f(MakeUnion(out...))
+	case Intersection:
+		out := make([]Type, len(v.Types))
+		for i, m := range v.Types {
+			out[i] = MapDeep(m, f)
+		}
+		return f(Intersection{Types: out})
+	case Array:
+		v.Key = MapDeep(v.Key, f)
+		v.Value = MapDeep(v.Value, f)
+		return f(v)
+	case Shape:
+		entries := make([]ShapeEntry, len(v.Entries))
+		for i, e := range v.Entries {
+			e.Type = MapDeep(e.Type, f)
+			entries[i] = e
+		}
+		v.Entries = entries
+		return f(v)
+	case Class:
+		if len(v.Args) > 0 {
+			args := make([]Type, len(v.Args))
+			for i, a := range v.Args {
+				args[i] = MapDeep(a, f)
+			}
+			v.Args = args
+		}
+		return f(v)
+	case ClassString:
+		if v.Of != nil {
+			v.Of = MapDeep(v.Of, f)
+		}
+		return f(v)
+	case Iterable:
+		v.Key = MapDeep(v.Key, f)
+		v.Value = MapDeep(v.Value, f)
+		return f(v)
+	case Callable:
+		if v.HasSig {
+			params := make([]CallableParam, len(v.Params))
+			for i, p := range v.Params {
+				p.Type = MapDeep(p.Type, f)
+				params[i] = p
+			}
+			v.Params = params
+			v.Return = MapDeep(v.Return, f)
+		}
+		return f(v)
+	case Conditional:
+		v.Then = MapDeep(v.Then, f)
+		v.Else = MapDeep(v.Else, f)
+		return f(v)
+	}
+	return f(t)
 }
 
 // Substitute replaces type parameters by name using subst and returns the

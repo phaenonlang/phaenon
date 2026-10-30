@@ -804,6 +804,7 @@ type (
 	// Echo is echo a, b; and the short tag form <?= a ?>.
 	Echo struct {
 		S     Span
+		Doc   string
 		Exprs []Expr
 		Short bool
 	}
@@ -834,6 +835,7 @@ type (
 	// If is if/elseif/else, braces or alternative syntax.
 	If struct {
 		S       Span
+		Doc     string
 		Cond    Expr
 		Then    Stmt
 		ElseIfs []*ElseIf
@@ -847,17 +849,20 @@ type (
 	}
 	While struct {
 		S    Span
+		Doc  string
 		Cond Expr
 		Body Stmt
 		Alt  bool
 	}
 	DoWhile struct {
 		S    Span
+		Doc  string
 		Body Stmt
 		Cond Expr
 	}
 	For struct {
 		S    Span
+		Doc  string
 		Init []Expr
 		Cond []Expr
 		Step []Expr
@@ -877,6 +882,7 @@ type (
 	}
 	Switch struct {
 		S       Span
+		Doc     string
 		Subject Expr
 		Cases   []*Case
 		Alt     bool
@@ -916,10 +922,12 @@ type (
 	}
 	Unset struct {
 		S    Span
+		Doc  string
 		Vars []Expr
 	}
 	Try struct {
 		S          Span
+		Doc        string
 		Body       []Stmt
 		Catches    []*Catch
 		Finally    []Stmt

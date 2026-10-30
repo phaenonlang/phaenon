@@ -187,10 +187,43 @@ function array_intersect_key(array $array, array ...$arrays): array {}
  * @template K of array-key
  * @template V
  * @param array<K, V> $array
- * @param array<V> ...$arrays
+ * @param array<mixed> ...$arrays
  * @return array<K, V>
  */
 function array_diff(array $array, array ...$arrays): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K> $keys
+ * @param V $value
+ * @return array<K, V>
+ */
+function array_fill_keys(array $keys, mixed $value): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<K, V> ...$replacements
+ * @return array<K, V>
+ */
+function array_replace(array $array, array ...$replacements): array {}
+
+/**
+ * Keys keep their type: a string key stays a string whatever its case.
+ *
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @return array<K, V>
+ */
+function array_change_key_case(array $array, int $case = CASE_LOWER): array {}
+
+/**
+ * @return ($start is int ? ($end is int ? list<int> : list<int|float>) : list<int|float|string>)
+ */
+function range(string|int|float $start, string|int|float $end, int|float $step = 1): array {}
 
 /**
  * @template V

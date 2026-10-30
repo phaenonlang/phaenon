@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -163,6 +164,19 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 		if p.NullSafe && nonNullType(t) {
 			x.narrowPath(env, p.Object, types.StripNull(x.pathType(p.Object, env)), false)
 		}
+	case *ast.Index:
+		// `is_string($data[$field])` with $field one of a few literals (a
+		// foreach over them) narrows each of those offsets, as PHPStan does.
+		if v, ok := p.Index.(*ast.Variable); ok {
+			if base, ok := pathKey(p.Array); ok {
+				if keys := literalOffsetKeys(x.pathType(v, env)); keys != nil {
+					for _, k := range keys {
+						env.setPath(base+k, t)
+					}
+					return
+				}
+			}
+		}
 	case *ast.Binary:
 		// `is_string($a['k'] ?? null)`: a type without null says the offset
 		// is set and of that type.
@@ -194,6 +208,26 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 	if key, ok := pathKey(e); ok {
 		env.setPath(key, t)
 	}
+}
+
+// literalOffsetKeys spells a union of literal keys the way pathKey spells
+// offsets ("['service']", "[3]"); nil when a member is not a literal.
+func literalOffsetKeys(t types.Type) []string {
+	var keys []string
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.StringLit:
+			keys = append(keys, "['"+m.V+"']")
+		case types.Int:
+			if m.Lo != m.Hi {
+				return nil
+			}
+			keys = append(keys, "["+strconv.FormatInt(m.Lo, 10)+"]")
+		default:
+			return nil
+		}
+	}
+	return keys
 }
 
 // narrowPathNative is narrowPath with the variable's PHP type narrowed by
@@ -545,6 +579,40 @@ func (x *fnCtx) instanceofType(e *ast.Instanceof, env *state) {
 	*env = *join(then, els)
 }
 
+// predicateTarget is the type an is_*() function tests for, nil for other
+// names.
+func predicateTarget(name string) types.Type {
+	switch name {
+	case "is_int", "is_integer", "is_long":
+		return types.TInt
+	case "is_float", "is_double":
+		return types.TFloat
+	case "is_string":
+		return types.TString
+	case "is_bool":
+		return types.TBool
+	case "is_array":
+		return types.TArray
+	case "is_object":
+		return types.TObject
+	case "is_null":
+		return types.TNull
+	case "is_iterable":
+		return types.TIterable
+	case "is_callable":
+		return types.TCallable
+	case "is_scalar":
+		return types.TScalar
+	case "is_numeric":
+		return types.TNumeric
+	case "is_countable":
+		return types.MakeUnion(types.TArray, types.NewClass("Countable"))
+	case "is_resource":
+		return types.TResource
+	}
+	return nil
+}
+
 // predicateCall narrows on is_*() and the other predicate functions.
 func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok bool) {
 	n, isName := e.Callee.(*ast.Name)
@@ -556,114 +624,90 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 		return nil, nil, false
 	}
 	arg := e.Args.Args[0].Value
-	var target types.Type
-	switch name {
-	case "is_int", "is_integer", "is_long":
-		target = types.TInt
-	case "is_float", "is_double":
-		target = types.TFloat
-	case "is_string":
-		target = types.TString
-	case "is_bool":
-		target = types.TBool
-	case "is_array":
-		target = types.TArray
-	case "is_object":
-		target = types.TObject
-	case "is_null":
-		target = types.TNull
-	case "is_iterable":
-		target = types.TIterable
-	case "is_callable":
-		target = types.TCallable
-	case "is_scalar":
-		target = types.TScalar
-	case "is_numeric":
-		target = types.TNumeric
-	case "is_countable":
-		target = types.MakeUnion(types.TArray, types.NewClass("Countable"))
-	case "is_resource":
-		target = types.TResource
-	case "is_a", "is_subclass_of":
-		if len(e.Args.Args) < 2 {
-			return nil, nil, false
-		}
-		x.call(e, env, nil)
-		ct := x.pathType(e.Args.Args[1].Value, env)
-		var cls types.Type
-		switch c := ct.(type) {
-		case types.StringLit:
-			cls = types.Class{Name: c.V}
-		case types.ClassString:
-			cls = types.TObject // some class: the subject is an object, or a class-string
-			if c.Of != nil {
-				cls = c.Of
+	target := predicateTarget(name)
+	if target == nil {
+		switch name {
+		case "is_a", "is_subclass_of":
+			if len(e.Args.Args) < 2 {
+				return nil, nil, false
 			}
-		case types.String:
-			cls = types.TObject
-		}
-		then, els = env.clone(), env.clone()
-		x.condValueType = types.TBool
-		if cls == nil {
+			x.call(e, env, nil)
+			ct := x.pathType(e.Args.Args[1].Value, env)
+			var cls types.Type
+			switch c := ct.(type) {
+			case types.StringLit:
+				cls = types.Class{Name: c.V}
+			case types.ClassString:
+				cls = types.TObject // some class: the subject is an object, or a class-string
+				if c.Of != nil {
+					cls = c.Of
+				}
+			case types.String:
+				cls = types.TObject
+			}
+			then, els = env.clone(), env.clone()
+			x.condValueType = types.TBool
+			if cls == nil {
+				return then, els, true
+			}
+			at := x.pathType(arg, env)
+			allowString := len(e.Args.Args) >= 3 && isTrueLit(e.Args.Args[2].Value)
+			if allowString {
+				x.narrowPath(then, arg, types.Intersect(at, types.MakeUnion(cls, types.ClassString{Of: cls}), x.p()), true)
+			} else {
+				x.narrowPath(then, arg, types.Intersect(at, cls, x.p()), true)
+				x.narrowPath(els, arg, x.subtract(at, cls, x.p()), false)
+			}
+			return then, els, true
+		case "array_key_exists", "key_exists":
+			if len(e.Args.Args) < 2 {
+				return nil, nil, false
+			}
+			x.call(e, env, nil)
+			then, els = env.clone(), env.clone()
+			x.condValueType = types.TBool
+			keyT := x.pathType(arg, env)
+			arrExpr := e.Args.Args[1].Value
+			at := x.pathType(arrExpr, env)
+			x.narrowPath(then, arrExpr, withKey(at, keyT, true), false)
+			x.narrowPath(els, arrExpr, withKey(at, keyT, false), false)
+			return then, els, true
+		case "in_array":
+			if len(e.Args.Args) < 3 || !isTrueLit(e.Args.Args[2].Value) {
+				return nil, nil, false
+			}
+			x.call(e, env, nil)
+			then, els = env.clone(), env.clone()
+			x.condValueType = types.TBool
+			at := x.pathType(arg, env)
+			hay := x.pathType(e.Args.Args[1].Value, env)
+			_, v, _ := types.IterableKV(hay, x.p())
+			if isLiteralLike(v) {
+				x.narrowPath(then, arg, types.Intersect(at, v, x.p()), true)
+				x.narrowPath(els, arg, x.subtract(at, v, x.p()), false)
+			} else {
+				x.narrowPath(then, arg, types.Intersect(at, v, x.p()), true)
+			}
+			return then, els, true
+		case "assert":
+			then, els = x.cond(arg, env)
+			x.condValueType = types.TBool
+			return then, then.clone(), true
+		case "method_exists", "property_exists", "function_exists":
+			x.call(e, env, nil)
+			x.condValueType = types.TBool
+			return env.clone(), env.clone(), true
+		default:
+			// User functions with @phpstan-assert.
+			fn := x.lookupFunction(n)
+			if fn == nil || len(fn.Signature().Asserts) == 0 {
+				return nil, nil, false
+			}
+			x.call(e, env, nil)
+			then, els = x.applyAsserts(x.functionCallee(fn, e.Args), env)
+			x.condValueType = types.TBool
 			return then, els, true
 		}
-		at := x.pathType(arg, env)
-		allowString := len(e.Args.Args) >= 3 && isTrueLit(e.Args.Args[2].Value)
-		if allowString {
-			x.narrowPath(then, arg, types.Intersect(at, types.MakeUnion(cls, types.ClassString{Of: cls}), x.p()), true)
-		} else {
-			x.narrowPath(then, arg, types.Intersect(at, cls, x.p()), true)
-			x.narrowPath(els, arg, x.subtract(at, cls, x.p()), false)
-		}
-		return then, els, true
-	case "array_key_exists", "key_exists":
-		if len(e.Args.Args) < 2 {
-			return nil, nil, false
-		}
-		x.call(e, env, nil)
-		then, els = env.clone(), env.clone()
-		x.condValueType = types.TBool
-		keyT := x.pathType(arg, env)
-		arrExpr := e.Args.Args[1].Value
-		at := x.pathType(arrExpr, env)
-		x.narrowPath(then, arrExpr, withKey(at, keyT, true), false)
-		x.narrowPath(els, arrExpr, withKey(at, keyT, false), false)
-		return then, els, true
-	case "in_array":
-		if len(e.Args.Args) < 3 || !isTrueLit(e.Args.Args[2].Value) {
-			return nil, nil, false
-		}
-		x.call(e, env, nil)
-		then, els = env.clone(), env.clone()
-		x.condValueType = types.TBool
-		at := x.pathType(arg, env)
-		hay := x.pathType(e.Args.Args[1].Value, env)
-		_, v, _ := types.IterableKV(hay, x.p())
-		if isLiteralLike(v) {
-			x.narrowPath(then, arg, types.Intersect(at, v, x.p()), true)
-			x.narrowPath(els, arg, x.subtract(at, v, x.p()), false)
-		} else {
-			x.narrowPath(then, arg, types.Intersect(at, v, x.p()), true)
-		}
-		return then, els, true
-	case "assert":
-		then, els = x.cond(arg, env)
-		x.condValueType = types.TBool
-		return then, then.clone(), true
-	case "method_exists", "property_exists", "function_exists":
-		x.call(e, env, nil)
-		x.condValueType = types.TBool
-		return env.clone(), env.clone(), true
-	default:
-		// User functions with @phpstan-assert.
-		fn := x.lookupFunction(n)
-		if fn == nil || len(fn.Signature().Asserts) == 0 {
-			return nil, nil, false
-		}
-		x.call(e, env, nil)
-		then, els = x.applyAsserts(x.functionCallee(fn, e.Args), env)
-		x.condValueType = types.TBool
-		return then, els, true
 	}
 	x.call(e, env, nil)
 	x.condValueType = types.TBool
@@ -962,6 +1006,20 @@ func (x *fnCtx) applyAsserts(ce callee, env *state) (then, els *state) {
 			continue
 		}
 		t := types.Substitute(types.Substitute(res.Doc(a.Type), ce.classSubst), subst)
+		if b, ok := t.(types.BoolLit); ok && a.Var != "this" && !a.IfTrue && !a.IfFalse {
+			// `@phpstan-assert true $condition` (PHPUnit's assertTrue): the
+			// argument is a condition that holds from here on.
+			saved := x.c.mark()
+			cthen, cels := x.cond(target, then)
+			x.c.rollback(saved) // the argument was checked when the call was
+			if b.V {
+				then = cthen
+			} else {
+				then = cels
+			}
+			els = then.clone()
+			continue
+		}
 		cur := x.pathType(target, env)
 		narrowed := types.Intersect(cur, t, x.p())
 		if a.Exact {
