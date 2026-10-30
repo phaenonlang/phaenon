@@ -14,6 +14,7 @@ final class Str
     {
     }
 
+    /** Code points. */
     public static function length(string|\Stringable $s): int
     {
         return mb_strlen((string) $s);
@@ -71,6 +72,7 @@ final class Str
         return str_contains((string) $s, $needle);
     }
 
+    /** Code points; null, never false. */
     public static function indexOf(string|\Stringable $s, string $needle, int $from = 0): ?int
     {
         $s = (string) $s;
@@ -83,6 +85,7 @@ final class Str
         return false === $i ? null : $i;
     }
 
+    /** Code points; null, never false. */
     public static function lastIndexOf(string|\Stringable $s, string $needle): ?int
     {
         $i = mb_strrpos((string) $s, $needle);
@@ -90,6 +93,7 @@ final class Str
         return false === $i ? null : $i;
     }
 
+    /** Code points; a negative start counts from the end, as substr() does. */
     public static function slice(string|\Stringable $s, int $start, ?int $length = null): string
     {
         return mb_substr((string) $s, $start, $length);
@@ -148,11 +152,13 @@ final class Str
         return mb_str_pad((string) $s, $length, $pad, STR_PAD_RIGHT);
     }
 
+    /** One code point each. */
     public static function chars(string|\Stringable $s): list<string>
     {
         return mb_str_split((string) $s);
     }
 
+    /** Grapheme clusters (`\X`): what a reader sees as one character. */
     public static function graphemes(string|\Stringable $s): list<string>
     {
         preg_match_all('/\X/u', (string) $s, $m);
@@ -160,6 +166,7 @@ final class Str
         return $m[0];
     }
 
+    /** Grapheme clusters, where length() counts code points. */
     public static function graphemeLength(string|\Stringable $s): int
     {
         $n = grapheme_strlen((string) $s);
@@ -178,6 +185,7 @@ final class Str
         return (false === $head ? '' : $head) . $ellipsis;
     }
 
+    /** `preg_match() === 1`. */
     public static function matches(string|\Stringable $s, string $pattern): bool
     {
         return 1 === preg_match($pattern, (string) $s);

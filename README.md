@@ -105,6 +105,7 @@ phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... path...   
 phn check [--json] [--no-deprecations] [--exclude PATH]... path...              # type-check .phn (and .php) files
 phn migrate path...                                    # rewrite .php as .phn
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Seq, Map, Str, Bytes), as phaenon/runtime ships it
+phn stdlib --plugin-stubs DIR  # the PhpStorm plugin's editor-only pseudo-classes (ListMethods.php, …) from the same sources
 phn lex   [--php] file                    # token stream
 phn print [--php] file                    # parse and pretty-print
 ```
