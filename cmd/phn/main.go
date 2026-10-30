@@ -52,7 +52,8 @@ usage:
   phn check [--json] [--no-deprecations] [--exclude PATH]... <path>...
                                                            type-check .phn files, write nothing
   phn migrate [--keep-docblocks] <path>...                 rewrite .php files as .phn; lift generic docblocks into syntax
-  phn stdlib --out DIR [--check]                           write the compiled stdlib (Seq.php, Map.php, Str.php, Bytes.php) into DIR
+  phn stdlib [--out DIR] [--plugin-stubs DIR] [--check]    write the compiled stdlib (Seq.php, …) into DIR, or the PhpStorm
+                                                           plugin's pseudo-classes (ListMethods.php, …) into the other DIR
   phn lex   [--php] <file>                                 dump the token stream
   phn print [--php] <file>                                 parse and pretty-print
 
@@ -60,7 +61,8 @@ build writes Foo.php next to Foo.phn, or under DIR (mirroring the path given) wi
 a file with type errors is not written unless --emit-on-error is given (the exit status still
 reports the errors). --check writes nothing and fails when any output is missing or stale.
 --exclude skips a path under the ones given (fixtures another analyser owns); it may be repeated.
-stdlib materialises the classes behind the method syntax, as the phaenon/runtime package ships them.
+stdlib materialises the classes behind the method syntax, as the phaenon/runtime package ships them,
+and with --plugin-stubs the editor-only pseudo-classes the PhpStorm plugin bundles.
 check reads vendor code through the nearest vendor/composer autoload maps.
 --php reads the file as plain PHP (with <?php tags) instead of Phaenon.`))
 	os.Exit(2)
@@ -212,47 +214,63 @@ func build(args []string) {
 func stdlibCmd(args []string) {
 	fs := flag.NewFlagSet("stdlib", flag.ExitOnError)
 	out := fs.String("out", "", "directory to write the compiled stdlib into")
+	plugin := fs.String("plugin-stubs", "", "directory to write the PhpStorm plugin's pseudo-classes into")
 	check := fs.Bool("check", false, "verify the files there are up to date; write nothing")
 	fs.Parse(args)
-	if *out == "" || fs.NArg() != 0 {
+	if (*out == "" && *plugin == "") || fs.NArg() != 0 {
 		usage()
 	}
-	compiled, err := emit.Stdlib()
-	if err != nil {
-		fail("%v", err)
+	if *out != "" {
+		compiled, err := emit.Stdlib()
+		if err != nil {
+			fail("%v", err)
+		}
+		materialise("stdlib", compiled, *out, *check)
 	}
-	names := make([]string, 0, len(compiled))
-	for name := range compiled {
+	if *plugin != "" {
+		stubs, err := emit.PluginStubs()
+		if err != nil {
+			fail("%v", err)
+		}
+		materialise("plugin stub", stubs, *plugin, *check)
+	}
+}
+
+// materialise writes the generated files into dir, or with check only
+// reports the stale and missing ones.
+func materialise(what string, files map[string][]byte, dir string, check bool) {
+	names := make([]string, 0, len(files))
+	for name := range files {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	written, stale := 0, 0
 	for _, name := range names {
-		dst := filepath.Join(*out, name)
+		dst := filepath.Join(dir, name)
 		cur, readErr := os.ReadFile(dst)
-		if readErr == nil && bytes.Equal(cur, compiled[name]) {
+		if readErr == nil && bytes.Equal(cur, files[name]) {
 			continue
 		}
-		if *check {
+		if check {
 			fmt.Fprintf(os.Stderr, "%s: stale or missing\n", dst)
 			stale++
 			continue
 		}
-		if err := os.MkdirAll(*out, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fail("%v", err)
 		}
-		if err := os.WriteFile(dst, compiled[name], 0o644); err != nil {
+		if err := os.WriteFile(dst, files[name], 0o644); err != nil {
 			fail("%v", err)
 		}
 		written++
 	}
 	switch {
-	case *check && stale > 0:
-		fail("%d of %d stdlib files are stale; run `phn stdlib --out %s`", stale, len(names), *out)
-	case *check:
-		fmt.Printf("%d stdlib files up to date\n", len(names))
+	case check && stale > 0:
+		fail("%d of %d %s files are stale; run phn stdlib to rewrite them", stale, len(names), what)
+	case check:
+		fmt.Printf("%d %s files, all fresh\n", len(names), what)
 	default:
-		fmt.Printf("%d stdlib files, %d written\n", len(names), written)
+		fmt.Printf("%d %s files, %d written\n", len(names), what, written)
 	}
 }
 

@@ -80,7 +80,10 @@ PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite
 ```
 
 `phn` itself: `phn build|check|migrate|stdlib|lex|print` — run `phn` without arguments for usage; the
-README explains the Composer workflow. Dogfood targets call `phn` from `PATH`.
+README explains the Composer workflow. Dogfood targets call `phn` from `PATH`. `phn stdlib` writes the
+runtime package (`--out ../runtime/src`) and the PhpStorm plugin's pseudo-classes (`--plugin-stubs
+../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`) from `stdlib/runtime/*.phn`; the tests
+`TestRuntimePackageFresh` and `TestPluginStubsFresh` fail when either checkout is stale.
 
 ## How work is done
 
