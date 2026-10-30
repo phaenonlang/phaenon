@@ -65,3 +65,13 @@ function equality(bytes $a, string $b, bytes $c): void
     }
     takesInt($a->equals($c)); // want P2103
 }
+
+function comparisons(bytes $a, bytes $b, array $parts): void
+{
+    takesInt(strcmp($a, $b));
+    takesInt(strncmp($a, 'abc', 3));
+    takesString(base64_encode(json_encode($parts, JSON_THROW_ON_ERROR)));
+    takesString(base64_encode(json_encode($parts, \JSON_UNESCAPED_SLASHES | \JSON_THROW_ON_ERROR)));
+    takesString(base64_encode(json_encode($parts, flags: JSON_THROW_ON_ERROR)));
+    takesString(base64_encode(json_encode($parts))); // want P2103
+}

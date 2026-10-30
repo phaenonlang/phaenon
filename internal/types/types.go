@@ -626,6 +626,15 @@ func widenLiterals(ms []Type) []Type {
 // absorbs reports whether a union member o makes m redundant, using only
 // structural facts (no hierarchy).
 func absorbs(o, m Type) bool {
+	// A&B is part of A: the join of `T` with `T&int` is `T`.
+	if m, ok := m.(Intersection); ok {
+		for _, part := range m.Types {
+			if Equal(part, o) || absorbs(o, part) {
+				return true
+			}
+		}
+		return false
+	}
 	switch o := o.(type) {
 	case Int:
 		if m, ok := m.(Int); ok {

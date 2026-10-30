@@ -394,3 +394,41 @@ function merged(array $by, array $more, array $stages, string $k): void
 function takesList(array $l): void
 {
 }
+
+class Figure
+{
+}
+
+final class Circle extends Figure
+{
+    public function radius(): int
+    {
+        return 1;
+    }
+}
+
+/**
+ * @phpstan-assert-if-true =Figure $value
+ */
+function isFigure(mixed $value): bool
+{
+    return $value instanceof Figure;
+}
+
+/**
+ * @phpstan-assert-if-true Figure $value
+ */
+function isAFigure(mixed $value): bool
+{
+    return $value instanceof Figure;
+}
+
+function exactAssert(?Circle $c, ?Circle $d): void
+{
+    if (isFigure($c)) {
+        $c->radius(); // want P2006
+    }
+    if (isAFigure($d)) {
+        $d->radius();
+    }
+}
