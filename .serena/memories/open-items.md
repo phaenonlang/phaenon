@@ -19,7 +19,7 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
     natively since 2026-10-29 (`generics.md` §11.2).
   - `tequila/object-mapper` `tests/` carry 16 findings that PHPStan never saw (its `paths` is
     `src` only): Symfony container `get()` typing (needs a phpstan-symfony-like overlay) and
-    untyped closure parameters in fixtures. The tests are built with `phn build --no-types tests`.
+    untyped closure parameters in fixtures. The tests are built with `phn build --emit-on-error tests`.
 - **`tequila/mongodb-odm`** (2026-10-29, [[dogfood]]): migrated and built on `phaenon-dogfood`; the
   checker reports 40 findings in `src`, all of PHPStan's level-9/10 kind (`mixed` from Symfony
   config arrays and untyped `array` parameters flowing into typed ones) — PHPStan at level max
@@ -54,14 +54,16 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 ## M4 — left after the first slice (2026-10-30)
 
-- `?->` on a list / map / string receiver is refused (`P2519`); lowering it needs a temporary or
-  a `match`, decide the spelling.
-- A `\Stringable` receiver does not get the `Str` methods yet (`strings.md` §6 says it should).
-- `phn build --no-types` cannot lower method syntax (no receiver types): it leaves `$xs->map()`
-  in the output. Either refuse such files without types, or drop `--no-types`.
-- `phn migrate`: `array{A, B}` (positional shape) → `(A, B)`.
-- The runtime package `../runtime` does not yet carry `Seq`, `Map`, `Str`: build it from
-  `stdlib/runtime/*.phn` with `phn` (one source), then [[gotcha-runtime-stub-drift]] is moot.
+- ~~`?->` on a list / map / string receiver~~ — done 2026-10-30: a guard `null === $x ? null :
+  Str::f($x)` when the receiver is a side-effect-free path, `P2519` otherwise
+  (`collections.md` §3.1).
+- ~~A `\Stringable` receiver gets the `Str` methods~~ — done 2026-10-30.
+- ~~`phn build --no-types`~~ — removed 2026-10-30; `--emit-on-error` builds a file with findings.
+- ~~`phn migrate`: `array{A, B}` → `(A, B)`~~ — done 2026-10-30 (two or more elements; `(A)`
+  would read as a cast).
+- The runtime package `../runtime` gets `Seq`, `Map`, `Str`, `Bytes` from `phn stdlib --out
+  src` (the `.phn` sources are the one source; `phn build` cannot compile them, the embedded
+  copy already declares the classes). Pending: the package's tests and a freshness check.
 - ~~`Bytes.phn`, the `(bytes)` cast, `P2530`, the overlay's binary producers~~ — done 2026-10-30.
 - ~~`P2516` to an error, `P2518` (`map` key bound)~~ — done 2026-10-30 (`P2516` had been an error
   since the checker landed; the comment said otherwise).

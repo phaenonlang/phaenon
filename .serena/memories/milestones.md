@@ -31,17 +31,16 @@ The roadmap puts the editor plugins in M6.
 
 | **M4** first slice (2026-10-30) | Method syntax on `list` / `map` / `string` receivers → `Seq::` / `Map::` / `Str::` static calls (`internal/checker/stdlib.go`, emitter `stdlibCall`), the stdlib written in Phaenon (`stdlib/runtime/Seq.phn`, `Map.phn`, `Str.phn`, read as stubs and compiled for the PHPStan golden), tuple type `(A, B)`, `bytes` primitive, generated PHP imports its classes (D11) | Emit golden `internal/emit/testdata/collections.phn` passes PHPStan max; checker golden `collections.phn`; the three dogfood repos still at 0 findings after the loop-body bug fix (findings inside loops were lost before — `fixpoint` discarded them but the dedupe set remembered them) | `2b9b220` · design `collections.md`, `strings.md` (reviewed), roadmap D11 |
 | **M4** second slice (2026-10-30) | `bytes` in use: the `(bytes)` cast (Phaenon-only token `T_BYTES_CAST`, erased by the emitter), `P2530`, `P2305` on bytes vs text, the overlay `stdlib/overlay/bytes.php` + `mongodb.php`, `stdlib/runtime/Bytes.phn`, `Str::bytes`; `P2518` with the implied key bound (`program.ImplyMapKeyBounds`); `P2516` confirmed an error; `TestRuntimeStubs` type-checks the `.phn` stdlib | Checker golden `bytes.phn`, emit golden `bytes.phn` under PHPStan max; reflector and mongodb-odm at 0, object-mapper at its 16 known test findings | design `strings.md` §6 (2026-10-30 rows), `collections.md` §8 |
+| **M4** third slice (2026-10-30) | Null receivers guarded (`program.MethodTarget.Guard`, checker `purePath`, emitter `stdlibCall`), `\Stringable` receivers → `Str` (`stringableFallback`), `phn migrate` tuple lift (`render` KindShape), `phn stdlib --out DIR [--check]` (`emit.Stdlib`), `--no-types` removed. Bug fixed: `emit.File` reparsed the source, so `phn build` never lowered method syntax (the goldens compiled the checked tree directly; they now go through `File`) | Checker/emit goldens `collections.phn` extended, PHPStan max green; dogfood libraries unchanged | design `collections.md` §3.1, §8; `strings.md` §7; roadmap M4 |
 
 ## Next — a maintainer's choice
 
 Recorded 2026-10-28 when the migrate step landed, unchanged by the 2026-10-29 correction. Whoever lands the next one updates this section
 and [[open-items]].
 
-1. **M4 — collections and strings** (started 2026-10-30, go-ahead given): two slices are in
-   (rows above). Left: `Str` methods on `\Stringable` receivers, `?->` on primitive receivers,
-   `--no-types` vs method syntax, the runtime package built from the `.phn` stdlib, migrate
-   lifting `array{A, B}` to `(A, B)`, the PhpStorm plugin following the method syntax, then the
-   `tequila/core` dogfood.
+1. **M4 — collections and strings** (started 2026-10-30, go-ahead given): three slices are in
+   (rows above). Left: the runtime package's tests over `phn stdlib` output, the PhpStorm plugin
+   following the method syntax, then the `tequila/core` dogfood.
 2. ~~`tequila/mongodb-odm` as the next generics dogfood target~~ — done 2026-10-29 up to the
    level-8 question above; then `tequila/core` with M4.
 
