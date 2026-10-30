@@ -144,10 +144,12 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   `(bytes)` a string cast; `list`/`map`/`string`/`bytes`/`\Stringable` receivers get
   `Seq`/`Map`/`Str`/`Bytes` completion, resolution and chain typing through bundled pseudo-classes
   (`src/main/resources/stubs/phaenon/Phaenon/Internal/*Methods.php`) and a `PhpTypeProvider4`;
-  29 tests, verifier compatible with 2025.1. Left: the pseudo-class stubs are **hand-written from
-  `stdlib/runtime/*.phn` and will drift** — generate them (a `phn` subcommand); `is`/`as` do not
-  narrow beyond a class name; user generics' type arguments (`Box<User>`) are dropped; `type`
-  aliases are erased whole; the provider uses undocumented PhpStorm API (noted in its README).
+  29 tests, verifier compatible with 2025.1. ~~The pseudo-class stubs are hand-written and will
+  drift~~ — generated since 2026-10-31 by `phn stdlib --plugin-stubs` from `stdlib/runtime/*.phn`
+  (`TestPluginStubsFresh`); the plugin parses every dogfood tree (`PHAENON_TREES=…`). Left:
+  `is`/`as` do not narrow beyond a class name; user generics' type arguments (`Box<User>`) are
+  dropped; `type` aliases are erased whole; the provider uses undocumented PhpStorm API (noted in
+  its README).
 - The implied `declare(strict_types=1)` is not modelled.
 - Editor colouring relies on the internal extension point `com.jetbrains.php.baseLexerProvider`.
 

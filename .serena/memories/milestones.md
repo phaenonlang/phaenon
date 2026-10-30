@@ -43,9 +43,11 @@ and [[open-items]].
    (2026-10-30, `../runtime` `34ab0b3`). The `tequila/core` dogfood has started ([[dogfood]]):
    first pass over the PHP sources, 754 → 538, the checker gaps it showed fixed with the fixture
    `tequila-core.phn`. The PhpStorm plugin parses Phaenon syntax and completes the method syntax
-   (2026-10-31, `../jetbrains` `f7a05b0`). Left for M4: the core findings (11 on 774 files on
-   2026-10-31, all deliberate; `phn build` + PHPStan max + cs + the suite of 1188 tests pass on the
-   compiled output, re-migrated on the level-max `main`, mostly level-9 strictness), its `phn build` and suite on compiled output, generated plugin stubs.
+   (2026-10-31, `../jetbrains` `f7a05b0`). M4's remaining items closed 2026-10-31: the core findings are at 11 on 774
+   files (all PHPStan rules deliberately not matched, vault `open-items`), `phn build` + PHPStan
+   max + cs + the suite of 1188 tests pass on the compiled output, and the plugin's pseudo-classes
+   are generated from the stdlib sources (`phn stdlib --plugin-stubs`). **M4 is complete pending the
+   maintainer's review**; closing it in `roadmap.md` §3 is that review's outcome.
 2. ~~`tequila/mongodb-odm` as the next generics dogfood target~~ — done 2026-10-29 up to the
    level-8 question above; then `tequila/core` with M4.
 
