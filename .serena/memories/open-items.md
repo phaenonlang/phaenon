@@ -83,6 +83,15 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - PSR-3 `log($level)` implementations: `P2516` wants a type; `mixed $level` is the spelling (the
   interface leaves it untyped, so `mixed` is what it is). No compiler change; core's test loggers
   got it 2026-10-31.
+- **PHPStan rules deliberately not matched** (the eleven findings left on core, 2026-10-31):
+  regex analysis (`preg_match('/^[a-z]+$/', $s)` making `$s` a `non-empty-string`);
+  `Closure::call($obj)` / `bindTo()` rebinding `$this` inside the closure (and its scope, for
+  private members); expression-level throw points in a `try` (a by-reference argument defined
+  before the call that throws is defined in the catch); a method call on a union receiver
+  checking arguments against the union of the members' parameter types; phpredis's
+  `multi()->set()->del()` chain, on which PHPStan is silent for reasons its stubs do not show;
+  `@template B of self::*_REFERENCE` (a constant wildcard as a bound). Each is a small PHPStan
+  extension or scope feature; pick up when a dogfood target makes one matter.
 
 ## M6 — tooling, analysis rules
 

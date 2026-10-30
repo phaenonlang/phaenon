@@ -95,7 +95,16 @@ push dogfood work without a maintainer's go-ahead.
   (`0589e1a`, hooks skipped: no compiled PHP to run them on) and the types the checker asked for
   (`2c5754b`: `AbstractUuidAggregateId::fromBinary(bytes)`, `mixed $level` in the test loggers).
   **314** after the twelve `bytes` into vendor `string` got their `(string)` (`016fb9c`), as
-  decided (strings.md §5).
+  decided (strings.md §5). **175** once re-migrated on the level-max `main`, **11** after the
+  fourth and fifth checker pass (`cd1ff1c`, `a35880e`; checker.md §9 2026-10-31). The check also
+  excludes the three files core's `phpstan.neon` excludes (`src/UI/Http/Api/Controller/
+  AbstractApiController.phn`, `src/CQRS/Command/CommandBusAwareTrait.phn`,
+  `src/CQRS/Query/QueryBusAwareTrait.phn`), which PHPStan never sees either. The eleven left:
+  three where PHPStan's regex analysis narrows a `preg_match` subject to `non-empty-string`, two
+  `(fn () => $this->inner)->call($obj)`, two on Symfony's `ContainerInterface::get()`
+  (`@template B of self::*_REFERENCE`), one `multi()->set()->del()` on phpredis, one
+  `toDatabase()` on a `RepositoryInterface<T>|RepositoryInterface<object>` receiver, one
+  by-reference variable defined inside a `try` ([[open-items]], all deliberate).
 - **`main` is at PHPStan level max since 2026-10-30** (PR #199, 399 findings fixed the way
   mongodb-odm's #45 did; #200 followed symfony/rate-limiter 8.1.10's corrected sliding window,
   which five tests had asserted the old way; #201 `pass_filenames: false` on the hooks). The
@@ -104,9 +113,7 @@ push dogfood work without a maintainer's go-ahead.
   then the two type commits replayed (`499b29b`, `10240ba`); the pre-level-max branch is kept as
   `phaenon-dogfood-pre-levelmax` until nothing is missed. **777 files, 175 errors** (116 `P2103`,
   32 `P2202`): the level-max work on `main` removed 139 findings the checker had reported first.
-- Next: work the 175 down (`mixed` into typed parameters and `array` into `array<string, mixed>`
-  still dominate; `P2105 … on never` and `P2402` are suspected checker gaps), then `phn build`
-  and the suite on compiled output.
+- Next: `phn build` and core's suite on the compiled output, then generated plugin stubs.
 
 ## Next targets (roadmap §3)
 
