@@ -24,3 +24,8 @@ function mb_str_split(string $string, int $length = 1, ?string $encoding = null)
  * @return list<string>|false
  */
 function grapheme_str_split(string $string, int $length = 1): array|false {}
+
+/**
+ * @return ($substitute_character is null ? string|int : bool)
+ */
+function mb_substitute_character(string|int|null $substitute_character = null): string|int|bool {}

@@ -66,12 +66,12 @@ final class Seq
 
     public static function slice<T>(list<T> $xs, int $offset, ?int $length = null): list<T>
     {
-        return array_values(array_slice($xs, $offset, $length));
+        return array_slice($xs, $offset, $length);
     }
 
     public static function concat<T>(list<T> ...$lists): list<T>
     {
-        return self::flatten($lists);
+        return self::flatten(array_values($lists));
     }
 
     public static function reverse<T>(list<T> $xs): list<T>
@@ -87,19 +87,24 @@ final class Seq
             usort($xs, $cmp);
         }
 
-        return array_values($xs);
+        return $xs;
     }
 
     public static function sortBy<T, K of int|string>(list<T> $xs, Closure(T): K $key): list<T>
     {
         usort($xs, fn ($a, $b): int => $key($a) <=> $key($b));
 
-        return array_values($xs);
+        return $xs;
     }
 
     public static function unique<T of int|string>(list<T> $xs): list<T>
     {
-        return array_values(array_unique($xs));
+        $out = [];
+        foreach (array_unique($xs) as $x) {
+            $out[] = $x;
+        }
+
+        return $out;
     }
 
     public static function flatten<T>(list<list<T>> $xs): list<T>
@@ -114,8 +119,15 @@ final class Seq
         return $out;
     }
 
+    /**
+     * @throws \ValueError when $size is not positive
+     */
     public static function chunk<T>(list<T> $xs, int $size): list<list<T>>
     {
+        if ($size < 1) {
+            throw new \ValueError('Seq::chunk(): the size must be at least 1');
+        }
+
         return array_chunk($xs, $size);
     }
 
