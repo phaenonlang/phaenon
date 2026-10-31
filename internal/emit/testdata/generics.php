@@ -65,7 +65,7 @@ final class User extends Model
 /** @template T of Model */
 class Repository
 {
-    /** @var array<int, Model> */
+    /** @var array<int, Model> the items, by id */
     private array $items = [];
 
     /** @param class-string<T> $class */

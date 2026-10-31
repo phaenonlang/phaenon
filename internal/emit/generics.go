@@ -524,8 +524,18 @@ func (l *lowering) addDoc(declStart int, doc string, tags []string) {
 	span := ast.Span{Start: idx, End: idx + len(doc)}
 	indent = l.indentAt(idx)
 	if !strings.Contains(doc, "\n") {
-		// `/** Summary. */` becomes a multi-line block.
 		content := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(doc, "/**"), "*/"))
+		if len(tags) == 1 && strings.HasPrefix(tags[0], "@var ") {
+			// A property's one-line `/** what it holds */` keeps its line:
+			// `/** @var list<string> what it holds */` is the PHP it came from.
+			text := "/** " + tags[0]
+			if content != "" {
+				text += " " + content
+			}
+			l.e.replace(span, text+" */")
+			return
+		}
+		// `/** Summary. */` becomes a multi-line block.
 		var b strings.Builder
 		b.WriteString("/**\n")
 		if content != "" {
@@ -583,6 +593,12 @@ func (l *lowering) fillTypes(doc string, idx int, tags []string) []string {
 				if len(lf) >= 2 && strings.HasPrefix(strings.TrimLeft(lf[1], "&."), "$") {
 					at := idx + off + strings.Index(line, "@param") + len("@param")
 					l.e.replace(ast.Span{Start: at, End: at}, " "+strings.Join(fields[1:len(fields)-1], " "))
+					// `@param $x - prose` spells a typeless description; with
+					// the type back, the dash goes: `@param T $x prose`.
+					afterVar := strings.Index(line, lf[1]) + len(lf[1])
+					if dash := afterVar + len(line[afterVar:]) - len(strings.TrimLeft(line[afterVar:], " \t")); strings.HasPrefix(line[dash:], "- ") || strings.TrimRight(line[dash:], " \t\r\n") == "-" {
+						l.e.replace(ast.Span{Start: idx + off + afterVar, End: idx + off + dash + 1}, "")
+					}
 					found = true
 				}
 				break

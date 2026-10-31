@@ -56,6 +56,7 @@ final class User extends Model
 // the type, the compiler adds nothing (design/generics.md §11.2).
 class Repository<T of Model>
 {
+    /** the items, by id */
     private map<int, Model> $items = [];
 
     public function __construct(private readonly class<T> $class, private readonly string $table = 'default')
@@ -164,7 +165,7 @@ function uses(mixed $m, Box<int> $box): void
  * prose only, PHPStan's refinement types left in the docblock, a Closure
  * the lexer would otherwise read as a cast.
  *
- * @param $c the class to describe
+ * @param $c - the class to describe
  * @param non-empty-string $id
  * @param array-key $k
  * @param positive-int $n
@@ -191,7 +192,7 @@ final class Keyed<Model>
     }
 
     /**
-     * @param $keyOf the sort key of a row, or the value that is its cursor
+     * @param $keyOf - the sort key of a row, or the value that is its cursor
      */
     public function keys(list<Model> $rows, Closure(Model): \stdClass|string $keyOf): int
     {
