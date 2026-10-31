@@ -122,6 +122,28 @@ push dogfood work without a maintainer's go-ahead.
   a written `\ArrayObject<int, Metric>` replaces a stale `@var`. The rule tests' fixture line
   numbers moved by four (the compiled fixtures have no four-line header): adjusted on the branch
   (`tests/PHPStan/*RuleTest.phn`). Branch: 5 local commits, compiled `.php` committed as in odm.
+- **Sibling output layout (2026-11-01, roadmap D12):** the first IDE review of the branch found
+  every class declared twice (`.phn` + its `.php`), crowded directories, Cmd+click landing in the
+  compiled file, and `@param $id prose` flagged by PhpStorm. The branch now has `phaenon.json`
+  (`src` → `.src`, `tests` → `.tests`, `exclude` = the analyser directories + the three files
+  `phpstan.neon` excludes); the 812 side-by-side `.php` are deleted from git and `.src`/`.tests`
+  are gitignored; `composer.json` (PSR-4, `autoload-dev`, `exclude-from-classmap`, the `build`,
+  `build:check`, `test*` scripts), `phpstan.neon`, `.php-cs-fixer.dist.php` and
+  `config/services.yaml` + `config/services_test.yaml` (`resource: '../.src/'`, the Upcasting
+  fixtures) point at the outputs; `ProductionAutoloadTest` asserts `.src/`. cs runs on the
+  outputs with the four PSR-12 line-1 rules off (`blank_line_after_opening_tag`,
+  `blank_lines_before_namespace`, `linebreak_after_opening_tag`,
+  `no_multiple_statements_per_line`) — it had never really run before (the finder skipped every
+  generated file). Re-migrated with the new docblock rules (D14): 109 files, `@param $x - prose`,
+  `/** prose */` properties. PHPStan max 0, cs 0, `phn check` 11 as before, `phn build --check`
+  red only through the 8 files holding the 11 deliberate findings; `composer test` green (1188)
+  once the service-discovery paths followed. Branch commit `155a38b` (hooks ran: the PHPStan hook
+  first hit Composer's 300 s process timeout on a cold cache; `COMPOSER_PROCESS_TIMEOUT` or a
+  `composer phpstan` beforehand).
+- Gotcha (2026-11-01): `composer.lock` is gitignored in core, and the main checkout's `vendor/`
+  was the old `main` install (contracts-core without `NotSecret`, nats without `keepAlive`):
+  PHPStan reported 24 `class.notFound`/`method.notFound` and `phn check` 34 errors until
+  `composer update`. After switching branches in core, `composer update` first.
 - Gotcha: PHPStan's temp cache (`sys_get_temp_dir()/phpstan`) can break and make the pre-commit
   hook fail with `opendir … Failed to open directory` warnings while `composer phpstan` itself
   reports no errors; `rm -rf` that directory (it is regenerated). Seen twice on 2026-10-31.

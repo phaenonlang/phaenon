@@ -1,7 +1,7 @@
 ---
 type: backlog
 tags: [phaenon, backlog]
-updated: 2026-10-29
+updated: 2026-11-01
 ---
 
 # Open and deferred items
@@ -71,7 +71,9 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 ## tequila/core dogfood (2026-10-30)
 
 - ~~`phn check` has no exclude configuration~~ — `--exclude PATH` (repeatable) on `build` and
-  `check` since 2026-10-31; a project file (`phaenon.json`) can come when the Composer plugin does.
+  `check` since 2026-10-31; ~~a project file (`phaenon.json`) can come when the Composer plugin
+  does~~ — `phaenon.json` since 2026-11-01 (`1e8c359`: roots → sibling outputs, `exclude`,
+  asset copy, orphan removal; roadmap D12), core's branch on it.
 - ~~`bytes` into a `string` parameter that PHP code declares~~ — decided 2026-10-31: an explicit
   `(string)` at the boundary (strings.md §5); the twelve sites in core cast (`016fb9c` on its
   dogfood branch).
@@ -102,6 +104,17 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - **Dead code / unused members** — `method/property/constant/classConstant.unused`; allow-listed.
 - **LSP**, `phn fmt` (`.phn` files read as inline HTML to php-cs-fixer and plain editors), a
   persistent cache for vendor parsing (`checker.md` §10 *Speed*).
+- **Composer plugin + `phn` as a Composer package** (roadmap D13, decided 2026-11-01): libraries
+  ship `.phn` only; the plugin runs `phn build` in every installed package with a `phaenon.json`
+  on install/update (`config.allow-plugins` answers the trust question once), the binary pinned
+  per platform. Until then the odm/object-mapper/reflector dogfood branches still commit
+  side-by-side `.php` and a consumer builds `vendor/<pkg>` by hand; moving them to the sibling
+  layout is part of this item. `phn build --check` should also pass when the only "failures" are
+  `--emit-on-error` files whose output is current (core: 8 files, 11 deliberate findings).
+- **The `.phn` beside `.php` adoption case in the IDE**: without a project file both are indexed;
+  the plugin prefers the source for navigation and the duplicate inspection, but find-usages and
+  rename still see both. A `FileTypeOverrider` for a `.php` with a `.phn` sibling would hide it
+  entirely.
 
 ## Generics follow-ups (unscheduled)
 
@@ -149,7 +162,13 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   (`TestPluginStubsFresh`); the plugin parses every dogfood tree (`PHAENON_TREES=…`). Left:
   `is`/`as` do not narrow beyond a class name; user generics' type arguments (`Box<User>`) are
   dropped; `type` aliases are erased whole; the provider uses undocumented PhpStorm API (noted in
-  its README).
+  its README). 2026-11-01 (`dd2af30`): `phaenon.json` outputs excluded from the index
+  (`PhaenonExcludePolicy`, re-applied on project-file changes), a `.phn` declaration wins over its
+  `@generated` copy in navigation and the duplicate-declaration inspection (34 → 39 tests). A
+  typeless `@param $x prose` is mis-parsed by PhpStorm itself (`prose` as the type): the language
+  writes `@param $x - prose` (D14) rather than the plugin filtering three inspections. The
+  "missing type declaration" inspections on erased properties, parameters and return types are
+  filtered since `2a9b153` (the readonly error already was).
 - The implied `declare(strict_types=1)` is not modelled.
 - Editor colouring relies on the internal extension point `com.jetbrains.php.baseLexerProvider`.
 
