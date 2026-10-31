@@ -1,8 +1,8 @@
 # Phaenon — agent guide
 
 Phaenon is a typed dialect of PHP 8.5+ that compiles to idiomatic PHP ("TypeScript for PHP"):
-`.phn` files sit beside `.php` in a Composer project and compile to the PHP you would have written
-by hand. The type checker is the product. This repository is the compiler, `phn`, written in Go.
+the `.phn` sources of a Composer project compile into a sibling output directory (`src/` →
+`.src/`, named in `phaenon.json`) holding the PHP you would have written by hand. The type checker is the product. This repository is the compiler, `phn`, written in Go.
 Pre-alpha; GitHub org `phaenonlang`, repositories private until they are published under MIT.
 
 **This repository is the entry point for agents.** Start sessions here; the map below says where
@@ -30,7 +30,7 @@ squash merges).
 | `tequila/reflection` | `~/labs/tequila/reflector`, branch `phaenon-dogfood` (local only) | M1: built from `.phn`; its phpunit, PHPStan 10 and php-cs-fixer pass |
 | `tequila/object-mapper` | `~/labs/tequila/object-mapper`, branch `phaenon-dogfood` (local only) | M2: `phn check src` = 0 findings. M3: migrated with real generics (51 `.phn`), suite + PHPStan + cs pass. `tools/phpstan` is the parity PHPStan |
 | `tequila/mongodb-odm` | `~/labs/tequila/mongodb-odm`, branch `phaenon-dogfood` (local only) | M3: migrated (125 `.phn`), suite + PHPStan max + cs pass, `phn check` 0 errors (`main` went to level max for it). Needs ext-mongodb in the local `php` |
-| `tequila/core` | `~/labs/tequila/core`, branch `phaenon-dogfood` (local only) | M4: migrated (812 `.phn`) on a `main` at PHPStan level max; suite (1188 tests), PHPStan max and cs pass on the compiled output; `phn check` 11 findings, all PHPStan rules deliberately not matched (vault `dogfood`, `open-items`); the analyser tooling directories and the files `phpstan.neon` excludes are excluded from the check |
+| `tequila/core` | `~/labs/tequila/core`, branch `phaenon-dogfood` (local only) | M4: migrated (812 `.phn`) on a `main` at PHPStan level max; `phaenon.json` builds `src`/`tests` into `.src`/`.tests` (gitignored), where Composer, PHPUnit, PHPStan and cs look; suite (1188 tests), PHPStan max and cs pass on the output; `phn check` 11 findings, all PHPStan rules deliberately not matched (vault `dogfood`, `open-items`); `exclude` lists the analyser tooling and what `phpstan.neon` excludes. Run `composer update` after switching to the branch: `composer.lock` is ignored |
 | later | `nats` (M5), `php-service-template` (M6), `iam` (M7) | `../design/roadmap.md` §3 |
 
 ## Where to look things up
@@ -80,7 +80,7 @@ PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite
 ```
 
 `phn` itself: `phn build|check|migrate|stdlib|lex|print` — run `phn` without arguments for usage; the
-README explains the Composer workflow. Dogfood targets call `phn` from `PATH`. `phn stdlib` writes the
+README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`. `phn stdlib` writes the
 runtime package (`--out ../runtime/src`) and the PhpStorm plugin's pseudo-classes (`--plugin-stubs
 ../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`) from `stdlib/runtime/*.phn`; the tests
 `TestRuntimePackageFresh` and `TestPluginStubsFresh` fail when either checkout is stale.
