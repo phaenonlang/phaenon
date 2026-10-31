@@ -47,9 +47,9 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, strings.TrimSpace(`
 usage:
-  phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... <path>...
+  phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [<path>...]
                                                            type-check and compile .phn files to .php
-  phn check [--json] [--no-deprecations] [--exclude PATH]... <path>...
+  phn check [--json] [--no-deprecations] [--exclude PATH]... [<path>...]
                                                            type-check .phn files, write nothing
   phn migrate [--keep-docblocks] <path>...                 rewrite .php files as .phn; lift generic docblocks into syntax
   phn stdlib [--out DIR] [--plugin-stubs DIR] [--check]    write the compiled stdlib (Seq.php, …) into DIR, or the PhpStorm
@@ -57,10 +57,16 @@ usage:
   phn lex   [--php] <file>                                 dump the token stream
   phn print [--php] <file>                                 parse and pretty-print
 
-build writes Foo.php next to Foo.phn, or under DIR (mirroring the path given) with --out;
-a file with type errors is not written unless --emit-on-error is given (the exit status still
-reports the errors). --check writes nothing and fails when any output is missing or stale.
---exclude skips a path under the ones given (fixtures another analyser owns); it may be repeated.
+Without paths, build and check read phaenon.json from the working directory:
+  {"roots": {"src": ".src", "tests": ".tests"}, "exclude": ["tests/Fixture"]}
+Each root compiles into its output directory, a sibling with the same structure, where every
+other file under the root is copied too (so __DIR__-relative paths resolve as in the source) and
+outputs with no source behind them are removed. "exclude" lists paths the checker leaves alone:
+check skips them, build compiles them without reporting their diagnostics (--exclude adds more).
+Without a project file, build writes Foo.php next to Foo.phn, or under DIR (mirroring the path
+given) with --out. A file with type errors is not written unless --emit-on-error is given (the
+exit status still reports the errors). --check writes nothing and fails when any output is
+missing, stale or orphaned.
 stdlib materialises the classes behind the method syntax, as the phaenon/runtime package ships them,
 and with --plugin-stubs the editor-only pseudo-classes the PhpStorm plugin bundles.
 check reads vendor code through the nearest vendor/composer autoload maps.
@@ -95,8 +101,9 @@ func excluded(path string) bool {
 	return false
 }
 
-// collect expands paths to the files with one of the given extensions, walking directories.
-func collect(paths []string, exts ...string) []string {
+// collect expands paths to the files with one of the given extensions,
+// walking directories and leaving out what skip says to.
+func collect(paths []string, skip func(string) bool, exts ...string) []string {
 	wanted := map[string]bool{}
 	for _, e := range exts {
 		wanted[e] = true
@@ -108,7 +115,7 @@ func collect(paths []string, exts ...string) []string {
 			fail("%v", err)
 		}
 		if !info.IsDir() {
-			if !excluded(p) {
+			if !skip(p) {
 				files = append(files, p)
 			}
 			continue
@@ -117,7 +124,7 @@ func collect(paths []string, exts ...string) []string {
 			if err != nil {
 				fail("%v", err)
 			}
-			if excluded(path) {
+			if skip(path) {
 				if d.IsDir() {
 					return filepath.SkipDir
 				}
@@ -144,14 +151,39 @@ func build(args []string) {
 	emitOnError := fs.Bool("emit-on-error", false, "write files that have type errors too; the exit status still reports them")
 	excludeFlag(fs)
 	fs.Parse(args)
-	if fs.NArg() == 0 {
-		usage()
+	proj := loadProject()
+	roots := fs.Args()
+	if len(roots) == 0 {
+		if proj == nil {
+			fail("phn build: give paths, or a %s naming the roots", ProjectFile)
+		}
+		roots = proj.roots()
 	}
-	files := collect(fs.Args(), ".phn")
+	// Excluded paths are compiled all the same: they are code the project runs,
+	// only analysed by another tool (PHPStan's rule fixtures, a Rector config).
+	if proj != nil {
+		excludes = append(excludes, proj.Exclude...)
+		projectSources = proj.sources()
+	}
+	skip := func(path string) bool { return proj != nil && proj.isOutput(path) }
+	outputPath := func(in string) string {
+		dst := strings.TrimSuffix(in, ".phn") + ".php"
+		if *out != "" {
+			return filepath.Join(*out, dst)
+		}
+		if proj != nil {
+			return proj.outputPath(in)
+		}
+		return dst
+	}
+	files := collect(roots, skip, ".phn")
 	failed, written, stale := 0, 0, 0
 	diags := typeCheck(files, checker.Options{})
 	broken := map[string]bool{}
 	for _, d := range diags {
+		if excluded(d.File) {
+			continue
+		}
 		printDiag(d)
 		if d.Severity == checker.Error {
 			broken[d.File] = true
@@ -175,10 +207,7 @@ func build(args []string) {
 			failed++
 			continue
 		}
-		dst := strings.TrimSuffix(in, ".phn") + ".php"
-		if *out != "" {
-			dst = filepath.Join(*out, dst)
-		}
+		dst := outputPath(in)
 		cur, readErr := os.ReadFile(dst)
 		upToDate := readErr == nil && bytes.Equal(cur, php)
 		if upToDate {
@@ -189,21 +218,26 @@ func build(args []string) {
 			stale++
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			fail("%v", err)
-		}
-		if err := os.WriteFile(dst, php, 0o644); err != nil {
-			fail("%v", err)
-		}
+		writeFile(dst, php)
 		written++
+	}
+	copied, removed := 0, 0
+	if proj != nil && *out == "" && fs.NArg() == 0 {
+		for _, src := range proj.roots() {
+			c, r := proj.mirror(src, *check)
+			copied += c
+			removed += r
+		}
 	}
 	switch {
 	case failed > 0:
 		fail("%d of %d files failed to compile", failed, len(files))
-	case *check && stale > 0:
-		fail("%d of %d outputs are stale; run `phn build`", stale, len(files))
+	case *check && stale+copied+removed > 0:
+		fail("%d outputs are stale, %d copies are stale, %d outputs have no source; run `phn build`", stale, copied, removed)
 	case *check:
 		fmt.Printf("%d files up to date\n", len(files))
+	case proj != nil:
+		fmt.Printf("%d files compiled, %d written, %d files copied, %d stale outputs removed\n", len(files), written, copied, removed)
 	default:
 		fmt.Printf("%d files compiled, %d written\n", len(files), written)
 	}
@@ -279,6 +313,8 @@ func materialise(what string, files map[string][]byte, dir string, check bool) {
 var (
 	loadedProgram *program.Program
 	loadedChecker *checker.Checker
+	// projectSources is the project file's output → source root map, absolute.
+	projectSources map[string]string
 )
 
 // typeCheck loads the stubs, the nearest Composer maps and the given files,
@@ -306,6 +342,7 @@ func typeCheck(files []string, opts checker.Options) []checker.Diagnostic {
 				Message: "PHP extensions could not be read (" + err.Error() + "); only php-src's extensions are known"})
 		}
 		if l, err := program.FindComposer(filepath.Dir(files[0])); err == nil {
+			l.Sources = projectSources
 			p.AddLoader(l)
 		} else {
 			diags = append(diags, checker.Diagnostic{File: files[0], Line: 1, Col: 1, Severity: checker.Warning, Code: "P4005",
@@ -340,13 +377,23 @@ func checkCmd(args []string) {
 	noDeprecations := fs.Bool("no-deprecations", false, "do not report deprecated calls")
 	excludeFlag(fs)
 	fs.Parse(args)
-	if fs.NArg() == 0 {
-		usage()
+	proj := loadProject()
+	roots := fs.Args()
+	if len(roots) == 0 {
+		if proj == nil {
+			fail("phn check: give paths, or a %s naming the roots", ProjectFile)
+		}
+		roots = proj.roots()
 	}
+	if proj != nil {
+		excludes = append(excludes, proj.Exclude...)
+		projectSources = proj.sources()
+	}
+	skip := func(path string) bool { return excluded(path) || (proj != nil && proj.isOutput(path)) }
 	// Plain PHP is checked too, in PHP mode — except the .php a .phn
 	// compiles to, which would only duplicate its declarations.
 	var files []string
-	for _, f := range collect(fs.Args(), ".phn", ".php") {
+	for _, f := range collect(roots, skip, ".phn", ".php") {
 		if filepath.Ext(f) == ".php" {
 			if _, err := os.Stat(strings.TrimSuffix(f, ".php") + ".phn"); err == nil {
 				continue
@@ -409,7 +456,7 @@ func migrateCmd(args []string) {
 	if fs.NArg() == 0 {
 		usage()
 	}
-	files := collect(fs.Args(), ".php", ".phn")
+	files := collect(fs.Args(), excluded, ".php", ".phn")
 	skipped, migrated, lifted, kept := 0, 0, 0, 0
 	for _, in := range files {
 		src, err := os.ReadFile(in)

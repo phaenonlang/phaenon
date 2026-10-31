@@ -16,7 +16,12 @@ import (
 // ComposerLoader finds classes through Composer's generated autoload maps.
 type ComposerLoader struct {
 	// Dir is the vendor/composer directory the maps were read from.
-	Dir      string
+	Dir string
+	// Sources maps an output directory to the source root it is built
+	// from, both absolute, as the project file declares them: Composer's
+	// maps name the outputs, where the PHP is, and the checker reads the
+	// .phn sources behind them instead.
+	Sources  map[string]string
 	psr4     map[string][]string // prefix (with trailing \) → directories
 	psr0     map[string][]string
 	classmap map[string]string // lower FQN → path
@@ -95,6 +100,12 @@ func LoadComposer(dir string) (*ComposerLoader, error) {
 // FindClass implements Loader.
 func (l *ComposerLoader) FindClass(lower string) (string, bool) {
 	if p, ok := l.classmap[lower]; ok {
+		if src, ok := l.source(filepath.Dir(p)); ok {
+			base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+			if q, ok := findCaseInsensitive(src, []string{base}); ok {
+				return q, true
+			}
+		}
 		return p, true
 	}
 	// PSR-4: the prefix comparison is case-sensitive in Composer, but
@@ -107,6 +118,11 @@ func (l *ComposerLoader) FindClass(lower string) (string, bool) {
 		}
 		rel := lower[len(lp):]
 		for _, dir := range l.psr4[prefix] {
+			if src, ok := l.source(dir); ok {
+				if p, ok := findCaseInsensitive(src, strings.Split(rel, "\\")); ok {
+					return p, true
+				}
+			}
 			// The file system is usually case-sensitive on Linux, so try
 			// to find the file with the real case by scanning the directory.
 			if p, ok := findCaseInsensitive(dir, strings.Split(rel, "\\")); ok {
@@ -123,6 +139,25 @@ func (l *ComposerLoader) FindClass(lower string) (string, bool) {
 			if p, ok := findCaseInsensitive(dir, strings.Split(lower, "\\")); ok {
 				return p, true
 			}
+		}
+	}
+	return "", false
+}
+
+// source maps a directory under an output directory to the same place
+// under its source root.
+func (l *ComposerLoader) source(dir string) (string, bool) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", false
+	}
+	abs = filepath.Clean(abs)
+	for out, src := range l.Sources {
+		if abs == out {
+			return src, true
+		}
+		if strings.HasPrefix(abs, out+string(filepath.Separator)) {
+			return filepath.Join(src, abs[len(out)+1:]), true
 		}
 	}
 	return "", false
