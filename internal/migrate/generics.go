@@ -268,13 +268,42 @@ func (d *doc) remove(g *group) {
 	}
 }
 
-// keepProse rewrites a lifted `@param T $x prose` line to `@param $x prose`;
-// prose on the following lines stays where it is.
+// keepProse rewrites a lifted `@param T $x prose` line to `@param $x - prose`;
+// prose on the following lines stays where it is. The dash is the spelling
+// of a parameter description without a type (as in JSDoc): an IDE that
+// expects `@param Type $x` would otherwise read the first word of the prose
+// as the type. The emitter puts the type back and drops the dash.
 func (d *doc) keepProse(g *group, name string) {
 	line := d.lines[g.first]
 	cut := strings.Index(line, g.tag)
-	rest := prose(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line[cut+len(g.tag):]), "*/")), true)
-	d.rewrite[g.first] = strings.TrimRight(line[:cut]+"@param $"+name+" "+rest, " ")
+	d.rewrite[g.first] = strings.TrimRight(line[:cut]+"@param $"+name+" - "+paramProse(line[cut+len(g.tag):], name), " ")
+	if g.first == len(d.lines)-1 {
+		d.rewrite[g.first] += " */"
+	}
+}
+
+// paramProse is the description on a @param line, typed (`T $x prose`) or
+// not (`$x prose`, `$x - prose`), without the dash.
+func paramProse(text, name string) string {
+	text = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(text), "*/"))
+	var rest string
+	if strings.HasPrefix(strings.TrimLeft(text, "&."), "$") {
+		rest = strings.TrimPrefix(strings.TrimLeft(text, "&."), "$"+name)
+	} else {
+		rest = prose(text, true)
+	}
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(rest), "-"))
+}
+
+// stripType rewrites a lifted `@var T prose` line to its prose: the
+// declaration states the type now, and the docblock keeps what the tag said
+// about the value — `/** @var list<string> what it holds */` becomes
+// `/** what it holds */`. Prose on the following lines stays where it is.
+func (d *doc) stripType(g *group, named bool) {
+	line := d.lines[g.first]
+	cut := strings.Index(line, g.tag)
+	rest := prose(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line[cut+len(g.tag):]), "*/")), named)
+	d.rewrite[g.first] = strings.TrimRight(line[:cut]+rest, " ")
 	if g.first == len(d.lines)-1 {
 		d.rewrite[g.first] += " */"
 	}
@@ -464,7 +493,7 @@ func (l *lifter) propertyDecl(p *ast.PropertyDecl, sc scope) {
 			continue
 		}
 		if g.description(v.Name != "") != "" {
-			l.note(off, "kept %s: it has a description; the type is now also in the declaration", g.tag)
+			d.stripType(g, v.Name != "")
 		} else {
 			d.remove(g)
 		}
@@ -612,7 +641,14 @@ func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc sco
 			}
 			pt := g.parsed.Params[0]
 			if pt.Type == nil {
-				continue // already prose only
+				// Prose only already; it gets the dash, or goes when there is none.
+				switch rest := paramProse(d.lines[g.first][strings.Index(d.lines[g.first], g.tag)+len(g.tag):], pt.Name); {
+				case rest == "":
+					d.remove(g)
+				case !strings.Contains(d.lines[g.first], "$"+pt.Name+" -"):
+					d.keepProse(g, pt.Name)
+				}
+				continue
 			}
 			var p *ast.Param
 			for _, cand := range params {
@@ -711,7 +747,7 @@ func (l *lifter) paramDocs(params []*ast.Param, lifted map[string]string, sc sco
 			}
 			l.setType(p.Type, at, text)
 			if g.description(v.Name != "") != "" {
-				l.note(off, "kept %s: it has a description; the type is now also in the declaration", g.tag)
+				d.stripType(g, v.Name != "")
 			} else {
 				d.remove(g)
 			}
@@ -723,6 +759,11 @@ func (l *lifter) paramDocs(params []*ast.Param, lifted map[string]string, sc sco
 // liftable decides whether a docblock type can replace the declared one
 // and returns its Phaenon spelling; a refusal is noted.
 func (l *lifter) liftable(off int, g *group, docT *docblock.TypeNode, native ast.TypeExpr, sc scope, untyped bool) (string, bool) {
+	if written := l.nativeText(native); native != nil && phaenonSpelled(written) {
+		// A declaration already written in Phaenon (a .phn lifted again) is
+		// the type; the tag is a leftover of an earlier edit and goes.
+		return written, true
+	}
 	text, ok := render(docT)
 	if !ok {
 		l.note(off, "kept %s %s: no Phaenon spelling for it", g.tag, docT)
@@ -737,6 +778,21 @@ func (l *lifter) liftable(off int, g *group, docT *docblock.TypeNode, native ast
 		return "", false
 	}
 	return text, true
+}
+
+// phaenonSpelled reports whether a declared type uses Phaenon syntax — type
+// arguments, a closure signature, a tuple, `bytes` — which PHP could not
+// have declared, so that a docblock cannot be its source.
+func phaenonSpelled(text string) bool {
+	if strings.ContainsAny(text, "<(") {
+		return true
+	}
+	for _, part := range strings.FieldsFunc(text, func(r rune) bool { return r == '|' || r == '&' || r == '?' }) {
+		if part == "bytes" {
+			return true
+		}
+	}
+	return false
 }
 
 func mentionsUnlifted(t *docblock.TypeNode, sc scope) bool {

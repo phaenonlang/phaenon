@@ -1,4 +1,3 @@
-26: kept @var: it has a description; the type is now also in the declaration
 29: kept @var int|string: it erases to a different type than the declared (none)
 33: kept @var array{id: int}: no Phaenon spelling for it
 63: kept @return: it has a description; the type is now also in the declaration

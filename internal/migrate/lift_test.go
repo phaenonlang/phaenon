@@ -66,3 +66,20 @@ func TestLift(t *testing.T) {
 		})
 	}
 }
+
+// A .phn lifted a second time keeps the types its declarations spell: a
+// docblock left over from an earlier edit is not their source.
+func TestLiftKeepsAWrittenType(t *testing.T) {
+	src := "namespace App;\n\nfinal class Metrics\n{\n    /** @var \\ArrayObject<int, mixed> */\n    private \\ArrayObject<int, Metric> $exported;\n\n    /** @var string the raw frame */\n    private bytes $frame;\n}\n"
+	want := "namespace App;\n\nfinal class Metrics\n{\n    private \\ArrayObject<int, Metric> $exported;\n\n    /** the raw frame */\n    private bytes $frame;\n}\n"
+	got, notes, err := Lift([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	if len(notes) != 0 {
+		t.Errorf("unexpected notes: %v", notes)
+	}
+}

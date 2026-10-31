@@ -11,7 +11,7 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
 
     private list<string> $names = [];
 
-    /** @var array<string, int> the hit counts, by name */
+    /** the hit counts, by name */
     private map<string, int> $hits = [];
 
     /** @var int|string */
@@ -23,8 +23,8 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
     private array $shape = ['id' => 1];
 
     /**
-     * @param $attributeType FQN of an attribute class
-     * @param $className FQN of a class we look for attributes in
+     * @param $attributeType - FQN of an attribute class
+     * @param $className - FQN of a class we look for attributes in
      */
     public function allOfType<T of object>(class<T> $attributeType, class $className): array<T>
     {
