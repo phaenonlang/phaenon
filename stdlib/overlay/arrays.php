@@ -128,7 +128,7 @@ function key(array|object $array): int|string|null {}
 /**
  * @template K of array-key
  * @template V
- * @param array<K, V> $array
+ * @param array<K, V> $haystack
  * @return K|false
  */
 function array_search(mixed $needle, array $haystack, bool $strict = false): int|string|false {}
