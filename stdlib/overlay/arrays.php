@@ -193,6 +193,131 @@ function array_intersect_key(array $array, array ...$arrays): array {}
 function array_diff(array $array, array ...$arrays): array {}
 
 /**
+ * The intersect and diff family keeps the first array's keys and values:
+ * the others only decide which entries stay.
+ *
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed> ...$arrays
+ * @return array<K, V>
+ */
+function array_intersect(array $array, array ...$arrays): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed> ...$arrays
+ * @return array<K, V>
+ */
+function array_intersect_assoc(array $array, array ...$arrays): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed> ...$arrays
+ * @return array<K, V>
+ */
+function array_diff_assoc(array $array, array ...$arrays): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed>|callable ...$rest
+ * @return array<K, V>
+ */
+function array_udiff(array $array, ...$rest): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed>|callable ...$rest
+ * @return array<K, V>
+ */
+function array_udiff_assoc(array $array, ...$rest): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed>|callable ...$rest
+ * @return array<K, V>
+ */
+function array_udiff_uassoc(array $array, ...$rest): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed>|callable ...$rest
+ * @return array<K, V>
+ */
+function array_diff_ukey(array $array, ...$rest): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed>|callable ...$rest
+ * @return array<K, V>
+ */
+function array_diff_uassoc(array $array, ...$rest): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed>|callable ...$rest
+ * @return array<K, V>
+ */
+function array_uintersect(array $array, ...$rest): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed>|callable ...$rest
+ * @return array<K, V>
+ */
+function array_uintersect_assoc(array $array, ...$rest): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed>|callable ...$rest
+ * @return array<K, V>
+ */
+function array_uintersect_uassoc(array $array, ...$rest): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed>|callable ...$rest
+ * @return array<K, V>
+ */
+function array_intersect_ukey(array $array, ...$rest): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed>|callable ...$rest
+ * @return array<K, V>
+ */
+function array_intersect_uassoc(array $array, ...$rest): array {}
+
+/**
+ * @return ($string is array ? array<string> : string)
+ */
+function substr_replace(array|string $string, array|string $replace, array|int $offset, array|int|null $length = null): string|array {}
+
+/**
  * @template K of array-key
  * @template V
  * @param array<K> $keys
