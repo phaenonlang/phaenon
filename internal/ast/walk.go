@@ -172,7 +172,9 @@ func Inspect(n Node, f func(Node) bool) {
 	case *IntersectionType:
 		types(n.Types, f)
 	case *ClosureType:
-		types(n.Params, f)
+		for _, p := range n.Params {
+			Inspect(p.Type, f)
+		}
 		Inspect(n.Return, f)
 	case *TupleType:
 		types(n.Elems, f)

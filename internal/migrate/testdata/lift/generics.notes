@@ -12,4 +12,4 @@
 158: kept @param array{name: string, age: int}: no Phaenon spelling for it
 159: kept @param array{string}: no Phaenon spelling for it
 169: kept @param non-empty-array<string, \stdClass>: no Phaenon spelling for it
-170: kept @param \Closure(int, int=): int: no Phaenon spelling for it
+187: kept @var \Closure(int &$n): void: no Phaenon spelling for it
