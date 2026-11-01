@@ -746,6 +746,8 @@ type (
 		Doc       string
 		Attrs     []*AttrGroup
 		Modifiers Modifier
+		Mods      Span // the modifiers, when there are any
+		Kw        Span // the `const` keyword
 		Type      TypeExpr
 		Consts    []*ConstItem
 	}

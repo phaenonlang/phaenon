@@ -410,6 +410,10 @@ func (l *lifter) classDecl(c *ast.ClassDecl, outer scope) {
 			l.methodDecl(m, sc)
 		case *ast.PropertyDecl:
 			l.propertyDecl(m, sc)
+		case *ast.ClassConstDecl:
+			if m.Modifiers&ast.ModPublic != 0 {
+				l.dropWord(m.Mods, "public")
+			}
 		}
 	}
 }
@@ -1211,7 +1215,8 @@ func (l *lifter) funHead(head ast.Span) string {
 }
 
 // params drops the `public` of a promoted parameter with an asymmetric
-// visibility, `public private(set) T $x`, which Phaenon implies.
+// visibility, `public private(set) T $x`, which Phaenon implies — as a class
+// constant's `public` is (design/functions.md §1.1).
 func (l *lifter) params(params []*ast.Param) {
 	for _, p := range params {
 		l.dropPublic(p.Modifiers, p.Mods)
@@ -1219,17 +1224,26 @@ func (l *lifter) params(params []*ast.Param) {
 }
 
 func (l *lifter) dropPublic(m ast.Modifier, mods ast.Span) {
-	if l.keepPublic || m&ast.ModPublic == 0 || m&(ast.ModPublicSet|ast.ModProtectedSet|ast.ModPrivateSet) == 0 {
+	if m&ast.ModPublic == 0 || m&(ast.ModPublicSet|ast.ModProtectedSet|ast.ModPrivateSet) == 0 {
+		return
+	}
+	l.dropWord(mods, "public")
+}
+
+// dropWord removes the modifier word (case-insensitively) and the space after
+// it from a modifier run, unless --keep-public asked for it to stay.
+func (l *lifter) dropWord(mods ast.Span, word string) {
+	if l.keepPublic {
 		return
 	}
 	text := string(l.src[mods.Start:mods.End])
-	i := strings.Index(strings.ToLower(text), "public")
-	if i < 0 || (i+len("public") < len(text) && text[i+len("public")] == '(') {
+	i := strings.Index(strings.ToLower(text), word)
+	if i < 0 || (i+len(word) < len(text) && text[i+len(word)] == '(') {
 		return
 	}
-	j := i + len("public")
-	for j < len(text) && isSpace(text[j]) {
-		j++
+	end := mods.Start + i + len(word)
+	for end < len(l.src) && isSpace(l.src[end]) {
+		end++
 	}
-	l.replace(ast.Span{Start: mods.Start + i, End: mods.Start + j}, "")
+	l.replace(ast.Span{Start: mods.Start + i, End: end}, "")
 }

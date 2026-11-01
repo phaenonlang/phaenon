@@ -23,7 +23,7 @@ interface Named
 #[Map(static function (int $x): int { return $x * 2; })]
 abstract class Doubled implements Named
 {
-    const Closure UPPER = static function (string $s): string { return \strtoupper($s); };
+    public const Closure UPPER = static function (string $s): string { return \strtoupper($s); };
 
     public private(set) int $count = 0;
 

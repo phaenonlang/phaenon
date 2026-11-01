@@ -2,6 +2,12 @@ namespace App;
 
 final class Account
 {
+    const int LIMIT = 10;
+
+    final const string NAME = 'account';
+
+    private const string SECRET = 's';
+
     private(set) int $balance = 0;
 
     protected(set) static ?string $owner = null;
