@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"math"
 	"sort"
 	"strings"
 
@@ -275,17 +276,282 @@ func (e *state) equal(o *state) bool {
 			return false
 		}
 	}
+	if len(e.paths) != len(o.paths) {
+		return false
+	}
+	for k, t := range e.paths {
+		if w, ok := o.paths[k]; !ok || !types.Equal(t, w) {
+			return false
+		}
+	}
 	return true
 }
 
 // widen generalises the variables that changed between prev and e so loop
-// iteration converges: literals become their primitive, lists stay lists.
+// iteration converges: only what moved is widened, and only as far as it
+// moved (PHPStan's MutatingScope::generalizeType).
 func (e *state) widen(prev *state) {
 	for k, v := range e.vars {
 		if pv, ok := prev.vars[k]; ok && !types.Equal(pv.t, v.t) {
-			e.vars[k] = varInfo{t: widenType(v.t), maybe: v.maybe}
+			e.vars[k] = varInfo{t: generalize(pv.t, v.t, 0), maybe: v.maybe}
 		}
 	}
+	for k, t := range e.paths {
+		if pt, ok := prev.paths[k]; ok && !types.Equal(pt, t) {
+			e.paths[k] = generalize(pt, t, 0) // `$this->rows[] = …` in a loop grows a path as a variable
+		}
+	}
+}
+
+// generalize widens next, a loop variable's type after one more iteration,
+// against prev, its type before: an unchanged type stays; literals that
+// moved become the range or primitive they move in; two shapes with the
+// same keys generalise entry by entry; shapes that gained keys become an
+// array of their keys and values, which keeps a shape appended to a list
+// intact (`$rows[] = ['a', $x]` is list<array{string, string}>, not
+// list<list<string>>); arrays generalise key and value. A kind only one
+// side has is kept as it is.
+func generalize(prev, next types.Type, depth int) types.Type {
+	if types.Equal(prev, next) {
+		return next
+	}
+	if depth > 3 {
+		return widenType(types.MakeUnion(prev, next))
+	}
+	a, b := splitForGeneralize(prev), splitForGeneralize(next)
+	var out []types.Type
+	out = append(out, generalizeLiterals(a.strs, b.strs, types.TString)...)
+	out = append(out, generalizeLiterals(a.floats, b.floats, types.TFloat)...)
+	out = append(out, generalizeLiterals(a.bools, b.bools, types.TBool)...)
+	out = append(out, generalizeInts(a.ints, b.ints)...)
+	out = append(out, generalizeShapes(a.shapes, b.shapes, depth)...)
+	out = append(out, generalizeArrays(a.arrays, b.arrays, depth)...)
+	out = append(out, a.others...)
+	out = append(out, b.others...)
+	return types.MakeUnion(out...)
+}
+
+type generalizeParts struct {
+	strs, floats, bools, others []types.Type
+	ints                        []types.Int
+	shapes                      []types.Shape
+	arrays                      []types.Array
+}
+
+func splitForGeneralize(t types.Type) generalizeParts {
+	var p generalizeParts
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.StringLit:
+			p.strs = append(p.strs, m)
+		case types.FloatLit:
+			p.floats = append(p.floats, m)
+		case types.BoolLit:
+			p.bools = append(p.bools, m)
+		case types.Int:
+			p.ints = append(p.ints, m)
+		case types.Shape:
+			p.shapes = append(p.shapes, m)
+		case types.Array:
+			p.arrays = append(p.arrays, m)
+		default:
+			p.others = append(p.others, m)
+		}
+	}
+	return p
+}
+
+// generalizeLiterals keeps the literals when only one side has them or both
+// have the same; different literals on both sides become the primitive.
+func generalizeLiterals(a, b []types.Type, primitive types.Type) []types.Type {
+	switch {
+	case len(a) == 0:
+		return b
+	case len(b) == 0:
+		return a
+	}
+	if types.Equal(types.MakeUnion(a...), types.MakeUnion(b...)) {
+		return a
+	}
+	return []types.Type{primitive}
+}
+
+// generalizeInts opens the bound an integer moved past: a counter that grew
+// is int<start, max>, one that shrank int<min, start>.
+func generalizeInts(a, b []types.Int) []types.Type {
+	toTypes := func(ms []types.Int) []types.Type {
+		out := make([]types.Type, len(ms))
+		for i, m := range ms {
+			out[i] = m
+		}
+		return out
+	}
+	switch {
+	case len(a) == 0:
+		return toTypes(b)
+	case len(b) == 0:
+		return toTypes(a)
+	}
+	ua, ub := types.MakeUnion(toTypes(a)...), types.MakeUnion(toTypes(b)...)
+	if types.Equal(ua, ub) {
+		return []types.Type{ua}
+	}
+	lo, hi := a[0].Lo, a[0].Hi
+	for _, m := range a[1:] {
+		lo, hi = min(lo, m.Lo), max(hi, m.Hi)
+	}
+	for _, m := range b {
+		if m.Lo < lo {
+			lo = math.MinInt64
+		}
+		if m.Hi > hi {
+			hi = math.MaxInt64
+		}
+	}
+	return []types.Type{types.Int{Lo: lo, Hi: hi}}
+}
+
+// generalizeShapes: the same keys on both sides generalise entry by entry;
+// otherwise the shapes become one array of their generalised keys and
+// values (a list when every shape is one, non-empty when every shape is).
+func generalizeShapes(a, b []types.Shape, depth int) []types.Type {
+	toTypes := func(ms []types.Shape) []types.Type {
+		out := make([]types.Type, len(ms))
+		for i, m := range ms {
+			out[i] = m
+		}
+		return out
+	}
+	switch {
+	case len(a) == 0:
+		return toTypes(b)
+	case len(b) == 0:
+		return toTypes(a)
+	}
+	ka, kb := shapesKeySet(a), shapesKeySet(b)
+	if len(ka) == len(kb) && !shapesUnsealed(a) && !shapesUnsealed(b) {
+		same := true
+		for k := range ka {
+			if _, ok := kb[k]; !ok {
+				same = false
+				break
+			}
+		}
+		if same {
+			merged := types.Shape{List: shapesAreLists(a) && shapesAreLists(b)}
+			// Entries in the first shape's order, so the result is stable.
+			for _, e := range a[0].Entries {
+				ta, oa := shapesOffset(a, e)
+				tb, ob := shapesOffset(b, e)
+				merged.Entries = append(merged.Entries, types.ShapeEntry{Key: e.Key, IntKey: e.IntKey, IsInt: e.IsInt, Optional: oa || ob, Type: generalize(ta, tb, depth+1)})
+			}
+			return []types.Type{merged}
+		}
+	}
+	keysA, valsA, neA := shapesKV(a)
+	keysB, valsB, neB := shapesKV(b)
+	list := shapesAreLists(a) && shapesAreLists(b)
+	arr := types.Array{Value: generalize(valsA, valsB, depth+1), List: list, NonEmpty: neA && neB}
+	if list {
+		arr.Key = types.TInt
+	} else {
+		arr.Key = generalize(keysA, keysB, depth+1)
+	}
+	return []types.Type{arr}
+}
+
+func generalizeArrays(a, b []types.Array, depth int) []types.Type {
+	toTypes := func(ms []types.Array) []types.Type {
+		out := make([]types.Type, len(ms))
+		for i, m := range ms {
+			out[i] = m
+		}
+		return out
+	}
+	switch {
+	case len(a) == 0:
+		return toTypes(b)
+	case len(b) == 0:
+		return toTypes(a)
+	}
+	var keysA, valsA, keysB, valsB []types.Type
+	list, nonEmpty := true, true
+	for _, m := range a {
+		keysA, valsA = append(keysA, m.Key), append(valsA, m.Value)
+		list, nonEmpty = list && m.List, nonEmpty && m.NonEmpty
+	}
+	for _, m := range b {
+		keysB, valsB = append(keysB, m.Key), append(valsB, m.Value)
+		list, nonEmpty = list && m.List, nonEmpty && m.NonEmpty
+	}
+	return []types.Type{types.Array{
+		Key:      generalize(types.MakeUnion(keysA...), types.MakeUnion(keysB...), depth+1),
+		Value:    generalize(types.MakeUnion(valsA...), types.MakeUnion(valsB...), depth+1),
+		List:     list,
+		NonEmpty: nonEmpty,
+	}}
+}
+
+func shapesKeySet(ms []types.Shape) map[types.ShapeEntry]bool {
+	set := map[types.ShapeEntry]bool{}
+	for _, m := range ms {
+		for _, e := range m.Entries {
+			set[types.ShapeEntry{Key: e.Key, IntKey: e.IntKey, IsInt: e.IsInt}] = true
+		}
+	}
+	return set
+}
+
+func shapesUnsealed(ms []types.Shape) bool {
+	for _, m := range ms {
+		if m.Unsealed {
+			return true
+		}
+	}
+	return false
+}
+
+func shapesAreLists(ms []types.Shape) bool {
+	for _, m := range ms {
+		if !m.List && !shapeIsList(m) {
+			return false
+		}
+	}
+	return true
+}
+
+// shapesOffset is the type an offset has across several shapes, and
+// whether some shape lacks it or marks it optional.
+func shapesOffset(ms []types.Shape, key types.ShapeEntry) (types.Type, bool) {
+	var ts []types.Type
+	optional := false
+	for _, m := range ms {
+		found := false
+		for _, e := range m.Entries {
+			if e.IsInt == key.IsInt && e.IntKey == key.IntKey && e.Key == key.Key {
+				ts = append(ts, e.Type)
+				optional = optional || e.Optional
+				found = true
+			}
+		}
+		if !found {
+			optional = true
+		}
+	}
+	return types.MakeUnion(ts...), optional
+}
+
+// shapesKV is the union of several shapes' keys and values (never for the
+// empty shape), and whether every one of them has a certain entry.
+func shapesKV(ms []types.Shape) (keys, values types.Type, nonEmpty bool) {
+	var ks, vs []types.Type
+	nonEmpty = true
+	for _, m := range ms {
+		k, v, ne := arrayKV(m)
+		ks, vs = append(ks, k), append(vs, v)
+		nonEmpty = nonEmpty && ne
+	}
+	return types.MakeUnion(ks...), types.MakeUnion(vs...), nonEmpty
 }
 
 func widenType(t types.Type) types.Type {
@@ -300,14 +566,15 @@ func widenType(t types.Type) types.Type {
 		case types.BoolLit:
 			return types.TBool
 		case types.Shape:
-			if len(m.Entries) == 0 {
-				return m // `[]` has no keys to widen; the first entry decides them
+			// The shape stays, its values widen: a tuple appended by another
+			// holder of the reference is still a tuple.
+			entries := make([]types.ShapeEntry, len(m.Entries))
+			for i, e := range m.Entries {
+				e.Type = widenType(e.Type)
+				entries[i] = e
 			}
-			values := widenType(shapeValues(m))
-			if m.List {
-				return types.Array{Key: types.TInt, Value: values, List: true}
-			}
-			return types.Array{Key: widenType(shapeKeys(m)), Value: values}
+			m.Entries = entries
+			return m
 		case types.Array:
 			return types.Array{Key: widenType(m.Key), Value: widenType(m.Value), List: m.List}
 		}

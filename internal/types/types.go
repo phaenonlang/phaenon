@@ -572,7 +572,9 @@ func simplifyUnion(ms []Type) []Type {
 			if Equal(m, o) {
 				absorbed = j < i // keep the first duplicate
 			} else if absorbs(o, m) {
-				absorbed = true
+				// Two members that absorb each other (list{string, string}
+				// and array{0: string, 1: string}) are one: keep the first.
+				absorbed = !absorbs(m, o) || j < i
 			}
 			if absorbed {
 				break
@@ -702,6 +704,13 @@ func absorbs(o, m Type) bool {
 			}
 			return true
 		}
+	case Shape:
+		// array{Service, list<string>, array{}, true} is part of
+		// array{Service, list<string>, list<list<string>>, bool}: a `??=`
+		// or a write that narrows one element leaves the declared shape.
+		if m, ok := m.(Shape); ok {
+			return shapeFits(m, o)
+		}
 	case Callable:
 		if m, ok := m.(Callable); ok && !o.HasSig && (!o.Closure || m.Closure) {
 			return true
@@ -721,6 +730,36 @@ func absorbs(o, m Type) bool {
 		}
 	}
 	return false
+}
+
+// shapeFits is the hierarchy-free test that every value of shape m is a
+// value of shape o: m has every certain entry of o, nothing o does not
+// name unless o is unsealed, and each entry's type fits.
+func shapeFits(m, o Shape) bool {
+	if m.Unsealed && !o.Unsealed || o.List && !m.List && !shapeIsList(m) {
+		return false
+	}
+	for _, em := range m.Entries {
+		eo, found := shapeLookup(o, em)
+		if !found {
+			if o.Unsealed {
+				continue
+			}
+			return false
+		}
+		if em.Optional && !eo.Optional || !structuralSub(em.Type, eo.Type) {
+			return false
+		}
+	}
+	for _, eo := range o.Entries {
+		if eo.Optional {
+			continue
+		}
+		if em, found := shapeLookup(m, eo); !found || em.Optional {
+			return false
+		}
+	}
+	return true
 }
 
 // structuralSub is a hierarchy-free subtype test used while normalising.

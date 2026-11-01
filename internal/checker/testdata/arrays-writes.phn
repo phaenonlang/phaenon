@@ -1,0 +1,222 @@
+namespace Writes;
+
+// Array types through writes, appends, destructuring and loops: what PHPStan
+// infers for the same code, the checker infers too.
+
+final class Service
+{
+    public function __construct(public readonly string $name)
+    {
+    }
+}
+
+final class Status
+{
+    public function __construct(public readonly string $env, public readonly string $summary)
+    {
+    }
+}
+
+/** @param list<array{string, string}> $pairs */
+function takesPairs(array $pairs): void
+{
+}
+
+/** @param list<string> $xs */
+function takesStrings(array $xs): void
+{
+}
+
+/** @param list<list<string>> $paths */
+function takesPaths(array $paths): void
+{
+}
+
+/** @param list<int> $ns */
+function takesInts(array $ns): void
+{
+}
+
+/** @param array<string, list<string>> $m */
+function takesMapOfLists(array $m): void
+{
+}
+
+/** @param list<Status> $statuses */
+function takesStatuses(array $statuses): void
+{
+}
+
+function takesString(string $s): void
+{
+}
+
+function takesFloat(float $f): void
+{
+}
+
+function takesBool(bool $b): void
+{
+}
+
+/**
+ * Appending shapes in a loop: the loop generalises the variable that grew,
+ * not the shape it holds.
+ *
+ * @param list<string> $repos
+ * @return array{list<array{string, string}>, list<string>}
+ */
+function report(array $repos, bool $apply): array
+{
+    $report = [];
+    $problems = [];
+    $paths = [];
+    foreach ($repos as $repo) {
+        $paths[] = $repo;
+        if (!$apply) {
+            $problems[] = sprintf('%s: left in place', $repo);
+            continue;
+        }
+        $report[] = ['applied', sprintf('%s: removed', $repo)];
+    }
+    takesPairs($report);
+    takesStrings($problems);
+    takesStrings($paths);
+
+    return [$report, $problems];
+}
+
+/**
+ * A union of shapes appended in a loop destructures by position afterwards.
+ *
+ * @param list<string> $ops
+ */
+function runs(array $ops): void
+{
+    $runs = [];
+    foreach ($ops as $op) {
+        $run = match ($op) {
+            'pull' => ['/a', ['git', 'pull', '--ff-only'], 300.0],
+            'fetch' => ['/a', ['git', 'fetch'], 300.0],
+            default => ['/b', ['git', 'clone', $op], 600.0],
+        };
+        $runs[] = $run;
+    }
+    foreach ($runs as [$dir, $command, $timeout]) {
+        takesString($dir);
+        takesStrings($command);
+        takesFloat($timeout);
+    }
+}
+
+/**
+ * @param array<string, list<string>> $shapes
+ * @return list<array{path: list<string>, roots: list<string>}>
+ */
+function leaksOf(array $shapes): array
+{
+    return [];
+}
+
+/**
+ * A declared map of shapes survives `??=` on an element, an append into an
+ * element's list, and destructuring the elements afterwards.
+ *
+ * @param list<Service> $services
+ * @param array<string, list<string>> $shapes
+ * @param array<string, int> $base
+ */
+function groups(array $services, array $shapes, array $base): void
+{
+    $leaks = [];
+    foreach ($services as $service) {
+        foreach (leaksOf($shapes) as $leak) {
+            $leaks[] = [$service, $shapes, $leak];
+        }
+    }
+    /** @var array<string, array{Service, list<string>, list<list<string>>, bool}> $groups */
+    $groups = [];
+    foreach ($leaks as [$service, $shapes, $leak]) {
+        takesString($service->name);
+        takesMapOfLists($shapes);
+        $introduced = isset($base[$service->name]);
+        $key = implode('|', [$service->name, implode(',', $leak['roots']), $introduced ? 'new' : 'old']);
+        $groups[$key] ??= [$service, $leak['roots'], [], $introduced];
+        $groups[$key][2][] = $leak['path'];
+    }
+    foreach ($groups as [$service, $roots, $paths, $introduced]) {
+        takesString($service->name);
+        takesStrings($roots);
+        takesPaths($paths);
+        takesBool($introduced);
+    }
+}
+
+/**
+ * Writing at the key of the foreach over the same list keeps the list; an
+ * arbitrary index does not.
+ *
+ * @param list<Status> $statuses
+ * @param array<string, Status> $estate
+ * @return list<Status>
+ */
+function withEstate(array $statuses, array $estate): array
+{
+    foreach ($estate as $env => $e) {
+        foreach ($statuses as $i => $s) {
+            if ($s->env !== $env) {
+                continue;
+            }
+            $statuses[$i] = new Status($s->env, $s->summary.$e->summary);
+            continue 2;
+        }
+        $statuses[] = $e;
+    }
+
+    return $statuses;
+}
+
+/**
+ * @param list<Status> $statuses
+ * @return list<Status>
+ */
+function atIndex(array $statuses, int $i, Status $s): array
+{
+    $statuses[$i] = $s;
+
+    return $statuses; // want P2202
+}
+
+/**
+ * array_map over a literal list is a shape; writing its entries through the
+ * keys of a shape of the same length keeps it one.
+ *
+ * @param list<array{string, string, string}> $rows
+ */
+function widths(array $rows): void
+{
+    $header = ['ENV', 'SERVICE', 'WORKLOAD'];
+    $widths = array_map(strlen(...), $header);
+    foreach ($rows as $row) {
+        foreach ($row as $i => $cell) {
+            $widths[$i] = max($widths[$i], mb_strlen($cell));
+        }
+    }
+    takesInts($widths);
+}
+
+final class Reporter
+{
+    /** @var list<string> */
+    private array $reported = [];
+
+    /** @param list<string> $dirs */
+    public function run(array $dirs): void
+    {
+        $this->reported = [];
+        foreach ($dirs as $dir) {
+            $this->reported[] = realpath($dir) ?: $dir;
+        }
+        takesStrings($this->reported);
+    }
+}
