@@ -1792,6 +1792,17 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 	if _, nested := t.Array.(*ast.Index); nested && (types.IsMixed(base) || types.IsNullable(base) && types.IsMixed(types.StripNull(base))) {
 		base = types.Shape{}
 	}
+	// An offset the flow has seen — the key of the foreach over this array,
+	// or an earlier write to it — is replaced, not added: the keys and the
+	// list-ness stay (PHPStan's setExistingOffsetValueType).
+	existing := false
+	if keyT != nil {
+		if key, ok := pathKey(t); ok {
+			if cur, found := env.getPath(key); found && !types.IsNullable(cur) {
+				existing = true
+			}
+		}
+	}
 	var out []types.Type
 	for _, m := range types.Members(base) {
 		switch m := m.(type) {
@@ -1802,12 +1813,15 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 			out = append(out, arrayWithEntry(m, keyT, vt))
 		case types.Array:
 			k := m.Key
-			if keyT != nil {
+			list := m.List && (keyT == nil)
+			switch {
+			case existing:
+				list = m.List
+			case keyT != nil:
 				k = types.MakeUnion(k, keyT)
-			} else if !m.List {
+			case !m.List:
 				k = types.MakeUnion(k, types.TInt)
 			}
-			list := m.List && (keyT == nil)
 			out = append(out, types.Array{Key: widenKeys(k), Value: types.MakeUnion(m.Value, vt), List: list, NonEmpty: true})
 		case types.Mixed, types.Unknown:
 			out = append(out, m)
@@ -1891,11 +1905,67 @@ func arrayWithEntry(s types.Shape, key types.Type, vt types.Type) types.Type {
 			return s
 		}
 	}
+	// A key that is one of several literals, every one an entry the shape
+	// has (`$widths[$i]` with $i the key of a shape of the same length):
+	// each of those entries may be the one written, so each takes the value
+	// as well; the shape and its list-ness stay (PHPStan does the same).
+	if entries, ok := shapeEntriesForKeys(s, key, vt); ok {
+		s.Entries = entries
+		return s
+	}
 	if len(s.Entries) == 0 && !s.Unsealed {
 		// `$r = []; $r[$k] = $v`: the first entry sets the key and value types.
 		return types.Array{Key: key, Value: vt, NonEmpty: true}
 	}
 	return types.Array{Key: types.MakeUnion(shapeKeys(s), key), Value: types.MakeUnion(shapeValues(s), vt), NonEmpty: true}
+}
+
+// shapeEntriesForKeys is s's entries with vt joined into every entry a
+// literal member of key names, when key is a small set of literals (a
+// union, or an int range) and every one of them is an entry s has.
+func shapeEntriesForKeys(s types.Shape, key, vt types.Type) ([]types.ShapeEntry, bool) {
+	if s.Unsealed || len(s.Entries) == 0 {
+		return nil, false
+	}
+	var keys []types.ShapeEntry
+	for _, m := range types.Members(key) {
+		switch k := m.(type) {
+		case types.StringLit:
+			keys = append(keys, types.ShapeEntry{Key: k.V})
+		case types.Int:
+			if k.Hi-k.Lo >= int64(len(s.Entries)) || k.Hi-k.Lo < 0 {
+				return nil, false
+			}
+			for n := k.Lo; n <= k.Hi; n++ {
+				keys = append(keys, types.ShapeEntry{IsInt: true, IntKey: n})
+			}
+		default:
+			return nil, false
+		}
+	}
+	if len(keys) == 0 {
+		return nil, false
+	}
+	written := map[int]bool{}
+	for _, k := range keys {
+		found := false
+		for i, e := range s.Entries {
+			if e.IsInt == k.IsInt && e.IntKey == k.IntKey && e.Key == k.Key {
+				written[i] = true
+				found = true
+			}
+		}
+		if !found {
+			return nil, false
+		}
+	}
+	entries := append([]types.ShapeEntry{}, s.Entries...)
+	for i := range entries {
+		if written[i] {
+			entries[i].Type = types.MakeUnion(entries[i].Type, vt)
+		}
+	}
+	return entries, true
 }
 
 // destructure handles [$a, 'k' => $b] = value. src, when given, is the

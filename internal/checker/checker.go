@@ -293,11 +293,11 @@ type fnCtx struct {
 	inScope map[string]bool
 	// returnTypes collects inferred return types of closures without a declaration.
 	returnTypes []types.Type
-	// exitEnvs collects the environment at every `return` of a closure
-	// with by-reference uses (collectExits), so what the body assigned to
-	// them before leaving early reaches the enclosing scope as well.
-	exitEnvs     []*state
-	collectExits bool
+	// returnEnvs collects the environment at every return while
+	// trackReturns is set: a closure with by-reference uses leaves them as
+	// any of its exits does.
+	returnEnvs   []*state
+	trackReturns bool
 	// sawReturnValue is set when a `return expr;` was seen.
 	sawReturnValue bool
 	// shortCircuit marks `$a?->b` expressions whose null, if any, comes from
