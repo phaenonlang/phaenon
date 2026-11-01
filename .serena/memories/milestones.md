@@ -47,10 +47,11 @@ Rewritten 2026-11-01 when M4 closed. Whoever lands the next one updates this sec
 2. **M5 — concurrency** (in progress): `../design/concurrency.md` reviewed 2026-11-01,
    decisions C1–C10 in its §15, roadmap D6 revised and D16 added. Done: the FrankenPHP check
    (C9), the syntax, checker, emitter and the `phaenon/concurrent` package (first slice above).
-   Done too: the `tq-cli` dogfood (second row above; [[dogfood]]). Next: the `RevoltTransport`
-   and single-reader change for `tequila/nats` (C8, a Tequila-side PR); the PhpStorm plugin's
-   lexer approximation (`concurrency.md` §11); a maintainer creates `phaenonlang/concurrent`
-   and pushes `../concurrent` (local commit `fb494b7`); then closing M5 per [[working-method]].
+   Done too: the `tq-cli` dogfood (second row above; [[dogfood]]) and the plugin's lexer
+   approximation (`../jetbrains` commit after `4689034`, zip 2026-11-02 07:17). Next: the
+   `RevoltTransport` and single-reader change for `tequila/nats` (C8, a Tequila-side PR); a
+   maintainer creates `phaenonlang/concurrent` and pushes `../concurrent` (local commit
+   `fb494b7`); then closing M5 per [[working-method]].
 3. Beside it, when wanted: the Composer plugin (M6, D13); the three earlier dogfood branches on
    the sibling layout (D12); the checker items in [[open-items]].
 

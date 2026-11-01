@@ -106,9 +106,11 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   3.1; a method missing there is a declaration to add, not a checker bug.
 - **`Scope::first` / a race** (C6) and a `Scope::settle` that returns results and failures side
   by side: library additions when a use site appears.
-- **PhpStorm plugin**: nothing yet for `concurrently` / `spawn`; `concurrency.md` §11 has the
-  lexer approximation to build (keywords as comments, expression form stays a syntax error until
-  a PSI block exists).
+- **PhpStorm plugin**: the lexer approximation of `concurrency.md` §11 is in (2026-11-02): a
+  statement block parses as a block, `spawn expr` as `expr`, both words coloured as keywords. The
+  expression forms (`return concurrently { … };`, `spawn { … }`) are syntax errors in the editor
+  until a PSI element for a block exists (M6, with the LSP); `spawn` results are typed as the
+  value, not `Future<T>`.
 - ~~**Dogfood** `tq-cli`~~ — done 2026-11-02 ([[dogfood]]); `tequila/nats`'s `RevoltTransport`
   with the single-reader change to `Connection` (`concurrency.md` §9.3) is still to do.
 - **tq-cli's 378 checker findings** (125 in `src`, where PHPStan 10 passes): `curl_setopt`'s
