@@ -17,7 +17,8 @@ The workspace is `~/labs/phaenon/`; the other repos are siblings, reached as `..
 |---|---|---|---|---|
 | **phaenon** | `.` | `phaenonlang/phaenon` | The compiler `phn`: lexer, parser, checker, emitter, migrate; embedded PHP signatures | [Build and test](#build-and-test) |
 | **design** | `../design` | `phaenonlang/design` | The language design and every decision: `language-overview.md` (scope), `generics.md` (decisions §11), `checker.md` (decisions §9, open §10), `roadmap.md` (decisions D1–D8, milestones M0–M7, working method §4) | Markdown only |
-| **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `\Phaenon\Type`, behind structural `is` / `as` | `composer install`, `composer test`, `composer stan` |
+| **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `\Phaenon\Type`, behind structural `is` / `as`; `Seq`, `Map`, `Str`, `Bytes` behind method syntax | `composer install`, `composer test`, `composer stan` |
+| **concurrent** | `../concurrent` | local only until a maintainer creates `phaenonlang/concurrent` | Composer package `phaenon/concurrent`: `\Phaenon\Concurrent\Scope` behind `concurrently { }` and `spawn`, on amp v3 / Revolt; `src/Scope.php` is compiled from `stdlib/concurrent/Scope.phn` here | `composer install`, `composer test`, `composer stan` |
 | **jetbrains** | `../jetbrains` | `phaenonlang/jetbrains` | PhpStorm plugin: `.phn` read as PHP code without the open tag (Kotlin, Gradle); no Phaenon-only syntax yet | `./gradlew test`, `./gradlew buildPlugin` |
 | **php-src** | `../php-src` | clone of `php/php-src` | **Read-only reference.** The scanner and grammar the lexer and parser port, the `.phpt` corpus of the conformance suite, the source of `stdlib/php-src` | Never modify, build or change its git state |
 
@@ -31,13 +32,14 @@ squash merges).
 | `tequila/object-mapper` | `~/labs/tequila/object-mapper`, branch `phaenon-dogfood` (local only) | M2: `phn check src` = 0 findings. M3: migrated with real generics (51 `.phn`), suite + PHPStan + cs pass. `tools/phpstan` is the parity PHPStan |
 | `tequila/mongodb-odm` | `~/labs/tequila/mongodb-odm`, branch `phaenon-dogfood` (local only) | M3: migrated (125 `.phn`), suite + PHPStan max + cs pass, `phn check` 0 errors (`main` went to level max for it). Needs ext-mongodb in the local `php` |
 | `tequila/core` | `~/labs/tequila/core`, branch `phaenon-dogfood` (local only) | M4: migrated (812 `.phn`) on a `main` at PHPStan level max; `phaenon.json` builds `src`/`tests` into `.src`/`.tests` (gitignored), where Composer, PHPUnit, PHPStan and cs look; suite (1188 tests), PHPStan max and cs pass on the output; `phn check` 11 findings, all PHPStan rules deliberately not matched (vault `dogfood`, `open-items`); `exclude` lists the analyser tooling and what `phpstan.neon` excludes. Run `composer update` after switching to the branch: `composer.lock` is ignored |
-| later | `nats` (M5), `php-service-template` (M6), `iam` (M7) | `../design/roadmap.md` §3 |
+| `tq-cli`, `tequila/nats` | `~/labs/tequila/tq-cli`, `~/labs/tequila/nats` | M5 (decision C8): tq-cli first — its twelve `Api::concurrently` fan-outs on amp — then a `RevoltTransport` for nats; not started |
+| later | `php-service-template` (M6), `iam` (M7) | `../design/roadmap.md` §3 |
 
 ## Where to look things up
 
 | Question | Look in |
 |---|---|
-| What the language is, and will be | `../design/language-overview.md`, then the feature's doc (`functions.md` for `fun` and closures in constant expressions) |
+| What the language is, and will be | `../design/language-overview.md`, then the feature's doc (`functions.md` for `fun` and closures in constant expressions, `concurrency.md` for `concurrently` and `spawn`) |
 | Why something is the way it is | The decision sections: `roadmap.md` §1, `checker.md` §9, `generics.md` §11 — they win over the draft text above them |
 | Milestone status and what is next | `../design/roadmap.md` §3; vault `milestones` |
 | Deferred work | vault `open-items` |
@@ -62,7 +64,7 @@ internal/checker      the type checker behind `phn check`
 internal/emit         patch-based, line-preserving emitter; generics erasure, is/as lowering
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
 internal/conformance  suites over the php-src corpus with `php` as the oracle
-stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime declaration
+stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime and phaenon/concurrent sources (.phn), the amp/Revolt declarations
 ```
 
 ## Build and test
@@ -81,9 +83,11 @@ PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite
 
 `phn` itself: `phn build|check|migrate|stdlib|lex|print` — run `phn` without arguments for usage; the
 README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`. `phn stdlib` writes the
-runtime package (`--out ../runtime/src`) and the PhpStorm plugin's pseudo-classes (`--plugin-stubs
-../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`) from `stdlib/runtime/*.phn`; the tests
-`TestRuntimePackageFresh` and `TestPluginStubsFresh` fail when either checkout is stale.
+runtime package (`--out ../runtime/src`), the concurrent package (`--concurrent-out
+../concurrent/src`) and the PhpStorm plugin's pseudo-classes (`--plugin-stubs
+../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`) from `stdlib/runtime/*.phn` and
+`stdlib/concurrent/Scope.phn`; the tests `TestRuntimePackageFresh`, `TestConcurrentPackageFresh`
+and `TestPluginStubsFresh` fail when a checkout is stale.
 
 ## How work is done
 
