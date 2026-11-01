@@ -169,7 +169,7 @@ function array_fill(int $start_index, int $count, mixed $value): array {}
  * @template K of array-key
  * @template V
  * @param array<K, V> $array
- * @param array<K, mixed> ...$arrays
+ * @param array<array-key, mixed> ...$arrays
  * @return array<K, V>
  */
 function array_diff_key(array $array, array ...$arrays): array {}
@@ -178,7 +178,7 @@ function array_diff_key(array $array, array ...$arrays): array {}
  * @template K of array-key
  * @template V
  * @param array<K, V> $array
- * @param array<K, mixed> ...$arrays
+ * @param array<array-key, mixed> ...$arrays
  * @return array<K, V>
  */
 function array_intersect_key(array $array, array ...$arrays): array {}
@@ -191,6 +191,34 @@ function array_intersect_key(array $array, array ...$arrays): array {}
  * @return array<K, V>
  */
 function array_diff(array $array, array ...$arrays): array {}
+
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $array
+ * @param array<mixed> ...$arrays
+ * @return array<K, V>
+ */
+function array_intersect(array $array, array ...$arrays): array {}
+
+/**
+ * @template V
+ * @template P
+ * @param array<V> $array
+ * @param P $value
+ * @return ($array is list ? list<V|P> : array<array-key, V|P>)
+ */
+function array_pad(array $array, int $length, mixed $value): array {}
+
+/**
+ * The rows kept whole (a null column) keep their type; a column picked
+ * out of rows typed as a general array is mixed, as in PHPStan.
+ *
+ * @template V
+ * @param array<V> $array
+ * @return ($column_key is null ? ($index_key is null ? list<V> : array<array-key, V>) : ($index_key is null ? list<mixed> : array<array-key, mixed>))
+ */
+function array_column(array $array, int|string|null $column_key, int|string|null $index_key = null): array {}
 
 /**
  * @template K of array-key
