@@ -64,3 +64,10 @@ function version_compare(string $version1, string $version2, ?string $operator =
  * @return ($return is true ? string : null)
  */
 function var_export(mixed $value, bool $return = false): ?string {}
+
+/**
+ * Returned when asked to be, printed (and true) otherwise.
+ *
+ * @return ($return is true ? string : true)
+ */
+function print_r(mixed $value, bool $return = false): string|true {}
