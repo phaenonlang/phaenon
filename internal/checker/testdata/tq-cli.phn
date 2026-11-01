@@ -223,3 +223,42 @@ function missingOffsetOnce(): void
     $writes = array_values(array_filter($calls, static fn (array $c): bool => 'POST' === $c[0]));
     takesString($writes[0][0]); // want P2313
 }
+
+// From the tests/ pass (2026-11-02).
+
+/**
+ * `continue 2` in an inner loop is a back edge of the outer one: its step
+ * runs and its condition is tested again, so neither is the condition
+ * always true nor is the code after the loop unreachable.
+ */
+function continueOuter(): int
+{
+    for ($try = 0; $try < 50; ++$try) {
+        $base = random_int(20000, 40000);
+        foreach ([0, 10, 20] as $offset) {
+            if (0 === ($base + $offset) % 7) {
+                continue 2;
+            }
+        }
+
+        return $base;
+    }
+
+    return -1;
+}
+
+/** `break 2` leaves both loops: `while (true)` has an exit. */
+function breakOuter(list<list<int>> $rows): int
+{
+    $found = 0;
+    while (true) {
+        foreach ($rows as $row) {
+            if ([] === $row) {
+                $found = 'empty';
+                break 2;
+            }
+        }
+    }
+    takesInt($found); // want P2103
+    return 1;
+}

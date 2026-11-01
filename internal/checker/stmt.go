@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -67,15 +68,13 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 		if s.Levels != nil {
 			x.expr(s.Levels, env, nil)
 		}
-		x.breakEnvs = append(x.breakEnvs, env.clone())
-		env.dead = true
+		x.jump(env, s.Levels, false)
 	case *ast.Continue:
 		x.blockExit(s.S, s.Levels, "continue")
 		if s.Levels != nil {
 			x.expr(s.Levels, env, nil)
 		}
-		x.continueEnvs = append(x.continueEnvs, env.clone())
-		env.dead = true
+		x.jump(env, s.Levels, true)
 	case *ast.Return:
 		x.returnStmt(s, env)
 	case *ast.Global:
@@ -345,12 +344,63 @@ func (x *fnCtx) ifStmt(s *ast.If, env *state) {
 	*env = *joinAll(ends...)
 }
 
+// deepJump is a `break N` / `continue N` on its way out: levels counts the
+// constructs it still leaves, the innermost one it is in included.
+type deepJump struct {
+	env    *state
+	levels int
+	cont   bool
+}
+
+// jumpLevels is the level count a break or continue names: 1 when absent
+// (or not a literal, which PHP refuses).
+func jumpLevels(levels ast.Expr) int {
+	if lit, ok := levels.(*ast.IntLit); ok {
+		if v, err := strconv.Atoi(strings.ReplaceAll(lit.Raw, "_", "")); err == nil && v > 0 {
+			return v
+		}
+	}
+	return 1
+}
+
+// jump records a break or continue and ends the path: `continue 2` in an
+// inner loop is a back edge of the outer one, so its environment travels
+// out until it reaches that loop.
+func (x *fnCtx) jump(env *state, levels ast.Expr, cont bool) {
+	switch n := jumpLevels(levels); {
+	case n > 1:
+		x.deepJumps = append(x.deepJumps, deepJump{env: env.clone(), levels: n, cont: cont})
+	case cont:
+		x.continueEnvs = append(x.continueEnvs, env.clone())
+	default:
+		x.breakEnvs = append(x.breakEnvs, env.clone())
+	}
+	env.dead = true
+}
+
+// unwind passes the deep jumps collected inside a loop or switch body one
+// construct out: those whose target is the enclosing construct join its
+// breaks or continues, the others keep travelling.
+func (x *fnCtx) unwind(inner []deepJump, outerBreaks, outerContinues *[]*state) {
+	for _, j := range inner {
+		j.levels--
+		switch {
+		case j.levels > 1:
+			x.deepJumps = append(x.deepJumps, j)
+		case j.cont:
+			*outerContinues = append(*outerContinues, j.env)
+		default:
+			*outerBreaks = append(*outerBreaks, j.env)
+		}
+	}
+}
+
 // fixpoint runs a loop body until the environment at the loop head is
 // stable. body receives the head environment and returns the environment
 // at the end of the body (before the back edge) and the exit environment
 // (the condition being false).
 func (x *fnCtx) fixpoint(entry *state, body func(head *state) (end, exit *state)) *state {
-	savedBreaks, savedContinues := x.breakEnvs, x.continueEnvs
+	savedBreaks, savedContinues, savedDeep := x.breakEnvs, x.continueEnvs, x.deepJumps
 	defer func() { x.breakEnvs, x.continueEnvs = savedBreaks, savedContinues }()
 	x.loopDepth++
 	defer func() { x.loopDepth-- }()
@@ -359,7 +409,7 @@ func (x *fnCtx) fixpoint(entry *state, body func(head *state) (end, exit *state)
 	var breaks []*state
 	savedDiags := x.c.mark()
 	for i := 0; i < 5; i++ {
-		x.breakEnvs, x.continueEnvs = nil, nil
+		x.breakEnvs, x.continueEnvs, x.deepJumps = nil, nil, nil
 		if i < 4 {
 			// Diagnostics of non-final iterations are discarded: the
 			// types are still converging.
@@ -381,6 +431,9 @@ func (x *fnCtx) fixpoint(entry *state, body func(head *state) (end, exit *state)
 			break
 		}
 	}
+	inner := x.deepJumps
+	x.deepJumps = savedDeep
+	x.unwind(inner, &savedBreaks, &savedContinues)
 	return joinAll(append([]*state{exit}, breaks...)...)
 }
 
@@ -527,8 +580,8 @@ func (x *fnCtx) switchStmt(s *ast.Switch, env *state) {
 		x.removed(s.S, "the alternative switch syntax", "braces")
 	}
 	subject := x.expr(s.Subject, env, nil)
-	savedBreaks, savedContinues := x.breakEnvs, x.continueEnvs
-	x.breakEnvs, x.continueEnvs = nil, nil
+	savedBreaks, savedContinues, savedDeep := x.breakEnvs, x.continueEnvs, x.deepJumps
+	x.breakEnvs, x.continueEnvs, x.deepJumps = nil, nil, nil
 	defer func() { x.breakEnvs, x.continueEnvs = savedBreaks, savedContinues }()
 	remaining := subject
 	var fall *state
@@ -570,6 +623,9 @@ func (x *fnCtx) switchStmt(s *ast.Switch, env *state) {
 		// `continue` inside a switch continues the enclosing loop.
 		savedContinues = append(savedContinues, x.continueEnvs...)
 	}
+	inner := x.deepJumps
+	x.deepJumps = savedDeep
+	x.unwind(inner, &savedBreaks, &savedContinues)
 }
 
 // isIdentityLiteral reports whether every member of t compares by identity

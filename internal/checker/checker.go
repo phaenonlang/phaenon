@@ -327,6 +327,11 @@ type fnCtx struct {
 	breakEnvs    []*state
 	continueEnvs []*state
 	loopDepth    int
+	// deepJumps are `break N` / `continue N` (N > 1) still leaving the
+	// constructs between them and their target: each loop or switch they
+	// leave takes a level off, and the construct around the last one takes
+	// them as its own break or continue.
+	deepJumps []deepJump
 	// throwEnvs collects the environment after every statement inside a
 	// try body, for the catch blocks.
 	throwEnvs []*state
