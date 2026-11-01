@@ -64,6 +64,9 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 		case "get_defined_vars":
 			x.removed(e.S, "get_defined_vars()", "explicit variables")
 		}
+		if blockingSleeps[lower] && x.inBlock {
+			x.report(e.S, P2605, "%s() parks the whole process, the event loop and every task with it: Scope::sleep() yields instead", lower)
+		}
 	}
 	fn := x.lookupFunction(n)
 	if fn == nil {

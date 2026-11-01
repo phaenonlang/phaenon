@@ -52,8 +52,10 @@ usage:
   phn check [--json] [--no-deprecations] [--exclude PATH]... [<path>...]
                                                            type-check .phn files, write nothing
   phn migrate [--keep-docblocks] [--keep-public] <path>... rewrite .php files as .phn; lift generic docblocks into syntax, function into fun
-  phn stdlib [--out DIR] [--plugin-stubs DIR] [--check]    write the compiled stdlib (Seq.php, …) into DIR, or the PhpStorm
-                                                           plugin's pseudo-classes (ListMethods.php, …) into the other DIR
+  phn stdlib [--out DIR] [--concurrent-out DIR] [--plugin-stubs DIR] [--check]
+                                                           write the compiled stdlib (Seq.php, …) into DIR, the compiled
+                                                           phaenon/concurrent package into the second, or the PhpStorm
+                                                           plugin's pseudo-classes (ListMethods.php, …) into the third
   phn lex   [--php] <file>                                 dump the token stream
   phn print [--php] <file>                                 parse and pretty-print
 
@@ -248,10 +250,11 @@ func build(args []string) {
 func stdlibCmd(args []string) {
 	fs := flag.NewFlagSet("stdlib", flag.ExitOnError)
 	out := fs.String("out", "", "directory to write the compiled stdlib into")
+	concurrentOut := fs.String("concurrent-out", "", "directory to write the compiled phaenon/concurrent package into")
 	plugin := fs.String("plugin-stubs", "", "directory to write the PhpStorm plugin's pseudo-classes into")
 	check := fs.Bool("check", false, "verify the files there are up to date; write nothing")
 	fs.Parse(args)
-	if (*out == "" && *plugin == "") || fs.NArg() != 0 {
+	if (*out == "" && *concurrentOut == "" && *plugin == "") || fs.NArg() != 0 {
 		usage()
 	}
 	if *out != "" {
@@ -260,6 +263,13 @@ func stdlibCmd(args []string) {
 			fail("%v", err)
 		}
 		materialise("stdlib", compiled, *out, *check)
+	}
+	if *concurrentOut != "" {
+		compiled, err := emit.Concurrent()
+		if err != nil {
+			fail("%v", err)
+		}
+		materialise("concurrent package", compiled, *concurrentOut, *check)
 	}
 	if *plugin != "" {
 		stubs, err := emit.PluginStubs()

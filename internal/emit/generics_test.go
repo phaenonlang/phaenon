@@ -35,7 +35,14 @@ func TestGenerics(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, s := range stdlib.Runtime() {
+		concurrent, err := Concurrent()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, src := range concurrent {
+			compiled[name] = src
+		}
+		for _, s := range append(stdlib.Runtime(), stdlib.Concurrent()...) {
 			name, src := filepath.Base(s.Path), s.Src
 			if strings.HasSuffix(name, ".phn") {
 				name = strings.TrimSuffix(name, ".phn") + ".php"

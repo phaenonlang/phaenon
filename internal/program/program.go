@@ -112,7 +112,7 @@ func (p *Program) LoadStubs() error {
 	if _, err := p.AddFile("<stub>/constants.php", stdlib.Constants(), lexer.ModePHP, false); err != nil {
 		return fmt.Errorf("constants.php: %w", err)
 	}
-	for _, s := range stdlib.Runtime() {
+	for _, s := range append(stdlib.Runtime(), stdlib.Concurrent()...) {
 		mode := lexer.ModePHP
 		if strings.HasSuffix(s.Path, ".phn") {
 			mode = lexer.ModePhaenon // the stdlib is written in Phaenon

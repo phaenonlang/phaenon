@@ -110,6 +110,10 @@ func (x *fnCtx) expr(e ast.Expr, env *state, expected types.Type) types.Type {
 		return x.closure(e, env, expected)
 	case *ast.ArrowFunc:
 		return x.arrowFunc(e, env, expected)
+	case *ast.Concurrently:
+		return x.concurrently(e, env, true)
+	case *ast.Spawn:
+		return x.spawn(e, env)
 	case *ast.Match:
 		return x.match(e, env, expected)
 	case *ast.Yield:
@@ -1532,6 +1536,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		return vt
 	}
 	if e.Op == token.Kind('=') {
+		x.spawnEscapes(e, env)
 		expected := x.targetType(e.Target, env)
 		vt := x.expr(e.Value, env, expected)
 		if lit, ok := e.Target.(*ast.ArrayLit); ok {

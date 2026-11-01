@@ -1,0 +1,100 @@
+namespace App;
+
+use Amp\Cancellation;
+use Phaenon\Concurrent\Scope;
+
+final class User
+{
+    fun __construct(public readonly int $id, public readonly string $name)
+    {
+    }
+}
+
+final class Users
+{
+    fun find(int $id): User
+    {
+        return new User($id, "user-$id");
+    }
+
+    fun touch(int $id): void
+    {
+    }
+}
+
+final class Orders
+{
+    fun forUser(int $id): list<int>
+    {
+        return [$id, $id + 1];
+    }
+
+    fun count(int $id): int
+    {
+        return $id % 3;
+    }
+}
+
+final class Report
+{
+    fun __construct(public readonly list<int> $rows)
+    {
+    }
+}
+
+final class Profiles
+{
+    fun __construct(private readonly Users $users, private readonly Orders $orders)
+    {
+    }
+
+    fun load(int $id): string
+    {
+        return concurrently {
+            $user = spawn $this->users->find($id);
+            $orders = spawn $this->orders->forUser($id);
+
+            return $user->await()->name.':'.count($orders->await());
+        };
+    }
+
+    fun touchAll(list<int> $ids): void
+    {
+        concurrently (timeout: 5.0) {
+            foreach ($ids as $id) {
+                spawn $this->users->touch($id);
+            }
+        }
+    }
+
+    fun total(list<int> $ids, Cancellation $stop): int
+    {
+        $total = 0;
+        concurrently (cancellation: $stop) {
+            $tasks = $ids->map(fn (int $id) => spawn $this->orders->count($id));
+            foreach (Scope::all($tasks) as $n) {
+                $total += $n;
+            }
+        }
+
+        return $total;
+    }
+
+    fun report(int $id): Report
+    {
+        return concurrently {
+            $rows = spawn {
+                $user = $this->users->find($id);
+
+                return $this->orders->forUser($user->id);
+            };
+
+            return new Report($rows->await());
+        };
+    }
+
+    fun counts(list<int> $ids): map<int, int>
+    {
+        return Scope::map($ids, fn (int $id) => $this->orders->count($id));
+    }
+}

@@ -357,6 +357,27 @@ type (
 		ReturnType TypeExpr
 		Body       Expr
 	}
+	// Concurrently is `concurrently (opts) { .. }` (design/concurrency.md
+	// §4.1): an expression whose value is what `return` inside it returns;
+	// the tasks spawned in its body are joined when it ends.
+	Concurrently struct {
+		S     Span
+		Kw    Span     // the keyword
+		Opts  *ArgList // timeout:, cancellation:; nil without options
+		Open  Span     // the `{`
+		Body  []Stmt
+		Close Span // the `}`
+	}
+	// Spawn is `spawn expr` or `spawn { .. }`: a task of the enclosing
+	// concurrently block, evaluating to its Amp\Future handle.
+	Spawn struct {
+		S     Span
+		Kw    Span
+		Expr  Expr // nil for the block form
+		Open  Span
+		Body  []Stmt
+		Close Span
+	}
 	// Match is match(x) { .. }.
 	Match struct {
 		S       Span
@@ -460,6 +481,8 @@ func (*Eval) exprNode()                {}
 func (*Closure) exprNode()             {}
 func (*ArrowFunc) exprNode()           {}
 func (*Match) exprNode()               {}
+func (*Concurrently) exprNode()        {}
+func (*Spawn) exprNode()               {}
 func (*Yield) exprNode()               {}
 func (*YieldFrom) exprNode()           {}
 func (*Throw) exprNode()               {}
@@ -509,6 +532,8 @@ func (n *Closure) Span() Span             { return n.S }
 func (n *ClosureUse) Span() Span          { return n.S }
 func (n *ArrowFunc) Span() Span           { return n.S }
 func (n *Match) Span() Span               { return n.S }
+func (n *Concurrently) Span() Span        { return n.S }
+func (n *Spawn) Span() Span               { return n.S }
 func (n *MatchArm) Span() Span            { return n.S }
 func (n *Yield) Span() Span               { return n.S }
 func (n *YieldFrom) Span() Span           { return n.S }
