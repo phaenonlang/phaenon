@@ -168,10 +168,14 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   typeless `@param $x prose` is mis-parsed by PhpStorm itself (`prose` as the type): the language
   writes `@param $x - prose` (D14) rather than the plugin filtering three inspections. The
   "missing type declaration" inspections on erased properties, parameters and return types are
-  filtered since `2a9b153` (the readonly error already was). Names inside erased types navigate
-  and keep their import used since the next commit (`PhaenonErasedNames`); they are still not
-  references: find-usages, rename and completion miss them — the real fix is erasing to a
-  comment-like token whose PSI carries references instead of to whitespace.
+  filtered since `2a9b153` (the readonly error already was). ~~Names inside erased types are
+  text, not references~~ — since `0a22b5d` erasure goes to a token of its own
+  (`PHAENON_ERASED`, a comment to the parser) whose leaf carries a reference per class name:
+  navigation, find-usages, rename and the unused-import inspection work. Left: no completion
+  inside `<…>`; the erased leaf is a `PsiComment`, so comment-based features (spell-checking,
+  "commented-out code" style inspections) see Phaenon types as comments. PhpStorm 2025.1 does
+  not parse `[...$a][0]` in plain PHP either (core's `DeadlineMetricsTest.phn:114`); the
+  real-tree test lists such files instead of counting them.
 - The implied `declare(strict_types=1)` is not modelled.
 - Editor colouring relies on the internal extension point `com.jetbrains.php.baseLexerProvider`.
 
