@@ -1,7 +1,7 @@
 ---
 type: backlog
 tags: [phaenon, backlog]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Open and deferred items
@@ -118,25 +118,37 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - ~~**tq-cli's 378 checker findings**~~ — `src` at 0 (2026-11-02). Left: **213 in `tests/`**, which
   tq-cli's PHPStan never analysed; most are what PHPStan 10 reports too. Whether a dogfood's tests
   must pass `phn check` is open.
-- **`map<string, …>` and PHP's key normalisation**: `$out[(string) $k] = …` is typed string-keyed
-  (as PHPStan does), but PHP stores a numeric string key as an int, so `map<string, mixed>` from a
-  YAML/JSON helper can hold int keys at runtime. Retyping tq-cli's `Val::map()` to
-  `map<int|string, mixed>` raised 122 errors. A design question for the type lattice.
-- **bytes ergonomics** (from tq-cli's zip builder, relay frames, archives): no `.` / `.=` for
-  `bytes`, so builders become a `list<bytes>` and `Bytes::concat()`; a text header inside binary
-  needs `('tree '.\strlen($b)."\0")->bytes()`; `file_get_contents()` returns `string`, so every
+- ~~**`map<string, …>` and PHP's key normalisation**~~ — decided and done 2026-11-02
+  (`../design/checker.md` §9, `1d9d6ff`): a key whose type is known numeric is an int key
+  (literals, `decimal-int-string` = `(string)` of an int, the int part of `numeric-string`, a
+  `(string)` cast looked through member by member); a general `string` key stays a string key
+  on purpose. Left on tq-cli's branch: twelve findings in `src` from ten `(string)` re-keying
+  loops over decoded YAML/JSON that declare string keys (`Val::map()`, `InstallationLoader`
+  ×3, `ResourcesCommand::stringMap()`, `Estate::secretData()`, `BlobPlan::decode()`,
+  `LocalTenant` `render_env`, `SecretsContext::renderedStores()`, `TestInfra\Manifest`
+  options), and one in `tests/` (`StoredZipTest::ints()`); each is retyped `map<int|string, …>`
+  or made to reject int keys. `InstallationLoader.phn:915` is a live bug: a numeric YAML key
+  under a build set reaches `$at(…, $key)` (a `string` parameter) and throws `TypeError` in
+  place of the intended message.
+- **bytes ergonomics** (from tq-cli's zip builder, relay frames, archives): ~~no `.` / `.=` for
+  `bytes`~~ — `bytes . bytes` is `bytes` since 2026-11-02 (`strings.md` §2, §6; `07557a3`),
+  a buffer starts from `(bytes) ''`. Left: a text header inside binary needs
+  `('tree '.\strlen($b)."\0")->bytes()`; `file_get_contents()` returns `string`, so every
   binary read is `(bytes) $content`.
-- **The emitter copies `bytes` verbatim from written docblock tags** (`@return bytes`,
-  `@var list<bytes>`), while the docblocks it generates erase it to `string`; with
-  `use Phaenon\Bytes;` in the file, PHPStan reads the tag as the class (`strings.md` §5 says it
-  erases).
+- ~~**The emitter copies `bytes` verbatim from written docblock tags**~~ — done 2026-11-02
+  (`5d4e3a1`): the type of a written tag erases as a generated one does, on its line. A type
+  spread over several docblock lines is still copied as written; `map<…>` and the other
+  Phaenon vocabulary in written tags are the M4 item above, still undecided.
 - **Closure types cannot spell refined ints**: `Closure(positive-int): bytes` and
   `Closure(int<1, max>): bytes` are P1000 (hyphenated names are docblock vocabulary,
   `generics.md` §11.2, and `int<a, b>` has no native spelling).
-- **The emitter's automatic import collides with a file's own `use` block**: it writes
-  `use Phaenon\Str;` on line 1, and php-cs-fixer then fails `blank_line_after_namespace` /
-  `no_extra_blank_lines` in files that have their own imports. Writing the import by hand works
-  (`5519a67` made such an import count as used).
+- ~~**The emitter's automatic import collides with a file's own `use` block**~~ — done
+  2026-11-02 (roadmap D11, `39079ed`): the import shares the line of its neighbour in the
+  block (alphabetical place when sorted). One php-cs-fixer rule, `single_line_after_imports`,
+  still fails on an output that gets an import (plus `blank_line_between_import_groups` when
+  the block holds only function or constant imports): a dogfood's cs config turns it off beside
+  the four line-1 rules, or the import is written by hand (`5519a67` made that count as used).
+  tq-cli has one such file, in `tests/` (`StoredZipTest`), outside its cs finder.
 - The emitter's `use` clause is syntactic: a variable passed by reference to a function inside
   the block (`sort($rows)`) is not seen as assigned and is captured by value; a variable assigned
   in the block and conditionally assigned after it before being read is not captured. The
