@@ -37,7 +37,7 @@ squash merges).
 
 | Question | Look in |
 |---|---|
-| What the language is, and will be | `../design/language-overview.md`, then the feature's doc |
+| What the language is, and will be | `../design/language-overview.md`, then the feature's doc (`functions.md` for `fun` and closures in constant expressions) |
 | Why something is the way it is | The decision sections: `roadmap.md` §1, `checker.md` §9, `generics.md` §11 — they win over the draft text above them |
 | Milestone status and what is next | `../design/roadmap.md` §3; vault `milestones` |
 | Deferred work | vault `open-items` |
@@ -60,7 +60,7 @@ internal/types        the type lattice (PHPStan semantics): subtyping, narrowing
 internal/program      program model: project files, Composer vendor code (lazy), stubs + overlay
 internal/checker      the type checker behind `phn check`
 internal/emit         patch-based, line-preserving emitter; generics erasure, is/as lowering
-internal/migrate      .php → .phn: tag stripping, then generic docblocks lifted into syntax
+internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
 internal/conformance  suites over the php-src corpus with `php` as the oracle
 stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime declaration
 ```

@@ -10,14 +10,14 @@ namespace Phaenon;
  */
 final class Bytes
 {
-    private function __construct()
+    private fun __construct()
     {
     }
 
     /**
      * @throws \ValueError when $hex is not an even number of hex digits
      */
-    public static function fromHex(string $hex): bytes
+    static fun fromHex(string $hex): bytes
     {
         $b = @hex2bin($hex);
         if (false === $b) {
@@ -30,7 +30,7 @@ final class Bytes
     /**
      * @throws \ValueError when $b64 is not base64 (standard or URL-safe alphabet)
      */
-    public static function fromBase64(string $b64): bytes
+    static fun fromBase64(string $b64): bytes
     {
         $b = base64_decode(strtr($b64, '-_', '+/'), true);
         if (false === $b) {
@@ -40,32 +40,32 @@ final class Bytes
         return (bytes) $b;
     }
 
-    public static function length(bytes $b): int
+    static fun length(bytes $b): int
     {
         return strlen($b);
     }
 
-    public static function isEmpty(bytes $b): bool
+    static fun isEmpty(bytes $b): bool
     {
         return 0 === strlen($b);
     }
 
-    public static function slice(bytes $b, int $start, ?int $length = null): bytes
+    static fun slice(bytes $b, int $start, ?int $length = null): bytes
     {
         return substr($b, $start, $length);
     }
 
-    public static function concat(bytes ...$parts): bytes
+    static fun concat(bytes ...$parts): bytes
     {
         return (bytes) implode('', $parts);
     }
 
-    public static function hex(bytes $b): string
+    static fun hex(bytes $b): string
     {
         return bin2hex($b);
     }
 
-    public static function base64(bytes $b, bool $urlSafe = false): string
+    static fun base64(bytes $b, bool $urlSafe = false): string
     {
         $s = base64_encode($b);
 
@@ -77,7 +77,7 @@ final class Bytes
      *
      * @throws \ValueError when the bytes are not valid UTF-8
      */
-    public static function text(bytes $b): string
+    static fun text(bytes $b): string
     {
         if (!mb_check_encoding($b, 'UTF-8')) {
             throw new \ValueError('Bytes::text(): not valid UTF-8');
@@ -89,7 +89,7 @@ final class Bytes
     /**
      * The bytes decoded as UTF-8 text, every invalid sequence replaced by U+FFFD.
      */
-    public static function textLossy(bytes $b): string
+    static fun textLossy(bytes $b): string
     {
         $substitute = mb_substitute_character();
         mb_substitute_character(0xFFFD);
@@ -103,7 +103,7 @@ final class Bytes
     /**
      * Constant-time comparison, for secrets and signatures.
      */
-    public static function equals(bytes $a, bytes $b): bool
+    static fun equals(bytes $a, bytes $b): bool
     {
         return hash_equals($a, $b);
     }
@@ -113,7 +113,7 @@ final class Bytes
      *
      * @throws \OutOfRangeException
      */
-    public static function at(bytes $b, int $i): int
+    static fun at(bytes $b, int $i): int
     {
         $n = strlen($b);
         if ($i < -$n || $i >= $n) {

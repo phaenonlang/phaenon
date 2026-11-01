@@ -171,6 +171,10 @@ func (x *fnCtx) exprLenient(e ast.Expr, env *state) types.Type {
 
 func (x *fnCtx) variable(v *ast.Variable, env *state, lenient bool) types.Type {
 	if v.Name == "this" {
+		if x.constClosure {
+			x.report(v.S, P2531, "a closure in a constant expression cannot use $this")
+			return types.TObject
+		}
 		if x.class == nil || x.static {
 			x.report(v.S, P2311, "$this is not available in a static context")
 			return types.TObject

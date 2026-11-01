@@ -51,7 +51,7 @@ usage:
                                                            type-check and compile .phn files to .php
   phn check [--json] [--no-deprecations] [--exclude PATH]... [<path>...]
                                                            type-check .phn files, write nothing
-  phn migrate [--keep-docblocks] <path>...                 rewrite .php files as .phn; lift generic docblocks into syntax
+  phn migrate [--keep-docblocks] [--keep-public] <path>... rewrite .php files as .phn; lift generic docblocks into syntax, function into fun
   phn stdlib [--out DIR] [--plugin-stubs DIR] [--check]    write the compiled stdlib (Seq.php, …) into DIR, or the PhpStorm
                                                            plugin's pseudo-classes (ListMethods.php, …) into the other DIR
   phn lex   [--php] <file>                                 dump the token stream
@@ -452,6 +452,7 @@ func printDiag(d checker.Diagnostic) {
 func migrateCmd(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	keepDoc := fs.Bool("keep-docblocks", false, "leave generic docblocks as they are")
+	keepPublic := fs.Bool("keep-public", false, "write `public fun` and keep `public` before private(set) (Phaenon implies it)")
 	fs.Parse(args)
 	if fs.NArg() == 0 {
 		usage()
@@ -469,7 +470,7 @@ func migrateCmd(args []string) {
 			if *keepDoc {
 				continue
 			}
-			phn, notes, err = migrate.Lift(src)
+			phn, notes, err = migrate.Lift(src, migrate.Options{KeepPublic: *keepPublic})
 			if err != nil {
 				fail("%s: %v", in, err)
 			}
@@ -478,7 +479,7 @@ func migrateCmd(args []string) {
 			}
 			lifted++
 		} else {
-			phn, notes, err = migrate.Convert(src, migrate.Options{Generics: !*keepDoc})
+			phn, notes, err = migrate.Convert(src, migrate.Options{Generics: !*keepDoc, KeepPublic: *keepPublic})
 			if err != nil {
 				if errors.Is(err, migrate.ErrNotPlainCode) || errors.Is(err, migrate.ErrGenerated) {
 					fmt.Fprintf(os.Stderr, "%s: skipped: %v\n", in, err)

@@ -35,6 +35,10 @@ type Options struct {
 	// Generics lifts generic docblocks (@template, @param list<T>, …) into
 	// Phaenon syntax; the tags it cannot lift are reported as notes.
 	Generics bool
+	// KeepPublic writes `public fun` where the PHP said `public function`,
+	// and keeps `public` before an asymmetric visibility; off, a sole
+	// `public` is dropped, since Phaenon implies it (design/functions.md).
+	KeepPublic bool
 }
 
 // File converts PHP source to Phaenon source.
@@ -53,7 +57,7 @@ func Convert(src []byte, opts Options) ([]byte, []Note, error) {
 	}
 	var notes []Note
 	if opts.Generics {
-		if out, notes, err = Lift(out); err != nil {
+		if out, notes, err = Lift(out, opts); err != nil {
 			return nil, nil, err
 		}
 	}

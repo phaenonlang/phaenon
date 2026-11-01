@@ -1,0 +1,39 @@
+namespace App;
+
+final class Account
+{
+    private(set) int $balance = 0;
+
+    protected(set) static ?string $owner = null;
+
+    fun __construct(private(set) string $id, protected string $note = '')
+    {
+    }
+
+    fun id(): string
+    {
+        return $this->id;
+    }
+
+    final static fun open(string $id): self
+    {
+        return new self($id);
+    }
+
+    protected fun touch(): void
+    {
+    }
+
+    private static fun hidden(): void
+    {
+    }
+
+    public
+    fun split(): void
+    {
+    }
+}
+
+fun helper(): void
+{
+}

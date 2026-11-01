@@ -382,7 +382,7 @@ func (p *Printer) stmt(s ast.Stmt) {
 	case *ast.FunctionDecl:
 		p.doc(s.Doc)
 		p.attrsLines(s.Attrs)
-		p.w("function ")
+		p.w(keyword(s.Fun))
 		if s.ByRef {
 			p.w("&")
 		}
@@ -624,7 +624,7 @@ func (p *Printer) member(m ast.ClassMember) {
 		p.doc(m.Doc)
 		p.attrsLines(m.Attrs)
 		p.modifiers(m.Modifiers)
-		p.w("function ")
+		p.w(keyword(m.Fun))
 		if m.ByRef {
 			p.w("&")
 		}
@@ -686,4 +686,12 @@ func (p *Printer) member(m ast.ClassMember) {
 	default:
 		panic(fmt.Sprintf("printer: unknown member node %T", m))
 	}
+}
+
+// keyword is the spelling of a named declaration: `fun` in Phaenon, else `function`.
+func keyword(fun bool) string {
+	if fun {
+		return "fun "
+	}
+	return "function "
 }

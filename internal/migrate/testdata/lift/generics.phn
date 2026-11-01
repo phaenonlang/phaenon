@@ -26,7 +26,7 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
      * @param $attributeType - FQN of an attribute class
      * @param $className - FQN of a class we look for attributes in
      */
-    public function allOfType<T of object>(class<T> $attributeType, class $className): array<T>
+    fun allOfType<T of object>(class<T> $attributeType, class $className): array<T>
     {
         return [];
     }
@@ -36,7 +36,7 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
      *
      * @throws \ReflectionException
      */
-    public function first<T of object>(class<T> $attributeType): ?T
+    fun first<T of object>(class<T> $attributeType): ?T
     {
         return null;
     }
@@ -44,7 +44,7 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
     /**
      * @return T the mapped object
      */
-    public function map<T of object>(object $source, T|class<T> $target): T
+    fun map<T of object>(object $source, T|class<T> $target): T
     {
         return $source;
     }
@@ -55,19 +55,19 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
      * @param array{id: int} $row
      * @param non-empty-string ...$names
      */
-    public function closures(?Closure(object, object): object $mapping, Closure(int): string $f, callable $g, int $n, array $row, string ...$names, ?string $maybe = null): void
+    fun closures(?Closure(object, object): object $mapping, Closure(int): string $f, callable $g, int $n, array $row, string ...$names, ?string $maybe = null): void
     {
     }
 
     /**
      * @return list<int>
      */
-    public function widened(list<int> $xs): iterable
+    fun widened(list<int> $xs): iterable
     {
         return $xs;
     }
 
-    public function qualified(\App\Model\Row $row, Row $other): void
+    fun qualified(\App\Model\Row $row, Row $other): void
     {
     }
 
@@ -75,25 +75,25 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
      * @param int $n
      * @return iterable<string>
      */
-    public function untypedParts($n)
+    fun untypedParts($n)
     {
     }
 
-    public function __construct<ClassType of object>(private ReflectorInterface<ClassType, \UnitEnum> $reflector, string $name = '')
+    fun __construct<ClassType of object>(private ReflectorInterface<ClassType, \UnitEnum> $reflector, string $name = '')
     {
     }
 
-    public function fluent(): static
+    fun fluent(): static
     {
         return $this;
     }
 
     /** @phpstan-param positive-int $n */
-    public function prefixed(int $n): void
+    fun prefixed(int $n): void
     {
     }
 
-    public function count(): int
+    fun count(): int
     {
         return 0;
     }
@@ -103,7 +103,7 @@ abstract class Repo<T> extends Base<T>
 {
 }
 
-function firstOf<T of object>(list<T> $items): ?T
+fun firstOf<T of object>(list<T> $items): ?T
 {
     return $items[0] ?? null;
 }
@@ -112,7 +112,7 @@ function firstOf<T of object>(list<T> $items): ?T
  * @param array{name: string, age: int} $named
  * @param array{string} $single
  */
-function tuples((string, int) $pair, list<(string, int)> $pairs, array $named, array $single): (int, string)
+fun tuples((string, int) $pair, list<(string, int)> $pairs, array $named, array $single): (int, string)
 {
     return [$pair[1], $pair[0]];
 }
@@ -121,6 +121,6 @@ function tuples((string, int) $pair, list<(string, int)> $pairs, array $named, a
  * @param non-empty-array<string, \stdClass> $objects
  * @param \Closure(int, int=): int $withOptional
  */
-function keyed(map<int, string> $map, array $objects, \Closure $withOptional): void
+fun keyed(map<int, string> $map, array $objects, \Closure $withOptional): void
 {
 }

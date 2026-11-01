@@ -11,21 +11,21 @@ use Closure;
  */
 final class Seq
 {
-    private function __construct()
+    private fun __construct()
     {
     }
 
-    public static function map<T, U>(list<T> $xs, Closure(T): U $f): list<U>
+    static fun map<T, U>(list<T> $xs, Closure(T): U $f): list<U>
     {
         return array_map($f, $xs);
     }
 
-    public static function filter<T>(list<T> $xs, Closure(T): bool $keep): list<T>
+    static fun filter<T>(list<T> $xs, Closure(T): bool $keep): list<T>
     {
         return array_values(array_filter($xs, $keep));
     }
 
-    public static function reduce<T, A>(list<T> $xs, A $initial, Closure(A, T): A $f): A
+    static fun reduce<T, A>(list<T> $xs, A $initial, Closure(A, T): A $f): A
     {
         $acc = $initial;
         foreach ($xs as $x) {
@@ -35,51 +35,51 @@ final class Seq
         return $acc;
     }
 
-    public static function each<T>(list<T> $xs, Closure(T): void $f): void
+    static fun each<T>(list<T> $xs, Closure(T): void $f): void
     {
         foreach ($xs as $x) {
             $f($x);
         }
     }
 
-    public static function first<T>(list<T> $xs): ?T
+    static fun first<T>(list<T> $xs): ?T
     {
         return [] === $xs ? null : $xs[0];
     }
 
-    public static function last<T>(list<T> $xs): ?T
+    static fun last<T>(list<T> $xs): ?T
     {
         return [] === $xs ? null : $xs[count($xs) - 1];
     }
 
-    public static function contains<T>(list<T> $xs, T $needle): bool
+    static fun contains<T>(list<T> $xs, T $needle): bool
     {
         return in_array($needle, $xs, true);
     }
 
-    public static function indexOf<T>(list<T> $xs, T $needle): ?int
+    static fun indexOf<T>(list<T> $xs, T $needle): ?int
     {
         $i = array_search($needle, $xs, true);
 
         return is_int($i) ? $i : null;
     }
 
-    public static function slice<T>(list<T> $xs, int $offset, ?int $length = null): list<T>
+    static fun slice<T>(list<T> $xs, int $offset, ?int $length = null): list<T>
     {
         return array_slice($xs, $offset, $length);
     }
 
-    public static function concat<T>(list<T> ...$lists): list<T>
+    static fun concat<T>(list<T> ...$lists): list<T>
     {
         return self::flatten(array_values($lists));
     }
 
-    public static function reverse<T>(list<T> $xs): list<T>
+    static fun reverse<T>(list<T> $xs): list<T>
     {
         return array_reverse($xs);
     }
 
-    public static function sort<T>(list<T> $xs, ?Closure(T, T): int $cmp = null): list<T>
+    static fun sort<T>(list<T> $xs, ?Closure(T, T): int $cmp = null): list<T>
     {
         if (null === $cmp) {
             sort($xs);
@@ -90,14 +90,14 @@ final class Seq
         return $xs;
     }
 
-    public static function sortBy<T, K of int|string>(list<T> $xs, Closure(T): K $key): list<T>
+    static fun sortBy<T, K of int|string>(list<T> $xs, Closure(T): K $key): list<T>
     {
         usort($xs, fn ($a, $b): int => $key($a) <=> $key($b));
 
         return $xs;
     }
 
-    public static function unique<T of int|string>(list<T> $xs): list<T>
+    static fun unique<T of int|string>(list<T> $xs): list<T>
     {
         // Strict: 1 and '1' are two values (array_unique() and array keys
         // would merge them). The first occurrence keeps its place.
@@ -115,7 +115,7 @@ final class Seq
         return $out;
     }
 
-    public static function flatten<T>(list<list<T>> $xs): list<T>
+    static fun flatten<T>(list<list<T>> $xs): list<T>
     {
         $out = [];
         foreach ($xs as $inner) {
@@ -130,7 +130,7 @@ final class Seq
     /**
      * @throws \ValueError when $size is not positive
      */
-    public static function chunk<T>(list<T> $xs, int $size): list<list<T>>
+    static fun chunk<T>(list<T> $xs, int $size): list<list<T>>
     {
         if ($size < 1) {
             throw new \ValueError('Seq::chunk(): the size must be at least 1');
@@ -139,7 +139,7 @@ final class Seq
         return array_chunk($xs, $size);
     }
 
-    public static function zip<A, B>(list<A> $as, list<B> $bs): list<(A, B)>
+    static fun zip<A, B>(list<A> $as, list<B> $bs): list<(A, B)>
     {
         $out = [];
         $n = min(count($as), count($bs));
@@ -150,7 +150,7 @@ final class Seq
         return $out;
     }
 
-    public static function keyBy<T, K of int|string>(list<T> $xs, Closure(T): K $key): map<K, T>
+    static fun keyBy<T, K of int|string>(list<T> $xs, Closure(T): K $key): map<K, T>
     {
         $out = [];
         foreach ($xs as $x) {
@@ -160,7 +160,7 @@ final class Seq
         return $out;
     }
 
-    public static function groupBy<T, K of int|string>(list<T> $xs, Closure(T): K $key): map<K, list<T>>
+    static fun groupBy<T, K of int|string>(list<T> $xs, Closure(T): K $key): map<K, list<T>>
     {
         $out = [];
         foreach ($xs as $x) {
@@ -170,17 +170,17 @@ final class Seq
         return $out;
     }
 
-    public static function join(list<string|\Stringable> $xs, string $separator): string
+    static fun join(list<string|\Stringable> $xs, string $separator): string
     {
         return implode($separator, $xs);
     }
 
-    public static function isEmpty(list<mixed> $xs): bool
+    static fun isEmpty(list<mixed> $xs): bool
     {
         return [] === $xs;
     }
 
-    public static function count(list<mixed> $xs): int
+    static fun count(list<mixed> $xs): int
     {
         return count($xs);
     }

@@ -53,7 +53,7 @@ func TestLift(t *testing.T) {
 				t.Errorf("notes differ from %s (PHAENON_UPDATE=1 to rewrite):\n%s", notesFile, b.String())
 			}
 			// Lifting is idempotent: the output has nothing left to lift.
-			again, notes2, err := Lift(got)
+			again, notes2, err := Lift(got, Options{Generics: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -72,7 +72,7 @@ func TestLift(t *testing.T) {
 func TestLiftKeepsAWrittenType(t *testing.T) {
 	src := "namespace App;\n\nfinal class Metrics\n{\n    /** @var \\ArrayObject<int, mixed> */\n    private \\ArrayObject<int, Metric> $exported;\n\n    /** @var string the raw frame */\n    private bytes $frame;\n}\n"
 	want := "namespace App;\n\nfinal class Metrics\n{\n    private \\ArrayObject<int, Metric> $exported;\n\n    /** the raw frame */\n    private bytes $frame;\n}\n"
-	got, notes, err := Lift([]byte(src))
+	got, notes, err := Lift([]byte(src), Options{Generics: true})
 	if err != nil {
 		t.Fatal(err)
 	}

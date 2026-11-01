@@ -1,0 +1,91 @@
+namespace App;
+
+use Closure;
+
+// `fun` declares a function or method, public unless a visibility is written;
+// a property with an asymmetric visibility and no main one is public; a
+// closure in a constant expression compiles to the static function PHP 8.5
+// accepts there (design/functions.md).
+
+#[\Attribute(\Attribute::TARGET_CLASS)]
+final class Map
+{
+    fun __construct(public readonly Closure $f)
+    {
+    }
+}
+
+interface Named
+{
+    fun name(): string;
+}
+
+#[Map(fn (int $x): int => $x * 2)]
+abstract class Doubled implements Named
+{
+    const Closure UPPER = fn (string $s): string => \strtoupper($s);
+
+    private(set) int $count = 0;
+
+    protected static int $hits = 0;
+
+    final fun __construct(
+        private(set) string $id,
+        public Closure $normalise = fn (string $s): string => \trim($s),
+    ) {
+    }
+
+    fun name(): string
+    {
+        return $this->id;
+    }
+
+    public fun id(): string
+    {
+        return \trim($this->id);
+    }
+
+    final fun version(): int
+    {
+        return $this->count;
+    }
+
+    protected static fun make(string $id): static
+    {
+        return new static($id);
+    }
+
+    abstract protected fun run(): void;
+
+    protected fun reset(): void
+    {
+        static $calls = fn (): int => 0;
+        $this->count = 0;
+        self::$hits++;
+    }
+
+    final public static fun compare(): Closure
+    {
+        return function (int $a, int $b): int {
+            return $a <=> $b;
+        };
+    }
+}
+
+#[Map(function (int $x): int {
+    return $x + 1;
+})]
+enum Level: int
+{
+    case Low = 1;
+}
+
+fun helper(Closure $f = fn (): int => 1): int
+{
+    return $f() === 1 ? 1 : 0;
+}
+
+fun &byRef(list<int> &$a): list<int>
+{
+    return $a;
+}

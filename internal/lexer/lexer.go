@@ -533,8 +533,22 @@ func (l *Lexer) word(i int) token.Token {
 		if k, ok := phaenonKeywords[string(lower)]; ok {
 			return l.emit(k, end)
 		}
+		if string(lower) == "fun" && l.declaresName(end) {
+			return l.emit(token.T_FUN, end)
+		}
 	}
 	return l.emit(token.T_STRING, end)
+}
+
+// declaresName reports whether a name (or `&` and a name) follows offset i
+// after trivia: `fun id(` declares, `fun(` calls a function called fun and
+// `fun = 1` names a constant (design/functions.md §1.1).
+func (l *Lexer) declaresName(i int) bool {
+	j := l.skipWhitespaceAndComments(i)
+	if l.at(j) == '&' {
+		j = l.skipWhitespaceAndComments(j + 1)
+	}
+	return isLabelStart(l.at(j))
 }
 
 // phaenonKeywords are reserved only in Phaenon mode. The contextual ones

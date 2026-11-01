@@ -85,6 +85,7 @@ func Tree(src []byte, f *ast.File, opts Options) ([]byte, error) {
 	if err := e.lowerGenerics(f); err != nil {
 		return nil, err
 	}
+	e.lowerFunctions(f)
 	e.prologue(f)
 	return e.apply(), nil
 }

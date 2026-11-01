@@ -92,7 +92,9 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 		for _, v := range s.Vars {
 			t := types.TNull
 			if v.Default != nil {
+				x.inConst = true
 				t = widenType(x.expr(v.Default, env, nil))
+				x.inConst = false
 			}
 			if doc != nil {
 				for _, vt := range doc.Vars {
@@ -829,7 +831,9 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 			x.byRef[p.Name] = true
 		}
 		if i < len(decls) && decls[i].Default != nil {
+			x.inConst = true
 			dt := x.expr(decls[i].Default, newEnv(), p.Type)
+			x.inConst = false
 			// A default for a parameter typed by a template is held to the
 			// template's bound: `B $behavior = 1` with `B of 1|2`.
 			if !types.IsAcceptable(dt, paramsToBounds(p.Type), x.p()) {
@@ -927,7 +931,13 @@ func isNeverType(t types.Type) bool {
 }
 
 func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.Type {
-	c := x.child(e.Static)
+	c := x.child(e.Static || x.inConst)
+	if x.inConst {
+		c.constClosure = true
+		if len(e.Uses) > 0 {
+			x.report(e.Uses[0].S, P2531, "a closure in a constant expression cannot use variables of the enclosing scope")
+		}
+	}
 	c.closureTypeParams(e.TypeParams, e.Params, e.ReturnType)
 	c.checkSignatureTypes(nil, e.Params, e.ReturnType)
 	params, cps := c.closureParams(e.Params, expected)
@@ -1040,7 +1050,8 @@ func refinedReturn(declared types.Type, returned []types.Type, generator bool, h
 }
 
 func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) types.Type {
-	c := x.child(e.Static)
+	c := x.child(e.Static || x.inConst)
+	c.constClosure = x.inConst
 	c.arrow = true
 	c.closureTypeParams(e.TypeParams, e.Params, e.ReturnType)
 	c.checkSignatureTypes(nil, e.Params, e.ReturnType)

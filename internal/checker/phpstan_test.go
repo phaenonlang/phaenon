@@ -144,6 +144,10 @@ func usesPhaenonSyntax(src []byte) bool {
 			switch n := n.(type) {
 			case *ast.TypeParam, *ast.IsExpr, *ast.AsExpr, *ast.TypeAlias, *ast.ClosureType, *ast.TupleType:
 				found = true
+			case *ast.FunctionDecl:
+				found = found || n.Fun
+			case *ast.MethodDecl:
+				found = found || n.Fun
 			case *ast.Cast:
 				found = n.Op == token.T_BYTES_CAST
 			case *ast.NamedType:
