@@ -346,13 +346,13 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 		}
 		var ev types.Type
 		if item.Key != nil {
-			kt := x.expr(item.Key, env, nil)
+			kt, stored := x.keyExpr(item.Key, env)
 			var entryExpected types.Type = expectedValue
 			if sh, ok := expectedShapeEntry(expected, kt); ok {
 				entryExpected = sh
 			}
 			ev = x.expr(item.Value, env, entryExpected)
-			keys = append(keys, normaliseKey(kt))
+			keys = append(keys, stored)
 			switch k := kt.(type) {
 			case types.StringLit:
 				if n, err := strconv.ParseInt(k.V, 10, 64); err == nil && strconv.FormatInt(n, 10) == k.V {
@@ -438,23 +438,51 @@ func expectedShapeEntry(expected types.Type, key types.Type) (types.Type, bool) 
 	return nil, false
 }
 
+// normaliseKey is the key PHP stores for a value of type t, member by
+// member: bool and float keys become ints, null the empty string, and a
+// string known to be a canonical decimal integer the int it spells
+// (types.StoredKey; design/checker.md §9). A general string stays a string.
 func normaliseKey(t types.Type) types.Type {
 	if types.IsMixed(t) {
 		return types.TArrayKey // PHP casts or refuses; the array gets int|string keys
 	}
-	switch k := t.(type) {
-	case types.BoolLit, types.Bool:
-		return types.TInt
-	case types.Null:
-		return types.StringLit{V: ""}
-	case types.Float, types.FloatLit:
-		return types.TInt
-	case types.StringLit:
-		if n, err := strconv.ParseInt(k.V, 10, 64); err == nil && strconv.FormatInt(n, 10) == k.V {
-			return types.IntLit(n)
+	return types.Map(t, func(m types.Type) types.Type {
+		switch m.(type) {
+		case types.BoolLit, types.Bool:
+			return types.TInt
+		case types.Null:
+			return types.StringLit{V: ""}
+		case types.Float, types.FloatLit:
+			return types.TInt
 		}
+		return types.StoredKey(m)
+	})
+}
+
+// keyExpr types an expression used as an array key: its own type, and the
+// key PHP stores for it. A (string) cast written as the key is looked
+// through: each member of the operand is cast and normalised on its own,
+// before a union would absorb the decimal-int-string an int casts to into
+// string, so `$out[(string) $k]` with $k: int|string writes int|string.
+func (x *fnCtx) keyExpr(e ast.Expr, env *state) (raw, key types.Type) {
+	inner := e
+	for {
+		p, ok := inner.(*ast.Paren)
+		if !ok {
+			break
+		}
+		inner = p.Expr
 	}
-	return t
+	if c, ok := inner.(*ast.Cast); ok && c.Op == token.T_STRING_CAST {
+		members := x.stringCast(c, x.expr(c.Expr, env, nil))
+		keys := make([]types.Type, len(members))
+		for i, m := range members {
+			keys[i] = normaliseKey(m)
+		}
+		return types.MakeUnion(members...), types.MakeUnion(keys...)
+	}
+	raw = x.expr(e, env, nil)
+	return raw, normaliseKey(raw)
 }
 
 func upsert(entries []types.ShapeEntry, e types.ShapeEntry) []types.ShapeEntry {
@@ -915,7 +943,7 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 	if e.Index == nil {
 		return types.TMixed
 	}
-	idx := x.expr(e.Index, env, nil)
+	raw, idx := x.keyExpr(e.Index, env)
 	if types.IsMixed(base) {
 		if _, unknown := base.(types.Unknown); unknown {
 			return base // an offset of what was already reported stays reported
@@ -929,7 +957,7 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 			t, found, certain := shapeOffset(m, idx)
 			if !found {
 				if !lenient && !m.Unsealed && certain {
-					x.report(e.Index.Span(), P2313, "offset %s does not exist on %s", x.typeName(idx), x.typeName(m))
+					x.report(e.Index.Span(), P2313, "offset %s does not exist on %s", x.typeName(raw), x.typeName(m))
 				}
 				switch {
 				case m.Unsealed:
@@ -947,8 +975,8 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 			}
 			out = append(out, t)
 		case types.Array:
-			if !types.IsMixed(idx) && !types.Overlaps(normaliseKey(idx), m.Key, x.p()) && !lenient {
-				x.report(e.Index.Span(), P2313, "offset %s does not exist on %s", x.typeName(idx), x.typeName(m))
+			if !types.IsMixed(raw) && !types.Overlaps(idx, m.Key, x.p()) && !lenient {
+				x.report(e.Index.Span(), P2313, "offset %s does not exist on %s", x.typeName(raw), x.typeName(m))
 			}
 			out = append(out, m.Value)
 		case types.String, types.StringLit:
@@ -1112,19 +1140,7 @@ func (x *fnCtx) cast(e *ast.Cast, env *state) types.Type {
 		}
 		return types.TBytes
 	case token.T_STRING_CAST:
-		// (string) is the explicit, unchecked conversion of bytes for the
-		// PHP APIs that take binary in a string parameter (strings.md §5).
-		x.checkStringable(types.Subtract(t, types.TBytes, x.p()), e.Expr.Span())
-		if lit, ok := types.IsIntLit(t); ok {
-			return types.StringLit{V: strconv.FormatInt(lit, 10)}
-		}
-		if _, ok := t.(types.StringLit); ok {
-			return t
-		}
-		if types.IsSubtype(t, types.TString, x.p()) {
-			return t
-		}
-		return types.TString
+		return types.MakeUnion(x.stringCast(e, t)...)
 	case token.T_BOOL_CAST:
 		return types.TBool
 	case token.T_ARRAY_CAST:
@@ -1157,6 +1173,48 @@ func (x *fnCtx) cast(e *ast.Cast, env *state) types.Type {
 		x.removed(e.S, e.Raw+" cast", "the canonical cast")
 	}
 	return types.TMixed
+}
+
+// stringCast types (string) of a value of type t, member by member: an
+// int is a decimal-int-string (a literal its literal), as PHPStan types
+// it; a bool is the empty string or '1', null the empty string; a string
+// stays what it is; anything else that converts is a string. (string) is
+// also the explicit, unchecked conversion of bytes for the PHP APIs that
+// take binary in a string parameter (strings.md §5). The members are
+// returned unjoined for keyExpr, which must see the int part before a
+// union absorbs it.
+func (x *fnCtx) stringCast(e *ast.Cast, t types.Type) []types.Type {
+	x.checkStringable(types.Subtract(t, types.TBytes, x.p()), e.Expr.Span())
+	if types.IsMixed(t) {
+		return []types.Type{types.TString}
+	}
+	var out []types.Type
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.Int:
+			if m.Lo == m.Hi {
+				out = append(out, types.StringLit{V: strconv.FormatInt(m.Lo, 10)})
+			} else {
+				out = append(out, types.TDecimalIntString)
+			}
+		case types.BoolLit:
+			if m.V {
+				out = append(out, types.StringLit{V: "1"})
+			} else {
+				out = append(out, types.StringLit{V: ""})
+			}
+		case types.Bool:
+			out = append(out, types.StringLit{V: ""}, types.StringLit{V: "1"})
+		case types.Null:
+			out = append(out, types.StringLit{V: ""})
+		case types.String, types.StringLit, types.ClassString:
+			out = append(out, m)
+		case types.Never:
+		default:
+			out = append(out, types.TString)
+		}
+	}
+	return out
 }
 
 func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
@@ -1804,12 +1862,12 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 	base := x.exprLenient(t.Array, env)
 	var keyT types.Type
 	if t.Index != nil {
-		raw := x.expr(t.Index, env, nil)
+		raw, key := x.keyExpr(t.Index, env)
 		if types.IsMixed(raw) {
 			// PHPStan at level max: a mixed key may be anything PHP refuses.
 			x.report(t.Index.Span(), P2316, "possibly invalid array key type mixed")
 		}
-		keyT = normaliseKey(raw)
+		keyT = key
 	}
 	// Undefined variable used as an array: it becomes one.
 	if v, ok := t.Array.(*ast.Variable); ok {
@@ -2014,7 +2072,7 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 		}
 		var keyT types.Type
 		if item.Key != nil {
-			keyT = normaliseKey(x.expr(item.Key, env, nil))
+			_, keyT = x.keyExpr(item.Key, env)
 		} else {
 			keyT = types.IntLit(pos)
 			pos++

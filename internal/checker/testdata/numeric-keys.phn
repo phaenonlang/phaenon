@@ -1,0 +1,194 @@
+namespace NumericKeys;
+
+// Array keys PHP converts (design/checker.md §9, 2026-11-02): a string that
+// is a canonical decimal integer is stored as an int key. A key whose type
+// proves it — an integer literal string, a decimal-int-string (what (string)
+// of an int is), the int part of a numeric-string, a (string) cast of an int
+// member — is an int key; a general string key stays a string key.
+//
+// Written with docblock types rather than map<…> so that the PHPStan parity
+// run reads the file too: `@return array<string, mixed>` is the type
+// `map<string, mixed>` declares.
+
+function takesString(string $s): void
+{
+}
+
+/** @param array<int, int> $m */
+function takesIntKeyed(array $m): void
+{
+}
+
+/** @param array<string, int> $m */
+function takesStringKeyed(array $m): void
+{
+}
+
+/** @param array<string, true> $m */
+function takesStringSet(array $m): void
+{
+}
+
+/**
+ * Re-keying with (string): the int keys of the input stay int keys, so the
+ * declaration is untrue, and the finding is here, not at the callers.
+ * PHPStan reads the keys as strings (stricter here).
+ *
+ * @return array<string, mixed>
+ */
+function stringKeyed(mixed $value): array
+{
+    if (!\is_array($value)) {
+        return [];
+    }
+    $out = [];
+    foreach ($value as $key => $item) {
+        $out[(string) $key] = $item;
+    }
+
+    return $out; // want P2202
+}
+
+/**
+ * The same helper, honest about its keys.
+ *
+ * @return array<int|string, mixed>
+ */
+function honest(mixed $value): array
+{
+    if (!\is_array($value)) {
+        return [];
+    }
+    $out = [];
+    foreach ($value as $key => $item) {
+        $out[(string) $key] = $item;
+    }
+
+    return $out;
+}
+
+/**
+ * Rejecting the int keys first builds a string map: a string key read from
+ * an array is never a decimal integer.
+ *
+ * @return array<string, mixed>
+ */
+function validated(mixed $value): array
+{
+    if (!\is_array($value)) {
+        return [];
+    }
+    $out = [];
+    foreach ($value as $key => $item) {
+        if (!\is_string($key)) {
+            throw new \UnexpectedValueException('expected string keys');
+        }
+        $out[$key] = $item;
+    }
+
+    return $out;
+}
+
+/** @return array<string, int> */
+function literalNumericKey(): array
+{
+    return ['1' => 1, 'a' => 2]; // want P2202
+}
+
+/** @return array<string, int> */
+function literalStringKeys(): array
+{
+    // Not canonical decimal integers: these stay strings in PHP.
+    return ['0123' => 1, '1.5' => 2, ' 1' => 3, '1e3' => 4, '-0' => 5, '+1' => 6, '9223372036854775808' => 7];
+}
+
+function literalWrites(): void
+{
+    $c = [];
+    $c['42'] = 1;
+    $c['-7'] = 2;
+    $c['9223372036854775807'] = 3;
+    takesIntKeyed($c);
+    $d = [];
+    $d['0123'] = 1;
+    takesIntKeyed($d); // want P2103
+    takesStringKeyed($d);
+}
+
+/**
+ * A general string is not known to be numeric: its key stays a string key,
+ * the hole checker.md §9 keeps on purpose.
+ */
+function generalStringKey(string $name): void
+{
+    $out = [];
+    $out[$name] = 1;
+    takesStringKeyed($out);
+    $lit = [$name => 2];
+    takesStringKeyed($lit);
+}
+
+function castKeys(int $id, int|string $k): void
+{
+    $a = [];
+    $a[(string) $id] = 1;
+    takesIntKeyed($a);
+    takesStringKeyed($a); // want P2103
+    $b = [(string) $id => 1];
+    takesIntKeyed($b);
+    $s = (string) $id;
+    $c = [];
+    $c[$s] = 1;
+    takesIntKeyed($c);
+    // PHPStan types (string) $k as string and these keys as strings: the
+    // cast is looked through, so the int member is an int key (stricter).
+    $d = [];
+    $d[(string) $k] = 1;
+    takesStringKeyed($d); // want P2103
+    $e = ['x' => 0, (string) $k => 1];
+    takesStringKeyed($e); // want P2103
+}
+
+/**
+ * @param numeric-string $n
+ * @param decimal-int-string $dec
+ */
+function refinedKeys(string $n, string $dec): void
+{
+    $a = [];
+    $a[$n] = 1; // '1' becomes 1, '1.5' stays a string: int|numeric-string
+    takesStringKeyed($a); // want P2103
+    $b = [];
+    $b[$dec] = 1;
+    takesIntKeyed($b);
+}
+
+/**
+ * @param array<int, string> $byId
+ * @param array<string, string> $byName
+ */
+function readsThroughCast(array $byId, array $byName, int $id): void
+{
+    takesString($byId[(string) $id]);
+    takesString($byName[(string) $id]); // want P2313
+    $m = [5 => 'five'];
+    takesString($m[(string) 5]);
+}
+
+/** @param list<int> $ids */
+function templateBuiltKeys(array $ids): void
+{
+    takesIntKeyed(array_flip(['1', '2']));
+    $strings = array_map(fn (int $x): string => (string) $x, $ids);
+    // array_fill_keys() writes each value as a key: decimal strings become
+    // ints. PHPStan keeps array<decimal-int-string, true> (stricter here).
+    takesStringSet(array_fill_keys($strings, true)); // want P2103
+}
+
+function castIsDecimal(int $id): void
+{
+    if ((string) $id === 'all') { // want P2305
+    }
+    if ((string) $id === '42') {
+    }
+}

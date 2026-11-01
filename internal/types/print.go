@@ -93,6 +93,8 @@ func (pr *printer) print(t Type, nested bool) {
 		switch {
 		case t.Callable:
 			b.WriteString("callable-string")
+		case t.DecimalInt:
+			b.WriteString("decimal-int-string")
 		case t.Numeric:
 			b.WriteString("numeric-string")
 		case t.Literal:
