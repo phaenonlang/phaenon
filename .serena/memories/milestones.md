@@ -36,20 +36,16 @@ The roadmap puts the editor plugins in M6.
 
 ## Next — a maintainer's choice
 
-Recorded 2026-10-28 when the migrate step landed, unchanged by the 2026-10-29 correction. Whoever lands the next one updates this section
-and [[open-items]].
+Rewritten 2026-11-01 when M4 closed. Whoever lands the next one updates this section and
+[[open-items]].
 
-1. **M4 — collections and strings** (started 2026-10-30, go-ahead given): three slices are in
-   (rows above); the runtime package carries `Seq`, `Map`, `Str`, `Bytes` with 95 tests
-   (2026-10-30, `../runtime` `34ab0b3`). The `tequila/core` dogfood has started ([[dogfood]]):
-   first pass over the PHP sources, 754 → 538, the checker gaps it showed fixed with the fixture
-   `tequila-core.phn`. The PhpStorm plugin parses Phaenon syntax and completes the method syntax
-   (2026-10-31, `../jetbrains` `f7a05b0`). M4's remaining items closed 2026-10-31: the core findings are at 11 on 774
-   files (all PHPStan rules deliberately not matched, vault `open-items`), `phn build` + PHPStan
-   max + cs + the suite of 1188 tests pass on the compiled output, and the plugin's pseudo-classes
-   are generated from the stdlib sources (`phn stdlib --plugin-stubs`). **M4 is complete pending the
-   maintainer's review**; closing it in `roadmap.md` §3 is that review's outcome.
-2. ~~`tequila/mongodb-odm` as the next generics dogfood target~~ — done 2026-10-29 up to the
-   level-8 question above; then `tequila/core` with M4.
+1. ~~**M4 — collections and strings**~~ — closed 2026-11-01 (`../design/roadmap.md` §3 has the
+   summary): four slices, `tequila/core` green on the compiled output, the plugin following the
+   language, the three earlier dogfood trees respelled with `fun`.
+2. **M5 — concurrency** (go-ahead given 2026-11-01): starts with `../design/concurrency.md`
+   (pending; `language-overview.md` §5 names it), then goldens, the checker, the emitter, and
+   `tequila/nats` as the dogfood target (roadmap §3). Nothing of it exists yet.
+3. Beside it, when wanted: the Composer plugin (M6, D13); the three earlier dogfood branches on
+   the sibling layout (D12); the checker items in [[open-items]].
 
 ← [[Home]]

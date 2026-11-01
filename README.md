@@ -14,8 +14,12 @@ type checker for the PHP subset plus the PHPStan docblock vocabulary; on the fir
 libraries it reports exactly what PHPStan reports at level 10. M3 done — generics are syntax:
 `class Box<T>`, `list<T>`, `map<K, V>`, `class<T>`, `Closure(T): U`, `is` / `as`, `type` aliases;
 they compile to PHP with PHPStan docblocks, and `phn migrate` lifts PHPStan's docblock generics
-into that syntax. Three Tequila libraries build from `.phn` with their suites passing; the checker
-reads the extensions the local `php` has loaded (ext-mongodb and friends) from its reflection.
+into that syntax. M4 done — `list<T>`, `map<K, V>`, tuples and `bytes` with a stdlib written in
+Phaenon behind method syntax (`$xs->map(…)` → `Seq::map($xs, …)`), `fun` with `public` implied,
+closures in attributes, and a project file that builds sources into sibling output directories.
+Four Tequila libraries build from `.phn` with their suites passing, `tequila/core` among them;
+the checker reads the extensions the local `php` has loaded (ext-mongodb and friends) from its
+reflection.
 
 ## Type checking
 
