@@ -158,6 +158,14 @@ func (x *fnCtx) exprLenient(e ast.Expr, env *state) types.Type {
 	case *ast.Variable:
 		return x.variable(e, env, true)
 	case *ast.Index:
+		// A narrowed offset reads as narrowed here too: `is_bool($e['v'])`
+		// after `is_scalar($e['v'])` subtracts bool from scalar, not from
+		// the element type.
+		if key, ok := pathKey(e); ok {
+			if t, ok := env.getPath(key); ok {
+				return t
+			}
+		}
 		base := x.exprLenient(e.Array, env)
 		if e.Index != nil {
 			x.expr(e.Index, env, nil)
