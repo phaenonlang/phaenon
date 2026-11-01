@@ -330,6 +330,7 @@ type (
 		S          Span
 		Attrs      []*AttrGroup
 		Static     bool
+		Kw         Span // the `function` keyword
 		ByRef      bool
 		TypeParams []*TypeParam
 		Params     []*Param
@@ -348,6 +349,8 @@ type (
 		S          Span
 		Attrs      []*AttrGroup
 		Static     bool
+		Kw         Span // the `fn` keyword
+		Arrow      Span // the `=>`
 		ByRef      bool
 		TypeParams []*TypeParam
 		Params     []*Param
@@ -629,6 +632,7 @@ type Param struct {
 	Doc       string // a preceding doc comment: `/** @var T */` on a promoted property
 	Attrs     []*AttrGroup
 	Modifiers Modifier // constructor promotion
+	Mods      Span     // the modifiers, when there are any
 	Type      TypeExpr
 	ByRef     bool
 	Variadic  bool
@@ -689,6 +693,8 @@ type FunctionDecl struct {
 	S          Span
 	Doc        string
 	Attrs      []*AttrGroup
+	Fun        bool // spelled `fun` (Phaenon); Head is the keyword
+	Head       Span // the keyword
 	ByRef      bool
 	Name       *Ident
 	TypeParams []*TypeParam
@@ -707,6 +713,8 @@ type (
 		Doc        string
 		Attrs      []*AttrGroup
 		Modifiers  Modifier
+		Fun        bool // spelled `fun` (Phaenon): public unless a visibility is written
+		Head       Span // the modifiers and the keyword
 		ByRef      bool
 		Name       *Ident
 		TypeParams []*TypeParam
@@ -721,6 +729,7 @@ type (
 		Doc       string
 		Attrs     []*AttrGroup
 		Modifiers Modifier
+		Mods      Span // the modifiers, when there are any
 		Type      TypeExpr
 		Props     []*PropertyItem
 		Hooks     []*PropertyHook // only with a single Props entry

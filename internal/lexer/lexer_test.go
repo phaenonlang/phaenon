@@ -62,6 +62,9 @@ func TestPhaenonMode(t *testing.T) {
 		{"$a ?> 1; // c ?> still comment\n$b", `T_VARIABLE($a) ?(?) >(>) T_LNUMBER(1) ;(;) T_VARIABLE($b)`},
 		// A stray <?php at byte 0 is one token for a friendly diagnostic.
 		{"<?php $a", `T_OPEN_TAG(<?php) T_VARIABLE($a)`},
+		// `fun` is a keyword before a name, an identifier elsewhere.
+		{`fun f() {} static fun &g() {} fun(); fun = 1; $x->fun;`,
+			`T_FUN(fun) T_STRING(f) ((() )()) {({) }(}) T_STATIC(static) T_FUN(fun) T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG(&) T_STRING(g) ((() )()) {({) }(}) T_STRING(fun) ((() )()) ;(;) T_STRING(fun) =(=) T_LNUMBER(1) ;(;) T_VARIABLE($x) T_OBJECT_OPERATOR(->) T_STRING(fun) ;(;)`},
 		// Keywords after -> are still names.
 		{`$x->is; $x->type;`, `T_VARIABLE($x) T_OBJECT_OPERATOR(->) T_STRING(is) ;(;) T_VARIABLE($x) T_OBJECT_OPERATOR(->) T_STRING(type) ;(;)`},
 	}

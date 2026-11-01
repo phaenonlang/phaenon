@@ -905,21 +905,24 @@ func (p *Parser) closure() ast.Expr {
 	attrs := p.attributes()
 	static := p.accept(token.T_STATIC)
 	if p.at(token.T_FN) {
-		p.next()
-		f := &ast.ArrowFunc{Attrs: attrs, Static: static}
+		kw := p.next()
+		f := &ast.ArrowFunc{Attrs: attrs, Static: static, Kw: ast.Span{Start: kw.Start, End: kw.End}}
 		f.ByRef = p.acceptAmpersand()
 		f.TypeParams = p.typeParams()
 		f.Params = p.params()
 		if p.accept(token.Kind(':')) {
 			f.ReturnType = p.typeExpr()
 		}
+		arrow := p.tok()
 		p.expect(token.T_DOUBLE_ARROW)
+		f.Arrow = ast.Span{Start: arrow.Start, End: arrow.End}
 		f.Body = p.exprBP(bpArrowFn)
 		f.S = p.span(start)
 		return f
 	}
+	kw := p.tok()
 	p.expect(token.T_FUNCTION)
-	c := &ast.Closure{Attrs: attrs, Static: static}
+	c := &ast.Closure{Attrs: attrs, Static: static, Kw: ast.Span{Start: kw.Start, End: kw.End}}
 	c.ByRef = p.acceptAmpersand()
 	c.TypeParams = p.typeParams()
 	c.Params = p.params()

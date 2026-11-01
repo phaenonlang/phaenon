@@ -10,31 +10,31 @@ use Closure;
  */
 final class Map
 {
-    private function __construct()
+    private fun __construct()
     {
     }
 
-    public static function get<K of int|string, V>(map<K, V> $m, K $key): ?V
+    static fun get<K of int|string, V>(map<K, V> $m, K $key): ?V
     {
         return $m[$key] ?? null;
     }
 
-    public static function has<K of int|string>(map<K, mixed> $m, K $key): bool
+    static fun has<K of int|string>(map<K, mixed> $m, K $key): bool
     {
         return array_key_exists($key, $m);
     }
 
-    public static function keys<K of int|string>(map<K, mixed> $m): list<K>
+    static fun keys<K of int|string>(map<K, mixed> $m): list<K>
     {
         return array_keys($m);
     }
 
-    public static function values<V>(map<int|string, V> $m): list<V>
+    static fun values<V>(map<int|string, V> $m): list<V>
     {
         return array_values($m);
     }
 
-    public static function map<K of int|string, V, U>(map<K, V> $m, Closure(V, K): U $f): map<K, U>
+    static fun map<K of int|string, V, U>(map<K, V> $m, Closure(V, K): U $f): map<K, U>
     {
         $out = [];
         foreach ($m as $k => $v) {
@@ -44,7 +44,7 @@ final class Map
         return $out;
     }
 
-    public static function filter<K of int|string, V>(map<K, V> $m, Closure(V, K): bool $keep): map<K, V>
+    static fun filter<K of int|string, V>(map<K, V> $m, Closure(V, K): bool $keep): map<K, V>
     {
         $out = [];
         foreach ($m as $k => $v) {
@@ -56,7 +56,7 @@ final class Map
         return $out;
     }
 
-    public static function each<K of int|string, V>(map<K, V> $m, Closure(V, K): void $f): void
+    static fun each<K of int|string, V>(map<K, V> $m, Closure(V, K): void $f): void
     {
         foreach ($m as $k => $v) {
             $f($v, $k);
@@ -66,7 +66,7 @@ final class Map
     /**
      * Later maps win, key by key, as array_replace() does; integer keys keep their value.
      */
-    public static function merge<K of int|string, V>(map<K, V> ...$maps): map<K, V>
+    static fun merge<K of int|string, V>(map<K, V> ...$maps): map<K, V>
     {
         $out = [];
         foreach ($maps as $m) {
@@ -78,14 +78,14 @@ final class Map
         return $out;
     }
 
-    public static function with<K of int|string, V>(map<K, V> $m, K $key, V $value): map<K, V>
+    static fun with<K of int|string, V>(map<K, V> $m, K $key, V $value): map<K, V>
     {
         $m[$key] = $value;
 
         return $m;
     }
 
-    public static function without<K of int|string, V>(map<K, V> $m, K ...$keys): map<K, V>
+    static fun without<K of int|string, V>(map<K, V> $m, K ...$keys): map<K, V>
     {
         foreach ($keys as $key) {
             unset($m[$key]);
@@ -94,7 +94,7 @@ final class Map
         return $m;
     }
 
-    public static function toList<K of int|string, V>(map<K, V> $m): list<(K, V)>
+    static fun toList<K of int|string, V>(map<K, V> $m): list<(K, V)>
     {
         $out = [];
         foreach ($m as $k => $v) {
@@ -104,7 +104,7 @@ final class Map
         return $out;
     }
 
-    public static function fromList<K of int|string, V>(list<(K, V)> $pairs): map<K, V>
+    static fun fromList<K of int|string, V>(list<(K, V)> $pairs): map<K, V>
     {
         $out = [];
         foreach ($pairs as [$k, $v]) {
@@ -114,12 +114,12 @@ final class Map
         return $out;
     }
 
-    public static function isEmpty(map<int|string, mixed> $m): bool
+    static fun isEmpty(map<int|string, mixed> $m): bool
     {
         return [] === $m;
     }
 
-    public static function count(map<int|string, mixed> $m): int
+    static fun count(map<int|string, mixed> $m): int
     {
         return count($m);
     }

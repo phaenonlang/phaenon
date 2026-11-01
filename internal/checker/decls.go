@@ -154,6 +154,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 			continue
 		}
 		ctx := c.newCtx(cl.File, cl.Scope, cl, true)
+		ctx.inConst = true
 		vt := ctx.expr(k.Value, newEnv(), k.Type)
 		if k.Type != nil && !types.IsAcceptable(vt, k.Type, c.p) {
 			c.report(k.Span, P2211, "constant %s::%s (%s) does not accept %s", cl.Name, k.Name, types.Print(k.Type), types.Print(vt))
@@ -199,6 +200,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 
 func (c *Checker) checkAttrs(cl *program.Class, g *ast.AttrGroup) {
 	ctx := c.newCtx(cl.File, cl.Scope, cl, true)
+	ctx.inConst = true
 	for _, a := range g.Attrs {
 		name := ctx.res.ClassName(a.Name)
 		if c.p.Class(name) == nil {
@@ -349,6 +351,7 @@ func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 		c.report(pr.Span, P2516, "property %s::$%s has no type", cl.Name, pr.Name)
 	}
 	ctx := c.newCtx(cl.File, cl.Scope, cl, pr.Static)
+	ctx.inConst = true
 	if pr.HasDefault && pr.Default != nil {
 		dt := ctx.expr(pr.Default, newEnv(), pr.Type)
 		if !types.IsAcceptable(dt, pr.Type, c.p) {

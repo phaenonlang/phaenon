@@ -1,0 +1,56 @@
+namespace Fun;
+
+use Closure;
+
+// `fun` declares a function or method with public implied; a closure in a
+// constant expression — an attribute argument, a constant, a default — is
+// static and captures nothing (design/functions.md §2).
+
+#[\Attribute(\Attribute::TARGET_CLASS)]
+final class Map
+{
+    fun __construct(public readonly Closure $f)
+    {
+    }
+}
+
+#[Map(fn (int $x): int => $x * 2)]
+final class Doubled
+{
+    const Closure UPPER = fn (string $s): string => \strtoupper($s);
+
+    private(set) int $count = 0;
+
+    fun __construct(private Closure $normalise = fn (string $s): string => \trim($s))
+    {
+    }
+
+    protected static fun make(): static
+    {
+        return new static();
+    }
+
+    fun bad(Closure $f = fn (): mixed => $this): void // want P2531
+    {
+        $this->count = $this->count + 1;
+        $f();
+    }
+}
+
+#[Map(function (): int { \var_dump($this); return 1; })] // want P2531
+final class Captured
+{
+    public int $count = 0;
+}
+
+fun helper(): int
+{
+    return Doubled::UPPER->__invoke('a') === 'A' ? 1 : 0;
+}
+
+fun caller(): void
+{
+    $d = new Doubled();
+    $d->bad();
+    \assert(helper() === 1 && $d->count >= 0);
+}

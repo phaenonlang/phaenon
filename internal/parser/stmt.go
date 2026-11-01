@@ -262,7 +262,7 @@ func (p *Parser) statement() ast.Stmt {
 		p.semi()
 		c.S = p.span(start)
 		return c
-	case token.T_FUNCTION:
+	case token.T_FUNCTION, token.T_FUN:
 		if p.isFunctionDecl() {
 			return p.functionDecl(nil)
 		}
@@ -280,7 +280,7 @@ func (p *Parser) statement() ast.Stmt {
 			p.docComment = doc // a declaration's docblock sits above its attributes
 		}
 		switch {
-		case p.at(token.T_FUNCTION) && p.isFunctionDecl():
+		case (p.at(token.T_FUNCTION) || p.at(token.T_FUN)) && p.isFunctionDecl():
 			return p.functionDecl(attrs)
 		case p.at(token.T_CONST):
 			p.next()
@@ -741,7 +741,11 @@ func (p *Parser) param() *ast.Param {
 		doc = p.takeDoc()
 	}
 	pr.Doc = doc
+	ms := p.tok().Start
 	pr.Modifiers = p.modifiers()
+	if pr.Modifiers != 0 {
+		pr.Mods = ast.Span{Start: ms, End: p.end()}
+	}
 	if !p.at(token.T_VARIABLE) && !p.at(token.T_ELLIPSIS) &&
 		!p.at(token.T_AMPERSAND_FOLLOWED_BY_VAR_OR_VARARG) && !p.at(token.T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG) {
 		pr.Type = p.typeExpr()
@@ -796,8 +800,11 @@ func (p *Parser) functionDecl(attrs []*ast.AttrGroup) ast.Stmt {
 		start = attrs[0].S.Start
 	}
 	doc := p.takeDoc()
-	p.expect(token.T_FUNCTION)
-	f := &ast.FunctionDecl{Doc: doc, Attrs: attrs}
+	kw := p.tok()
+	if !p.accept(token.T_FUN) {
+		p.expect(token.T_FUNCTION)
+	}
+	f := &ast.FunctionDecl{Doc: doc, Attrs: attrs, Fun: kw.Kind == token.T_FUN, Head: ast.Span{Start: kw.Start, End: kw.End}}
 	f.ByRef = p.acceptAmpersand()
 	if p.at(token.T_READONLY) {
 		t := p.next()
@@ -924,7 +931,9 @@ func (p *Parser) classMember() ast.ClassMember {
 		e.S = p.span(start)
 		return e
 	}
+	head := p.tok().Start
 	mods := p.modifiers()
+	modsEnd := p.end()
 	switch {
 	case p.at(token.T_CONST):
 		p.next()
@@ -943,9 +952,9 @@ func (p *Parser) classMember() ast.ClassMember {
 		p.expect(token.Kind(';'))
 		c.S = p.span(start)
 		return c
-	case p.at(token.T_FUNCTION):
-		p.next()
-		m := &ast.MethodDecl{Doc: doc, Attrs: attrs, Modifiers: mods}
+	case p.at(token.T_FUNCTION), p.at(token.T_FUN):
+		kw := p.next()
+		m := &ast.MethodDecl{Doc: doc, Attrs: attrs, Modifiers: mods, Fun: kw.Kind == token.T_FUN, Head: ast.Span{Start: head, End: kw.End}}
 		m.ByRef = p.acceptAmpersand()
 		m.Name = p.identifier()
 		m.TypeParams = p.typeParams()
@@ -964,6 +973,9 @@ func (p *Parser) classMember() ast.ClassMember {
 	}
 	// Property.
 	pd := &ast.PropertyDecl{Doc: doc, Attrs: attrs, Modifiers: mods}
+	if mods != 0 {
+		pd.Mods = ast.Span{Start: head, End: modsEnd}
+	}
 	if !p.at(token.T_VARIABLE) {
 		pd.Type = p.typeExpr()
 	}

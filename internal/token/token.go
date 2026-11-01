@@ -179,6 +179,7 @@ const (
 
 	// Phaenon additions (never produced in PHP mode).
 	T_IS         // 'is'
+	T_FUN        // 'fun' (contextual: before a declaration's name)
 	T_TYPE       // 'type' (contextual)
 	T_OF         // 'of' (contextual)
 	T_IN         // 'in' (contextual)
@@ -342,6 +343,7 @@ var names = [...]string{
 	T_BAD_CHARACTER - firstNamed:                           "T_BAD_CHARACTER",
 	T_INLINE_HTML - firstNamed:                             "T_INLINE_HTML",
 	T_IS - firstNamed:                                      "T_IS",
+	T_FUN - firstNamed:                                     "T_FUN",
 	T_TYPE - firstNamed:                                    "T_TYPE",
 	T_OF - firstNamed:                                      "T_OF",
 	T_IN - firstNamed:                                      "T_IN",

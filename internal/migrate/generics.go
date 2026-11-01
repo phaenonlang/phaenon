@@ -28,12 +28,12 @@ type Note struct {
 }
 
 // Lift rewrites the generic docblocks of Phaenon source as syntax.
-func Lift(src []byte) ([]byte, []Note, error) {
+func Lift(src []byte, opts Options) ([]byte, []Note, error) {
 	f, err := parser.Parse(src, lexer.ModePhaenon)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse: %w", err)
 	}
-	l := &lifter{src: src}
+	l := &lifter{src: src, keepPublic: opts.KeepPublic}
 	l.stmts(f.Stmts, nil)
 	sort.SliceStable(l.notes, func(i, j int) bool { return l.notes[i].Line < l.notes[j].Line })
 	return l.apply(), l.notes, nil
@@ -45,9 +45,10 @@ type edit struct {
 }
 
 type lifter struct {
-	src   []byte
-	edits []edit
-	notes []Note
+	src        []byte
+	edits      []edit
+	notes      []Note
+	keepPublic bool
 	// ns and uses resolve class names the way PHP does, so that a docblock
 	// `\App\Model\Row` and a declared, imported `Row` are the same class.
 	ns   string
@@ -414,6 +415,10 @@ func (l *lifter) classDecl(c *ast.ClassDecl, outer scope) {
 }
 
 func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
+	if !fn.Fun {
+		l.replace(fn.Head, "fun")
+	}
+	l.params(fn.Params)
 	sc := outer.child()
 	d := l.findDoc(fn.Doc, fn.S.Start)
 	if d != nil {
@@ -432,6 +437,10 @@ func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
 }
 
 func (l *lifter) methodDecl(m *ast.MethodDecl, outer scope) {
+	if !m.Fun {
+		l.replace(m.Head, l.funHead(m.Head))
+	}
+	l.params(m.Params)
 	sc := outer.child()
 	d := l.findDoc(m.Doc, m.S.Start)
 	if d != nil {
@@ -466,6 +475,7 @@ func collectNames(t *docblock.TypeNode, into map[string]bool) {
 }
 
 func (l *lifter) propertyDecl(p *ast.PropertyDecl, sc scope) {
+	l.dropPublic(p.Modifiers, p.Mods)
 	d := l.findDoc(p.Doc, p.S.Start)
 	if d == nil {
 		return
@@ -1179,4 +1189,47 @@ func (l *lifter) astAtoms(t ast.TypeExpr, sc scope) atoms {
 		out["array"] = true
 	}
 	return normalise(out)
+}
+
+// funHead spells a `[modifiers] function` head as `[modifiers] fun`: the
+// modifiers as written, minus a `public` that `fun` implies (kept with
+// --keep-public). A head broken over lines or holding a comment keeps its
+// modifiers and has only the keyword replaced.
+func (l *lifter) funHead(head ast.Span) string {
+	text := string(l.src[head.Start:head.End])
+	if strings.ContainsAny(text, "\n\r/#") {
+		return text[:len(text)-len("function")] + "fun"
+	}
+	var parts []string
+	for _, w := range strings.Fields(text[:len(text)-len("function")]) {
+		if strings.EqualFold(w, "public") && !l.keepPublic {
+			continue
+		}
+		parts = append(parts, w)
+	}
+	return strings.Join(append(parts, "fun"), " ")
+}
+
+// params drops the `public` of a promoted parameter with an asymmetric
+// visibility, `public private(set) T $x`, which Phaenon implies.
+func (l *lifter) params(params []*ast.Param) {
+	for _, p := range params {
+		l.dropPublic(p.Modifiers, p.Mods)
+	}
+}
+
+func (l *lifter) dropPublic(m ast.Modifier, mods ast.Span) {
+	if l.keepPublic || m&ast.ModPublic == 0 || m&(ast.ModPublicSet|ast.ModProtectedSet|ast.ModPrivateSet) == 0 {
+		return
+	}
+	text := string(l.src[mods.Start:mods.End])
+	i := strings.Index(strings.ToLower(text), "public")
+	if i < 0 || (i+len("public") < len(text) && text[i+len("public")] == '(') {
+		return
+	}
+	j := i + len("public")
+	for j < len(text) && isSpace(text[j]) {
+		j++
+	}
+	l.replace(ast.Span{Start: mods.Start + i, End: mods.Start + j}, "")
 }

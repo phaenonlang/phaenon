@@ -54,7 +54,7 @@ output whose source is gone is removed. `exclude` names the paths the checker le
 (fixtures another analyser owns); `phn build` compiles them all the same.
 
 ```sh
-phn migrate src tests          # once: Foo.php → Foo.phn, generic docblocks lifted into syntax
+phn migrate src tests          # once: Foo.php → Foo.phn, generic docblocks lifted into syntax, `public function` → `fun`
 phn build                      # the roots of phaenon.json → their outputs
 phn build --check              # CI: fail when an output is missing, stale or has no source
 phn check                      # type-check the roots, minus "exclude"
@@ -66,7 +66,10 @@ case, a `.phn` at a time in a PHP tree — or under `--out DIR`.
 `phn migrate` strips `<?php`, `declare(strict_types=1)` and a trailing `?>`, then lifts what
 PHPStan code says in comments into the signature: `@template T of Foo` → `<T of Foo>`, `@extends
 Base<T>` → `extends Base<T>`, `@param list<T> $xs` → `list<T> $xs`, `@return T` → `: T`, a
-property's `@var array<K, V>` → `map<K, V>`. A tag is lifted only when its type has a Phaenon
+property's `@var array<K, V>` → `map<K, V>`. It also spells every named function and method `fun`,
+dropping the `public` that Phaenon implies (`public function` → `fun`, `final public static
+function` → `final static fun`), and drops `public` before an asymmetric visibility
+(`public private(set)` → `private(set)`); `--keep-public` keeps both. A tag is lifted only when its type has a Phaenon
 spelling and erases to the type PHP already saw — the generated `.php` keeps the same signatures —
 and every tag left in place is reported with the reason (`--keep-docblocks` skips the lift).
 Prose survives without its type: `@param T $x prose` becomes `@param $x - prose` (the dash, as in
@@ -98,13 +101,13 @@ installed package on `composer install` is M6 work; until then a consumer runs `
 ```php
 final class Repository<T of Model>
 {
-    public function __construct(private readonly class<T> $class, private EventStore $store) {}
-    public function get(Uuid $id): ?T { … if ($root instanceof $this->class) { return $root; } … }
-    public function fresh(Uuid $id): T { return new $this->class($id); }
+    fun __construct(private readonly class<T> $class, private EventStore $store) {}
+    fun get(Uuid $id): ?T { … if ($root instanceof $this->class) { return $root; } … }
+    fun fresh(Uuid $id): T { return new $this->class($id); }
 }
 final class UserRepository extends Repository<User>
 {
-    public function __construct(EventStore $store) { parent::__construct(User::class, $store); }
+    fun __construct(EventStore $store) { parent::__construct(User::class, $store); }
 }
 
 function first<T>(list<T> $items): ?T { return $items[0] ?? null; }
@@ -127,7 +130,7 @@ every other edit keeps line numbers exact. Design: `design/generics.md`, decisio
 ```sh
 phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] # type-check and compile .phn → .php; no paths: phaenon.json
 phn check [--json] [--no-deprecations] [--exclude PATH]... path...              # type-check .phn (and .php) files
-phn migrate path...                                    # rewrite .php as .phn
+phn migrate [--keep-docblocks] [--keep-public] path... # rewrite .php as .phn
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Seq, Map, Str, Bytes), as phaenon/runtime ships it
 phn stdlib --plugin-stubs DIR  # the PhpStorm plugin's editor-only pseudo-classes (ListMethods.php, …) from the same sources
 phn lex   [--php] file                    # token stream

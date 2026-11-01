@@ -194,7 +194,9 @@ func (c *Checker) checkFile(f *program.File) {
 			case *ast.OpenTag, *ast.CloseTag, *ast.InlineHTML, *ast.Declare, *ast.ConstDecl, *ast.HaltCompiler:
 				if cd, ok := s.(*ast.ConstDecl); ok {
 					for _, k := range cd.Consts {
+						ctx.inConst = true
 						ctx.expr(k.Value, env, nil)
+						ctx.inConst = false
 					}
 				}
 			default:
@@ -259,6 +261,8 @@ type fnCtx struct {
 	file            *program.File
 	class           *program.Class
 	static          bool // no $this
+	inConst         bool // checking a constant expression: an attribute argument, a constant, a default
+	constClosure    bool // a closure inside a constant expression: static, capturing nothing (P2531)
 	returnType      types.Type
 	hasReturn       bool // a declared return type exists
 	name            string
@@ -569,6 +573,7 @@ func (c *Checker) constType(k *program.Constant) types.Type {
 		savedDiags = c.mark()
 	}
 	ctx := c.newCtx(k.File, k.Scope, k.Class, true)
+	ctx.inConst = true
 	t := ctx.expr(k.Value, newEnv(), k.Type)
 	if silent {
 		c.rollback(savedDiags)
