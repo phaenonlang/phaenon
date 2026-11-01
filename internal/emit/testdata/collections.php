@@ -113,3 +113,12 @@ function prefixed(Id $id): bool
 {
     return Str::startsWith($id, 'u-');
 }
+
+/**
+ * @param list<array{string, int}> $pairs
+ * @return ?array{string, int}
+ */
+function firstPair(array $pairs): ?array
+{
+    return $pairs[0] ?? null;
+}
