@@ -482,8 +482,13 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 			return classSub(a, b, h, depth)
 		case Iterable:
 			if h != nil && h.IsSubclassOf(a.Name, "Traversable") {
-				// Key/value types of a Traversable are not tracked without generics.
-				k, v := classIterableKV(a)
+				// What the class iterates is what its Traversable ancestor is
+				// given (Generator<K, V, S, R> iterates K => V), as foreach
+				// reads it.
+				k, v, found := h.IteratorArgs(a)
+				if !found {
+					k, v = classIterableKV(a)
+				}
 				return subtype(k, b.Key, h, depth+1) && subtype(v, b.Value, h, depth+1)
 			}
 			return false

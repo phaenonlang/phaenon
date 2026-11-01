@@ -829,18 +829,21 @@ func (x *fnCtx) yield(e *ast.Yield, env *state) types.Type {
 		x.report(e.S, P2315, "yield outside a generator")
 	}
 	k, v, send := x.generatorKV()
+	var kt, vt types.Type = types.TInt, types.TNull // `yield;` yields null under the next int key
 	if e.Key != nil {
-		kt := x.expr(e.Key, env, k)
+		kt = x.expr(e.Key, env, k)
 		if x.hasReturn && !types.IsAcceptable(kt, k, x.p()) {
 			x.report(e.Key.Span(), P2202, "%s yields key %s, expected %s", x.name, x.typeName(kt), x.typeName(k))
 		}
 	}
 	if e.Value != nil {
-		vt := x.expr(e.Value, env, v)
+		vt = x.expr(e.Value, env, v)
 		if x.hasReturn && !types.IsAcceptable(vt, v, x.p()) {
 			x.report(e.Value.Span(), P2202, "%s yields %s, expected %s", x.name, x.typeName(vt), x.typeName(v))
 		}
 	}
+	x.yieldKeys = append(x.yieldKeys, kt)
+	x.yieldValues = append(x.yieldValues, vt)
 	return send
 }
 
@@ -849,7 +852,10 @@ func (x *fnCtx) yieldFrom(e *ast.YieldFrom, env *state) types.Type {
 		x.report(e.S, P2315, "yield outside a generator")
 	}
 	t := x.expr(e.Expr, env, nil)
-	if _, _, ok := types.IterableKV(t, x.p()); !ok {
+	if k, v, ok := types.IterableKV(t, x.p()); ok {
+		x.yieldKeys = append(x.yieldKeys, k) // yield from keeps the inner keys
+		x.yieldValues = append(x.yieldValues, v)
+	} else {
 		x.report(e.Expr.Span(), P2303, "yield from %s", x.typeName(t))
 	}
 	for _, m := range types.Members(t) {
@@ -1059,6 +1065,7 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		exits = c.fixpoint(cenv, func(head *state) (*state, *state) {
 			c.returnTypes = nil
 			c.returnEnvs = nil
+			c.yieldKeys, c.yieldValues = nil, nil
 			c.stmts(e.Body, head)
 			end = head
 			all := joinAll(append([]*state{head}, c.returnEnvs...)...)
@@ -1092,7 +1099,12 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 			x.report(e.S, P2203, "closure should return %s but a return statement is missing", x.typeName(ret))
 		}
 	}
-	if ret == nil {
+	if gen := c.yieldedGenerator(); gen != nil && (ret == nil || types.IsSubtype(gen, ret, x.p())) {
+		// What the generator yields types it, as the returns type a closure
+		// that returns (PHPStan infers both): `static function (): \Generator
+		// { yield 'x'; }` is a Generator<int, 'x', mixed, void>.
+		ret = gen
+	} else if ret == nil {
 		switch {
 		case c.generator:
 			ret = types.NewClass("Generator")
@@ -1115,6 +1127,20 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 // is a closure returning array{a: 1}, as PHPStan types it. A body that
 // never reaches a return — every path throws or exits — returns never,
 // which any closure type accepts (PHPStan: `Closure(): never`).
+// yieldedGenerator is the Generator a generator closure's body makes: its
+// keys and values are what it yields, its return what it returns (void when
+// nothing). Nil when the closure is no generator or no yield was reached.
+func (x *fnCtx) yieldedGenerator() types.Type {
+	if !x.generator || len(x.yieldValues) == 0 {
+		return nil
+	}
+	var r types.Type = types.TVoid
+	if len(x.returnTypes) > 0 {
+		r = types.MakeUnion(x.returnTypes...)
+	}
+	return types.Class{Name: "Generator", Args: []types.Type{types.MakeUnion(x.yieldKeys...), types.MakeUnion(x.yieldValues...), types.TMixed, r}}
+}
+
 func refinedReturn(declared types.Type, returned []types.Type, generator, dead bool, h types.Hierarchy) types.Type {
 	if _, isVoid := declared.(types.Void); isVoid || generator {
 		return declared

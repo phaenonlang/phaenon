@@ -308,6 +308,10 @@ type fnCtx struct {
 	inScope map[string]bool
 	// returnTypes collects inferred return types of closures without a declaration.
 	returnTypes []types.Type
+	// yieldKeys and yieldValues collect what a generator closure yields:
+	// its Generator<K, V, mixed, R> is inferred from them, as its return
+	// type is from its returns.
+	yieldKeys, yieldValues []types.Type
 	// returnEnvs collects the environment at every return while
 	// trackReturns is set: a closure with by-reference uses leaves them as
 	// any of its exits does.

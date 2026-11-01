@@ -286,3 +286,32 @@ function printedAndJoined(object $o, array $lines, array $maybe): void
     takesNonEmpty(implode(['a', 1]));
     takesNonEmpty(implode(', ', [])); // want P2103
 }
+
+/** @param iterable<string> $chunks */
+function takesChunks(iterable $chunks): void
+{
+}
+
+/** @return \Generator<int, string, mixed, void> */
+function chunks(): \Generator
+{
+    yield 'a';
+}
+
+/**
+ * A generator closure is typed by what it yields, as a closure that returns
+ * is by what it returns: a raw `\Generator` that yields strings is an
+ * iterable of strings. A Generator<K, V, S, R> iterates K => V.
+ */
+function generatorClosures(): void
+{
+    takesChunks(chunks());
+    takesChunks((static function (): \Generator {
+        yield 'first';
+        throw new \RuntimeException('cut halfway');
+    })());
+    takesChunks((static function () {
+        yield from ['a' => 'x', 'b' => 'y'];
+    })());
+    takesChunks((static function (): \Generator { yield 1; })()); // want P2103
+}
