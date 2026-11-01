@@ -831,3 +831,16 @@ function byRefAppend(array $active): void
         takesString($member->name);
     }
 }
+
+function splitFlags(string $s): void
+{
+    foreach (preg_split('/\s+/', $s, flags: \PREG_SPLIT_NO_EMPTY) ?: [] as $piece) {
+        takesString($piece);
+    }
+    foreach (preg_split('/\s+/', $s, -1, \PREG_SPLIT_NO_EMPTY | \PREG_SPLIT_DELIM_CAPTURE) ?: [] as $piece) {
+        takesString($piece);
+    }
+    foreach (preg_split('/\s+/', $s, -1, \PREG_SPLIT_OFFSET_CAPTURE) ?: [] as $piece) {
+        takesString($piece); // want P2103
+    }
+}
