@@ -109,11 +109,19 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - **PhpStorm plugin**: nothing yet for `concurrently` / `spawn`; `concurrency.md` §11 has the
   lexer approximation to build (keywords as comments, expression form stays a syntax error until
   a PSI block exists).
-- **Dogfood** not started: `tq-cli` first (C8), then `tequila/nats`'s `RevoltTransport` with the
-  single-reader change to `Connection` (`concurrency.md` §9.3).
+- ~~**Dogfood** `tq-cli`~~ — done 2026-11-02 ([[dogfood]]); `tequila/nats`'s `RevoltTransport`
+  with the single-reader change to `Connection` (`concurrency.md` §9.3) is still to do.
+- **tq-cli's 378 checker findings** (125 in `src`, where PHPStan 10 passes): `curl_setopt`'s
+  option-dependent value type, `is_string()` reported always-true after `??` on shapes, property
+  access on `array<string, list<…>>|object` unions, `bytes` vs text around `base64_encode` /
+  `random_bytes` / `bin2hex` (the overlay's `bytes` typing bites real code — `base64_encode`
+  wants `string|bytes`, callers pass what `random_bytes` returns through string functions),
+  `mixed` out of json/yaml arrays. Worth the M4-style pass before M5 closes, or an allow-list
+  entry per family.
 - The emitter's `use` clause is syntactic: a variable passed by reference to a function inside
-  the block (`sort($rows)`) is not seen as assigned and is captured by value. The checker knows
-  by-ref parameters; a hint from it would make the clause exact.
+  the block (`sort($rows)`) is not seen as assigned and is captured by value; a variable assigned
+  in the block and conditionally assigned after it before being read is not captured. The
+  checker's flow analysis knows both; a hint from it would make the clause exact.
 
 ## M6 — tooling, analysis rules
 

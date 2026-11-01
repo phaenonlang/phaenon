@@ -167,4 +167,31 @@ push dogfood work without a maintainer's go-ahead.
 | M6 | `php-service-template` ships `.phn` by default |
 | M7 | `iam` first, then the rest of the services through the template |
 
+## `tq-cli` — M5, 2026-11-02
+
+- Repo `~/labs/tequila/tq-cli` has the developer's own branch checked out, so the dogfood lives
+  in a **git worktree**: `~/labs/tequila/tq-cli-phaenon-dogfood`, branch `phaenon-dogfood` off
+  `origin/main` at `37201c8`, one local commit `c58cb76` *build: compile tq-cli from Phaenon
+  sources, fan-outs as concurrently blocks*. **Local only — never pushed.**
+- 859 `.phn` (585 `src/`, 274 `tests/`), `phaenon.json` builds `src`/`tests` into `.src`/`.tests`
+  (ignored), where Composer, PHPUnit, PHPStan (level 10, `src` only) and php-cs-fixer point (the
+  four line-1 rules off, as in core). `phaenon/concurrent` comes from `../../phaenon/concurrent`
+  as a Composer **path repository** (symlinked into `vendor/phaenon/concurrent`): `composer
+  update phaenon/concurrent` after switching to the branch.
+- **The fifteen `Api::concurrently` fan-outs are `concurrently` blocks** (`$tasks[$key] = spawn
+  …` in a loop, `return Scope::all($tasks)`; `spawn { try … }` for the probes that catch;
+  one `Scope::map`), `Api::concurrently()` removed. `PlatformOnlyFiles` and the three tests
+  that read source files from disk read `.src/` — the PHP that ships.
+- Verify (`PATH` with `phn`): `phn build --emit-on-error`, `vendor/bin/phpunit` (**2045 tests
+  green**, ≈3 min), `composer phpstan` (level 10, no errors), `composer cs:check` (0 of 586).
+- `phn check`: 378 errors (125 `src`, 253 `tests`), none `P26xx`; PHPStan at level 10 passes on
+  `src`, so the `src` ones are the checker's: `curl_setopt` option typing, `is_string()` on a
+  string (narrowing through `??`/array shapes), property access on array shapes, `bytes` used
+  as text (the base64/`random_bytes` family), `mixed` from json/yaml arrays. Not worked through
+  (M4 did that for core); listed in [[open-items]].
+- Found on the way: `?(int, int)` (a nullable tuple, written by `phn migrate`) did not parse
+  (`074979a`); the emitter's `use` clause captured loop variables and arrow-function parameters
+  by reference until the capture rule became "mentioned before the block, or read first after
+  it, parameters shadowing".
+
 ← [[Home]]

@@ -112,23 +112,39 @@ func (l *concurrencyLowering) scope(owner ast.Node, inherited map[string]bool) {
 				roots = stmtNodes(b.Body)
 			}
 		}
-		outside := union(inherited, mentions([]ast.Node{owner}, body))
-		inside := mentions(roots, ast.Span{})
-		captures := make(map[string]bool, len(inside))
-		var names []string
-		for name := range inside {
-			if outside[name] {
-				captures[name] = true
-				names = append(names, name)
+		// A variable is captured by value when the body reads it before
+		// assigning it and the enclosing scope has it before the block, and
+		// by reference when the body assigns it and the first thing the scope
+		// does with it after the block is read it. A loop variable the body
+		// assigns and a later `foreach` assigns again is the closure's own.
+		outside := varUses([]ast.Node{owner}, body)
+		inside := varUses(roots, ast.Span{})
+		assigned := map[string]bool{}
+		if c, ok := b.(*ast.Concurrently); ok {
+			for _, v := range assignedIn(c.Body) {
+				assigned[v.Name] = true
 			}
 		}
-		sort.Slice(names, func(i, j int) bool { return inside[names[i]] < inside[names[j]] })
+		captures := make(map[string]bool, len(inside))
+		byRef := map[string]bool{}
+		var names []string
+		for name, in := range inside {
+			out := outside[name]
+			before := inherited[name] || (out != nil && out.first < body.Start)
+			readAfter := out != nil && out.readFirstAfter(body.End)
+			switch {
+			case assigned[name] && readAfter:
+				byRef[name] = true
+			case before && in.mentions[0].read:
+			default:
+				continue
+			}
+			captures[name] = true
+			names = append(names, name)
+		}
+		sort.Slice(names, func(i, j int) bool { return inside[names[i]].first < inside[names[j]].first })
 		switch b := b.(type) {
 		case *ast.Concurrently:
-			byRef := map[string]bool{}
-			for _, v := range assignedIn(b.Body) {
-				byRef[v.Name] = true
-			}
 			l.block(b, names, byRef)
 		case *ast.Spawn:
 			l.spawn(b, names)
@@ -222,44 +238,137 @@ func eachDirect(owner ast.Node, f func(ast.Node) bool) {
 }
 
 // mentions maps the variables the roots mention, outside the span skip, to
-// their first offset. A nested function or closure is another scope and is
-// not entered — a closure's use list is, since it reads the variables here.
-// Arrow functions, blocks and spawns capture implicitly and are entered.
-// `$this` and the superglobals are never captured.
+// their first offset (see walkVars for the scope rule).
 func mentions(roots []ast.Node, skip ast.Span) map[string]int {
 	out := map[string]int{}
 	for _, root := range roots {
-		ast.Inspect(root, func(n ast.Node) bool {
-			if n != root && skip.End > skip.Start {
-				if s := n.Span(); s.Start >= skip.Start && s.End <= skip.End {
-					return false
-				}
+		walkVars(root, skip, nil, func(v *ast.Variable, read bool) {
+			if _, seen := out[v.Name]; !seen {
+				out[v.Name] = v.S.Start
 			}
-			switch n := n.(type) {
-			case *ast.Variable:
-				if n.Name != "this" && !superglobal(n.Name) {
-					if _, seen := out[n.Name]; !seen {
-						out[n.Name] = n.S.Start
-					}
-				}
-			case *ast.Closure:
-				if n != root {
-					for _, u := range n.Uses {
-						if _, seen := out[u.Var.Name]; !seen {
-							out[u.Var.Name] = u.Var.S.Start
-						}
-					}
-					return false
-				}
-			case *ast.FunctionDecl, *ast.MethodDecl, *ast.ClassDecl:
-				if n != root {
-					return false
-				}
-			}
-			return true
 		})
 	}
 	return out
+}
+
+// uses records, per variable of a scope, where it is first mentioned and
+// every mention with whether it is a read (not an assignment target).
+type uses map[string]*varUse
+
+type varUse struct {
+	first    int
+	mentions []mention
+}
+
+type mention struct {
+	off  int
+	read bool
+}
+
+// readFirstAfter reports whether the first mention at or after off reads the
+// variable rather than assigning it afresh.
+func (v *varUse) readFirstAfter(off int) bool {
+	for _, m := range v.mentions {
+		if m.off >= off {
+			return m.read
+		}
+	}
+	return false
+}
+
+// varUses collects the uses of every variable the roots mention outside the
+// span skip.
+func varUses(roots []ast.Node, skip ast.Span) uses {
+	out := uses{}
+	for _, root := range roots {
+		walkVars(root, skip, nil, func(v *ast.Variable, read bool) {
+			u, ok := out[v.Name]
+			if !ok {
+				u = &varUse{first: v.S.Start}
+				out[v.Name] = u
+			}
+			u.mentions = append(u.mentions, mention{off: v.S.Start, read: read})
+		})
+	}
+	return out
+}
+
+// walkVars calls f for every variable of one scope under root, outside the
+// span skip, with whether the mention reads the variable (an assignment
+// target, a foreach variable or a catch variable does not). A nested
+// function or closure is another scope and is not entered — a closure's use
+// list is, since it reads the variables here. Arrow functions, blocks and
+// spawns capture implicitly and are entered; an arrow function's parameters
+// shadow the variables of their name inside it. `$this` and the superglobals
+// are nobody's to capture.
+func walkVars(root ast.Node, skip ast.Span, shadow map[string]bool, f func(v *ast.Variable, read bool)) {
+	targets := map[*ast.Variable]bool{}
+	var markTargets func(e ast.Expr)
+	markTargets = func(e ast.Expr) {
+		switch e := e.(type) {
+		case *ast.Variable:
+			targets[e] = true
+		case *ast.ArrayLit:
+			for _, it := range e.Items {
+				if it != nil {
+					markTargets(it.Value)
+				}
+			}
+		}
+	}
+	ast.Inspect(root, func(n ast.Node) bool {
+		if n != root && skip.End > skip.Start {
+			if s := n.Span(); s.Start >= skip.Start && s.End <= skip.End {
+				return false
+			}
+		}
+		switch n := n.(type) {
+		case *ast.Assign:
+			if n.Op == '=' && !n.ByRef {
+				markTargets(n.Target)
+			}
+		case *ast.Foreach:
+			markTargets(n.Key)
+			markTargets(n.Value)
+		case *ast.Catch:
+			if n.Var != nil {
+				targets[n.Var] = true
+			}
+		case *ast.Variable:
+			if n.Name != "this" && !superglobal(n.Name) && !shadow[n.Name] {
+				f(n, !targets[n])
+			}
+		case *ast.Closure:
+			if n != root {
+				for _, u := range n.Uses {
+					if !shadow[u.Var.Name] {
+						f(u.Var, true)
+					}
+				}
+				return false
+			}
+		case *ast.ArrowFunc:
+			if n != root {
+				inner := make(map[string]bool, len(shadow)+len(n.Params))
+				for k := range shadow {
+					inner[k] = true
+				}
+				for _, p := range n.Params {
+					inner[p.Var.Name] = true
+					if p.Default != nil {
+						walkVars(p.Default, skip, shadow, f)
+					}
+				}
+				walkVars(n.Body, skip, inner, f)
+				return false
+			}
+		case *ast.FunctionDecl, *ast.MethodDecl, *ast.ClassDecl:
+			if n != root {
+				return false
+			}
+		}
+		return true
+	})
 }
 
 func stmtNodes(stmts []ast.Stmt) []ast.Node {
