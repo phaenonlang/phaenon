@@ -86,6 +86,7 @@ func Tree(src []byte, f *ast.File, opts Options) ([]byte, error) {
 		return nil, err
 	}
 	e.lowerFunctions(f)
+	e.lowerConcurrency(f)
 	e.prologue(f)
 	return e.apply(), nil
 }
@@ -248,6 +249,12 @@ func (e *emitter) importShort(fqcn string, res *program.Resolver) string {
 		return short
 	}
 	short := fqcn[strings.LastIndex(fqcn, "\\")+1:]
+	if strings.EqualFold(res.Scope().Prefix()+short, fqcn) {
+		// The class belongs to this file's namespace: its short name is it.
+		e.imports[fqcn] = short
+		e.ownImports[fqcn] = true
+		return short
+	}
 	taken := namespaceEnd(e.opts.File.AST) == -2
 	for alias, target := range res.Scope().Imports() {
 		if strings.EqualFold(target, fqcn) {

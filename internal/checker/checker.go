@@ -270,6 +270,15 @@ type fnCtx struct {
 	res             *program.Resolver
 	byRef           map[string]bool
 	arrow           bool
+	// inBlock is set inside a concurrently block, nested closures included:
+	// where spawn is legal (P2601) and sleeps are not (P2605).
+	inBlock bool
+	// blockBody is the block whose body this context checks directly (nil
+	// in nested closures); blockValueUsed says its value is read, blockEntry
+	// is the environment at its start (design/concurrency.md §7).
+	blockBody      *ast.Concurrently
+	blockValueUsed bool
+	blockEntry     *state
 	// method/function being checked (for @phpstan-assert, by-ref params)
 	method   *program.Method
 	function *program.Function

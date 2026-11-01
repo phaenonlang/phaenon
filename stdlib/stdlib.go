@@ -19,6 +19,9 @@ var overlay embed.FS
 //go:embed all:runtime
 var runtime embed.FS
 
+//go:embed all:concurrent
+var concurrent embed.FS
+
 //go:embed constants.php
 var constants []byte
 
@@ -65,6 +68,13 @@ func EmbeddedExtensions() map[string]bool {
 // (`\Phaenon\Type`), which compiled code may depend on.
 func Runtime() []Stub {
 	return append(walk(runtime, "runtime", ".php"), walk(runtime, "runtime", ".phn")...)
+}
+
+// Concurrent returns the declarations of the phaenon/concurrent package
+// (`\Phaenon\Concurrent\Scope`, written in Phaenon) and of the amp v3 and
+// Revolt API it is built on, which compiled `concurrently` blocks depend on.
+func Concurrent() []Stub {
+	return append(walk(concurrent, "concurrent", ".php"), walk(concurrent, "concurrent", ".phn")...)
 }
 
 func walk(f embed.FS, root, suffix string) []Stub {

@@ -119,6 +119,14 @@ var (
 	P2530 = Code{"P2530", Error, "bytes used as text"}
 	P2531 = Code{"P2531", Error, "closure in a constant expression captures its scope"}
 
+	// P26xx — concurrency (design/concurrency.md §7)
+	P2601 = Code{"P2601", Error, "spawn outside of a concurrently block"}
+	P2602 = Code{"P2602", Error, "task handle leaves its block"}
+	P2603 = Code{"P2603", Error, "control flow crosses a concurrently or spawn block"}
+	P2604 = Code{"P2604", Error, "spawn body writes to a variable of the enclosing scope"}
+	P2605 = Code{"P2605", Error, "blocking sleep inside a concurrently block"}
+	P2606 = Code{"P2606", Error, "bad concurrently option"}
+
 	// P3 — generics
 	P3001 = Code{"P3001", Error, "wrong number of type arguments"}
 	P3002 = Code{"P3002", Error, "type argument outside its bound"}

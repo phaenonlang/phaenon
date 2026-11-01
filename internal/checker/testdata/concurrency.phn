@@ -1,0 +1,131 @@
+namespace App;
+
+use Amp\Cancellation;
+use Amp\Future;
+use Phaenon\Concurrent\Scope;
+
+final class Work
+{
+    fun find(int $id): string
+    {
+        return "item-$id";
+    }
+
+    fun touch(int $id): void
+    {
+    }
+
+    fun count(int $id): int
+    {
+        return $id;
+    }
+}
+
+final class Blocks
+{
+    private ?Future $kept = null;
+
+    fun __construct(private readonly Work $work)
+    {
+    }
+
+    fun ok(int $id, list<int> $ids, Cancellation $stop): string
+    {
+        $total = 0;
+        concurrently (timeout: 2, cancellation: $stop) {
+            $tasks = $ids->map(fn (int $i) => spawn $this->work->count($i));
+            foreach (Scope::all($tasks) as $n) {
+                $total += $n;
+            }
+            spawn $this->work->touch($id);
+        }
+
+        return concurrently {
+            $name = spawn $this->work->find($id);
+            $more = spawn {
+                $n = $this->work->count($id);
+
+                return $n + $total;
+            };
+
+            return $name->await().$more->await();
+        };
+    }
+
+    fun outside(int $id): void
+    {
+        spawn $this->work->touch($id); // want P2601
+    }
+
+    fun escapes(int $id): Future
+    {
+        return concurrently {
+            return spawn $this->work->find($id); // want P2602
+        };
+    }
+
+    fun stored(int $id): void
+    {
+        $task = null;
+        concurrently {
+            $this->kept = spawn $this->work->find($id); // want P2602
+            $task = spawn $this->work->find($id); // want P2602
+        }
+    }
+
+    fun crossing(list<int> $ids): int
+    {
+        foreach ($ids as $id) {
+            concurrently {
+                if ($id > 1) {
+                    break; // want P2603
+                }
+                spawn $this->work->touch($id);
+
+                return $id; // want P2603
+            }
+        }
+
+        return 0;
+    }
+
+    fun yields(): void
+    {
+        concurrently {
+            yield 1; // want P2603
+        }
+    }
+
+    fun writes(): int
+    {
+        $count = 0;
+
+        return concurrently {
+            $n = spawn {
+                $count++; // want P2604
+
+                return 1;
+            };
+
+            return $count + $n->await();
+        };
+    }
+
+    fun sleeps(): void
+    {
+        concurrently {
+            spawn usleep(10); // want P2605
+            Scope::sleep(0.01);
+        }
+    }
+
+    fun options(): void
+    {
+        concurrently (timeout: 'soon') { // want P2606
+        }
+        concurrently (retries: 3) { // want P2606
+        }
+        concurrently (2.0) { // want P2606
+        }
+    }
+}

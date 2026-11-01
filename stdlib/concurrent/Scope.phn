@@ -1,0 +1,273 @@
+namespace Phaenon\Concurrent;
+
+use Amp\Cancellation;
+use Amp\CancelledException;
+use Amp\CompositeCancellation;
+use Amp\DeferredCancellation;
+use Amp\Future;
+use Amp\NullCancellation;
+use Amp\TimeoutCancellation;
+use Closure;
+use Fiber;
+use LogicException;
+use Throwable;
+use WeakMap;
+use function Amp\async;
+use function Amp\delay;
+use function Amp\Future\await;
+
+/**
+ * The scope behind a `concurrently { … }` block (design/concurrency.md §8).
+ * `run` opens a scope around the body it is given, `spawn` starts a task in
+ * the innermost open scope of the current fiber, and the scope ends only
+ * when every task has completed: a failure cancels the others and is
+ * rethrown at the end. The loop is Revolt's, the handles are amp's Futures;
+ * this class adds the structure.
+ */
+final class Scope
+{
+    /** The open scopes of every fiber but the main one, innermost last. */
+    private static ?WeakMap $stacks = null;
+
+    /** The main fiber's open scopes, innermost last. */
+    private static list<Scope> $main = [];
+
+    private list<Future<mixed>> $tasks = [];
+
+    private readonly DeferredCancellation $own;
+
+    private readonly Cancellation $cancellation;
+
+    private ?Throwable $failure = null;
+
+    private fun __construct(?Scope $parent, float|int|null $timeout, ?Cancellation $external)
+    {
+        $this->own = new DeferredCancellation();
+        $parts = [$this->own->getCancellation()];
+        if ($parent !== null) {
+            $parts[] = $parent->cancellation;
+        }
+        if ($external !== null) {
+            $parts[] = $external;
+        }
+        if ($timeout !== null) {
+            $parts[] = new TimeoutCancellation((float) $timeout);
+        }
+        $this->cancellation = count($parts) === 1 ? $parts[0] : new CompositeCancellation(...$parts);
+    }
+
+    /**
+     * Runs the body of a block in the calling fiber, inside a new scope, and
+     * returns its value once every task spawned in it has completed. A
+     * task's failure, the body's exception, the deadline or the given
+     * cancellation cancel the rest and are rethrown here
+     * (design/concurrency.md §5).
+     */
+    static fun run<R>(Closure(): R $body, float|int|null $timeout = null, ?Cancellation $cancellation = null): R
+    {
+        $scope = new self(self::current(), $timeout, $cancellation);
+        self::push($scope);
+        try {
+            $value = $body();
+        } catch (Throwable $e) {
+            $scope->abort($e);
+        } finally {
+            self::pop($scope);
+        }
+        $scope->join();
+
+        return $value;
+    }
+
+    /**
+     * Starts a task in the innermost block of the current fiber and returns
+     * its handle. The task runs when the body next waits.
+     */
+    static fun spawn<T>(Closure(): T $task): Future<T>
+    {
+        $scope = self::current() ?? throw new LogicException('spawn outside of a concurrently block');
+        /** @var Future<T> $future */
+        $future = async(static function () use ($scope, $task): mixed {
+            self::enter($scope);
+            try {
+                return $task();
+            } catch (Throwable $e) {
+                $scope->fail($e);
+                throw $e;
+            }
+        });
+        $scope->tasks[] = $future;
+
+        return $future;
+    }
+
+    /**
+     * Awaits every handle and returns the results under the same keys. The
+     * tasks stay the block's: a failure among them fails the block.
+     */
+    static fun all<K of int|string, T>(iterable<K, Future<T>> $tasks): map<K, T>
+    {
+        return await($tasks, self::cancellation());
+    }
+
+    /**
+     * One task per element, joined: the results under the same keys. A
+     * block of its own, so a failure cancels the other tasks and is thrown
+     * here.
+     */
+    static fun map<K of int|string, T, R>(iterable<K, T> $items, Closure(T): R $task): map<K, R>
+    {
+        return concurrently {
+            /** @var map<K, Future<R>> $tasks */
+            $tasks = [];
+            foreach ($items as $key => $item) {
+                $tasks[$key] = spawn $task($item);
+            }
+
+            return self::all($tasks);
+        };
+    }
+
+    /**
+     * The current task's scope cancellation: what to hand an amp API that
+     * accepts one, so that the call is interrupted when the block is.
+     */
+    static fun cancellation(): Cancellation
+    {
+        return self::current()?->cancellation ?? new NullCancellation();
+    }
+
+    /** Waits, and wakes early with CancelledException when the scope is cancelled. */
+    static fun sleep(float $seconds): void
+    {
+        delay($seconds, cancellation: self::cancellation());
+    }
+
+    /** Throws CancelledException when the current scope is cancelled: for a long loop without a wait of its own. */
+    static fun checkpoint(): void
+    {
+        self::cancellation()->throwIfRequested();
+    }
+
+    static fun cancelled(): bool
+    {
+        return self::cancellation()->isRequested();
+    }
+
+    // ---------------------------------------------------------------- the scope
+
+    /** Awaits every task in completion order; the first failure aborts the rest. */
+    private fun join(): void
+    {
+        while ($this->tasks !== []) {
+            $pending = $this->tasks;
+            $this->tasks = [];
+            try {
+                foreach (Future::iterate($pending, $this->cancellation) as $future) {
+                    $future->await();
+                }
+            } catch (Throwable $e) {
+                $this->abort($e);
+            }
+        }
+    }
+
+    /**
+     * Cancels every task, waits for all of them, and throws. The first
+     * failure recorded in the scope wins over a CancelledException the body
+     * received from its own scope; the body's own exception wins over a
+     * task's.
+     */
+    private fun abort(Throwable $cause): never
+    {
+        $this->fail($cause);
+        $this->drain();
+        if ($cause instanceof CancelledException && $this->failure !== null) {
+            throw $this->failure;
+        }
+        throw $cause;
+    }
+
+    /** Records the scope's first failure and cancels everything in it. */
+    private fun fail(Throwable $e): void
+    {
+        if ($this->failure === null) {
+            $this->failure = $e;
+            $this->own->cancel($e);
+        }
+    }
+
+    /** Waits for every task to finish, whatever its outcome. */
+    private fun drain(): void
+    {
+        while ($this->tasks !== []) {
+            $pending = $this->tasks;
+            $this->tasks = [];
+            foreach ($pending as $future) {
+                try {
+                    $future->await();
+                } catch (Throwable) {
+                    // The failure is recorded, or the task was cancelled by this scope.
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- the ambient stack
+
+    private static fun current(): ?Scope
+    {
+        $stack = self::stack();
+
+        return $stack === [] ? null : $stack[count($stack) - 1];
+    }
+
+    private static fun push(Scope $scope): void
+    {
+        self::setStack([...self::stack(), $scope]);
+    }
+
+    private static fun pop(Scope $scope): void
+    {
+        $stack = self::stack();
+        if ($stack === [] || $stack[count($stack) - 1] !== $scope) {
+            throw new LogicException('concurrently blocks closed out of order');
+        }
+        array_pop($stack);
+        self::setStack($stack);
+    }
+
+    /** Makes $scope the ambient scope of the task fiber that starts here. */
+    private static fun enter(Scope $scope): void
+    {
+        self::setStack([$scope]);
+    }
+
+    private static fun stack(): list<Scope>
+    {
+        $fiber = Fiber::getCurrent();
+        if ($fiber === null) {
+            return self::$main;
+        }
+        /** @var list<Scope> $stack */
+        $stack = (self::$stacks ??= new WeakMap())[$fiber] ?? [];
+
+        return $stack;
+    }
+
+    private static fun setStack(list<Scope> $stack): void
+    {
+        $fiber = Fiber::getCurrent();
+        if ($fiber === null) {
+            self::$main = $stack;
+
+            return;
+        }
+        $stacks = self::$stacks ??= new WeakMap();
+        if ($stack === []) {
+            unset($stacks[$fiber]);
+        } else {
+            $stacks[$fiber] = $stack;
+        }
+    }
+}

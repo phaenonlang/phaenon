@@ -142,7 +142,7 @@ func usesPhaenonSyntax(src []byte) bool {
 	for _, s := range f.Stmts {
 		ast.Inspect(s, func(n ast.Node) bool {
 			switch n := n.(type) {
-			case *ast.TypeParam, *ast.IsExpr, *ast.AsExpr, *ast.TypeAlias, *ast.ClosureType, *ast.TupleType:
+			case *ast.TypeParam, *ast.IsExpr, *ast.AsExpr, *ast.TypeAlias, *ast.ClosureType, *ast.TupleType, *ast.Concurrently, *ast.Spawn:
 				found = true
 			case *ast.FunctionDecl:
 				found = found || n.Fun

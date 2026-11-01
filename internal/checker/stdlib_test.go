@@ -19,7 +19,7 @@ func TestRuntimeStubs(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := 0
-	for _, s := range stdlib.Runtime() {
+	for _, s := range append(stdlib.Runtime(), stdlib.Concurrent()...) {
 		if !strings.HasSuffix(s.Path, ".phn") {
 			continue
 		}

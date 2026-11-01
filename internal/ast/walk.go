@@ -129,6 +129,14 @@ func Inspect(n Node, f func(Node) bool) {
 		params(n.Params, f)
 		Inspect(n.ReturnType, f)
 		Inspect(n.Body, f)
+	case *Concurrently:
+		if n.Opts != nil {
+			Inspect(n.Opts, f)
+		}
+		stmts(n.Body, f)
+	case *Spawn:
+		Inspect(n.Expr, f)
+		stmts(n.Body, f)
 	case *Match:
 		Inspect(n.Subject, f)
 		for _, a := range n.Arms {
