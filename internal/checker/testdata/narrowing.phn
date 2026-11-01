@@ -234,3 +234,17 @@ function tryCatch(): int
 
     return $x + $y;
 }
+
+/** @param array<string, mixed> $entry */
+function offsetTernary(array $entry): void
+{
+    if (!\is_scalar($entry['value'])) {
+        return;
+    }
+    takesString(\is_bool($entry['value']) ? 'b' : (string) $entry['value']);
+    takesInt(\is_int($entry['value']) ? $entry['value'] : 0);
+    takesInt(match (true) {
+        \is_int($entry['n']) => $entry['n'],
+        default => 0,
+    });
+}
