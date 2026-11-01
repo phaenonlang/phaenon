@@ -97,23 +97,28 @@ function array_pop(array &$array): mixed {}
 function array_shift(array &$array): mixed {}
 
 /**
+ * The first element: only an empty array has none (PHPStan agrees).
+ *
  * @template V
  * @param array<V>|object $array
- * @return V|false
+ * @return ($array is non-empty-array ? V : V|false)
  */
 function reset(array|object &$array): mixed {}
 
 /**
  * @template V
  * @param array<V>|object $array
- * @return V|false
+ * @return ($array is non-empty-array ? V : V|false)
  */
 function end(array|object &$array): mixed {}
 
 /**
+ * The pointer of an array that was never moved is on its first element;
+ * PHPStan types current() of a non-empty array as the element too.
+ *
  * @template V
  * @param array<V>|object $array
- * @return V|false
+ * @return ($array is non-empty-array ? V : V|false)
  */
 function current(array|object $array): mixed {}
 
