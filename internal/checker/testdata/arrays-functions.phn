@@ -1,0 +1,91 @@
+namespace Fns;
+
+// The array functions: which keep keys, which keep lists, and what their
+// values are — as PHPStan's return type extensions have it.
+
+/** @param list<string> $xs */
+function takesStrings(array $xs): void
+{
+}
+
+/** @param array<string, string> $m */
+function takesMap(array $m): void
+{
+}
+
+/** @param array<string, list<string>> $m */
+function takesMapOfLists(array $m): void
+{
+}
+
+/** @param array<string, int> $m */
+function takesCounts(array $m): void
+{
+}
+
+function takesString(string $s): void
+{
+}
+
+function takesInt(int $i): void
+{
+}
+
+/**
+ * array_intersect and array_diff keep the first array's keys and values.
+ *
+ * @param list<string> $a
+ * @param list<string> $b
+ * @param array<string, string> $m
+ */
+function intersections(array $a, array $b, array $m): void
+{
+    takesStrings(array_values(array_intersect($a, $b)));
+    takesStrings(array_values(array_diff($a, $b)));
+    takesMap(array_intersect($m, $b));
+    takesMap(array_intersect_assoc($m, $m));
+    takesMap(array_diff_assoc($m, $m));
+    takesMap(array_udiff($m, $m, strcmp(...)));
+    takesMap(array_uintersect($m, $m, strcmp(...)));
+    $shapes = [];
+    foreach (array_intersect($a, $b) as $environment) {
+        $shapes[$environment] = $a;
+    }
+    takesMapOfLists($shapes);
+    $platform = [];
+    foreach ([...array_intersect(['core', 'iam'], array_keys($m)), ...array_diff(array_keys($m), ['core', 'iam'])] as $name) {
+        $platform[$name] = strlen($name);
+    }
+    takesCounts($platform);
+    takesStrings(array_values(array_unique(['observe', ...array_intersect(['observe', 'verify', 'act'], $b)])));
+    takesStrings(array_intersect($a, $b)); // want P2103
+}
+
+/**
+ * @param list<string> $a
+ * @param array<string, string> $m
+ * @param array<string, list<string>> $keys
+ * @param list<int> $ints
+ * @param list<float> $floats
+ */
+function values(array $a, array $m, array $keys, array $ints, array $floats, string $s): void
+{
+    takesMapOfLists(array_filter($keys, static fn (string $key): bool => 1 === preg_match('/^tq_/', $key), \ARRAY_FILTER_USE_KEY));
+    takesInt(array_sum(array_map(\count(...), [$a, $a])));
+    takesInt(array_sum($ints));
+    takesInt(array_sum($floats)); // want P2103
+    $env = [];
+    foreach ($m as $name => $value) {
+        array_push($env, '-e', $name.'='.$value);
+    }
+    takesStrings($env);
+    takesStrings(array_merge(['bin/tq'], array_keys($m)));
+    takesString(substr_replace($s, 'x', 1, 2));
+    foreach (preg_split('/\s+/', trim($s), flags: \PREG_SPLIT_NO_EMPTY) ?: [] as $ref) {
+        takesString($ref);
+    }
+    foreach (preg_split('/\s+/', $s, flags: \PREG_SPLIT_OFFSET_CAPTURE) ?: [] as $pair) {
+        takesString($pair[0]);
+        takesInt($pair[1]);
+    }
+}

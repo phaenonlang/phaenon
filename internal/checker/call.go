@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -340,16 +341,28 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 					return types.Array{Key: types.TInt, Value: r.Value, List: true, NonEmpty: a.NonEmpty}
 				}
 			}
-			if _, ok := argType(1).(types.Shape); ok {
+			if sh, ok := argType(1).(types.Shape); ok {
 				if r, ok := ret.(types.Array); ok {
-					return types.Array{Key: r.Key, Value: r.Value, List: true}
+					if sh.Unsealed {
+						return types.Array{Key: r.Key, Value: r.Value, List: sh.List || shapeIsList(sh)}
+					}
+					// A sealed shape maps entry by entry: the keys stay, each
+					// value is what the callback returns (PHPStan keeps the
+					// constant array too).
+					mapped := types.Shape{List: sh.List}
+					for _, e := range sh.Entries {
+						mapped.Entries = append(mapped.Entries, types.ShapeEntry{Key: e.Key, IntKey: e.IntKey, IsInt: e.IsInt, Optional: e.Optional, Type: r.Value})
+					}
+					return mapped
 				}
 			}
 		}
 	case "array_filter":
 		if a, ok := argType(0).(types.Array); ok {
 			if r, ok := ret.(types.Array); ok {
-				v := r.Value
+				// The values are the array's: a callback over the keys
+				// (ARRAY_FILTER_USE_KEY) binds V to the key type as well.
+				v := a.Value
 				if len(args.Args) == 2 && args.Args[1].Value != nil {
 					if nv := x.filteredValue(args.Args[1].Value, a.Value, env); nv != nil {
 						v = nv
@@ -435,6 +448,16 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 			fail = types.TNull
 		}
 		return types.MakeUnion(t, fail)
+	case "array_sum":
+		// Ints add up to an int, non-negative ones to a non-negative int,
+		// floats to a float (PHPStan's ArraySumFunctionDynamicReturnTypeExtension).
+		if _, v, ok := types.IterableKV(argType(0), x.p()); ok {
+			return arraySumType(v, ret)
+		}
+	case "preg_split":
+		if t := pregSplitType(args); t != nil {
+			return t
+		}
 	case "min", "max":
 		var ts []types.Type
 		if len(args.Args) == 1 {
@@ -460,6 +483,74 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 		return types.Array{Key: types.TInt, Value: types.TMixed, List: true}
 	}
 	return ret
+}
+
+// shapeIsList reports a shape whose keys are 0..n-1 in order, a list
+// whether or not it was written as one.
+func shapeIsList(s types.Shape) bool {
+	for i, e := range s.Entries {
+		if !e.IsInt || e.IntKey != int64(i) {
+			return false
+		}
+	}
+	return true
+}
+
+// arraySumType is array_sum() over values of type v: int for ints
+// (int<0, max> when none is negative), float for floats, int|float when
+// both or anything else numeric may be among them; ret when v says
+// nothing.
+func arraySumType(v, ret types.Type) types.Type {
+	ints, floats := 0, 0
+	nonNegative := true
+	for _, m := range types.Members(v) {
+		switch m := m.(type) {
+		case types.Int:
+			ints++
+			nonNegative = nonNegative && m.Lo >= 0
+		case types.Float, types.FloatLit:
+			floats++
+		default:
+			return ret
+		}
+	}
+	switch {
+	case ints > 0 && floats == 0:
+		if nonNegative {
+			return types.Int{Lo: 0, Hi: math.MaxInt64}
+		}
+		return types.TInt
+	case floats > 0 && ints == 0:
+		return types.TFloat
+	}
+	return ret
+}
+
+// pregSplitType is what preg_split() returns under the flags written at
+// the call: pieces, non-empty under PREG_SPLIT_NO_EMPTY, each paired with
+// its offset under PREG_SPLIT_OFFSET_CAPTURE; nil without flags (the
+// overlay's default applies).
+func pregSplitType(args *ast.ArgList) types.Type {
+	if args == nil {
+		return nil
+	}
+	var flags ast.Expr
+	for i, a := range args.Args {
+		if (a.Name == nil && i == 3) || (a.Name != nil && a.Name.Name == "flags") {
+			flags = a.Value
+		}
+	}
+	if flags == nil {
+		return nil
+	}
+	var piece types.Type = types.TString
+	if mentionsConst(flags, "preg_split_no_empty") {
+		piece = types.String{NonEmpty: true}
+	}
+	if mentionsConst(flags, "preg_split_offset_capture") {
+		piece = types.Shape{List: true, Entries: []types.ShapeEntry{{IsInt: true, IntKey: 0, Type: piece}, {IsInt: true, IntKey: 1, Type: types.Int{Lo: 0, Hi: math.MaxInt64}}}}
+	}
+	return types.MakeUnion(types.Array{Key: types.TInt, Value: piece, List: true}, types.TFalse)
 }
 
 // pregMatchesType is what preg_match() / preg_match_all() leave in
@@ -1427,7 +1518,11 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			at = v
 		}
 		if len(inferable) > 0 && !isCallableType(at) {
-			unify(pt, at, subst, inferable, x.p())
+			// Against the declared type, not the one substituted so far:
+			// a second argument for `X ...$values` (array_push's '-e' then
+			// a string) or `array<K, V> ...$arrays` widens the binding
+			// instead of being checked against the first argument's.
+			unify(types.Substitute(b.param.Type, rename), at, subst, inferable, x.p())
 		}
 	}
 	for i, b := range bindings {
