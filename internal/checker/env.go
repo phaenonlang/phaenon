@@ -25,20 +25,34 @@ type varInfo struct {
 type state struct {
 	vars  map[string]varInfo
 	paths map[string]types.Type // "$this->x", "$a['k']" → narrowed type
+	// conds holds, per boolean variable, the condition it was assigned
+	// from: `$ok = null !== $x` makes `if ($ok)` narrow $x, as PHPStan
+	// does, until $ok or a variable the condition reads is reassigned.
+	conds map[string]condition
 	dead  bool
 }
 
+// condition is a boolean variable's defining expression and the variables
+// it reads.
+type condition struct {
+	expr ast.Expr
+	vars map[string]bool
+}
+
 func newEnv() *state {
-	return &state{vars: map[string]varInfo{}, paths: map[string]types.Type{}}
+	return &state{vars: map[string]varInfo{}, paths: map[string]types.Type{}, conds: map[string]condition{}}
 }
 
 func (e *state) clone() *state {
-	n := &state{vars: make(map[string]varInfo, len(e.vars)), paths: make(map[string]types.Type, len(e.paths)), dead: e.dead}
+	n := &state{vars: make(map[string]varInfo, len(e.vars)), paths: make(map[string]types.Type, len(e.paths)), conds: make(map[string]condition, len(e.conds)), dead: e.dead}
 	for k, v := range e.vars {
 		n.vars[k] = v
 	}
 	for k, v := range e.paths {
 		n.paths[k] = v
+	}
+	for k, v := range e.conds {
+		n.conds[k] = v
 	}
 	return n
 }
@@ -48,6 +62,17 @@ func (e *state) set(name string, t types.Type) {
 	e.vars[name] = varInfo{t: t}
 	e.invalidatePrefix("$" + name)
 	e.invalidateMentions(name)
+	e.dropConditions(name)
+}
+
+// dropConditions forgets the condition a variable carried and every
+// condition that reads the variable: either has a new value.
+func (e *state) dropConditions(name string) {
+	for k, c := range e.conds {
+		if k == name || c.vars[name] {
+			delete(e.conds, k)
+		}
+	}
 }
 
 // invalidateMentions drops the paths that pass the variable as an argument
@@ -150,6 +175,17 @@ func (e *state) invalidatePrefix(prefix string) {
 	}
 }
 
+// invalidateUnder drops the narrowed paths strictly under a receiver —
+// `$this->calls` once `$this->record()` ran, which may have changed it —
+// and keeps the receiver's own narrowing: the object is the same one.
+func (e *state) invalidateUnder(prefix string) {
+	for k := range e.paths {
+		if len(k) > len(prefix) && strings.HasPrefix(k, prefix) && (strings.HasPrefix(k[len(prefix):], "->") || strings.HasPrefix(k[len(prefix):], "[") || strings.HasPrefix(k[len(prefix):], "::")) {
+			delete(e.paths, k)
+		}
+	}
+}
+
 // invalidateCalls drops the narrowed method-call paths under a receiver:
 // `$dm->flush()` is no longer null once `$dm->add($x)` has run.
 func (e *state) invalidateCalls(receiver string) {
@@ -240,6 +276,11 @@ func join(a, b *state) *state {
 			n.paths[k] = types.MakeUnion(ta, tb)
 		}
 	}
+	for k, ca := range a.conds {
+		if cb, ok := b.conds[k]; ok && ca.expr == cb.expr {
+			n.conds[k] = ca
+		}
+	}
 	return n
 }
 
@@ -279,17 +320,35 @@ func (e *state) equal(o *state) bool {
 }
 
 // widen generalises the variables that changed between prev and e so loop
-// iteration converges: literals become their primitive, lists stay lists.
+// iteration converges: literals become their primitive, the array that
+// grew loses its keys, what it holds keeps its shape.
 func (e *state) widen(prev *state) {
 	for k, v := range e.vars {
 		if pv, ok := prev.vars[k]; ok && !types.Equal(pv.t, v.t) {
-			e.vars[k] = varInfo{t: widenType(v.t), maybe: v.maybe}
+			e.vars[k] = varInfo{t: widenAgainst(pv.t, v.t), maybe: v.maybe}
 		}
 	}
 }
 
+// widenType generalises a type with no earlier one to compare against: a
+// by-reference capture the closure may change in any way.
 func widenType(t types.Type) types.Type {
-	return types.Map(t, func(m types.Type) types.Type {
+	return widenAgainst(nil, t)
+}
+
+// widenAgainst generalises cur, the type one iteration after prev: literals
+// become their primitive; a shape whose keys differ from prev's — the
+// array that grew, or a top-level one with no prev — becomes an array of
+// its widened keys and values; a shape with prev's keys, or one nested
+// where prev has nothing to say, keeps them with widened values. So a
+// tuple appended on every iteration stays `(Repo, Project)`, not
+// `list<Repo|Project>`, as PHPStan keeps it.
+func widenAgainst(prev, cur types.Type) types.Type {
+	return widenLevel(prev, cur, true)
+}
+
+func widenLevel(prev, cur types.Type, top bool) types.Type {
+	return types.Map(cur, func(m types.Type) types.Type {
 		switch m := m.(type) {
 		case types.Int:
 			return types.TInt
@@ -303,16 +362,99 @@ func widenType(t types.Type) types.Type {
 			if len(m.Entries) == 0 {
 				return m // `[]` has no keys to widen; the first entry decides them
 			}
-			values := widenType(shapeValues(m))
+			p := arrayCounterpart(prev, m)
+			if ps, ok := p.(types.Shape); ok && sameKeys(ps, m) {
+				return widenEntries(ps, m)
+			}
+			if p == nil && !top {
+				return widenEntries(types.Shape{}, m)
+			}
+			pk, pv := arrayParts(p)
+			values := widenLevel(pv, shapeValues(m), false)
 			if m.List {
 				return types.Array{Key: types.TInt, Value: values, List: true}
 			}
-			return types.Array{Key: widenType(shapeKeys(m)), Value: values}
+			return types.Array{Key: widenLevel(pk, shapeKeys(m), false), Value: values}
 		case types.Array:
-			return types.Array{Key: widenType(m.Key), Value: widenType(m.Value), List: m.List}
+			pk, pv := arrayParts(arrayCounterpart(prev, m))
+			return types.Array{Key: widenLevel(pk, m.Key, false), Value: widenLevel(pv, m.Value, false), List: m.List}
 		}
 		return m
 	})
+}
+
+// arrayCounterpart picks, among prev's members, the array a shape or array
+// of cur descends from: an equal one, else a shape with the same keys,
+// else any array or shape; nil when prev has none.
+func arrayCounterpart(prev, m types.Type) types.Type {
+	if prev == nil {
+		return nil
+	}
+	var first types.Type
+	for _, p := range types.Members(prev) {
+		switch p := p.(type) {
+		case types.Shape:
+			if types.Equal(p, m) {
+				return p
+			}
+			if ms, ok := m.(types.Shape); ok && sameKeys(p, ms) {
+				return p
+			}
+			if first == nil {
+				first = p
+			}
+		case types.Array:
+			if types.Equal(p, m) {
+				return p
+			}
+			if first == nil {
+				first = p
+			}
+		}
+	}
+	return first
+}
+
+// arrayParts is the key and value type of an array or shape, nil for
+// anything else.
+func arrayParts(t types.Type) (key, value types.Type) {
+	switch t := t.(type) {
+	case types.Shape:
+		return shapeKeys(t), shapeValues(t)
+	case types.Array:
+		return t.Key, t.Value
+	}
+	return nil, nil
+}
+
+// sameKeys says whether two shapes have the same entries in the same
+// order, optionality included.
+func sameKeys(a, b types.Shape) bool {
+	if len(a.Entries) != len(b.Entries) {
+		return false
+	}
+	for i, ea := range a.Entries {
+		eb := b.Entries[i]
+		if ea.IsInt != eb.IsInt || ea.IntKey != eb.IntKey || ea.Key != eb.Key || ea.Optional != eb.Optional {
+			return false
+		}
+	}
+	return true
+}
+
+// widenEntries keeps cur's keys and widens each value against prev's
+// entry of the same position (prev empty: against nothing).
+func widenEntries(prev, cur types.Shape) types.Type {
+	out := types.Shape{Unsealed: cur.Unsealed, List: cur.List, Callable: cur.Callable, Entries: make([]types.ShapeEntry, len(cur.Entries))}
+	for i, e := range cur.Entries {
+		var pt types.Type
+		if i < len(prev.Entries) {
+			pt = prev.Entries[i].Type
+		}
+		e.Type = widenLevel(pt, e.Type, false)
+		out.Entries[i] = e
+	}
+	return out
 }
 
 func shapeKeys(s types.Shape) types.Type {

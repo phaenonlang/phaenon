@@ -644,7 +644,12 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 }
 
 func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
-	defer func() { env.dead = true }()
+	defer func() {
+		if x.collectExits {
+			x.exitEnvs = append(x.exitEnvs, env.clone())
+		}
+		env.dead = true
+	}()
 	var declared types.Type // an unnamed `@var T` above the return types the value
 	if s.Doc != "" {
 		doc := docblock.Parse(s.Doc)
@@ -982,11 +987,14 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		// A by-reference use is whatever the body assigns to it as well:
 		// `use (&$server)` with `$server = null` inside is resource|null
 		// throughout (PHPStan types it so). One silent pass finds out.
+		c.collectExits = true
 		saved := x.c.mark()
 		probe := cenv.clone()
 		c.stmts(e.Body, probe)
 		x.c.rollback(saved)
 		c.returnTypes = nil
+		probe = joinAll(append([]*state{probe}, c.exitEnvs...)...)
+		c.exitEnvs = nil
 		for _, u := range e.Uses {
 			if !u.ByRef {
 				continue
@@ -1000,12 +1008,14 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 	}
 	c.stmts(e.Body, cenv)
 	// What the body assigns to a by-reference use is what the enclosing
-	// scope may see once the closure has run.
+	// scope may see once the closure has run — at any of its exits, an
+	// early `return` after `$detached[] = $m` included.
+	after := joinAll(append([]*state{cenv}, c.exitEnvs...)...)
 	for _, u := range e.Uses {
 		if !u.ByRef {
 			continue
 		}
-		if inner, ok := cenv.get(u.Var.Name); ok {
+		if inner, ok := after.get(u.Var.Name); ok {
 			if outer, ok := env.get(u.Var.Name); ok {
 				env.set(u.Var.Name, types.MakeUnion(outer.t, inner.t))
 			}
@@ -1034,19 +1044,24 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 			ret = types.TVoid
 		}
 	} else {
-		ret = refinedReturn(ret, c.returnTypes, c.generator, x.p())
+		ret = refinedReturn(ret, c.returnTypes, c.generator, cenv.dead, x.p())
 	}
 	return types.Callable{Closure: true, HasSig: true, Params: cps, Return: ret}
 }
 
 // refinedReturn is a closure's declared return type narrowed to what its
 // body returns when that fits: `function (): array { return ['a' => 1]; }`
-// is a closure returning array{a: 1}, as PHPStan types it.
-func refinedReturn(declared types.Type, returned []types.Type, generator bool, h types.Hierarchy) types.Type {
-	if generator || len(returned) == 0 {
+// is a closure returning array{a: 1}, as PHPStan types it. A body that
+// never reaches a return — every path throws or exits — returns never,
+// which any closure type accepts (PHPStan: `Closure(): never`).
+func refinedReturn(declared types.Type, returned []types.Type, generator, dead bool, h types.Hierarchy) types.Type {
+	if _, isVoid := declared.(types.Void); isVoid || generator {
 		return declared
 	}
-	if _, isVoid := declared.(types.Void); isVoid {
+	if len(returned) == 0 {
+		if dead {
+			return types.TNever
+		}
 		return declared
 	}
 	u := types.MakeUnion(returned...)
@@ -1088,7 +1103,7 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 		if _, isVoid := ret.(types.Void); !isVoid && !types.IsAcceptable(bt, ret, x.p()) {
 			x.report(e.Body.Span(), P2202, "arrow function should return %s but returns %s", x.typeName(ret), x.typeName(bt))
 		}
-		ret = refinedReturn(ret, []types.Type{bt}, false, x.p())
+		ret = refinedReturn(ret, []types.Type{bt}, false, false, x.p())
 	} else {
 		ret = bt
 	}
