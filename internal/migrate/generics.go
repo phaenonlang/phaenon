@@ -979,12 +979,21 @@ func render(n *docblock.TypeNode) (string, bool) {
 		}
 		var params []string
 		for _, p := range n.Params {
-			if p.Optional || p.Variadic || p.ByRef || p.Type == nil {
+			// `T=` and `T...` are Phaenon's spelling too; the parameter's
+			// name is not (design/generics.md §11.3). A by-reference
+			// parameter has no spelling.
+			if p.ByRef || p.Type == nil {
 				return "", false
 			}
 			s, ok := render(p.Type)
 			if !ok {
 				return "", false
+			}
+			if p.Variadic {
+				s += "..."
+			}
+			if p.Optional {
+				s += "="
 			}
 			params = append(params, s)
 		}

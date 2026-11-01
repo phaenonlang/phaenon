@@ -428,19 +428,36 @@ func (p *Parser) singleType() ast.TypeExpr {
 	return nt
 }
 
-// closureType parses Phaenon's Closure(A, B): R after the Closure name.
+// closureType parses Phaenon's Closure(A, B=, C...): R after the Closure
+// name. `T=` is an optional parameter and `T...` the variadic one, PHPStan's
+// markers (design/generics.md §11.3); a parameter after the variadic one, or
+// a required one after an optional one, is a syntax error.
 func (p *Parser) closureType(start int) ast.TypeExpr {
-	var params []ast.TypeExpr
+	var params []ast.ClosureParam
 	if p.atCast() {
 		// `Closure(int): string` — the lexer read `(int)` as a cast token.
 		t := p.next()
 		text := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(t.Text(p.src), "("), ")"))
-		params = append(params, &ast.NamedType{S: ast.Span{Start: t.Start + 1, End: t.End - 1},
-			Name: &ast.Name{S: ast.Span{Start: t.Start + 1, End: t.End - 1}, Kind: ast.NameUnqualified, Parts: []string{text}}})
+		params = append(params, ast.ClosureParam{Type: &ast.NamedType{S: ast.Span{Start: t.Start + 1, End: t.End - 1},
+			Name: &ast.Name{S: ast.Span{Start: t.Start + 1, End: t.End - 1}, Kind: ast.NameUnqualified, Parts: []string{text}}}})
 	} else {
 		p.expect(token.Kind('('))
+		optional := false
 		for !p.at(token.Kind(')')) {
-			params = append(params, p.typeExpr())
+			if n := len(params); n > 0 && params[n-1].Variadic {
+				p.errorf("a closure type's variadic parameter must be its last")
+			}
+			cp := ast.ClosureParam{Type: p.typeExpr()}
+			switch {
+			case p.accept(token.T_ELLIPSIS):
+				cp.Variadic = true
+			case p.accept(token.Kind('=')):
+				cp.Optional = true
+				optional = true
+			case optional:
+				p.errorf("a closure type's parameter after an optional one must be optional (T=) or variadic (T...)")
+			}
+			params = append(params, cp)
 			if !p.accept(token.Kind(',')) {
 				break
 			}

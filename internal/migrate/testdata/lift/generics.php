@@ -172,3 +172,31 @@ function tuples(array $pair, array $pairs, array $named, array $single): array
 function keyed(array $map, array $objects, \Closure $withOptional): void
 {
 }
+
+/**
+ * A cluster reached over kubectl. PHPStan's `T...` and `T=` markers are
+ * Phaenon's too; a parameter's name is dropped; a by-reference parameter
+ * keeps its docblock.
+ */
+final class KubeAccess
+{
+    /** @var \Closure(string ...$args): array{int, string} */
+    private \Closure $kubectl;
+    /** @var \Closure(string $stdin, string ...$args): array{int, string} */
+    private \Closure $kubectlStdin;
+    /** @var \Closure(int &$n): void */
+    private \Closure $byRef;
+
+    /**
+     * @param \Closure(string ...$args): array{int, string} $kubectl
+     * @param (\Closure(string, int=): void)|null $log
+     */
+    public function __construct(\Closure $kubectl, ?\Closure $log = null)
+    {
+        $this->kubectl = $kubectl;
+        $this->kubectlStdin = static fn (string $stdin, string ...$args) => [0, $stdin];
+        $this->byRef = static function (int &$n): void {
+            $n++;
+        };
+    }
+}

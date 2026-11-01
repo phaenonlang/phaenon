@@ -240,7 +240,13 @@ func (p *Printer) typ(t ast.TypeExpr) {
 			if i > 0 {
 				p.w(", ")
 			}
-			p.typ(m)
+			p.typ(m.Type)
+			if m.Variadic {
+				p.w("...")
+			}
+			if m.Optional {
+				p.w("=")
+			}
 		}
 		p.w(")")
 		if t.Return != nil {

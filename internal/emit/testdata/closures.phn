@@ -1,0 +1,39 @@
+namespace App;
+
+// Closure types with PHPStan's parameter markers (design/generics.md §11.3):
+// `T=` is an optional parameter, `T...` the variadic one. The type erases to
+// \Closure; the docblock spells the signature as written, which is what
+// PHPStan reads.
+
+final class DevUp
+{
+    private readonly Closure(string...): (int, string) $kubectl;
+    private readonly Closure(string, string...): (int, string) $kubectlStdin;
+    private Closure(string, int=): void $log;
+
+    public function __construct(
+        ?Closure(string...): (int, string) $kubectl = null,
+        private readonly ?Closure(string, int=): bool $probe = null,
+    ) {
+        $this->kubectl = $kubectl ?? static fn (string ...$args) => [0, \implode(' ', $args)];
+        $this->kubectlStdin = static fn (string $stdin, string ...$args) => [0, $stdin];
+        $this->log = static function (string $s, int $level = 0): void {
+        };
+    }
+
+    public function apply(string $manifest): (int, string)
+    {
+        ($this->log)('apply');
+        if ($this->probe !== null && ($this->probe)('cluster', 3)) {
+            return ($this->kubectl)('apply', '-f', $manifest);
+        }
+        return ($this->kubectlStdin)($manifest, 'apply', '-f', '-');
+    }
+
+    public function counter(Closure(int...): int $sum, Closure(string, int=): void $f): Closure(string...): int
+    {
+        $f('a');
+        $f('a', $sum(1, 2, 3));
+        return static fn (string ...$xs): int => \count($xs);
+    }
+}

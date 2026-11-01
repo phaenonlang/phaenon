@@ -70,7 +70,7 @@ func (x *fnCtx) checkTypeExpr(t ast.TypeExpr) {
 		}
 	case *ast.ClosureType:
 		for _, m := range t.Params {
-			x.checkTypeExpr(m)
+			x.checkTypeExpr(m.Type)
 		}
 		x.checkTypeExpr(t.Return)
 	case *ast.TupleType:

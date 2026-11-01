@@ -390,7 +390,16 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 	case *ast.ClosureType:
 		var parts []string
 		for _, m := range t.Params {
-			parts = append(parts, l.docType(m, sc))
+			// `T...` and `T=` are PHPStan's markers as well: the docblock
+			// spells the parameter as the source did.
+			s := l.docType(m.Type, sc)
+			if m.Variadic {
+				s += "..."
+			}
+			if m.Optional {
+				s += "="
+			}
+			parts = append(parts, s)
 		}
 		s := "\\Closure(" + strings.Join(parts, ", ") + ")"
 		if t.Return != nil {

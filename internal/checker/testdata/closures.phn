@@ -1,0 +1,67 @@
+namespace Clo;
+
+// Closure types with PHPStan's parameter markers (design/generics.md §11.3):
+// `T=` is an optional parameter, `T...` the variadic one. A call on such a
+// value checks arity as a function call does; a closure literal is checked
+// against the type parameter by parameter.
+
+function takesInt(int $i): void
+{
+}
+
+function takesString(string $s): void
+{
+}
+
+final class KubeAccess
+{
+    private Closure(string...): (int, string) $kubectl;
+    private Closure(string, string...): (int, string) $kubectlStdin;
+    private Closure(string, int=): void $log;
+    private ?Closure(string): ?(int, string) $probe = null;
+
+    public function __construct()
+    {
+        $this->kubectl = static fn (string ...$args) => [0, \implode(' ', $args)];
+        $this->kubectlStdin = static fn (string $stdin, string ...$args) => [0, $stdin];
+        $this->log = static function (string $s, int $level = 0): void {
+        };
+        $this->log = static function (string $s, int ...$levels): void { // a variadic parameter satisfies an optional one
+        };
+        $this->kubectlStdin = static fn (string $stdin) => [0, $stdin]; // fewer parameters: the extra arguments are ignored
+        $this->kubectl = static fn (string $one) => [0, $one]; // want P2201
+        $this->kubectlStdin = static fn (string $stdin, int ...$args) => [0, $stdin]; // want P2201
+        $this->log = static function (string $s, int $level): void { // want P2201
+        };
+    }
+
+    public function run(): void
+    {
+        [$code, $out] = ($this->kubectl)();
+        takesInt($code);
+        takesString($out);
+        [$code2, $out2] = ($this->kubectlStdin)('manifest', 'apply', '-f', '-');
+        takesInt($code2);
+        takesInt($out2); // want P2103
+        ($this->kubectlStdin)(); // want P2101
+        ($this->kubectl)(1); // want P2103
+        ($this->log)('a');
+        ($this->log)('a', 1);
+        ($this->log)('a', 1, 2); // want P2102
+        ($this->log)('a', 'b'); // want P2103
+        if ($this->probe !== null) {
+            $r = ($this->probe)('x');
+            takesInt($r[0] ?? 0);
+        }
+    }
+}
+
+function withParams(Closure(string, int=): void $f, Closure(int...): int $sum): Closure(string...): int
+{
+    $f('a');
+    $f('a', 1);
+    $f(); // want P2101
+    takesInt($sum());
+    takesInt($sum(1, 2, 3));
+    return static fn (string ...$xs): int => \count($xs);
+}
