@@ -981,22 +981,36 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 	if closureHasByRefUse(e) {
 		// A by-reference use is whatever the body assigns to it as well:
 		// `use (&$server)` with `$server = null` inside is resource|null
-		// throughout (PHPStan types it so). One silent pass finds out.
+		// throughout (PHPStan types it so). The closure may run any number
+		// of times, so silent passes run to a fixed point like a loop
+		// body, generalising what grows: `$found[] = $x` makes $found a
+		// list<X>, as PHPStan has it.
 		saved := x.c.mark()
-		probe := cenv.clone()
-		c.stmts(e.Body, probe)
-		x.c.rollback(saved)
-		c.returnTypes = nil
-		for _, u := range e.Uses {
-			if !u.ByRef {
-				continue
-			}
-			if inner, ok := probe.get(u.Var.Name); ok {
+		for i := 0; i < 4; i++ {
+			probe := cenv.clone()
+			c.stmts(e.Body, probe)
+			c.returnTypes = nil
+			changed := false
+			for _, u := range e.Uses {
+				if !u.ByRef {
+					continue
+				}
+				inner, ok := probe.get(u.Var.Name)
+				if !ok {
+					continue
+				}
 				if outer, ok := cenv.get(u.Var.Name); ok {
-					cenv.set(u.Var.Name, types.MakeUnion(outer.t, inner.t))
+					if next := generalize(outer.t, inner.t); !types.Equal(next, outer.t) {
+						cenv.set(u.Var.Name, next)
+						changed = true
+					}
 				}
 			}
+			if !changed {
+				break
+			}
 		}
+		x.c.rollback(saved)
 	}
 	c.stmts(e.Body, cenv)
 	// What the body assigns to a by-reference use is what the enclosing
@@ -1007,7 +1021,7 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		}
 		if inner, ok := cenv.get(u.Var.Name); ok {
 			if outer, ok := env.get(u.Var.Name); ok {
-				env.set(u.Var.Name, types.MakeUnion(outer.t, inner.t))
+				env.set(u.Var.Name, generalize(outer.t, inner.t))
 			}
 		}
 	}

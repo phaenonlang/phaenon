@@ -755,3 +755,65 @@ function arrayFunctions(array $a, array $b, string $repo, array $env, array $rul
     takesString(str_replace("\n", "\r\n", $h));
     takesString(substr_replace(['abc'], 'q', 1, 1)); // want P2103
 }
+
+final class Leak
+{
+    /** @param list<string> $roots */
+    public function __construct(public string $path, public array $roots)
+    {
+    }
+}
+
+/**
+ * @param list<User> $users
+ * @param list<Leak> $found
+ */
+function appendInLoop(array $users, array $found): void
+{
+    $leaks = [];
+    $names = [];
+    $n = 0;
+    foreach ($users as $user) {
+        foreach ($found as $leak) {
+            $leaks[] = [$user, ['a' => 1], $leak];
+        }
+        $names[] = $user->name;
+        $n = $n + 1;
+    }
+    foreach ($leaks as [$user, $shape, $leak]) {
+        takesString($user->name);
+        takesList($leak->roots);
+        takesInt($shape['a']);
+    }
+    takesList($names);
+    takesInt($n);
+    takesString($n); // want P2103 "int given"
+}
+
+/** @param list<User> $active */
+function byRefAppend(array $active): void
+{
+    $detached = [];
+    $f = function (int $i) use ($active, &$detached): void {
+        $detached[] = $active[$i];
+    };
+    $f(1);
+    foreach ($detached as $member) {
+        takesString($member->name);
+    }
+    $urls = [];
+    $g = static function (string $url, array $headers) use (&$urls): array {
+        $urls[] = [$url, $headers['authorization']];
+
+        return [200, ''];
+    };
+    $g('u', []);
+    takesString($urls[1][0]);
+    takesString($urls[1][1]); // want P2103 "mixed"
+    $count = 0;
+    $h = function () use (&$count): void {
+        ++$count;
+    };
+    $h();
+    takesInt($count);
+}
