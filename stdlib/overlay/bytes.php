@@ -92,6 +92,68 @@ function base64_encode(string $string): string {}
  */
 function substr(string $string, int $offset, ?int $length = null): string {}
 
+/**
+ * @param string|bytes $string
+ * @return ($string is bytes ? bytes : string)
+ */
+function strrev(string $string): string {}
+
+/** @param string|bytes $data */
+function hash_update(HashContext $context, string $data): true {}
+
+/** @return ($binary is true ? bytes : string) */
+function hash_final(HashContext $context, bool $binary = false): string {}
+
+/*
+ * Compressed data is binary; what it decodes to is as much text as
+ * file_get_contents() is (strings.md §6).
+ */
+
+/**
+ * @param string|bytes $data
+ * @return bytes|false
+ */
+function gzencode(string $data, int $level = -1, int $encoding = ZLIB_ENCODING_GZIP): string|false {}
+
+/**
+ * @param string|bytes $data
+ * @return bytes|false
+ */
+function gzcompress(string $data, int $level = -1, int $encoding = ZLIB_ENCODING_DEFLATE): string|false {}
+
+/**
+ * @param string|bytes $data
+ * @return bytes|false
+ */
+function gzdeflate(string $data, int $level = -1, int $encoding = ZLIB_ENCODING_RAW): string|false {}
+
+/**
+ * @param string|bytes $data
+ * @return bytes|false
+ */
+function zlib_encode(string $data, int $encoding, int $level = -1): string|false {}
+
+/**
+ * @param string|bytes $data
+ * @return bytes|false
+ */
+function deflate_add(DeflateContext $context, string $data, int $flush_mode = ZLIB_SYNC_FLUSH): string|false {}
+
+/** @param string|bytes $data */
+function gzdecode(string $data, int $max_length = 0): string|false {}
+
+/** @param string|bytes $data */
+function gzuncompress(string $data, int $max_length = 0): string|false {}
+
+/** @param string|bytes $data */
+function gzinflate(string $data, int $max_length = 0): string|false {}
+
+/** @param string|bytes $data */
+function zlib_decode(string $data, int $max_length = 0): string|false {}
+
+/** @param string|bytes $data */
+function inflate_add(InflateContext $context, string $data, int $flush_mode = ZLIB_SYNC_FLUSH): string|false {}
+
 /** @param string|bytes $character */
 function ord(string $character): int {}
 

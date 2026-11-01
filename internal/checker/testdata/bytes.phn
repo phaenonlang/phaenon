@@ -75,3 +75,20 @@ function comparisons(bytes $a, bytes $b, array $parts): void
     takesString(base64_encode(json_encode($parts, flags: JSON_THROW_ON_ERROR)));
     takesString(base64_encode(json_encode($parts))); // want P2103
 }
+
+function compression(bytes $raw, string $text): void
+{
+    takesBytes(strrev($raw));
+    takesString(strrev($text));
+    takesBytes(gzencode($text) ?: throw new \RuntimeException('zlib'));
+    takesString(gzencode($text) ?: throw new \RuntimeException('zlib')); // want P2103
+    takesString(gzdecode($raw) ?: '');
+    $deflate = deflate_init(\ZLIB_ENCODING_RAW) ?: throw new \RuntimeException('zlib');
+    takesBytes(deflate_add($deflate, $raw, \ZLIB_FINISH) ?: throw new \RuntimeException('zlib'));
+    $crc = hash_init('crc32b');
+    hash_update($crc, $raw);
+    hash_update($crc, $text);
+    takesBytes(hash_final($crc, true));
+    takesString(hash_final($crc));
+    takesString(hash_final($crc, true)); // want P2103
+}
