@@ -670,3 +670,24 @@ function reflects(\ReflectionClass $r): void
 function takesUserClass(\ReflectionClass $r): void
 {
 }
+
+/** @param \Closure(string, array<string, string>): (array<string, mixed>|null) $post */
+function takesPost(\Closure $post): void
+{
+}
+
+function fail(string $m): never
+{
+    throw new \RuntimeException($m);
+}
+
+function closureNever(): void
+{
+    takesPost(static function (): array { throw new \RuntimeException('x'); });
+    takesPost(static function (string $url): array { fail('no'); });
+    takesPost(static function (string $url): array { return ['a' => 1]; });
+    takesPost(static function (): array { if (rand(0, 1)) { throw new \RuntimeException('x'); } return []; });
+    takesPost(static function (): array { // want P2203, P2103
+    });
+    takesPost(static function (): array { return [1]; }); // want P2103
+}

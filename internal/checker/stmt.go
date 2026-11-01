@@ -1033,20 +1033,26 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		default:
 			ret = types.TVoid
 		}
-	} else {
-		ret = refinedReturn(ret, c.returnTypes, c.generator, x.p())
+	} else if !c.generator {
+		ret = refinedReturn(ret, c.returnTypes, !cenv.dead, x.p())
 	}
 	return types.Callable{Closure: true, HasSig: true, Params: cps, Return: ret}
 }
 
 // refinedReturn is a closure's declared return type narrowed to what its
 // body returns when that fits: `function (): array { return ['a' => 1]; }`
-// is a closure returning array{a: 1}, as PHPStan types it.
-func refinedReturn(declared types.Type, returned []types.Type, generator bool, h types.Hierarchy) types.Type {
-	if generator || len(returned) == 0 {
+// is a closure returning array{a: 1}, as PHPStan types it. A body that
+// never completes — it throws, or ends in a never call — and returns
+// nothing is a closure returning never (`Closure(): never` in PHPStan),
+// whatever it declares; completes says the body's end is reachable.
+func refinedReturn(declared types.Type, returned []types.Type, completes bool, h types.Hierarchy) types.Type {
+	if _, isVoid := declared.(types.Void); isVoid {
 		return declared
 	}
-	if _, isVoid := declared.(types.Void); isVoid {
+	if len(returned) == 0 {
+		if !completes {
+			return types.TNever
+		}
 		return declared
 	}
 	u := types.MakeUnion(returned...)
@@ -1088,7 +1094,7 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 		if _, isVoid := ret.(types.Void); !isVoid && !types.IsAcceptable(bt, ret, x.p()) {
 			x.report(e.Body.Span(), P2202, "arrow function should return %s but returns %s", x.typeName(ret), x.typeName(bt))
 		}
-		ret = refinedReturn(ret, []types.Type{bt}, false, x.p())
+		ret = refinedReturn(ret, []types.Type{bt}, true, x.p())
 	} else {
 		ret = bt
 	}
