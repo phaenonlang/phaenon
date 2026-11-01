@@ -18,6 +18,110 @@ type varInfo struct {
 	// instanceof that is always true, a === that is always false) need both
 	// types to agree, as PHPStan does with treatPhpDocTypesAsCertain off.
 	native types.Type
+	// conds remembers what a condition the variable was assigned from
+	// narrowed: `$ok = is_string($v) && …` records that $v is a string
+	// when $ok is true, so `if (!$ok) { return; }` leaves $v a string, as
+	// PHPStan's conditional expressions do. Dropped when the variable or
+	// one the condition narrowed is assigned again.
+	conds []condHolder
+}
+
+// condHolder is one branch of a condition a variable was assigned from:
+// when the variable's narrowed type fits whenType, the branch was taken,
+// and narrowed says what the variables mentioned were in it.
+type condHolder struct {
+	whenType types.Type
+	narrowed map[string]types.Type
+}
+
+// condBranch records the narrowings of one branch of a condition against
+// the environment before it. A branch that narrowed nothing is still a
+// branch the value may come from, so it is kept with nothing to apply;
+// only an unreachable branch is nil.
+func condBranch(whenType types.Type, branch, before *state) *condHolder {
+	if branch.dead {
+		return nil
+	}
+	narrowed := map[string]types.Type{}
+	for k, v := range branch.vars {
+		if b, ok := before.vars[k]; ok && !types.Equal(b.t, v.t) {
+			narrowed[k] = v.t
+		}
+	}
+	return &condHolder{whenType: whenType, narrowed: narrowed}
+}
+
+// setConds attaches the condition branches to a variable just assigned;
+// nothing is kept when no branch narrowed anything.
+func (e *state) setConds(name string, holders ...*condHolder) {
+	info, ok := e.vars[name]
+	if !ok {
+		return
+	}
+	info.conds = nil
+	any := false
+	for _, h := range holders {
+		if h != nil {
+			info.conds = append(info.conds, *h)
+			any = any || len(h.narrowed) > 0
+		}
+	}
+	if !any {
+		info.conds = nil
+	}
+	e.vars[name] = info
+}
+
+// applyConds narrows the variables a condition assigned to name mentioned,
+// once name itself is narrowed to t: the branches whose type t fits were
+// the ones taken. Both branches fitting says nothing.
+func (e *state) applyConds(name string, t types.Type, p *program.Program) {
+	info, ok := e.vars[name]
+	if !ok || len(info.conds) == 0 {
+		return
+	}
+	var taken []condHolder
+	for _, c := range info.conds {
+		if types.IsSubtype(t, c.whenType, p) {
+			taken = append(taken, c)
+		}
+	}
+	if len(taken) != 1 {
+		return
+	}
+	for k, nt := range taken[0].narrowed {
+		cur, ok := e.vars[k]
+		if !ok {
+			continue
+		}
+		r := types.Intersect(cur.t, nt, p)
+		if _, never := r.(types.Never); never {
+			continue
+		}
+		cur.t = r
+		cur.native = narrowNative(cur.native, r, p)
+		e.vars[k] = cur
+	}
+}
+
+// dropConds forgets the conditions that mention name: the variable it
+// narrowed has another value now.
+func (e *state) dropConds(name string) {
+	for k, v := range e.vars {
+		if len(v.conds) == 0 {
+			continue
+		}
+		kept := v.conds[:0:0]
+		for _, c := range v.conds {
+			if _, mentions := c.narrowed[name]; !mentions {
+				kept = append(kept, c)
+			}
+		}
+		if len(kept) != len(v.conds) {
+			v.conds = kept
+			e.vars[k] = v
+		}
+	}
 }
 
 // state is the abstract state at one program point: the type of every
@@ -48,6 +152,7 @@ func (e *state) set(name string, t types.Type) {
 	e.vars[name] = varInfo{t: t}
 	e.invalidatePrefix("$" + name)
 	e.invalidateMentions(name)
+	e.dropConds(name)
 }
 
 // invalidateMentions drops the paths that pass the variable as an argument

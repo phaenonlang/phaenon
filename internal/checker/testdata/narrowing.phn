@@ -248,3 +248,45 @@ function offsetTernary(array $entry): void
         default => 0,
     });
 }
+
+function takesStd(\stdClass $o): void
+{
+}
+
+function viaVariable(mixed $value, mixed $before, mixed $other): void
+{
+    $ok = \is_string($value) && '' !== $value;
+    if (!$ok) {
+        return;
+    }
+    takesString($value);
+    $loose = $before instanceof \stdClass && property_exists($before, 'services') ? $before->services : null;
+    if (null !== $loose) {
+        takesStd($before); // want P2103 "mixed"
+    }
+    $services = $before instanceof \stdClass && property_exists($before, 'services') && $before->services instanceof \stdClass ? $before->services : null;
+    if (null === $services) {
+        return;
+    }
+    takesStd($before);
+    $flag = \is_int($other) ? 1 : 0;
+    if (1 === $flag) {
+        takesInt($other);
+    }
+    $isInt = \is_int($other);
+    $other = $value;
+    if ($isInt) {
+        takesInt($other); // want P2103
+    }
+}
+
+function viaTernaryBool(string $type, string $status): void
+{
+    // Both branches are bool: a test of $good tells nothing about $type.
+    $good = 'Drifted' === $type ? 'False' === $status : 'True' === $status;
+    if ($good) {
+        takesString($type);
+    } elseif ('Observed' === $type) {
+        takesString($status);
+    }
+}
