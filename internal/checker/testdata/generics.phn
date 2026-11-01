@@ -169,3 +169,39 @@ function tagged<T of int|string>(T $x): T
 
     return $x;
 }
+
+/**
+ * PHP's iteration interfaces take their value alone or key and value, and a
+ * Generator's send and return types default to mixed: PHPStan's arity for
+ * the SPL. WeakMap is WeakMap<TKey of object, TValue>.
+ */
+function spl(\Iterator<string> $values, \Traversable<int, string> $pairs, \Generator<string, int> $gen, \IteratorAggregate<string> $agg, \WeakMap<\stdClass, float> $weights): void
+{
+    foreach ($values as $v) {
+        takesString($v);
+        takesInt($v); // want P2103
+    }
+    foreach ($pairs as $k => $v) {
+        takesInt($k);
+        takesString($v);
+    }
+    foreach ($gen as $k => $v) {
+        takesString($k);
+        takesInt($v);
+    }
+    $gen->send('anything');
+    takesInt($gen->getReturn()); // want P2103 — mixed: nothing is known of the return
+    foreach ($agg as $v) {
+        takesString($v);
+    }
+    $weights[new \stdClass()] = 1.5;
+    takesInt($weights[new \stdClass()]); // want P2103
+    takesInt(\count($weights));
+}
+
+function splArity(
+    \ArrayAccess<int> $a, // want P3001
+    \Generator<int, int, int, int, int> $g, // want P3001
+    \WeakMap<int, int> $w, // want P3002
+): void {
+}

@@ -238,7 +238,22 @@ func (r *resolver) classType(name string, args []types.Type) types.Type {
 	if strings.EqualFold(name, "Closure") {
 		return types.TClosure
 	}
+	if len(args) == 1 && ValueOnlyIterable(name) {
+		args = []types.Type{types.TMixed, args[0]} // Iterator<V> is Iterator<mixed, V>
+	}
 	return types.Class{Name: name, Args: args}
+}
+
+// ValueOnlyIterable says whether a single type argument on the class names
+// its value, not its key: `Iterator<string>` is `Iterator<mixed, string>`,
+// `Generator<string>` is `Generator<mixed, string, mixed, mixed>`, as
+// `iterable<string>` is and as PHPStan reads the SPL iteration interfaces.
+func ValueOnlyIterable(name string) bool {
+	switch strings.ToLower(strings.TrimPrefix(name, "\\")) {
+	case "traversable", "iterator", "iteratoraggregate", "generator":
+		return true
+	}
+	return false
 }
 
 // selfArgs are the class's own type parameters as arguments (self inside a
