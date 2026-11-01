@@ -150,6 +150,7 @@ func (x *fnCtx) stdlibMethod(e *ast.MethodCall, class, name string, obj types.Ty
 		x.argsOnly(e.Args, env)
 		return types.TError
 	}
+	x.c.stdlibUsed[class] = true
 	short := class[strings.LastIndex(class, "\\")+1:]
 	kind := stdlibKind[class]
 	// A null receiver (`?->`, or a chain `$a?->b` already short-circuited)
