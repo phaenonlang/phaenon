@@ -283,9 +283,201 @@ func (e *state) equal(o *state) bool {
 func (e *state) widen(prev *state) {
 	for k, v := range e.vars {
 		if pv, ok := prev.vars[k]; ok && !types.Equal(pv.t, v.t) {
-			e.vars[k] = varInfo{t: widenType(v.t), maybe: v.maybe}
+			e.vars[k] = varInfo{t: generalize(pv.t, v.t), maybe: v.maybe}
 		}
 	}
+}
+
+// generalize is the type a variable converges to when it was prev before a
+// pass over a loop body (or a closure that may run again) and is cur after
+// it — PHPStan's generalizeWith: equal types stay; scalars that changed
+// become their primitive; a shape whose keys stayed keeps them and
+// generalises entry by entry; a shape that gained keys becomes the array
+// of its keys and values, the values as they are, so `$leaks[] = [$svc,
+// $leak]` in a loop is a list<array{Service, Leak}>, not a list of their
+// union. The result is a supertype of both.
+func generalize(prev, cur types.Type) types.Type {
+	if types.Equal(prev, cur) {
+		return cur
+	}
+	var pArrays, cArrays, pRest, cRest []types.Type
+	for _, m := range types.Members(prev) {
+		if isArrayLike(m) {
+			pArrays = append(pArrays, m)
+		} else {
+			pRest = append(pRest, m)
+		}
+	}
+	for _, m := range types.Members(cur) {
+		if isArrayLike(m) {
+			cArrays = append(cArrays, m)
+		} else {
+			cRest = append(cRest, m)
+		}
+	}
+	var out []types.Type
+	switch {
+	case len(pArrays) == 0:
+		out = append(out, cArrays...)
+	case len(cArrays) == 0:
+		out = append(out, pArrays...)
+	case len(pArrays) == 1 && len(cArrays) == 1:
+		out = append(out, generalizeArrays(pArrays[0], cArrays[0]))
+	default:
+		// `array{}|list{T}` against `array{}|list{T}|list{T, T}`: each
+		// side as one array of its keys and values first.
+		out = append(out, generalizeArrays(mergeArrays(pArrays), mergeArrays(cArrays)))
+	}
+	rest := types.MakeUnion(append(pRest, cRest...)...)
+	if !types.Equal(types.MakeUnion(pRest...), types.MakeUnion(cRest...)) {
+		rest = widenScalars(rest)
+	}
+	if len(pRest)+len(cRest) > 0 {
+		out = append(out, rest)
+	}
+	return types.MakeUnion(out...)
+}
+
+func isArrayLike(t types.Type) bool {
+	switch t.(type) {
+	case types.Shape, types.Array:
+		return true
+	}
+	return false
+}
+
+// generalizeArrays generalises one array member against another.
+func generalizeArrays(prev, cur types.Type) types.Type {
+	if ps, ok := prev.(types.Shape); ok {
+		if cs, ok := cur.(types.Shape); ok && !ps.Unsealed && !cs.Unsealed && sameShapeKeys(ps, cs) {
+			out := types.Shape{List: ps.List && cs.List, Entries: make([]types.ShapeEntry, 0, len(cs.Entries))}
+			for _, ce := range cs.Entries {
+				pe := shapeEntry(ps, ce)
+				out.Entries = append(out.Entries, types.ShapeEntry{Key: ce.Key, IntKey: ce.IntKey, IsInt: ce.IsInt, Optional: pe.Optional || ce.Optional, Type: generalize(pe.Type, ce.Type)})
+			}
+			return out
+		}
+	}
+	pk, pv, pList, pNonEmpty, pEmpty := arrayParts(prev)
+	ck, cv, cList, cNonEmpty, cEmpty := arrayParts(cur)
+	var key, value types.Type
+	switch {
+	case pEmpty:
+		key, value = ck, cv
+	case cEmpty:
+		key, value = pk, pv
+	default:
+		key, value = generalize(pk, ck), generalize(pv, cv)
+	}
+	if key == nil {
+		key = types.TArrayKey
+	}
+	if value == nil {
+		value = types.TMixed
+	}
+	return types.Array{Key: widenScalars(key), Value: value, List: pList && cList, NonEmpty: pNonEmpty && cNonEmpty}
+}
+
+// mergeArrays is the union of several array members as one array of their
+// keys and values; `array{}` alone stays `array{}`, and with others only
+// takes the non-emptiness away.
+func mergeArrays(ms []types.Type) types.Type {
+	var keys, values []types.Type
+	list, nonEmpty := true, true
+	for _, m := range ms {
+		k, v, l, ne, empty := arrayParts(m)
+		if empty {
+			nonEmpty = false
+			continue
+		}
+		keys = append(keys, k)
+		values = append(values, v)
+		list = list && l
+		nonEmpty = nonEmpty && ne
+	}
+	if len(keys) == 0 {
+		return types.Shape{}
+	}
+	return types.Array{Key: types.MakeUnion(keys...), Value: types.MakeUnion(values...), List: list, NonEmpty: nonEmpty}
+}
+
+// arrayParts is the key and value type of an array member, whether it is a
+// list and known non-empty, and whether it is `array{}`; the key and value
+// of `array{}` are nil.
+func arrayParts(t types.Type) (key, value types.Type, list, nonEmpty, empty bool) {
+	switch m := t.(type) {
+	case types.Array:
+		return m.Key, m.Value, m.List, m.NonEmpty, false
+	case types.Shape:
+		if len(m.Entries) == 0 && !m.Unsealed {
+			return nil, nil, true, false, true
+		}
+		if m.Unsealed {
+			return types.TArrayKey, types.TMixed, false, false, false
+		}
+		list = m.List
+		if !list {
+			list = true
+			for i, e := range m.Entries {
+				if !e.IsInt || e.IntKey != int64(i) {
+					list = false
+					break
+				}
+			}
+		}
+		for _, e := range m.Entries {
+			if !e.Optional {
+				nonEmpty = true
+				break
+			}
+		}
+		return widenScalars(shapeKeys(m)), shapeValues(m), list, nonEmpty, false
+	}
+	return types.TArrayKey, types.TMixed, false, false, false
+}
+
+func sameShapeKeys(a, b types.Shape) bool {
+	if len(a.Entries) != len(b.Entries) {
+		return false
+	}
+	for _, e := range a.Entries {
+		if _, ok := shapeEntryLookup(b, e); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func shapeEntry(s types.Shape, e types.ShapeEntry) types.ShapeEntry {
+	found, _ := shapeEntryLookup(s, e)
+	return found
+}
+
+func shapeEntryLookup(s types.Shape, e types.ShapeEntry) (types.ShapeEntry, bool) {
+	for _, f := range s.Entries {
+		if f.IsInt == e.IsInt && f.Key == e.Key && f.IntKey == e.IntKey {
+			return f, true
+		}
+	}
+	return types.ShapeEntry{}, false
+}
+
+// widenScalars turns the scalar literals among the members of t into their
+// primitive, leaving arrays and everything else as they are.
+func widenScalars(t types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		switch m.(type) {
+		case types.Int:
+			return types.TInt
+		case types.StringLit:
+			return types.TString
+		case types.FloatLit:
+			return types.TFloat
+		case types.BoolLit:
+			return types.TBool
+		}
+		return m
+	})
 }
 
 func widenType(t types.Type) types.Type {
@@ -300,14 +492,18 @@ func widenType(t types.Type) types.Type {
 		case types.BoolLit:
 			return types.TBool
 		case types.Shape:
+			// The keys stay — a tuple read through a reference is still a
+			// tuple (PHPStan generalises a shape entry by entry); only the
+			// entries' literals widen.
 			if len(m.Entries) == 0 {
-				return m // `[]` has no keys to widen; the first entry decides them
+				return m
 			}
-			values := widenType(shapeValues(m))
-			if m.List {
-				return types.Array{Key: types.TInt, Value: values, List: true}
+			entries := make([]types.ShapeEntry, len(m.Entries))
+			for i, e := range m.Entries {
+				e.Type = widenType(e.Type)
+				entries[i] = e
 			}
-			return types.Array{Key: widenType(shapeKeys(m)), Value: values}
+			return types.Shape{Entries: entries, Unsealed: m.Unsealed, List: m.List, Callable: m.Callable}
 		case types.Array:
 			return types.Array{Key: widenType(m.Key), Value: widenType(m.Value), List: m.List}
 		}
