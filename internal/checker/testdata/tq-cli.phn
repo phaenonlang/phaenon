@@ -262,3 +262,27 @@ function breakOuter(list<list<int>> $rows): int
     takesInt($found); // want P2103
     return 1;
 }
+
+/** @param non-empty-string $prefix */
+function takesNonEmpty(string $prefix): void
+{
+}
+
+/**
+ * print_r() returns its text when asked to (and prints, answering true,
+ * otherwise); implode() of literals is that literal, and of a non-empty
+ * list of non-empty strings a non-empty string.
+ *
+ * @param non-empty-list<non-empty-string> $lines
+ * @param list<non-empty-string> $maybe
+ */
+function printedAndJoined(object $o, array $lines, array $maybe): void
+{
+    takesString(print_r($o, true));
+    takesString(print_r($o)); // want P2103
+    takesNonEmpty(implode("\n", ['first', 'second']));
+    takesNonEmpty(implode(', ', $lines));
+    takesNonEmpty(implode(', ', $maybe)); // want P2103
+    takesNonEmpty(implode(['a', 1]));
+    takesNonEmpty(implode(', ', [])); // want P2103
+}

@@ -3,6 +3,7 @@ package checker
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -420,7 +421,9 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 			}
 		}
 		return ret
-	case "implode", "join", "str_repeat", "strtolower", "strtoupper", "ucfirst", "trim", "ltrim", "rtrim", "substr":
+	case "implode", "join":
+		return x.implodeType(args, argType, ret)
+	case "str_repeat", "strtolower", "strtoupper", "ucfirst", "trim", "ltrim", "rtrim", "substr":
 		return ret
 	case "filter_var":
 		// The filter constant says what comes back, the flags whether
@@ -674,6 +677,70 @@ func minMaxType(isMax bool, ts []types.Type) types.Type {
 		}
 	}
 	return types.Int{Lo: lo, Hi: hi}
+}
+
+// implodeType refines implode(): a sealed array of literals joined by a
+// literal separator is that literal, and a non-empty array of non-empty
+// strings joins into a non-empty string (PHPStan's
+// ImplodeFunctionReturnTypeExtension).
+func (x *fnCtx) implodeType(args *ast.ArgList, argType func(int) types.Type, ret types.Type) types.Type {
+	for _, a := range args.Args {
+		if a.Name != nil || a.Unpack || a.Placeholder {
+			return ret
+		}
+	}
+	var sep, arr types.Type
+	switch len(args.Args) {
+	case 1:
+		sep, arr = types.StringLit{V: ""}, argType(0)
+	case 2:
+		sep, arr = argType(0), argType(1)
+	default:
+		return ret
+	}
+	if sh, ok := arr.(types.Shape); ok && !sh.Unsealed {
+		if s, ok := sep.(types.StringLit); ok {
+			if parts, ok := literalParts(sh); ok {
+				return types.StringLit{V: strings.Join(parts, s.V)}
+			}
+		}
+	}
+	nonEmpty := false
+	switch a := arr.(type) {
+	case types.Array:
+		nonEmpty = a.NonEmpty
+	case types.Shape:
+		for _, en := range a.Entries {
+			nonEmpty = nonEmpty || !en.Optional
+		}
+	}
+	if _, v, ok := types.IterableKV(arr, x.p()); ok && nonEmpty && types.IsSubtype(v, types.String{NonEmpty: true}, x.p()) {
+		return types.String{NonEmpty: true}
+	}
+	return ret
+}
+
+// literalParts spells out the entries of a shape whose every entry is
+// present and a string or int literal, as implode() writes them.
+func literalParts(sh types.Shape) ([]string, bool) {
+	parts := make([]string, 0, len(sh.Entries))
+	for _, en := range sh.Entries {
+		if en.Optional {
+			return nil, false
+		}
+		switch t := en.Type.(type) {
+		case types.StringLit:
+			parts = append(parts, t.V)
+		case types.Int:
+			if t.Lo != t.Hi {
+				return nil, false
+			}
+			parts = append(parts, strconv.FormatInt(t.Lo, 10))
+		default:
+			return nil, false
+		}
+	}
+	return parts, true
 }
 
 // formatHasText reports a printf format with literal text beside its
