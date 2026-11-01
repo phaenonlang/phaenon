@@ -68,8 +68,8 @@ PHPStan code says in comments into the signature: `@template T of Foo` → `<T o
 Base<T>` → `extends Base<T>`, `@param list<T> $xs` → `list<T> $xs`, `@return T` → `: T`, a
 property's `@var array<K, V>` → `map<K, V>`. It also spells every named function and method `fun`,
 dropping the `public` that Phaenon implies (`public function` → `fun`, `final public static
-function` → `final static fun`), and drops `public` before an asymmetric visibility
-(`public private(set)` → `private(set)`); `--keep-public` keeps both. A tag is lifted only when its type has a Phaenon
+function` → `final static fun`), drops a constant's `public` (`public const` → `const`) and `public`
+before an asymmetric visibility (`public private(set)` → `private(set)`); `--keep-public` keeps all three. A tag is lifted only when its type has a Phaenon
 spelling and erases to the type PHP already saw — the generated `.php` keeps the same signatures —
 and every tag left in place is reported with the reason (`--keep-docblocks` skips the lift).
 Prose survives without its type: `@param T $x prose` becomes `@param $x - prose` (the dash, as in

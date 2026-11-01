@@ -9,8 +9,9 @@ import (
 
 // lowerFunctions compiles the syntax of design/functions.md, none of which
 // needs type information: a `fun` head becomes the PSR-12 `function` head
-// with `public` written out, a property or promoted parameter with an
-// asymmetric visibility and no main one gets its implied `public`, and a
+// with `public` written out, a class constant or a property or promoted
+// parameter with an asymmetric visibility and no main one gets its implied
+// `public`, and a
 // closure in a constant expression becomes the `static function` PHP 8.5
 // accepts there. It runs after the generics lowering, so that a docblock that
 // pass inserts at a declaration's start precedes the rewritten head.
@@ -27,6 +28,10 @@ func (e *emitter) lowerFunctions(f *ast.File) {
 			}
 		case *ast.PropertyDecl:
 			e.impliedPublic(n.Modifiers, n.Mods)
+		case *ast.ClassConstDecl:
+			if n.Modifiers&(ast.ModPublic|ast.ModProtected|ast.ModPrivate) == 0 {
+				e.insert(n.Kw.Start, "public ")
+			}
 		case *ast.Param:
 			e.impliedPublic(n.Modifiers, n.Mods)
 			if n.Default != nil {

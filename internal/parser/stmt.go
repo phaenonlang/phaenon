@@ -936,8 +936,11 @@ func (p *Parser) classMember() ast.ClassMember {
 	modsEnd := p.end()
 	switch {
 	case p.at(token.T_CONST):
-		p.next()
-		c := &ast.ClassConstDecl{Doc: doc, Attrs: attrs, Modifiers: mods}
+		kw := p.next()
+		c := &ast.ClassConstDecl{Doc: doc, Attrs: attrs, Modifiers: mods, Kw: ast.Span{Start: kw.Start, End: kw.End}}
+		if mods != 0 {
+			c.Mods = ast.Span{Start: head, End: modsEnd}
+		}
 		// Typed constant: `const int FOO = 1;` — a type is present when the
 		// token after the next one is not '='.
 		if p.peekKind(1) != token.Kind('=') {

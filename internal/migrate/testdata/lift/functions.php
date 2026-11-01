@@ -6,6 +6,12 @@ namespace App;
 
 final class Account
 {
+    public const int LIMIT = 10;
+
+    final public const string NAME = 'account';
+
+    private const string SECRET = 's';
+
     public private(set) int $balance = 0;
 
     public protected(set) static ?string $owner = null;
