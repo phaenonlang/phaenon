@@ -644,7 +644,12 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 }
 
 func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
-	defer func() { env.dead = true }()
+	defer func() {
+		if x.trackExits {
+			x.exitEnvs = append(x.exitEnvs, env.clone())
+		}
+		env.dead = true
+	}()
 	var declared types.Type // an unnamed `@var T` above the return types the value
 	if s.Doc != "" {
 		doc := docblock.Parse(s.Doc)
@@ -923,6 +928,15 @@ func (x *fnCtx) closureParams(decls []*ast.Param, expected types.Type) ([]*progr
 	return params, cps
 }
 
+// exits joins the environment at the end of a closure body with those at
+// its return statements, collected while trackExits was set, and clears
+// them for the next pass.
+func (x *fnCtx) exits(end *state) *state {
+	out := joinAll(append([]*state{end}, x.exitEnvs...)...)
+	x.exitEnvs = nil
+	return out
+}
+
 func closureHasByRefUse(e *ast.Closure) bool {
 	for _, u := range e.Uses {
 		if u.ByRef {
@@ -985,17 +999,21 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		// of times, so silent passes run to a fixed point like a loop
 		// body, generalising what grows: `$found[] = $x` makes $found a
 		// list<X>, as PHPStan has it.
+		// The uses are what the body left them at any exit: a `return`
+		// after `$found[] = $x` counts as much as the body's end.
+		c.trackExits = true
 		saved := x.c.mark()
 		for i := 0; i < 4; i++ {
 			probe := cenv.clone()
 			c.stmts(e.Body, probe)
 			c.returnTypes = nil
+			exits := c.exits(probe)
 			changed := false
 			for _, u := range e.Uses {
 				if !u.ByRef {
 					continue
 				}
-				inner, ok := probe.get(u.Var.Name)
+				inner, ok := exits.get(u.Var.Name)
 				if !ok {
 					continue
 				}
@@ -1015,11 +1033,12 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 	c.stmts(e.Body, cenv)
 	// What the body assigns to a by-reference use is what the enclosing
 	// scope may see once the closure has run.
+	exits := c.exits(cenv)
 	for _, u := range e.Uses {
 		if !u.ByRef {
 			continue
 		}
-		if inner, ok := cenv.get(u.Var.Name); ok {
+		if inner, ok := exits.get(u.Var.Name); ok {
 			if outer, ok := env.get(u.Var.Name); ok {
 				env.set(u.Var.Name, generalize(outer.t, inner.t))
 			}

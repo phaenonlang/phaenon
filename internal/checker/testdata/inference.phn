@@ -816,4 +816,18 @@ function byRefAppend(array $active): void
     };
     $h();
     takesInt($count);
+    $fetched = [];
+    $k = function (int $i, string $op) use ($active, &$fetched): void {
+        $member = $active[$i];
+        if ('fetch' === $op) {
+            $fetched[] = $member;
+
+            return;
+        }
+        takesString($member->name);
+    };
+    $k(0, 'fetch');
+    foreach ($fetched as $member) {
+        takesString($member->name);
+    }
 }
