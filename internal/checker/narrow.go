@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -191,7 +192,7 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 			env.setPath("$this", t)
 			return
 		}
-		if superglobals[p.Name] {
+		if superglobals[p.Name] && !localArgs(p.Name, env) {
 			return
 		}
 		info, ok := env.get(p.Name)
@@ -499,6 +500,10 @@ func (x *fnCtx) ordering(e *ast.Binary, env *state) (then, els *state) {
 	}
 	c, n, ok := countCompare(e)
 	if !ok {
+		x.rangeNarrow(then, e.Left, lt, rt, e.Op)
+		x.rangeNarrow(then, e.Right, rt, lt, flipOrdering(e.Op))
+		x.rangeNarrow(els, e.Left, lt, rt, negateOrdering(e.Op))
+		x.rangeNarrow(els, e.Right, rt, lt, negateOrdering(flipOrdering(e.Op)))
 		return then, els
 	}
 	arg := c.Args.Args[0].Value
@@ -529,6 +534,96 @@ func (x *fnCtx) ordering(e *ast.Binary, env *state) (then, els *state) {
 		x.narrowPath(els, arg, nonEmptyArray(at), false)
 	}
 	return then, els
+}
+
+// rangeNarrow narrows an int compared with an int by `<`, `>`, `<=` or `>=`
+// to the range the comparison leaves it: after `$port < 1 || $port > 65535`
+// has returned, $port is int<1, 65535>, as PHPStan says. The bound is the
+// other operand's range; `$x < $y` with $y in int<0, 10> leaves $x at most 9
+// when true and at least 0 when false. Members of $x that are not int (a
+// null PHP would compare as 0) stay.
+func (x *fnCtx) rangeNarrow(env *state, target ast.Expr, t, bound types.Type, op token.Kind) {
+	if env.dead {
+		return
+	}
+	b, ok := bound.(types.Int)
+	if !ok {
+		return
+	}
+	var lo, hi int64 = math.MinInt64, math.MaxInt64
+	switch op {
+	case token.Kind('<'):
+		if b.Hi == math.MinInt64 {
+			return
+		}
+		hi = b.Hi - 1
+	case token.T_IS_SMALLER_OR_EQUAL:
+		hi = b.Hi
+	case token.Kind('>'):
+		if b.Lo == math.MaxInt64 {
+			return
+		}
+		lo = b.Lo + 1
+	case token.T_IS_GREATER_OR_EQUAL:
+		lo = b.Lo
+	default:
+		return
+	}
+	var out []types.Type
+	narrowed := false
+	for _, m := range types.Members(t) {
+		i, ok := m.(types.Int)
+		if !ok {
+			out = append(out, m)
+			continue
+		}
+		i.Lo, i.Hi = max(i.Lo, lo), min(i.Hi, hi)
+		if i.Lo > i.Hi {
+			narrowed = true
+			continue // nothing of this member satisfies the comparison
+		}
+		narrowed = narrowed || i != m
+		out = append(out, i)
+	}
+	if !narrowed {
+		return
+	}
+	if len(out) == 0 {
+		x.narrowPath(env, target, types.Never{}, false)
+		return
+	}
+	x.narrowPath(env, target, types.MakeUnion(out...), false)
+}
+
+// flipOrdering turns `N < $x` into `$x > N`: the comparison seen from the
+// right operand.
+func flipOrdering(op token.Kind) token.Kind {
+	switch op {
+	case token.Kind('<'):
+		return token.Kind('>')
+	case token.Kind('>'):
+		return token.Kind('<')
+	case token.T_IS_SMALLER_OR_EQUAL:
+		return token.T_IS_GREATER_OR_EQUAL
+	case token.T_IS_GREATER_OR_EQUAL:
+		return token.T_IS_SMALLER_OR_EQUAL
+	}
+	return op
+}
+
+// negateOrdering is the comparison that holds when op does not.
+func negateOrdering(op token.Kind) token.Kind {
+	switch op {
+	case token.Kind('<'):
+		return token.T_IS_GREATER_OR_EQUAL
+	case token.Kind('>'):
+		return token.T_IS_SMALLER_OR_EQUAL
+	case token.T_IS_SMALLER_OR_EQUAL:
+		return token.Kind('>')
+	case token.T_IS_GREATER_OR_EQUAL:
+		return token.Kind('<')
+	}
+	return op
 }
 
 // instanceofCond narrows on instanceof and reports always-true/false.

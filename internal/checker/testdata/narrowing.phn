@@ -290,3 +290,46 @@ function viaTernaryBool(string $type, string $status): void
         takesString($status);
     }
 }
+
+/** @param int<0, 65535> $port */
+function takesPort(int $port): void
+{
+}
+
+/** @param int<1, max> $n */
+function takesPositive(int $n): void
+{
+}
+
+function ranges(int $port, int $n, int $lo, ?int $maybe): void
+{
+    // `<`, `>`, `<=`, `>=` against an int leave a range, as in PHPStan.
+    if ($port < 1 || $port > 65535) {
+        return;
+    }
+    takesPort($port);
+    if ($n <= 0) {
+        takesPositive($n); // want P2103
+    } else {
+        takesPositive($n);
+    }
+    if (0 < $lo && $lo < 100) {
+        takesPort($lo);
+    }
+    takesPort($lo); // want P2103
+    if (null !== $maybe && $maybe >= 1) {
+        takesPositive($maybe);
+    }
+}
+
+function scriptArguments(): void
+{
+    // $argv is the script's only at the top level; here it is a local.
+    $argv = $_SERVER['argv'] ?? [];
+    takesString($argv); // want P2103
+    foreach (\is_array($argv) ? $argv : [] as $arg) {
+        if (\is_string($arg)) {
+            takesString($arg);
+        }
+    }
+}
