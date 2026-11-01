@@ -286,7 +286,15 @@ func statementDoc(s ast.Stmt) string {
 // arguments. A @var tag is checked against what PHP knows, so `@var
 // Meta<object>` may widen an inferred Meta<Dog> (PHPStan's varTag.nativeType).
 func withoutTypeArgs(t types.Type) types.Type {
-	return types.Erase(t)
+	// bytes is a type of its own, not a refinement of string a docblock may
+	// narrow to: `@var bytes $out` over a bytes value is no contradiction,
+	// over a string it is (the (bytes) cast retypes, strings.md §2).
+	return types.Map(t, func(m types.Type) types.Type {
+		if _, ok := m.(types.Bytes); ok {
+			return m
+		}
+		return types.Erase(m)
+	})
 }
 
 // isLiteralExpr reports whether e is written out in full — a literal, a

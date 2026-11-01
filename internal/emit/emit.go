@@ -87,6 +87,9 @@ func Tree(src []byte, f *ast.File, opts Options) ([]byte, error) {
 	}
 	e.lowerFunctions(f)
 	e.lowerConcurrency(f)
+	if opts.File != nil {
+		e.eraseWrittenBytes()
+	}
 	e.prologue(f)
 	return e.apply(), nil
 }
