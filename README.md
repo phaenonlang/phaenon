@@ -19,10 +19,11 @@ Phaenon behind method syntax (`$xs->map(…)` → `Seq::map($xs, …)`), `fun` w
 closures in attributes, and a project file that builds sources into sibling output directories.
 Four Tequila libraries build from `.phn` with their suites passing, `tequila/core` among them;
 the checker reads the extensions the local `php` has loaded (ext-mongodb and friends) from its
-reflection. M5 in progress — structured concurrency: `concurrently { … }` blocks and `spawn`
-over amp v3 and the Revolt event loop compile to `Scope::run(…)` / `Scope::spawn(…)` on the
-`phaenon/concurrent` package; `tq-cli` (859 `.phn`, fifteen fan-outs as blocks) runs its 2045
-tests on the compiled output, the `tequila/nats` transport is next.
+reflection. M5 done — structured concurrency: `concurrently { … }` blocks and `spawn` over amp v3
+and the Revolt event loop compile to `Scope::run(…)` / `Scope::spawn(…)` on the
+`phaenon/concurrent` package; `tq-cli` (859 `.phn`, fifteen fan-outs as blocks) runs its 2052
+tests on the compiled output with `phn check` clean, and `tequila/nats` gained a Revolt transport
+so that one connection serves concurrent tasks.
 
 ## Type checking
 
