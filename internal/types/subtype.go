@@ -174,6 +174,12 @@ func overlap2(x, y Type, h Hierarchy) bool {
 		return x.Lo <= y.Hi && y.Lo <= x.Hi
 	case StringLit, FloatLit, BoolLit, EnumCase:
 		return false
+	case String:
+		// A literal the refinement does not admit ('all' against a
+		// decimal-int-string): the subtype test above already said no.
+		if _, ok := y.(StringLit); ok {
+			return false
+		}
 	}
 	return true
 }

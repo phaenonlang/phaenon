@@ -533,7 +533,9 @@ func (l *lowering) addDoc(declStart int, doc string, tags []string) {
 	span := ast.Span{Start: idx, End: idx + len(doc)}
 	indent = l.indentAt(idx)
 	if !strings.Contains(doc, "\n") {
-		content := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(doc, "/**"), "*/"))
+		// The content moves into a new docblock: its written types erase
+		// as eraseWrittenBytes would have erased them in place.
+		content := eraseBytesInDoc(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(doc, "/**"), "*/")))
 		if len(tags) == 1 && strings.HasPrefix(tags[0], "@var ") {
 			// A property's one-line `/** what it holds */` keeps its line:
 			// `/** @var list<string> what it holds */` is the PHP it came from.

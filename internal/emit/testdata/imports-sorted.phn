@@ -1,0 +1,24 @@
+namespace App\Report;
+
+use ArrayObject;
+use DateTimeImmutable;
+use Stringable;
+
+// A sorted use block: the imports the compiler adds (Seq, Str) join it in
+// their alphabetical place, on the line of the import they follow, so every
+// line keeps its number (roadmap D11).
+
+final class Summary implements Stringable
+{
+    /** @param ArrayObject<int, string> $lines */
+    public function __construct(private readonly ArrayObject $lines, private readonly DateTimeImmutable $at)
+    {
+    }
+
+    public function __toString(): string
+    {
+        $lines = \array_values($this->lines->getArrayCopy());
+
+        return $this->at->format('Y-m-d') . ' ' . $lines->map(fn (string $l) => $l->trim())->join(', ');
+    }
+}

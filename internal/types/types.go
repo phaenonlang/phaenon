@@ -12,6 +12,7 @@ package types
 import (
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -86,6 +87,11 @@ type (
 		Literal   bool // literal-string
 		Callable  bool // callable-string
 		Lowercase bool
+		// DecimalInt is PHPStan's decimal-int-string: a canonical decimal
+		// integer ("42", "-7", never "042" or "1.0"), what (string) gives
+		// for an int and what PHP stores as an int array key. Always set
+		// with Numeric and NonEmpty.
+		DecimalInt bool
 	}
 	StringLit struct{ V string }
 	// ClassString is class-string<Of>; Of == nil is any class-string.
@@ -236,6 +242,8 @@ var (
 	TScalar Type = Union{[]Type{TBool, TInt, TFloat, TString}}
 	// TNumeric is int|float|numeric-string.
 	TNumeric Type = Union{[]Type{TInt, TFloat, String{Numeric: true}}}
+	// TDecimalIntString is decimal-int-string, the type of (string) $int.
+	TDecimalIntString Type = String{NonEmpty: true, Numeric: true, DecimalInt: true}
 	// TIterable is iterable<mixed, mixed>.
 	TIterable Type = Iterable{TMixed, TMixed}
 	// TError is the type of an expression that was already reported as
@@ -812,6 +820,9 @@ func stringLitFits(v string, s String) bool {
 	if s.Numeric && !isNumericString(v) {
 		return false
 	}
+	if s.DecimalInt && !IsDecimalInt(v) {
+		return false
+	}
 	if s.Lowercase && strings.ToLower(v) != v {
 		return false
 	}
@@ -821,7 +832,59 @@ func stringLitFits(v string, s String) bool {
 // stringRefines reports whether every m string is an o string.
 func stringRefines(m, o String) bool {
 	return (!o.NonEmpty || m.NonEmpty || m.Numeric) && (!o.Numeric || m.Numeric) &&
-		(!o.Literal || m.Literal) && (!o.Callable || m.Callable) && (!o.Lowercase || m.Lowercase)
+		(!o.Literal || m.Literal) && (!o.Callable || m.Callable) && (!o.Lowercase || m.Lowercase) &&
+		(!o.DecimalInt || m.DecimalInt)
+}
+
+// IsDecimalInt reports whether PHP reads s as a canonical decimal integer,
+// the strings it stores as int array keys (ZEND_HANDLE_NUMERIC_STR): an
+// optional minus, no leading zero, no sign on zero, within the int range.
+// "123" and "-7" are; "0123", "-0", "+1", "1.5", " 1" and "1e3" are not.
+func IsDecimalInt(s string) bool {
+	n, err := strconv.ParseInt(s, 10, 64)
+	return err == nil && strconv.FormatInt(n, 10) == s
+}
+
+// StoredKey is the key PHP stores for a string key of type t: a string it
+// reads as a canonical decimal integer becomes that int. A literal converts
+// exactly, a decimal-int-string becomes int, a numeric-string may be either
+// (int|numeric-string, as PHPStan has it); other members stay as they are.
+// The cast of bool, null and float keys is the checker's business.
+func StoredKey(t Type) Type {
+	changed := false
+	for _, m := range Members(t) {
+		if storedKeyMember(m) != nil {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		return t
+	}
+	return Map(t, func(m Type) Type {
+		if k := storedKeyMember(m); k != nil {
+			return k
+		}
+		return m
+	})
+}
+
+func storedKeyMember(m Type) Type {
+	switch m := m.(type) {
+	case StringLit:
+		if IsDecimalInt(m.V) {
+			n, _ := strconv.ParseInt(m.V, 10, 64)
+			return IntLit(n)
+		}
+	case String:
+		switch {
+		case m.DecimalInt:
+			return TInt
+		case m.Numeric:
+			return MakeUnion(TInt, m)
+		}
+	}
+	return nil
 }
 
 func isNumericString(s string) bool {
@@ -946,7 +1009,8 @@ func meet2(a, b Type) Type {
 		switch b := b.(type) {
 		case String:
 			return String{NonEmpty: a.NonEmpty || b.NonEmpty, Numeric: a.Numeric || b.Numeric,
-				Literal: a.Literal || b.Literal, Callable: a.Callable || b.Callable, Lowercase: a.Lowercase || b.Lowercase}
+				Literal: a.Literal || b.Literal, Callable: a.Callable || b.Callable, Lowercase: a.Lowercase || b.Lowercase,
+				DecimalInt: a.DecimalInt || b.DecimalInt}
 		case ClassString:
 			return b
 		}
@@ -1214,7 +1278,9 @@ func Substitute(t Type, subst map[string]Type) Type {
 		}
 		return MakeIntersection(ms...)
 	case Array:
-		return Array{Key: Substitute(t.Key, subst), Value: Substitute(t.Value, subst), List: t.List, NonEmpty: t.NonEmpty}
+		// A key position filled by substitution is a key PHP stores:
+		// array_fill_keys() over decimal strings builds int keys.
+		return Array{Key: StoredKey(Substitute(t.Key, subst)), Value: Substitute(t.Value, subst), List: t.List, NonEmpty: t.NonEmpty}
 	case Shape:
 		es := make([]ShapeEntry, len(t.Entries))
 		for i, e := range t.Entries {

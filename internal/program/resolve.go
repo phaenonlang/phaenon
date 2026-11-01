@@ -335,18 +335,22 @@ func (r *resolver) keyword(lower string, args []types.Type, node *docblock.TypeN
 		case 1:
 			a.Value = arg(0, types.TMixed)
 		case 2:
-			a.Key, a.Value = arg(0, types.TArrayKey), arg(1, types.TMixed)
+			// array<numeric-string, V> holds int|numeric-string keys, as
+			// PHPStan reads it: PHP stores a decimal string as an int.
+			a.Key, a.Value = types.StoredKey(arg(0, types.TArrayKey)), arg(1, types.TMixed)
 		}
 		return a, true
 	case "list", "non-empty-list":
 		return types.Array{Key: types.TInt, Value: arg(0, types.TMixed), List: true, NonEmpty: lower == "non-empty-list"}, true
 	case "map", "non-empty-map":
 		// Phaenon's name for array<K, V>: a keyed array.
-		return types.Array{Key: arg(0, types.TArrayKey), Value: arg(1, types.TMixed), NonEmpty: lower == "non-empty-map"}, true
+		return types.Array{Key: types.StoredKey(arg(0, types.TArrayKey)), Value: arg(1, types.TMixed), NonEmpty: lower == "non-empty-map"}, true
 	case "non-empty-string":
 		return types.String{NonEmpty: true}, true
 	case "numeric-string":
 		return types.String{Numeric: true}, true
+	case "decimal-int-string":
+		return types.TDecimalIntString, true
 	case "literal-string", "non-empty-literal-string":
 		return types.String{Literal: true, NonEmpty: lower == "non-empty-literal-string"}, true
 	case "callable-string":

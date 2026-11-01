@@ -1,0 +1,20 @@
+namespace App\Report;
+
+use Stringable;
+use ArrayObject;
+
+// An unsorted use block has no alphabetical place to offer: the import the
+// compiler adds goes after its last class import (roadmap D11).
+
+final class Heading implements Stringable
+{
+    /** @param ArrayObject<int, string> $words */
+    public function __construct(private readonly ArrayObject $words)
+    {
+    }
+
+    public function __toString(): string
+    {
+        return \implode(' ', $this->words->getArrayCopy())->upper();
+    }
+}
