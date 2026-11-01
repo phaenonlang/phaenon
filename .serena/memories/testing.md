@@ -81,7 +81,7 @@ requirements. `phn` is not installed on `PATH`: build it from the repo (`AGENTS.
 
 - `TestRuntimePackageFresh` (`internal/emit`) compares the compiled stdlib with `../runtime/src`;
   `TestConcurrentPackageFresh` compares the compiled `Scope.php` with `../concurrent/src`
-  (2026-11-02); `TestPluginStubsFresh` compares the generated pseudo-classes with
+  (2026-11-01); `TestPluginStubsFresh` compares the generated pseudo-classes with
   `../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`. All skip without the checkout;
   `phn stdlib --out ../runtime/src --concurrent-out ../concurrent/src --plugin-stubs ../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`
   rewrites all three (`--check` to verify).

@@ -95,7 +95,7 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   `@template B of self::*_REFERENCE` (a constant wildcard as a bound). Each is a small PHPStan
   extension or scope feature; pick up when a dogfood target makes one matter.
 
-## M5 — concurrency (2026-11-02)
+## M5 — concurrency (2026-11-01)
 
 - **`phn check` against `composer.json`**: a file that uses `concurrently` in a project that does
   not require `phaenon/concurrent` fails at runtime, not at check time — the compiler knows the
@@ -106,18 +106,35 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   3.1; a method missing there is a declaration to add, not a checker bug.
 - **`Scope::first` / a race** (C6) and a `Scope::settle` that returns results and failures side
   by side: library additions when a use site appears.
-- **PhpStorm plugin**: the lexer approximation of `concurrency.md` §11 is in (2026-11-02): a
+- **PhpStorm plugin**: the lexer approximation of `concurrency.md` §11 is in (2026-11-01): a
   statement block parses as a block, `spawn expr` as `expr`, both words coloured as keywords. The
   expression forms (`return concurrently { … };`, `spawn { … }`) are syntax errors in the editor
   until a PSI element for a block exists (M6, with the LSP); `spawn` results are typed as the
   value, not `Future<T>`.
-- ~~**Dogfood** `tq-cli`~~ — done 2026-11-02 ([[dogfood]]). `tequila/nats`: the `RevoltTransport`,
+- ~~**Dogfood** `tq-cli`~~ — done 2026-11-01 ([[dogfood]]). `tequila/nats`: the `RevoltTransport`,
   the pump lease and the opt-in reader task are on the local branch `feat/revolt-transport`
   (`~/labs/tequila/nats-revolt`), the ADR amendment on the platform's `docs/nats-revolt-transport`;
   neither pushed, waiting for a maintainer's go-ahead.
-- ~~**tq-cli's 378 checker findings**~~ — `src` at 0 (2026-11-02). Left: **213 in `tests/`**, which
-  tq-cli's PHPStan never analysed; most are what PHPStan 10 reports too. Whether a dogfood's tests
-  must pass `phn check` is open.
+- ~~**tq-cli's 378 checker findings**~~ — `src` at 0 (2026-11-01), ~~213 in `tests/`~~ at 0
+  (2026-11-01, [[dogfood]]). Whether a dogfood's tests must pass `phn check` is still open.
+- **Checker more lenient than PHPStan** (seen on tq-cli's compiled tests, 2026-11-01): offset
+  reads on `mixed` are silent (PHPStan `offsetAccess.nonOffsetAccessible`, 88 sites there); a
+  variadic `string ...$args` is `list<string>`, where PHPStan says `array<int|string, string>`
+  because named arguments collect under their names (`ControlTest.php:75`, `LockChangeTest`).
+  Both are parity gaps against the "never more lenient" rule; closing them would add findings
+  in the dogfood trees (not measured), so they wait for a decision.
+- **PHPStan ignores `@param` / `@return` docblocks on closures and arrow functions** (2.2.5,
+  any placement): the docblock the emitter writes before a closure with a `map<…>` or tuple
+  parameter is invisible to PHPStan, which sees the erased `array`.
+- **A method-call path keeps its narrowing across impure calls**: `assertTrue($repo->isDirty('x'))`,
+  a `Run::git()` commit, then `assertFalse($repo->isDirty('x'))` is "always false" and the rest
+  unreachable (P2401 on tq-cli's `GitopsRepoTest.phn:69`). PHPStan remembers the same `true`
+  but has no rule that reports it. Needs a purity notion (PHPStan's functionMetadata) to
+  invalidate on calls with side effects.
+- **A property narrowed by assignment stays narrowed across a closure call** (`$this->github = [];
+  $go();`): unsound in both checkers; tq-cli's tests reset through a void method instead.
+- Loop widening: `for ($try = 0; $try < 50; ++$try)` gives `int<min, 49>` inside, PHPStan
+  `int<0, 49>`. Precision only.
 - **`map<string, …>` and PHP's key normalisation**: `$out[(string) $k] = …` is typed string-keyed
   (as PHPStan does), but PHP stores a numeric string key as an int, so `map<string, mixed>` from a
   YAML/JSON helper can hold int keys at runtime. Retyping tq-cli's `Val::map()` to
@@ -202,6 +219,15 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 ## PhpStorm plugin (`../jetbrains`)
 
+- **Reformat Code does nothing to a `.phn`** (found 2026-11-01): indentation, spacing and braces
+  stay as written while the `.php` twin is formatted, probably because PhpStorm's PHP formatter
+  is a template formatter keyed to the `<?php` tags a Phaenon file has not. Symptom: an import
+  added by completion lands glued to the next line. The plugin's import optimiser lays out the
+  `use` block itself (`f630655`); formatter support for `.phn` is its own job.
+- **Batch Inspect Code** still reports imports used only by erased constructs as unused (the
+  filter covers editor highlighting only); an `InspectionSuppressor` would cover batch runs.
+- **A group-use member** used only by an erased construct comes back from Optimize Imports as
+  its own statement next to the shrunk group.
 - No Phaenon-only syntax yet: generics, `is` / `as`, `type` aliases show as PHP syntax errors.
 - ~~**M4 ships with editor support for the method syntax**~~ — done 2026-10-31 (`../jetbrains`
   `43db968`, `bbb8bc4`, `f7a05b0`): Phaenon syntax is erased to whitespace tokens in front of

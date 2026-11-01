@@ -167,12 +167,12 @@ push dogfood work without a maintainer's go-ahead.
 | M6 | `php-service-template` ships `.phn` by default |
 | M7 | `iam` first, then the rest of the services through the template |
 
-## `tq-cli` — M5, 2026-11-02
+## `tq-cli` — M5, 2026-11-01
 
 - Repo `~/labs/tequila/tq-cli` has the developer's own branch checked out, so the dogfood lives
   in a **git worktree**: `~/labs/tequila/tq-cli-phaenon-dogfood`, branch `phaenon-dogfood` off
   `origin/main` at `37201c8`: `c58cb76` *build: compile tq-cli from Phaenon sources, fan-outs as
-  concurrently blocks*, then the `src` pass of 2026-11-02 (`c351d37` curl handle checked,
+  concurrently blocks*, then the `src` pass of 2026-11-01 (`c351d37` curl handle checked,
   `f65d9e3` dead type checks dropped, `f2323e0` `phaenon/runtime` required, `62e2b3f` binary data
   is `bytes`, `2ba375f` closure seams lifted to `Closure(string...)`). **Local only — never
   pushed.**
@@ -189,15 +189,31 @@ push dogfood work without a maintainer's go-ahead.
   that read source files from disk read `.src/` — the PHP that ships.
 - Verify (`PATH` with `phn`): `phn build --emit-on-error`, `vendor/bin/phpunit` (**2045 tests
   green**, ≈3 min), `composer phpstan` (level 10, no errors), `composer cs:check` (0 of 586).
-- `phn check`: **`src` 0 errors** (2026-11-02; 378 at `c58cb76`, 125 of them in `src`), 213 in
-  `tests/`. The `src` ones were the checker's (offset narrowing, array inference through writes
-  and loops, conditions held in variables, conditional returns, SPL generics: the three checker
-  merges and `b90a878`…`4693d71`) or real: the unchecked `curl_init()` (PHPStan lets it through as
-  a benevolent union), dead `is_string()` checks the declarations made dead, binary data typed as
-  text. Two loops keep their `is_string($key)`: `Val::map()` declares `map<string, mixed>` but
+- `phn check`: **`src` 0 errors** (2026-11-01; 378 at `c58cb76`, 125 of them in `src`), **`tests`
+  0 errors** since the tests pass (2026-11-01, below). The `src` ones were the checker's (offset
+  narrowing, array inference through writes and loops, conditions held in variables, conditional
+  returns, SPL generics: the three checker merges and `b90a878`…`4693d71`) or real: the
+  unchecked `curl_init()` (PHPStan lets it through as a benevolent union), dead `is_string()`
+  checks the declarations made dead, binary data typed as text. Two loops keep their
+  `is_string($key)`: `Val::map()` declares `map<string, mixed>` but
   PHP turns numeric keys into ints, so they iterate `Val::arr()` instead (see [[open-items]]).
-  The `tests/` findings are, by line-by-line comparison, what PHPStan level 10 reports too; tq-cli's
-  PHPStan only analyses `src`.
+- **The tests pass** (2026-11-01): 213 errors in `tests/`, compared line by line (through a
+  diff line map, since the emitter adds `@return` lines) with the parity PHPStan at level 10 on
+  the compiled `.tests`: 203 on lines PHPStan reports too. Checker gaps (compiler `8eeab3b`
+  `continue 2` / `break 2` reach the loop they name, `6f9316b` `implode()` of literals and
+  `print_r($x, true)`, `68ffe52` generator closures typed by their yields and
+  `Generator<K, V, S, R>` iterating `K => V`); the rest fixed in the tests, six commits on the
+  branch (`635ae30` fakes typed as their seams, `d86f2f8` decoded documents asserted, `04986af`
+  openssl details asserted, `08aa83e` recorders reset through a fixture method, `0b9220f` `->`
+  on proven values, `4de7cc0` the remainder). Left: 138 P4006 (`expectExceptionMessage()`, soft-deprecated since
+  PHPUnit 13.2, #6560; the replacement `expectExceptionMessageIsOrContains()` is the same check)
+  and one P2401 (see [[open-items]]). PHPStan on `.tests` went 412 → 172; the rest are rules
+  the checker does not match (offset reads on `mixed`, closure docblocks, variadics as lists:
+  [[open-items]]).
+- A recorder reset by assignment (`$this->calls = []`, a by-reference `$calls = []`) stays
+  `list{}` for both checkers while the run appends through a closure they cannot see into, so
+  `$this->calls[0]` is "offset 0 does not exist". The tests reset through a void fixture method
+  (`forgetCalls()`), which both checkers treat as possibly changing `$this`, or slice from a count.
 - Found on the way: `?(int, int)` (a nullable tuple, written by `phn migrate`) did not parse
   (`074979a`); the emitter's `use` clause captured loop variables and arrow-function parameters
   by reference until the capture rule became "mentioned before the block, or read first after
