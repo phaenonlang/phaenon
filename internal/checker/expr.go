@@ -1569,6 +1569,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		x.assignTo(e.Target, vt, env, e.S)
 		if v, ok := e.Target.(*ast.Variable); ok {
 			env.setNative(v.Name, x.nativeOf(e.Value, env))
+			x.rememberCondition(v.Name, e.Value, env)
 		}
 		return vt
 	}
@@ -1592,6 +1593,71 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 	}
 	x.assignTo(e.Target, res, env, e.S)
 	return res
+}
+
+// rememberCondition records on a variable assigned a condition, or a
+// ternary, what each branch narrowed: `$ok = is_string($v) && …` says $v
+// is a string when $ok is true; `$s = $b instanceof X ? $b->s : null`
+// says $b is an X when $s is not null. A later test of the variable
+// applies the branch taken (PHPStan's conditional expressions). The
+// value was typed already; the branches are read in a silent pass.
+func (x *fnCtx) rememberCondition(name string, value ast.Expr, env *state) {
+	for {
+		p, ok := value.(*ast.Paren)
+		if !ok {
+			break
+		}
+		value = p.Expr
+	}
+	var whenThen, whenElse types.Type
+	var condExpr ast.Expr
+	var ternary *ast.Ternary
+	switch v := value.(type) {
+	case *ast.Ternary:
+		ternary, condExpr = v, v.Cond
+	case *ast.Binary:
+		switch v.Op {
+		case token.T_BOOLEAN_AND, token.T_LOGICAL_AND, token.T_BOOLEAN_OR, token.T_LOGICAL_OR,
+			token.T_IS_IDENTICAL, token.T_IS_NOT_IDENTICAL, token.T_IS_EQUAL, token.T_IS_NOT_EQUAL:
+			condExpr = v
+		}
+	case *ast.Unary:
+		if v.Op == token.Kind('!') {
+			condExpr = v
+		}
+	case *ast.Instanceof, *ast.IsExpr, *ast.Isset, *ast.Empty:
+		condExpr = value
+	case *ast.Call:
+		if n, ok := v.Callee.(*ast.Name); ok && predicateTarget(strings.ToLower(n.Parts[len(n.Parts)-1])) != nil {
+			condExpr = value
+		}
+	}
+	if condExpr == nil {
+		return
+	}
+	before := env.clone()
+	saved := x.c.mark()
+	then, els := x.cond(condExpr, env.clone())
+	if ternary != nil {
+		if ternary.Then == nil {
+			whenThen = types.Truthy(x.condValueType)
+		} else {
+			whenThen = x.expr(ternary.Then, then, nil)
+		}
+		whenElse = x.expr(ternary.Else, els, nil)
+	} else {
+		whenThen, whenElse = types.TTrue, types.TFalse
+	}
+	x.c.rollback(saved)
+	// Only values that tell the branches apart carry information: PHPStan
+	// records nothing for `$b instanceof X ? $b->s : null` when $b->s is
+	// mixed, since null is one of its values.
+	if _, never := types.Intersect(whenThen, whenElse, x.p()).(types.Never); !never {
+		return
+	}
+	delete(then.vars, name)
+	delete(els.vars, name)
+	env.setConds(name, condBranch(whenThen, then, before), condBranch(whenElse, els, before))
 }
 
 func compoundOp(k token.Kind) token.Kind {
