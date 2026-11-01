@@ -721,3 +721,37 @@ function shapeWider(array $github, array $session, array $short): void
     takesNone([]);
     takesNone(['a' => 1]); // want P2103
 }
+
+/**
+ * @param list<string> $a
+ * @param list<string> $b
+ * @param array<string, string> $env
+ * @param list<array<string, mixed>> $rulesets
+ */
+function arrayFunctions(array $a, array $b, string $repo, array $env, array $rulesets, string $cmd): void
+{
+    [$owner, $name] = array_pad(explode('/', $repo, 2), 2, '');
+    takesString($name);
+    foreach (array_intersect($a, $b) as $x) {
+        takesString($x);
+    }
+    foreach ([...array_intersect($a, $b), ...array_diff($a, $b)] as $y) {
+        takesString($y);
+    }
+    takesList(array_values(array_intersect($a, $b)));
+    $defaults = [];
+    if ('' === $repo) {
+        $defaults['K8S_A'] = 'false';
+    }
+    takesHeaders(array_diff_key($defaults, $env));
+    takesHeaders(array_intersect_key($env, array_flip(array_intersect($a, $b))));
+    $byName = array_column($rulesets, null, 'name');
+    takesList(array_keys($byName['x']));
+    takesList(array_column($rulesets, 'name')); // want P2103 "list given"
+    exec($cmd, $out);
+    takesString($out[0] ?? '');
+    $h = substr_replace('abc', 'q', 1, 1);
+    takesString($h);
+    takesString(str_replace("\n", "\r\n", $h));
+    takesString(substr_replace(['abc'], 'q', 1, 1)); // want P2103
+}

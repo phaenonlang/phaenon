@@ -16,6 +16,11 @@ function preg_split(string $pattern, string $subject, int $limit = -1, int $flag
 function str_replace(array|string $search, array|string $replace, string|array $subject, &$count = null): string|array {}
 
 /**
+ * @return ($string is array ? array<string> : string)
+ */
+function substr_replace(array|string $string, array|string $replace, array|int $offset, array|int|null $length = null): string|array {}
+
+/**
  * @return list<string>
  */
 function mb_str_split(string $string, int $length = 1, ?string $encoding = null): array {}
