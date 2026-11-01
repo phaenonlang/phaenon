@@ -172,8 +172,8 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   text, not references~~ — since `0a22b5d` erasure goes to a token of its own
   (`PHAENON_ERASED`, a comment to the parser) whose leaf carries a reference per class name:
   navigation, find-usages, rename and the unused-import inspection work; since `65a70f3`
-  completion inside `<…>` (classes with import insertion, type parameters, keywords; qualified
-  names not completed) and no spell-checking of the erased leaf. Left: the leaf is a
+  completion inside `<…>` (classes with import insertion, type parameters, keywords, and the
+  members of a namespace after a qualifier) and no spell-checking of the erased leaf. Left: the leaf is a
   `PsiComment`, so any other comment-based feature sees Phaenon types as comments. PhpStorm 2025.1 does
   not parse `[...$a][0]` in plain PHP either (core's `DeadlineMetricsTest.phn:114`); the
   real-tree test lists such files instead of counting them.
