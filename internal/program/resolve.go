@@ -185,7 +185,7 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 	case *ast.ClosureType:
 		c := types.Callable{Closure: true, HasSig: true, Return: r.native(t.Return)}
 		for _, pt := range t.Params {
-			c.Params = append(c.Params, types.CallableParam{Type: r.native(pt)})
+			c.Params = append(c.Params, types.CallableParam{Type: r.native(pt.Type), Optional: pt.Optional, Variadic: pt.Variadic})
 		}
 		return c
 	case *ast.TupleType:

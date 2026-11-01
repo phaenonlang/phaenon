@@ -238,13 +238,13 @@ func (pr *printer) print(t Type, nested bool) {
 				if i > 0 {
 					b.WriteString(", ")
 				}
-				if p.Variadic {
-					b.WriteString("...")
-				}
 				if p.Type == nil {
 					b.WriteString("mixed")
 				} else {
 					pr.print(p.Type, false)
+				}
+				if p.Variadic {
+					b.WriteString("...")
 				}
 				if p.ByRef {
 					b.WriteString(" &")

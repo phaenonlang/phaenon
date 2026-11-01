@@ -568,11 +568,20 @@ type (
 		Types         []TypeExpr
 		Parenthesised bool
 	}
-	// ClosureType is Phaenon's Closure(A, B): R.
+	// ClosureType is Phaenon's Closure(A, B=, C...): R.
 	ClosureType struct {
 		S      Span
-		Params []TypeExpr
+		Params []ClosureParam
 		Return TypeExpr
+	}
+	// ClosureParam is one parameter of a ClosureType: a type with PHPStan's
+	// marker for an optional (`T=`) or the variadic (`T...`) parameter. The
+	// parser keeps the variadic last and every parameter after an optional
+	// one optional or variadic (design/generics.md §11.3).
+	ClosureParam struct {
+		Type     TypeExpr
+		Optional bool
+		Variadic bool
 	}
 	// TupleType is Phaenon's (A, B): a positional shape (design/collections.md §2.4).
 	TupleType struct {

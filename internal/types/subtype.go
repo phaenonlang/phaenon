@@ -640,6 +640,11 @@ func callableSub(a, b Callable, h Hierarchy, depth int) bool {
 		if bp.Type != nil && ap.Type != nil && !paramAccepts(bp.Type, ap.Type, h, depth+1) {
 			return false
 		}
+		if (bp.Optional || bp.Variadic) && !ap.Optional && !ap.Variadic {
+			// The caller may leave this argument out; a requires it
+			// (PHPStan: `Closure(string...)` does not accept `fn (string $s)`).
+			return false
+		}
 	}
 	for i, ap := range a.Params {
 		if i >= len(b.Params) && !ap.Optional && !ap.Variadic {
