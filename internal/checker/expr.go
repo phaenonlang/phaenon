@@ -896,6 +896,9 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 	}
 	idx := x.expr(e.Index, env, nil)
 	if types.IsMixed(base) {
+		if _, unknown := base.(types.Unknown); unknown {
+			return base // an offset of what was already reported stays reported
+		}
 		return types.TMixed
 	}
 	var out []types.Type
@@ -910,6 +913,8 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 				switch {
 				case m.Unsealed:
 					out = append(out, types.TMixed)
+				case certain && !lenient:
+					out = append(out, types.TError) // reported above: one finding, no null to use next
 				case certain:
 					out = append(out, types.TNull)
 				default:
@@ -1546,6 +1551,12 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		x.assignTo(e.Target, vt, env, e.S)
 		if v, ok := e.Target.(*ast.Variable); ok {
 			env.setNative(v.Name, x.nativeOf(e.Value, env))
+			// `$unknown = null === $before`: the variable carries its
+			// condition for a later `if ($unknown)` (not one reading the
+			// variable itself: `$ok = $ok && …` would loop).
+			if vars, ok := conditionVars(e.Value); ok && !vars[v.Name] {
+				env.conds[v.Name] = condition{expr: e.Value, vars: vars}
+			}
 		}
 		return vt
 	}

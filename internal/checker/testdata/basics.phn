@@ -114,11 +114,6 @@ function main(User $u): void
     User::nope(); // want P2006
     $cls = User::class;
     new $cls(1);
-    $u->rename(name: 'x');
-    $w = $u->manager() ?: $u;
-    $w->name;
-    $u->manager()->name; // want P2105
-    global $g; // want P1001
     $z = match ($u->id) { // want P2304
         1 => 'a', // want P2305
         2 => 'b', // want P2305
@@ -128,4 +123,11 @@ function main(User $u): void
         default => 2,
     };
     takesInt($q);
+    // rename() is void: what was known of $u's members is forgotten here.
+    $u->rename(name: 'x');
+    $w = $u->manager() ?: $u;
+    $w->name;
+    $u->manager()->name; // want P2105
+    global $g; // want P1001
+    $u->id === 'a'; // want P2305 — int, no longer 3
 }
