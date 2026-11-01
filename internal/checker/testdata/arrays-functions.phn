@@ -89,3 +89,20 @@ function values(array $a, array $m, array $keys, array $ints, array $floats, str
         takesInt($pair[1]);
     }
 }
+
+/**
+ * end(), reset() and current() answer false for an empty array alone.
+ *
+ * @param non-empty-list<string> $words
+ * @param array<mixed> $any
+ */
+function pointers(array $words, array $any, string $path): void
+{
+    takesString(end($words));
+    takesString(reset($words));
+    takesString(current($words));
+    takesString(end($any)); // want P2103
+    $parts = explode('/', $path);
+    takesString(end($parts));
+    takesString(substr(end($parts), 0, 7));
+}
