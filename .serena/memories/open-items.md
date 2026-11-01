@@ -111,15 +111,32 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   expression forms (`return concurrently { … };`, `spawn { … }`) are syntax errors in the editor
   until a PSI element for a block exists (M6, with the LSP); `spawn` results are typed as the
   value, not `Future<T>`.
-- ~~**Dogfood** `tq-cli`~~ — done 2026-11-02 ([[dogfood]]); `tequila/nats`'s `RevoltTransport`
-  with the single-reader change to `Connection` (`concurrency.md` §9.3) is still to do.
-- **tq-cli's 378 checker findings** (125 in `src`, where PHPStan 10 passes): `curl_setopt`'s
-  option-dependent value type, `is_string()` reported always-true after `??` on shapes, property
-  access on `array<string, list<…>>|object` unions, `bytes` vs text around `base64_encode` /
-  `random_bytes` / `bin2hex` (the overlay's `bytes` typing bites real code — `base64_encode`
-  wants `string|bytes`, callers pass what `random_bytes` returns through string functions),
-  `mixed` out of json/yaml arrays. Worth the M4-style pass before M5 closes, or an allow-list
-  entry per family.
+- ~~**Dogfood** `tq-cli`~~ — done 2026-11-02 ([[dogfood]]). `tequila/nats`: the `RevoltTransport`,
+  the pump lease and the opt-in reader task are on the local branch `feat/revolt-transport`
+  (`~/labs/tequila/nats-revolt`), the ADR amendment on the platform's `docs/nats-revolt-transport`;
+  neither pushed, waiting for a maintainer's go-ahead.
+- ~~**tq-cli's 378 checker findings**~~ — `src` at 0 (2026-11-02). Left: **213 in `tests/`**, which
+  tq-cli's PHPStan never analysed; most are what PHPStan 10 reports too. Whether a dogfood's tests
+  must pass `phn check` is open.
+- **`map<string, …>` and PHP's key normalisation**: `$out[(string) $k] = …` is typed string-keyed
+  (as PHPStan does), but PHP stores a numeric string key as an int, so `map<string, mixed>` from a
+  YAML/JSON helper can hold int keys at runtime. Retyping tq-cli's `Val::map()` to
+  `map<int|string, mixed>` raised 122 errors. A design question for the type lattice.
+- **bytes ergonomics** (from tq-cli's zip builder, relay frames, archives): no `.` / `.=` for
+  `bytes`, so builders become a `list<bytes>` and `Bytes::concat()`; a text header inside binary
+  needs `('tree '.\strlen($b)."\0")->bytes()`; `file_get_contents()` returns `string`, so every
+  binary read is `(bytes) $content`.
+- **The emitter copies `bytes` verbatim from written docblock tags** (`@return bytes`,
+  `@var list<bytes>`), while the docblocks it generates erase it to `string`; with
+  `use Phaenon\Bytes;` in the file, PHPStan reads the tag as the class (`strings.md` §5 says it
+  erases).
+- **Closure types cannot spell refined ints**: `Closure(positive-int): bytes` and
+  `Closure(int<1, max>): bytes` are P1000 (hyphenated names are docblock vocabulary,
+  `generics.md` §11.2, and `int<a, b>` has no native spelling).
+- **The emitter's automatic import collides with a file's own `use` block**: it writes
+  `use Phaenon\Str;` on line 1, and php-cs-fixer then fails `blank_line_after_namespace` /
+  `no_extra_blank_lines` in files that have their own imports. Writing the import by hand works
+  (`5519a67` made such an import count as used).
 - The emitter's `use` clause is syntactic: a variable passed by reference to a function inside
   the block (`sort($rows)`) is not seen as assigned and is captured by value; a variable assigned
   in the block and conditionally assigned after it before being read is not captured. The

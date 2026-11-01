@@ -171,24 +171,33 @@ push dogfood work without a maintainer's go-ahead.
 
 - Repo `~/labs/tequila/tq-cli` has the developer's own branch checked out, so the dogfood lives
   in a **git worktree**: `~/labs/tequila/tq-cli-phaenon-dogfood`, branch `phaenon-dogfood` off
-  `origin/main` at `37201c8`, one local commit `c58cb76` *build: compile tq-cli from Phaenon
-  sources, fan-outs as concurrently blocks*. **Local only — never pushed.**
+  `origin/main` at `37201c8`: `c58cb76` *build: compile tq-cli from Phaenon sources, fan-outs as
+  concurrently blocks*, then the `src` pass of 2026-11-02 (`c351d37` curl handle checked,
+  `f65d9e3` dead type checks dropped, `f2323e0` `phaenon/runtime` required, `62e2b3f` binary data
+  is `bytes`, `2ba375f` closure seams lifted to `Closure(string...)`). **Local only — never
+  pushed.**
 - 859 `.phn` (585 `src/`, 274 `tests/`), `phaenon.json` builds `src`/`tests` into `.src`/`.tests`
   (ignored), where Composer, PHPUnit, PHPStan (level 10, `src` only) and php-cs-fixer point (the
   four line-1 rules off, as in core). `phaenon/concurrent` comes from `../../phaenon/concurrent`
-  as a Composer **path repository** (symlinked into `vendor/phaenon/concurrent`): `composer
-  update phaenon/concurrent` after switching to the branch.
+  as a Composer **path repository** (symlinked into `vendor/phaenon/concurrent`), and
+  `phaenon/runtime` the same way from `../../phaenon/runtime` (the `bytes` code calls `Phaenon\Bytes`
+  / `Phaenon\Str`): `composer update phaenon/concurrent phaenon/runtime` after switching to the
+  branch.
 - **The fifteen `Api::concurrently` fan-outs are `concurrently` blocks** (`$tasks[$key] = spawn
   …` in a loop, `return Scope::all($tasks)`; `spawn { try … }` for the probes that catch;
   one `Scope::map`), `Api::concurrently()` removed. `PlatformOnlyFiles` and the three tests
   that read source files from disk read `.src/` — the PHP that ships.
 - Verify (`PATH` with `phn`): `phn build --emit-on-error`, `vendor/bin/phpunit` (**2045 tests
   green**, ≈3 min), `composer phpstan` (level 10, no errors), `composer cs:check` (0 of 586).
-- `phn check`: 378 errors (125 `src`, 253 `tests`), none `P26xx`; PHPStan at level 10 passes on
-  `src`, so the `src` ones are the checker's: `curl_setopt` option typing, `is_string()` on a
-  string (narrowing through `??`/array shapes), property access on array shapes, `bytes` used
-  as text (the base64/`random_bytes` family), `mixed` from json/yaml arrays. Not worked through
-  (M4 did that for core); listed in [[open-items]].
+- `phn check`: **`src` 0 errors** (2026-11-02; 378 at `c58cb76`, 125 of them in `src`), 213 in
+  `tests/`. The `src` ones were the checker's (offset narrowing, array inference through writes
+  and loops, conditions held in variables, conditional returns, SPL generics: the three checker
+  merges and `b90a878`…`4693d71`) or real: the unchecked `curl_init()` (PHPStan lets it through as
+  a benevolent union), dead `is_string()` checks the declarations made dead, binary data typed as
+  text. Two loops keep their `is_string($key)`: `Val::map()` declares `map<string, mixed>` but
+  PHP turns numeric keys into ints, so they iterate `Val::arr()` instead (see [[open-items]]).
+  The `tests/` findings are, by line-by-line comparison, what PHPStan level 10 reports too; tq-cli's
+  PHPStan only analyses `src`.
 - Found on the way: `?(int, int)` (a nullable tuple, written by `phn migrate`) did not parse
   (`074979a`); the emitter's `use` clause captured loop variables and arrow-function parameters
   by reference until the capture rule became "mentioned before the block, or read first after
