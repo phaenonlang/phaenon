@@ -1,0 +1,14 @@
+namespace App\Report;
+
+/**
+ * A file without imports: the one the compiler adds opens the line where the
+ * first statement after the namespace begins, here this docblock, so the
+ * namespace keeps its blank line and every line its number (roadmap D11).
+ */
+final class Slug
+{
+    public static function of(string $title): string
+    {
+        return $title->trim()->lower()->replace(' ', '-');
+    }
+}

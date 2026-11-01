@@ -68,6 +68,58 @@ function text(bytes $raw, string $name): void
     $raw->upper(); // want P2006
 }
 
+final class Frame
+{
+    public bytes $buf;
+
+    /** @var list<bytes> */
+    public array $parts = [];
+
+    public function __construct()
+    {
+        $this->buf = (bytes) '';
+    }
+
+    public function append(bytes $chunk, string $label): void
+    {
+        $this->buf .= $chunk;
+        $this->buf .= $label; // want P2530
+        $this->parts[0] .= $chunk;
+        takesBytes($this->parts[0]);
+    }
+}
+
+// `.` joins two values of the same kind (strings.md §2, 2026-11-02): binary
+// joined to binary stays binary, binary mixed into text is the finding.
+function concatenation(bytes $a, bytes $b, string $s, ?bytes $maybe): void
+{
+    takesBytes($a . $b);
+    takesString($a . $b); // want P2103
+    $buf = (bytes) '';
+    $buf .= $a;
+    $buf .= $b . $a;
+    takesBytes($buf);
+    $mixed = $a . $s; // want P2530
+    $mixed2 = $s . $b; // want P2530
+    $text = '';
+    $text .= $a; // want P2530
+    takesBytes('' . $a); // want P2530
+    $interpolated = "$a"; // want P2530
+    takesBytes($a . 5); // want P2530
+    if ($maybe !== null) {
+        takesBytes($maybe . $a);
+    }
+}
+
+function inlineVar(string $text): void
+{
+    /** @var bytes $raw */
+    $raw = random_bytes(4);
+    takesBytes($raw);
+    /** @var bytes $retyped */
+    $retyped = strtoupper($text); // want P2212
+}
+
 function equality(bytes $a, string $b, bytes $c): void
 {
     if ($a === $b) { // want P2305
