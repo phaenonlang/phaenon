@@ -691,3 +691,33 @@ function closureNever(): void
     });
     takesPost(static function (): array { return [1]; }); // want P2103
 }
+
+/** @param \Closure(string): (array{token: string, expiresIn: int}|null) $signIn */
+function takesSignIn(\Closure $signIn): void
+{
+}
+
+/** @param list<array{string, string, string}> $calls */
+function takesCalls(array $calls): void
+{
+}
+
+/** @param array{} $none */
+function takesNone(array $none): void
+{
+}
+
+/**
+ * @param list<array{string, string, string, array<string, mixed>|null}> $github
+ * @param array{token: string, who: string, expiresIn: int} $session
+ * @param array{token: string} $short
+ */
+function shapeWider(array $github, array $session, array $short): void
+{
+    takesSignIn(static fn (string $o): array => ['token' => 'a', 'who' => 'b', 'expiresIn' => 1]);
+    takesSignIn(static fn (string $o): array => $session);
+    takesSignIn(static fn (string $o): array => $short); // want P2103
+    takesCalls($github);
+    takesNone([]);
+    takesNone(['a' => 1]); // want P2103
+}
