@@ -136,6 +136,11 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 ## Small things
 
+- `phn migrate` could rewrite `static function (…) { return …; }` in attribute arguments and constants back
+  to `fn (…) => …` (design/functions.md §2); today it leaves closures as written.
+- `fun` keyword completion in the plugin is the contributor's own lookup; PhpStorm's keyword completion
+  does not know it, nor do its live templates.
+
 - **PHPUnit overlay:** `assertSame` / `assertNotEmpty` narrowing was removed because the docblock
   reader does not support `@phpstan-assert =T` or the `!empty` forms; add when needed.
 - ~~**Runtime stub drift**~~ — `classString()` and `resource()` added to the stub 2026-10-28; nothing
@@ -173,7 +178,7 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   (`PHAENON_ERASED`, a comment to the parser) whose leaf carries a reference per class name:
   navigation, find-usages, rename and the unused-import inspection work; since `65a70f3`
   completion inside `<…>` (classes with import insertion, type parameters, keywords, and the
-  members of a namespace after a qualifier) and no spell-checking of the erased leaf; a type parameter navigates to its `<T of …>` declaration, the declaration shows its usages (erased constructs and docblock types), and the hierarchy check skips methods with erased types (found on core's `AbstractAggregate::id(): T`). Left: the leaf is a
+  members of a namespace after a qualifier) and no spell-checking of the erased leaf; a type parameter navigates to its `<T of …>` declaration, the declaration shows its usages (erased constructs and docblock types), and the hierarchy check skips methods with erased types (found on core's `AbstractAggregate::id(): T`); `fun` is the `function` keyword to the parser and the highlighter, with the PSR-12 visibility finding and the constant-expression findings filtered (`603db11`). A class constant without `public` is still "missing visibility": not implied, by design. Left: the leaf is a
   `PsiComment`, so any other comment-based feature sees Phaenon types as comments. PhpStorm 2025.1 does
   not parse `[...$a][0]` in plain PHP either (core's `DeadlineMetricsTest.phn:114`); the
   real-tree test lists such files instead of counting them.

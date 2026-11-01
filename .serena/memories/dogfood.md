@@ -150,6 +150,14 @@ push dogfood work without a maintainer's go-ahead.
 - The plugin's pseudo-classes are generated from the stdlib sources since 2026-10-31
   (`phn stdlib --plugin-stubs ../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`).
 
+- **`fun` re-migration (2026-11-01, D15):** `find src tests -name '*.phn' | xargs phn migrate` over every
+  dogfood tree respelled its declarations (core 732 of 812 files, mongodb-odm 111 of 125, object-mapper
+  43 of 51, reflector 10 of 18) and the rebuilt outputs were byte-identical, so no suite needed a rerun.
+  The only other output changes seen were the D14 dash in odm's and object-mapper's `@param $x - prose`
+  lines: their side-by-side `.php` had not been rebuilt since D14. Pass `.phn` files explicitly: pointing
+  `phn migrate` at a directory also converts every hand-written `.php` in it (the stdlib's `Type.php` once).
+  Core is committed locally; the other three trees carry the change uncommitted.
+
 ## Next targets (roadmap §3)
 
 | Milestone | Target |
