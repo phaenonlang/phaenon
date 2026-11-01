@@ -482,6 +482,14 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 			x.assignTo(s.Key, k, head, s.Key.Span())
 		}
 		x.assignTo(s.Value, v, head, s.Value.Span())
+		if s.Key != nil {
+			// `$xs[$k]` is an offset the iteration found: a write to it
+			// replaces a value, so a list stays a list (PHPStan's
+			// setExistingOffsetValueType).
+			if key, ok := pathKey(&ast.Index{Array: s.Expr, Index: s.Key}); ok {
+				head.setPath(key, v)
+			}
+		}
 		if nit := x.nativeOf(s.Expr, head); nit != nil {
 			// The loop variables hold what PHP's view of the iterable yields.
 			if nk, nv, ok := types.IterableKV(nit, x.p()); ok {
@@ -644,7 +652,12 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 }
 
 func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
-	defer func() { env.dead = true }()
+	defer func() {
+		if x.trackReturns {
+			x.returnEnvs = append(x.returnEnvs, env.clone())
+		}
+		env.dead = true
+	}()
 	var declared types.Type // an unnamed `@var T` above the return types the value
 	if s.Doc != "" {
 		doc := docblock.Parse(s.Doc)
@@ -967,7 +980,7 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 				env.set(u.Var.Name, types.TNull)
 				info = varInfo{t: types.TNull}
 			}
-			cenv.set(u.Var.Name, widenType(info.t))
+			cenv.set(u.Var.Name, info.t)
 			continue
 		}
 		if !ok {
@@ -978,34 +991,35 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		cenv.set(u.Var.Name, info.t)
 	}
 	c.generator = bodyHasYield(e.Body)
+	exits := cenv
 	if closureHasByRefUse(e) {
 		// A by-reference use is whatever the body assigns to it as well:
 		// `use (&$server)` with `$server = null` inside is resource|null
-		// throughout (PHPStan types it so). One silent pass finds out.
-		saved := x.c.mark()
-		probe := cenv.clone()
-		c.stmts(e.Body, probe)
-		x.c.rollback(saved)
-		c.returnTypes = nil
-		for _, u := range e.Uses {
-			if !u.ByRef {
-				continue
-			}
-			if inner, ok := probe.get(u.Var.Name); ok {
-				if outer, ok := cenv.get(u.Var.Name); ok {
-					cenv.set(u.Var.Name, types.MakeUnion(outer.t, inner.t))
-				}
-			}
-		}
+		// throughout, `use (&$rows)` with `$rows[] = …` a list however often
+		// the closure runs. The body is iterated to a fixed point like a
+		// loop's, every return an exit (PHPStan's processClosureNode).
+		c.trackReturns = true
+		var end *state
+		exits = c.fixpoint(cenv, func(head *state) (*state, *state) {
+			c.returnTypes = nil
+			c.returnEnvs = nil
+			c.stmts(e.Body, head)
+			end = head
+			all := joinAll(append([]*state{head}, c.returnEnvs...)...)
+			return all, all
+		})
+		c.trackReturns = false
+		cenv = end
+	} else {
+		c.stmts(e.Body, cenv)
 	}
-	c.stmts(e.Body, cenv)
 	// What the body assigns to a by-reference use is what the enclosing
 	// scope may see once the closure has run.
 	for _, u := range e.Uses {
 		if !u.ByRef {
 			continue
 		}
-		if inner, ok := cenv.get(u.Var.Name); ok {
+		if inner, ok := exits.get(u.Var.Name); ok {
 			if outer, ok := env.get(u.Var.Name); ok {
 				env.set(u.Var.Name, types.MakeUnion(outer.t, inner.t))
 			}
