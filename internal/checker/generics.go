@@ -169,6 +169,9 @@ func (x *fnCtx) checkArity(t *ast.NamedType, what string, tps []*program.TypePar
 	if given == 0 {
 		return // Foo without arguments means its bounds, as in PHPStan
 	}
+	if given == 1 && program.ValueOnlyIterable(what) {
+		return // Iterator<V>: the value alone, the key left mixed
+	}
 	required := 0
 	for _, tp := range tps {
 		if tp.Default == nil {

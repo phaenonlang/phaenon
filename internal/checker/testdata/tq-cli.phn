@@ -1,0 +1,225 @@
+namespace Cli;
+
+// Checker gaps the tq-cli dogfood found (2026-11-02), one function each:
+// stdlib declarations PHPStan has, flow the checker lost through closures,
+// loops and narrowings PHPStan keeps.
+
+function takesString(string $s): void
+{
+}
+
+function takesInt(int $i): void
+{
+}
+
+function sink(mixed $m): void
+{
+}
+
+/**
+ * An archive entry is a PharFileInfo (chmod() lives there); a list's
+ * array_search() answers its int key or false, never a string.
+ *
+ * @param list<string> $command
+ */
+function archiveEntries(array $command, string $name): void
+{
+    $tar = new \PharData('/tmp/p.tar');
+    $tar->addFromString('a.txt', 'x');
+    $tar['a.txt']->chmod(0o644);
+    $k = array_search($name, $command, true);
+    takesInt($k); // want P2103
+    takesString($command[$k + 1]);
+}
+
+final class Member
+{
+    public function __construct(public string $name, public string $path)
+    {
+    }
+
+    public function label(): string
+    {
+        return $this->name;
+    }
+}
+
+/**
+ * What a closure assigns to a by-reference use is what the enclosing scope
+ * sees once it ran — from every exit of the body, not only from its end.
+ *
+ * @param list<Member> $members
+ */
+function byRefUseExits(array $members): void
+{
+    $detached = [];
+    $outputs = [];
+    $each = function (int $i, Member $m) use (&$detached, &$outputs): void {
+        if ($i > 1) {
+            $detached[] = $m;
+
+            return;
+        }
+        $outputs[] = [$i, $m->label(), 1.5];
+    };
+    foreach ($members as $i => $m) {
+        $each($i, $m);
+    }
+    foreach ($detached as $member) {
+        takesString($member->name);
+        takesString($member->label());
+    }
+    [$code, $label, $took] = $outputs[0];
+    takesInt($code);
+    takesString($label);
+    takesInt($took); // want P2103
+}
+
+/**
+ * A tuple appended on every iteration stays a tuple: the loop widens the
+ * array that grows, not the shape of what it holds.
+ *
+ * @param list<Member> $members
+ */
+function tuplesInLoops(array $members): void
+{
+    $jobs = [];
+    $runs = [];
+    foreach ($members as $i => $m) {
+        $jobs[] = [$m, $m->label()];
+        $runs[$i] = [$m->path, ['git', 'pull'], 1.5];
+    }
+    foreach ($jobs as [$member, $label]) {
+        takesString($member->name);
+        takesString($label);
+    }
+    [$dir, $command, $timeout] = $runs[0];
+    takesString($dir);
+    takesString($timeout); // want P2103
+    $each = static function (int $i) use ($jobs): void {
+        [$member, $label] = $jobs[$i];
+        takesString($member->label());
+    };
+    $each(0);
+}
+
+/** @param \Closure(): array{token: string, expiresIn: int} $signIn */
+function takesSignIn(\Closure $signIn): void
+{
+}
+
+/** A closure whose body always throws returns never, which every closure type accepts. */
+function throwingClosure(): void
+{
+    $attempts = 0;
+    takesSignIn(static function () use (&$attempts): array {
+        ++$attempts;
+
+        throw new \RuntimeException('no');
+    });
+    takesSignIn(static function (): array { // want P2103
+        return ['token' => 'x'];
+    });
+    takesInt($attempts);
+}
+
+final class Host
+{
+    /** @var list<array{number: int, title: string}> */
+    public array $updated = [];
+
+    public function render(string $tag): void
+    {
+        $this->updated[] = ['number' => 1, 'title' => $tag];
+    }
+
+    public function count(): int
+    {
+        return \count($this->updated);
+    }
+}
+
+final class Suite
+{
+    /** @var list<array{0: string, 1: string}> */
+    private array $calls = [];
+
+    public function __construct(private Host $host)
+    {
+    }
+
+    public function record(): void
+    {
+        $this->calls[] = ['POST', '/x'];
+    }
+
+    public function peek(): int
+    {
+        return \count($this->calls);
+    }
+
+    /**
+     * A void method may change the object it was called on: what was known
+     * of the members under the receiver is forgotten, as PHPStan forgets it;
+     * a method with a result keeps it.
+     */
+    public function invalidation(): void
+    {
+        $this->calls = [];
+        $this->record();
+        takesString($this->calls[0][0]);
+        $this->calls = [];
+        $this->peek();
+        takesString($this->calls[0][0]); // want P2313
+        $this->host->updated = [];
+        $this->host->render('v3');
+        takesString($this->host->updated[0]['title']);
+        $this->host->updated = [];
+        $this->host->count();
+        takesString($this->host->updated[0]['title']); // want P2313
+    }
+}
+
+/**
+ * A boolean assigned from a condition carries it: testing the variable
+ * narrows what the condition tested, until either side is reassigned.
+ */
+function conditionInVariable(?array $before, ?string $onMain, bool $named, string $inClone): void
+{
+    $unknown = null === $before || [] === $before;
+    $changes = $unknown ? [] : array_keys($before);
+    sink($changes);
+    $behind = $named && null !== $onMain && $onMain !== $inClone;
+    if ($behind) {
+        takesString($onMain);
+    }
+    if (!$unknown) {
+        takesInt(\count($before));
+    }
+    $before = null;
+    if (!$unknown) {
+        takesInt(\count($before)); // want P2103
+    }
+}
+
+/** `'' === ($u['host'] ?? '')` being false says the offset is set and not ''. */
+function coalesceCompared(string $endpoint): void
+{
+    $url = parse_url($endpoint);
+    if (!\is_array($url) || '' === ($url['host'] ?? '')) {
+        return;
+    }
+    takesString(strtolower($url['host']));
+    if ('x' === ($url['path'] ?? '')) {
+        takesString($url['path']);
+    }
+}
+
+/** An offset a sealed shape lacks is one finding; the value is not then null or never. */
+function missingOffsetOnce(): void
+{
+    $calls = [];
+    takesString($calls[0]['title']); // want P2313
+    $writes = array_values(array_filter($calls, static fn (array $c): bool => 'POST' === $c[0]));
+    takesString($writes[0][0]); // want P2313
+}

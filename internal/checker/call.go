@@ -347,6 +347,9 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 			}
 		}
 	case "array_filter":
+		if sh, ok := argType(0).(types.Shape); ok && len(sh.Entries) == 0 {
+			return sh // nothing to filter: still []
+		}
 		if a, ok := argType(0).(types.Array); ok {
 			if r, ok := ret.(types.Array); ok {
 				v := r.Value
@@ -359,6 +362,9 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 			}
 		}
 	case "array_values":
+		if sh, ok := argType(0).(types.Shape); ok && len(sh.Entries) == 0 {
+			return sh // nothing to renumber: still []
+		}
 		if r, ok := ret.(types.Array); ok {
 			if a, ok := argType(0).(types.Array); ok && a.NonEmpty {
 				r.NonEmpty = true
@@ -849,6 +855,14 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 			ret := x.checkCall(sig, e.Args, env, e.S, expected)
 			if meth.SelfOut != nil {
 				x.narrowPath(env, e.Object, x.bindReceiver(meth.SelfOut, m, meth.Class), false)
+			}
+			if _, isVoid := meth.Return.(types.Void); isVoid {
+				// A void method is called for what it does to its object:
+				// what was known of the members under the receiver may be
+				// gone (PHPStan forgets them as well); the receiver stands.
+				if base, ok := pathKey(e.Object); ok {
+					env.invalidateUnder(base)
+				}
 			}
 			out = append(out, ret)
 		}
