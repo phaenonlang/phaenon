@@ -56,3 +56,15 @@ function keys(array $keys): array
 {
     return Seq::map($keys, fn (string $k) => Bytes::base64($k, urlSafe: true));
 }
+
+// `.` joins binary to binary and erases unchanged (strings.md §2).
+/** @param list<string> $chunks */
+function frame(string $header, array $chunks): string
+{
+    $out = '';
+    foreach ($chunks as $chunk) {
+        $out .= $chunk;
+    }
+
+    return $header . $out;
+}
