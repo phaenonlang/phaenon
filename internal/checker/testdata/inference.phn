@@ -670,3 +670,177 @@ function reflects(\ReflectionClass $r): void
 function takesUserClass(\ReflectionClass $r): void
 {
 }
+
+/** @param \Closure(string, array<string, string>): (array<string, mixed>|null) $post */
+function takesPost(\Closure $post): void
+{
+}
+
+function fail(string $m): never
+{
+    throw new \RuntimeException($m);
+}
+
+function closureNever(): void
+{
+    takesPost(static function (): array { throw new \RuntimeException('x'); });
+    takesPost(static function (string $url): array { fail('no'); });
+    takesPost(static function (string $url): array { return ['a' => 1]; });
+    takesPost(static function (): array { if (rand(0, 1)) { throw new \RuntimeException('x'); } return []; });
+    takesPost(static function (): array { // want P2203, P2103
+    });
+    takesPost(static function (): array { return [1]; }); // want P2103
+}
+
+/** @param \Closure(string): (array{token: string, expiresIn: int}|null) $signIn */
+function takesSignIn(\Closure $signIn): void
+{
+}
+
+/** @param list<array{string, string, string}> $calls */
+function takesCalls(array $calls): void
+{
+}
+
+/** @param array{} $none */
+function takesNone(array $none): void
+{
+}
+
+/**
+ * @param list<array{string, string, string, array<string, mixed>|null}> $github
+ * @param array{token: string, who: string, expiresIn: int} $session
+ * @param array{token: string} $short
+ */
+function shapeWider(array $github, array $session, array $short): void
+{
+    takesSignIn(static fn (string $o): array => ['token' => 'a', 'who' => 'b', 'expiresIn' => 1]);
+    takesSignIn(static fn (string $o): array => $session);
+    takesSignIn(static fn (string $o): array => $short); // want P2103
+    takesCalls($github);
+    takesNone([]);
+    takesNone(['a' => 1]); // want P2103
+}
+
+/**
+ * @param list<string> $a
+ * @param list<string> $b
+ * @param array<string, string> $env
+ * @param list<array<string, mixed>> $rulesets
+ */
+function arrayFunctions(array $a, array $b, string $repo, array $env, array $rulesets, string $cmd): void
+{
+    [$owner, $name] = array_pad(explode('/', $repo, 2), 2, '');
+    takesString($name);
+    foreach (array_intersect($a, $b) as $x) {
+        takesString($x);
+    }
+    foreach ([...array_intersect($a, $b), ...array_diff($a, $b)] as $y) {
+        takesString($y);
+    }
+    takesList(array_values(array_intersect($a, $b)));
+    $defaults = [];
+    if ('' === $repo) {
+        $defaults['K8S_A'] = 'false';
+    }
+    takesHeaders(array_diff_key($defaults, $env));
+    takesHeaders(array_intersect_key($env, array_flip(array_intersect($a, $b))));
+    $byName = array_column($rulesets, null, 'name');
+    takesList(array_keys($byName['x']));
+    takesList(array_column($rulesets, 'name')); // want P2103 "list given"
+    exec($cmd, $out);
+    takesString($out[0] ?? '');
+    $h = substr_replace('abc', 'q', 1, 1);
+    takesString($h);
+    takesString(str_replace("\n", "\r\n", $h));
+    takesString(substr_replace(['abc'], 'q', 1, 1)); // want P2103
+}
+
+final class Leak
+{
+    /** @param list<string> $roots */
+    public function __construct(public string $path, public array $roots)
+    {
+    }
+}
+
+/**
+ * @param list<User> $users
+ * @param list<Leak> $found
+ */
+function appendInLoop(array $users, array $found): void
+{
+    $leaks = [];
+    $names = [];
+    $n = 0;
+    foreach ($users as $user) {
+        foreach ($found as $leak) {
+            $leaks[] = [$user, ['a' => 1], $leak];
+        }
+        $names[] = $user->name;
+        $n = $n + 1;
+    }
+    foreach ($leaks as [$user, $shape, $leak]) {
+        takesString($user->name);
+        takesList($leak->roots);
+        takesInt($shape['a']);
+    }
+    takesList($names);
+    takesInt($n);
+    takesString($n); // want P2103 "int given"
+}
+
+/** @param list<User> $active */
+function byRefAppend(array $active): void
+{
+    $detached = [];
+    $f = function (int $i) use ($active, &$detached): void {
+        $detached[] = $active[$i];
+    };
+    $f(1);
+    foreach ($detached as $member) {
+        takesString($member->name);
+    }
+    $urls = [];
+    $g = static function (string $url, array $headers) use (&$urls): array {
+        $urls[] = [$url, $headers['authorization']];
+
+        return [200, ''];
+    };
+    $g('u', []);
+    takesString($urls[1][0]);
+    takesString($urls[1][1]); // want P2103 "mixed"
+    $count = 0;
+    $h = function () use (&$count): void {
+        ++$count;
+    };
+    $h();
+    takesInt($count);
+    $fetched = [];
+    $k = function (int $i, string $op) use ($active, &$fetched): void {
+        $member = $active[$i];
+        if ('fetch' === $op) {
+            $fetched[] = $member;
+
+            return;
+        }
+        takesString($member->name);
+    };
+    $k(0, 'fetch');
+    foreach ($fetched as $member) {
+        takesString($member->name);
+    }
+}
+
+function splitFlags(string $s): void
+{
+    foreach (preg_split('/\s+/', $s, flags: \PREG_SPLIT_NO_EMPTY) ?: [] as $piece) {
+        takesString($piece);
+    }
+    foreach (preg_split('/\s+/', $s, -1, \PREG_SPLIT_NO_EMPTY | \PREG_SPLIT_DELIM_CAPTURE) ?: [] as $piece) {
+        takesString($piece);
+    }
+    foreach (preg_split('/\s+/', $s, -1, \PREG_SPLIT_OFFSET_CAPTURE) ?: [] as $piece) {
+        takesString($piece); // want P2103
+    }
+}

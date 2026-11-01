@@ -19,6 +19,110 @@ type varInfo struct {
 	// instanceof that is always true, a === that is always false) need both
 	// types to agree, as PHPStan does with treatPhpDocTypesAsCertain off.
 	native types.Type
+	// conds remembers what a condition the variable was assigned from
+	// narrowed: `$ok = is_string($v) && …` records that $v is a string
+	// when $ok is true, so `if (!$ok) { return; }` leaves $v a string, as
+	// PHPStan's conditional expressions do. Dropped when the variable or
+	// one the condition narrowed is assigned again.
+	conds []condHolder
+}
+
+// condHolder is one branch of a condition a variable was assigned from:
+// when the variable's narrowed type fits whenType, the branch was taken,
+// and narrowed says what the variables mentioned were in it.
+type condHolder struct {
+	whenType types.Type
+	narrowed map[string]types.Type
+}
+
+// condBranch records the narrowings of one branch of a condition against
+// the environment before it. A branch that narrowed nothing is still a
+// branch the value may come from, so it is kept with nothing to apply;
+// only an unreachable branch is nil.
+func condBranch(whenType types.Type, branch, before *state) *condHolder {
+	if branch.dead {
+		return nil
+	}
+	narrowed := map[string]types.Type{}
+	for k, v := range branch.vars {
+		if b, ok := before.vars[k]; ok && !types.Equal(b.t, v.t) {
+			narrowed[k] = v.t
+		}
+	}
+	return &condHolder{whenType: whenType, narrowed: narrowed}
+}
+
+// setConds attaches the condition branches to a variable just assigned;
+// nothing is kept when no branch narrowed anything.
+func (e *state) setConds(name string, holders ...*condHolder) {
+	info, ok := e.vars[name]
+	if !ok {
+		return
+	}
+	info.conds = nil
+	any := false
+	for _, h := range holders {
+		if h != nil {
+			info.conds = append(info.conds, *h)
+			any = any || len(h.narrowed) > 0
+		}
+	}
+	if !any {
+		info.conds = nil
+	}
+	e.vars[name] = info
+}
+
+// applyConds narrows the variables a condition assigned to name mentioned,
+// once name itself is narrowed to t: the branches whose type t fits were
+// the ones taken. Both branches fitting says nothing.
+func (e *state) applyConds(name string, t types.Type, p *program.Program) {
+	info, ok := e.vars[name]
+	if !ok || len(info.conds) == 0 {
+		return
+	}
+	var taken []condHolder
+	for _, c := range info.conds {
+		if types.IsSubtype(t, c.whenType, p) {
+			taken = append(taken, c)
+		}
+	}
+	if len(taken) != 1 {
+		return
+	}
+	for k, nt := range taken[0].narrowed {
+		cur, ok := e.vars[k]
+		if !ok {
+			continue
+		}
+		r := types.Intersect(cur.t, nt, p)
+		if _, never := r.(types.Never); never {
+			continue
+		}
+		cur.t = r
+		cur.native = narrowNative(cur.native, r, p)
+		e.vars[k] = cur
+	}
+}
+
+// dropConds forgets the conditions that mention name: the variable it
+// narrowed has another value now.
+func (e *state) dropConds(name string) {
+	for k, v := range e.vars {
+		if len(v.conds) == 0 {
+			continue
+		}
+		kept := v.conds[:0:0]
+		for _, c := range v.conds {
+			if _, mentions := c.narrowed[name]; !mentions {
+				kept = append(kept, c)
+			}
+		}
+		if len(kept) != len(v.conds) {
+			v.conds = kept
+			e.vars[k] = v
+		}
+	}
 }
 
 // state is the abstract state at one program point: the type of every
@@ -26,34 +130,20 @@ type varInfo struct {
 type state struct {
 	vars  map[string]varInfo
 	paths map[string]types.Type // "$this->x", "$a['k']" → narrowed type
-	// conds holds, per boolean variable, the condition it was assigned
-	// from: `$ok = null !== $x` makes `if ($ok)` narrow $x, as PHPStan
-	// does, until $ok or a variable the condition reads is reassigned.
-	conds map[string]condition
 	dead  bool
 }
 
-// condition is a boolean variable's defining expression and the variables
-// it reads.
-type condition struct {
-	expr ast.Expr
-	vars map[string]bool
-}
-
 func newEnv() *state {
-	return &state{vars: map[string]varInfo{}, paths: map[string]types.Type{}, conds: map[string]condition{}}
+	return &state{vars: map[string]varInfo{}, paths: map[string]types.Type{}}
 }
 
 func (e *state) clone() *state {
-	n := &state{vars: make(map[string]varInfo, len(e.vars)), paths: make(map[string]types.Type, len(e.paths)), conds: make(map[string]condition, len(e.conds)), dead: e.dead}
+	n := &state{vars: make(map[string]varInfo, len(e.vars)), paths: make(map[string]types.Type, len(e.paths)), dead: e.dead}
 	for k, v := range e.vars {
 		n.vars[k] = v
 	}
 	for k, v := range e.paths {
 		n.paths[k] = v
-	}
-	for k, v := range e.conds {
-		n.conds[k] = v
 	}
 	return n
 }
@@ -63,17 +153,7 @@ func (e *state) set(name string, t types.Type) {
 	e.vars[name] = varInfo{t: t}
 	e.invalidatePrefix("$" + name)
 	e.invalidateMentions(name)
-	e.dropConditions(name)
-}
-
-// dropConditions forgets the condition a variable carried and every
-// condition that reads the variable: either has a new value.
-func (e *state) dropConditions(name string) {
-	for k, c := range e.conds {
-		if k == name || c.vars[name] {
-			delete(e.conds, k)
-		}
-	}
+	e.dropConds(name)
 }
 
 // invalidateMentions drops the paths that pass the variable as an argument
@@ -262,7 +342,7 @@ func join(a, b *state) *state {
 	n := newEnv()
 	for k, va := range a.vars {
 		if vb, ok := b.vars[k]; ok {
-			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb)}
+			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds)}
 		} else {
 			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native}
 		}
@@ -275,11 +355,6 @@ func join(a, b *state) *state {
 	for k, ta := range a.paths {
 		if tb, ok := b.paths[k]; ok {
 			n.paths[k] = types.MakeUnion(ta, tb)
-		}
-	}
-	for k, ca := range a.conds {
-		if cb, ok := b.conds[k]; ok && ca.expr == cb.expr {
-			n.conds[k] = ca
 		}
 	}
 	return n
@@ -342,34 +417,6 @@ func (e *state) widen(prev *state) {
 			e.paths[k] = generalize(pt, t, 0) // `$this->rows[] = …` in a loop grows a path as a variable
 		}
 	}
-}
-
-// generalize widens next, a loop variable's type after one more iteration,
-// against prev, its type before: an unchanged type stays; literals that
-// moved become the range or primitive they move in; two shapes with the
-// same keys generalise entry by entry; shapes that gained keys become an
-// array of their keys and values, which keeps a shape appended to a list
-// intact (`$rows[] = ['a', $x]` is list<array{string, string}>, not
-// list<list<string>>); arrays generalise key and value. A kind only one
-// side has is kept as it is.
-func generalize(prev, next types.Type, depth int) types.Type {
-	if types.Equal(prev, next) {
-		return next
-	}
-	if depth > 3 {
-		return widenType(types.MakeUnion(prev, next))
-	}
-	a, b := splitForGeneralize(prev), splitForGeneralize(next)
-	var out []types.Type
-	out = append(out, generalizeLiterals(a.strs, b.strs, types.TString)...)
-	out = append(out, generalizeLiterals(a.floats, b.floats, types.TFloat)...)
-	out = append(out, generalizeLiterals(a.bools, b.bools, types.TBool)...)
-	out = append(out, generalizeInts(a.ints, b.ints)...)
-	out = append(out, generalizeShapes(a.shapes, b.shapes, depth)...)
-	out = append(out, generalizeArrays(a.arrays, b.arrays, depth)...)
-	out = append(out, a.others...)
-	out = append(out, b.others...)
-	return types.MakeUnion(out...)
 }
 
 type generalizeParts struct {
@@ -499,38 +546,6 @@ func generalizeShapes(a, b []types.Shape, depth int) []types.Type {
 		arr.Key = generalize(keysA, keysB, depth+1)
 	}
 	return []types.Type{arr}
-}
-
-func generalizeArrays(a, b []types.Array, depth int) []types.Type {
-	toTypes := func(ms []types.Array) []types.Type {
-		out := make([]types.Type, len(ms))
-		for i, m := range ms {
-			out[i] = m
-		}
-		return out
-	}
-	switch {
-	case len(a) == 0:
-		return toTypes(b)
-	case len(b) == 0:
-		return toTypes(a)
-	}
-	var keysA, valsA, keysB, valsB []types.Type
-	list, nonEmpty := true, true
-	for _, m := range a {
-		keysA, valsA = append(keysA, m.Key), append(valsA, m.Value)
-		list, nonEmpty = list && m.List, nonEmpty && m.NonEmpty
-	}
-	for _, m := range b {
-		keysB, valsB = append(keysB, m.Key), append(valsB, m.Value)
-		list, nonEmpty = list && m.List, nonEmpty && m.NonEmpty
-	}
-	return []types.Type{types.Array{
-		Key:      generalize(types.MakeUnion(keysA...), types.MakeUnion(keysB...), depth+1),
-		Value:    generalize(types.MakeUnion(valsA...), types.MakeUnion(valsB...), depth+1),
-		List:     list,
-		NonEmpty: nonEmpty,
-	}}
 }
 
 func shapesKeySet(ms []types.Shape) map[types.ShapeEntry]bool {
@@ -750,4 +765,85 @@ func pathKey(e ast.Expr) (string, bool) {
 		return "", false
 	}
 	return "", false
+}
+
+// generalize widens next, a loop variable's type after one more iteration,
+// against prev, its type before: an unchanged type stays; literals that
+// moved become the range or primitive they move in; two shapes with the
+// same keys generalise entry by entry; shapes that gained keys become an
+// array of their keys and values, which keeps a shape appended to a list
+// intact (`$rows[] = ['a', $x]` is list<array{string, string}>, not
+// list<list<string>>); arrays generalise key and value. A kind only one
+// side has is kept as it is.
+func generalize(prev, next types.Type, depth int) types.Type {
+	if types.Equal(prev, next) {
+		return next
+	}
+	if depth > 3 {
+		return widenType(types.MakeUnion(prev, next))
+	}
+	a, b := splitForGeneralize(prev), splitForGeneralize(next)
+	var out []types.Type
+	out = append(out, generalizeLiterals(a.strs, b.strs, types.TString)...)
+	out = append(out, generalizeLiterals(a.floats, b.floats, types.TFloat)...)
+	out = append(out, generalizeLiterals(a.bools, b.bools, types.TBool)...)
+	out = append(out, generalizeInts(a.ints, b.ints)...)
+	out = append(out, generalizeShapes(a.shapes, b.shapes, depth)...)
+	out = append(out, generalizeArrays(a.arrays, b.arrays, depth)...)
+	out = append(out, a.others...)
+	out = append(out, b.others...)
+	return types.MakeUnion(out...)
+}
+
+func generalizeArrays(a, b []types.Array, depth int) []types.Type {
+	toTypes := func(ms []types.Array) []types.Type {
+		out := make([]types.Type, len(ms))
+		for i, m := range ms {
+			out[i] = m
+		}
+		return out
+	}
+	switch {
+	case len(a) == 0:
+		return toTypes(b)
+	case len(b) == 0:
+		return toTypes(a)
+	}
+	var keysA, valsA, keysB, valsB []types.Type
+	list, nonEmpty := true, true
+	for _, m := range a {
+		keysA, valsA = append(keysA, m.Key), append(valsA, m.Value)
+		list, nonEmpty = list && m.List, nonEmpty && m.NonEmpty
+	}
+	for _, m := range b {
+		keysB, valsB = append(keysB, m.Key), append(valsB, m.Value)
+		list, nonEmpty = list && m.List, nonEmpty && m.NonEmpty
+	}
+	return []types.Type{types.Array{
+		Key:      generalize(types.MakeUnion(keysA...), types.MakeUnion(keysB...), depth+1),
+		Value:    generalize(types.MakeUnion(valsA...), types.MakeUnion(valsB...), depth+1),
+		List:     list,
+		NonEmpty: nonEmpty,
+	}}
+}
+
+// joinConds keeps the condition a variable carried into both branches of a
+// join — the same holders, as a ternary testing the variable leaves them —
+// and forgets it when the sides disagree.
+func joinConds(a, b []condHolder) []condHolder {
+	if len(a) == 0 || len(a) != len(b) {
+		return nil
+	}
+	for i := range a {
+		if !types.Equal(a[i].whenType, b[i].whenType) || len(a[i].narrowed) != len(b[i].narrowed) {
+			return nil
+		}
+		for k, t := range a[i].narrowed {
+			u, ok := b[i].narrowed[k]
+			if !ok || !types.Equal(t, u) {
+				return nil
+			}
+		}
+	}
+	return a
 }

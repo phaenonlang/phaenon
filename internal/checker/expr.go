@@ -158,6 +158,14 @@ func (x *fnCtx) exprLenient(e ast.Expr, env *state) types.Type {
 	case *ast.Variable:
 		return x.variable(e, env, true)
 	case *ast.Index:
+		// A narrowed offset reads as narrowed here too: `is_bool($e['v'])`
+		// after `is_scalar($e['v'])` subtracts bool from scalar, not from
+		// the element type.
+		if key, ok := pathKey(e); ok {
+			if t, ok := env.getPath(key); ok {
+				return t
+			}
+		}
 		base := x.exprLenient(e.Array, env)
 		if e.Index != nil {
 			x.expr(e.Index, env, nil)
@@ -1280,6 +1288,21 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		if types.IsSubtype(l, types.TString, nil) && types.IsSubtype(r, types.TString, nil) {
 			return types.TString
 		}
+		// Flags combine into a literal: PREG_SPLIT_NO_EMPTY |
+		// PREG_SPLIT_DELIM_CAPTURE is 3, which a conditional return type
+		// on the flags can tell apart (PHPStan folds it too).
+		if a, ok := types.IsIntLit(l); ok {
+			if b, ok := types.IsIntLit(r); ok {
+				switch op {
+				case token.Kind('&'):
+					return types.IntLit(a & b)
+				case token.Kind('|'):
+					return types.IntLit(a | b)
+				default:
+					return types.IntLit(a ^ b)
+				}
+			}
+		}
 		x.arithResult(l, r, span, string(rune(op)))
 		return types.TInt
 	case token.T_SL, token.T_SR:
@@ -1551,12 +1574,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		x.assignTo(e.Target, vt, env, e.S)
 		if v, ok := e.Target.(*ast.Variable); ok {
 			env.setNative(v.Name, x.nativeOf(e.Value, env))
-			// `$unknown = null === $before`: the variable carries its
-			// condition for a later `if ($unknown)` (not one reading the
-			// variable itself: `$ok = $ok && …` would loop).
-			if vars, ok := conditionVars(e.Value); ok && !vars[v.Name] {
-				env.conds[v.Name] = condition{expr: e.Value, vars: vars}
-			}
+			x.rememberCondition(v.Name, e.Value, env)
 		}
 		return vt
 	}
@@ -2097,4 +2115,69 @@ func arrayKV(m types.Type) (key, value types.Type, nonEmpty bool) {
 		return shapeKeys(m), shapeValues(m), nonEmpty
 	}
 	return types.TArrayKey, types.TMixed, false
+}
+
+// rememberCondition records on a variable assigned a condition, or a
+// ternary, what each branch narrowed: `$ok = is_string($v) && …` says $v
+// is a string when $ok is true; `$s = $b instanceof X ? $b->s : null`
+// says $b is an X when $s is not null. A later test of the variable
+// applies the branch taken (PHPStan's conditional expressions). The
+// value was typed already; the branches are read in a silent pass.
+func (x *fnCtx) rememberCondition(name string, value ast.Expr, env *state) {
+	for {
+		p, ok := value.(*ast.Paren)
+		if !ok {
+			break
+		}
+		value = p.Expr
+	}
+	var whenThen, whenElse types.Type
+	var condExpr ast.Expr
+	var ternary *ast.Ternary
+	switch v := value.(type) {
+	case *ast.Ternary:
+		ternary, condExpr = v, v.Cond
+	case *ast.Binary:
+		switch v.Op {
+		case token.T_BOOLEAN_AND, token.T_LOGICAL_AND, token.T_BOOLEAN_OR, token.T_LOGICAL_OR,
+			token.T_IS_IDENTICAL, token.T_IS_NOT_IDENTICAL, token.T_IS_EQUAL, token.T_IS_NOT_EQUAL:
+			condExpr = v
+		}
+	case *ast.Unary:
+		if v.Op == token.Kind('!') {
+			condExpr = v
+		}
+	case *ast.Instanceof, *ast.IsExpr, *ast.Isset, *ast.Empty:
+		condExpr = value
+	case *ast.Call:
+		if n, ok := v.Callee.(*ast.Name); ok && predicateTarget(strings.ToLower(n.Parts[len(n.Parts)-1])) != nil {
+			condExpr = value
+		}
+	}
+	if condExpr == nil {
+		return
+	}
+	before := env.clone()
+	saved := x.c.mark()
+	then, els := x.cond(condExpr, env.clone())
+	if ternary != nil {
+		if ternary.Then == nil {
+			whenThen = types.Truthy(x.condValueType)
+		} else {
+			whenThen = x.expr(ternary.Then, then, nil)
+		}
+		whenElse = x.expr(ternary.Else, els, nil)
+	} else {
+		whenThen, whenElse = types.TTrue, types.TFalse
+	}
+	x.c.rollback(saved)
+	// Only values that tell the branches apart carry information: PHPStan
+	// records nothing for `$b instanceof X ? $b->s : null` when $b->s is
+	// mixed, since null is one of its values.
+	if _, never := types.Intersect(whenThen, whenElse, x.p()).(types.Never); !never {
+		return
+	}
+	delete(then.vars, name)
+	delete(els.vars, name)
+	env.setConds(name, condBranch(whenThen, then, before), condBranch(whenElse, els, before))
 }
