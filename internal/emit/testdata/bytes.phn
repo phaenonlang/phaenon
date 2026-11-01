@@ -52,3 +52,14 @@ function keys(list<bytes> $keys): list<string>
 {
     return $keys->map(fn (bytes $k) => $k->base64(urlSafe: true));
 }
+
+// `.` joins binary to binary and erases unchanged (strings.md §2).
+function frame(bytes $header, list<bytes> $chunks): bytes
+{
+    $out = (bytes) '';
+    foreach ($chunks as $chunk) {
+        $out .= $chunk;
+    }
+
+    return $header . $out;
+}

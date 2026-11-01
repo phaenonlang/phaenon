@@ -1295,10 +1295,53 @@ func bytesAgainstText(l, r types.Type) bool {
 	return (lb && rt) || (rb && lt)
 }
 
+// concatBytes reports an operand of `.` that is binary data: bytes, maybe
+// null (which `.` reads as the empty string), or a value already reported.
+func concatBytes(t types.Type) bool {
+	found := false
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Bytes:
+			found = true
+		case types.Null, types.Never:
+		case types.Unknown:
+			if !types.Equal(m, types.TError) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return found
+}
+
+// hasBytes reports a type with a bytes member.
+func hasBytes(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		if _, ok := m.(types.Bytes); ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Type {
 	span := e.Span()
 	switch op {
 	case token.Kind('.'):
+		// `.` joins two values of the same kind (strings.md §2): binary
+		// joined to binary stays binary, as `.=` on a bytes buffer does;
+		// binary mixed with text is the confusion bytes exists to catch,
+		// reported once, its result already reported.
+		if concatBytes(l) && concatBytes(r) {
+			return types.TBytes
+		}
+		if hasBytes(l) || hasBytes(r) {
+			x.report(span, P2530, "cannot concatenate bytes and text: ->text() decodes bytes as UTF-8, ->bytes() encodes text, (bytes) '' starts a binary buffer")
+			x.checkStringable(types.Subtract(l, types.TBytes, x.p()), span)
+			x.checkStringable(types.Subtract(r, types.TBytes, x.p()), span)
+			return types.TError
+		}
 		x.checkStringable(l, span)
 		x.checkStringable(r, span)
 		if ll, ok := l.(types.StringLit); ok {
@@ -1666,6 +1709,14 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		res = types.MakeUnion(types.StripNull(cur), vt)
 	} else {
 		res = x.binaryTypes(op, cur, vt, e)
+	}
+	if idx, ok := e.Target.(*ast.Index); ok && idx.Index != nil && !types.IsNullable(cur) {
+		// `$parts[0] .= $chunk` reads the offset before it writes it: the
+		// write replaces an existing entry, so a list stays a list (PHPStan's
+		// setExistingOffsetValueType, as for the key of a foreach).
+		if key, ok := pathKey(idx); ok {
+			env.setPath(key, cur)
+		}
 	}
 	x.assignTo(e.Target, res, env, e.S)
 	return res
