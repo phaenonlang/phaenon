@@ -95,6 +95,26 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   `@template B of self::*_REFERENCE` (a constant wildcard as a bound). Each is a small PHPStan
   extension or scope feature; pick up when a dogfood target makes one matter.
 
+## M5 — concurrency (2026-11-02)
+
+- **`phn check` against `composer.json`**: a file that uses `concurrently` in a project that does
+  not require `phaenon/concurrent` fails at runtime, not at check time — the compiler knows the
+  amp API from its embedded declarations (`stdlib/concurrent/amp/`), so it cannot tell. A P4xxx
+  warning from the project's `composer.json` / `installed.json` is the fix (`concurrency.md` §7).
+- **The embedded amp declarations shadow the vendor's**: `LoadStubs` declares `Amp\Future` and
+  friends eagerly, so a project's real `amphp/amp` is never consulted for them. Signatures follow
+  3.1; a method missing there is a declaration to add, not a checker bug.
+- **`Scope::first` / a race** (C6) and a `Scope::settle` that returns results and failures side
+  by side: library additions when a use site appears.
+- **PhpStorm plugin**: nothing yet for `concurrently` / `spawn`; `concurrency.md` §11 has the
+  lexer approximation to build (keywords as comments, expression form stays a syntax error until
+  a PSI block exists).
+- **Dogfood** not started: `tq-cli` first (C8), then `tequila/nats`'s `RevoltTransport` with the
+  single-reader change to `Connection` (`concurrency.md` §9.3).
+- The emitter's `use` clause is syntactic: a variable passed by reference to a function inside
+  the block (`sort($rows)`) is not seen as assigned and is captured by value. The checker knows
+  by-ref parameters; a hint from it would make the clause exact.
+
 ## M6 — tooling, analysis rules
 
 - **Throw analysis** — dead `catch` blocks, `@throws` checking (PHPStan `catch.neverThrown`;

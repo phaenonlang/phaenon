@@ -33,6 +33,7 @@ The roadmap puts the editor plugins in M6.
 | **M4** second slice (2026-10-30) | `bytes` in use: the `(bytes)` cast (Phaenon-only token `T_BYTES_CAST`, erased by the emitter), `P2530`, `P2305` on bytes vs text, the overlay `stdlib/overlay/bytes.php` + `mongodb.php`, `stdlib/runtime/Bytes.phn`, `Str::bytes`; `P2518` with the implied key bound (`program.ImplyMapKeyBounds`); `P2516` confirmed an error; `TestRuntimeStubs` type-checks the `.phn` stdlib | Checker golden `bytes.phn`, emit golden `bytes.phn` under PHPStan max; reflector and mongodb-odm at 0, object-mapper at its 16 known test findings | design `strings.md` §6 (2026-10-30 rows), `collections.md` §8 |
 | **M4** third slice (2026-10-30) | Null receivers guarded (`program.MethodTarget.Guard`, checker `purePath`, emitter `stdlibCall`), `\Stringable` receivers → `Str` (`stringableFallback`), `phn migrate` tuple lift (`render` KindShape), `phn stdlib --out DIR [--check]` (`emit.Stdlib`), `--no-types` removed. Bug fixed: `emit.File` reparsed the source, so `phn build` never lowered method syntax (the goldens compiled the checked tree directly; they now go through `File`) | Checker/emit goldens `collections.phn` extended, PHPStan max green; dogfood libraries unchanged | design `collections.md` §3.1, §8; `strings.md` §7; roadmap M4 |
 | **M4** fourth slice (2026-11-01) | `fun` declares a named function or method, `public` implied (contextual `T_FUN`, parser `Fun`/`Head` on the declarations, emitter `lowerFunctions` writing the PSR-12 head, printer prints `fun` back); `private(set)` without a main visibility is public (emitter writes `public private(set)`); closures in constant expressions (`fn`/`function` in attribute arguments, constants, defaults, static initializers) lowered to `static function` with `P2531` for `$this`/`use`; `phn migrate` writes `fun` and drops a sole `public` (`--keep-public`) | Lexer test, emit golden `functions.phn` (runs on PHP 8.5.3, PHPStan max), checker golden `functions.phn`, lift golden `functions.php`; the stdlib `.phn` and all four dogfood trees respelled with byte-identical output | `5da3e09` · design `functions.md`, roadmap D15; plugin `603db11` |
+| **M5** first slice (2026-11-02) | `concurrently (opts) { … }` and `spawn` (contextual `T_CONCURRENTLY`/`T_SPAWN`, `ast.Concurrently`/`ast.Spawn`, printer), checker `P2601`–`P2606` (`internal/checker/concurrency.go`), emitter `lowerConcurrency` (`Scope::run(function () use (…) { … }, opts)`, `Scope::spawn(fn () => …)`, computed `use` clause), the runtime `stdlib/concurrent/Scope.phn` written in Phaenon with the amp/Revolt declarations beside it, `phn stdlib --concurrent-out`, the local package `../concurrent` (14 PHPUnit tests against the real amp, PHPStan max) | Checker golden `concurrency.phn`, emit golden `concurrency.phn` → `.php` under PHPStan max; the FrankenPHP worker-mode check (400 requests, loop persisting between requests) recorded in `concurrency.md` §9.2 | `df7d449` + the follow-up · design `concurrency.md` (C1–C10), roadmap D6 revised, D16 |
 
 ## Next — a maintainer's choice
 
@@ -43,10 +44,13 @@ Rewritten 2026-11-01 when M4 closed. Whoever lands the next one updates this sec
    summary): four slices, `tequila/core` green on the compiled output, the plugin following the
    language, the three earlier dogfood trees respelled with `fun`.
 2. **M5 — concurrency** (in progress): `../design/concurrency.md` reviewed 2026-11-01,
-   decisions C1–C10 in its §15, roadmap D6 revised and D16 added. Order (C8, C9): the
-   FrankenPHP worker-mode check of Revolt between requests, goldens, checker (`P26xx`), emitter,
-   the package `phaenon/concurrent`; dogfood `tq-cli` first, then the `RevoltTransport` for
-   `tequila/nats`. No compiler code exists yet.
+   decisions C1–C10 in its §15, roadmap D6 revised and D16 added. Done: the FrankenPHP check
+   (C9), the syntax, checker, emitter and the `phaenon/concurrent` package (first slice above).
+   Next (C8): the `tq-cli` dogfood on a local `phaenon-dogfood` branch — migrate, replace the
+   twelve `Api::concurrently` fan-outs, suite and PHPStan on the output — then the
+   `RevoltTransport` and single-reader change for `tequila/nats`; the PhpStorm plugin's
+   lexer approximation (`concurrency.md` §11); a maintainer creates `phaenonlang/concurrent`
+   and pushes `../concurrent` (local commit `fb494b7`).
 3. Beside it, when wanted: the Composer plugin (M6, D13); the three earlier dogfood branches on
    the sibling layout (D12); the checker items in [[open-items]].
 

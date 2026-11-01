@@ -26,13 +26,20 @@ use function Amp\Future\await;
  */
 final class Scope
 {
-    /** The open scopes of every fiber but the main one, innermost last. */
+    /**
+     * The open scopes of every fiber but the main one, innermost last.
+     *
+     * @var WeakMap<object, list<Scope>>|null
+     */
     private static ?WeakMap $stacks = null;
 
     /** The main fiber's open scopes, innermost last. */
     private static list<Scope> $main = [];
 
+    /** Every task spawned in the scope, in order; join() awaits them from $joined on. */
     private list<Future<mixed>> $tasks = [];
+
+    private int $joined = 0;
 
     private readonly DeferredCancellation $own;
 
@@ -115,10 +122,10 @@ final class Scope
      * block of its own, so a failure cancels the other tasks and is thrown
      * here.
      */
-    static fun map<K of int|string, T, R>(iterable<K, T> $items, Closure(T): R $task): map<K, R>
+    static fun map<K of int|string, V, U>(iterable<K, V> $items, Closure(V): U $task): map<K, U>
     {
         return concurrently {
-            /** @var map<K, Future<R>> $tasks */
+            /** @var array<K, Future<U>> $tasks */
             $tasks = [];
             foreach ($items as $key => $item) {
                 $tasks[$key] = spawn $task($item);
@@ -134,7 +141,9 @@ final class Scope
      */
     static fun cancellation(): Cancellation
     {
-        return self::current()?->cancellation ?? new NullCancellation();
+        $scope = self::current();
+
+        return $scope === null ? new NullCancellation() : $scope->cancellation;
     }
 
     /** Waits, and wakes early with CancelledException when the scope is cancelled. */
@@ -156,12 +165,15 @@ final class Scope
 
     // ---------------------------------------------------------------- the scope
 
-    /** Awaits every task in completion order; the first failure aborts the rest. */
+    /**
+     * Awaits every task in completion order, the ones spawned meanwhile in
+     * the next round; the first failure aborts the rest.
+     */
     private fun join(): void
     {
-        while ($this->tasks !== []) {
-            $pending = $this->tasks;
-            $this->tasks = [];
+        while ($this->joined < count($this->tasks)) {
+            $pending = array_slice($this->tasks, $this->joined);
+            $this->joined = count($this->tasks);
             try {
                 foreach (Future::iterate($pending, $this->cancellation) as $future) {
                     $future->await();
@@ -176,7 +188,8 @@ final class Scope
      * Cancels every task, waits for all of them, and throws. The first
      * failure recorded in the scope wins over a CancelledException the body
      * received from its own scope; the body's own exception wins over a
-     * task's.
+     * task's. A deadline arrives as amp reports it: a CancelledException
+     * whose previous exception is the TimeoutException.
      */
     private fun abort(Throwable $cause): never
     {
@@ -200,15 +213,11 @@ final class Scope
     /** Waits for every task to finish, whatever its outcome. */
     private fun drain(): void
     {
-        while ($this->tasks !== []) {
-            $pending = $this->tasks;
-            $this->tasks = [];
-            foreach ($pending as $future) {
-                try {
-                    $future->await();
-                } catch (Throwable) {
-                    // The failure is recorded, or the task was cancelled by this scope.
-                }
+        for ($i = 0; $i < count($this->tasks); ++$i) {
+            try {
+                $this->tasks[$i]->await();
+            } catch (Throwable) {
+                // The failure is recorded, or the task was cancelled by this scope.
             }
         }
     }

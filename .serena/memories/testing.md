@@ -80,7 +80,12 @@ requirements. `phn` is not installed on `PATH`: build it from the repo (`AGENTS.
 ## Generated files kept fresh by tests (2026-10-31)
 
 - `TestRuntimePackageFresh` (`internal/emit`) compares the compiled stdlib with `../runtime/src`;
-  `TestPluginStubsFresh` compares the generated pseudo-classes with
-  `../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`. Both skip without the checkout;
-  `phn stdlib --out ../runtime/src --plugin-stubs ../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`
-  rewrites both (`--check` to verify).
+  `TestConcurrentPackageFresh` compares the compiled `Scope.php` with `../concurrent/src`
+  (2026-11-02); `TestPluginStubsFresh` compares the generated pseudo-classes with
+  `../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`. All skip without the checkout;
+  `phn stdlib --out ../runtime/src --concurrent-out ../concurrent/src --plugin-stubs ../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`
+  rewrites all three (`--check` to verify).
+- `TestRuntimeStubs` type-checks `stdlib/concurrent/Scope.phn` as well. The behaviour of the
+  scope — joins, cancellation, deadlines — is tested only in `../concurrent` (`composer test`,
+  14 tests against the real amp 3.1 / Revolt 1.0; `composer stan` at level max): the compiler's
+  goldens see the lowering, not the loop.

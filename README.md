@@ -19,7 +19,9 @@ Phaenon behind method syntax (`$xs->map(…)` → `Seq::map($xs, …)`), `fun` w
 closures in attributes, and a project file that builds sources into sibling output directories.
 Four Tequila libraries build from `.phn` with their suites passing, `tequila/core` among them;
 the checker reads the extensions the local `php` has loaded (ext-mongodb and friends) from its
-reflection.
+reflection. M5 in progress — structured concurrency: `concurrently { … }` blocks and `spawn`
+over amp v3 and the Revolt event loop compile to `Scope::run(…)` / `Scope::spawn(…)` on the
+`phaenon/concurrent` package; the compiler and the package are in, the `tq-cli` dogfood is next.
 
 ## Type checking
 
@@ -129,6 +131,41 @@ list<int>` compiles to `\Phaenon\Type::list(\Phaenon\Type::int())->check($x)`; `
 A generic declaration's docblock adds lines to the output (PHPStan reads one tag per line);
 every other edit keeps line numbers exact. Design: `design/generics.md`, decisions in §11.
 
+## Concurrency
+
+A `concurrently { … }` block owns every task started inside it with `spawn` and ends only when
+all of them have completed; a task's failure cancels the others and is rethrown where the block
+ends. The handle is amp's `Future<T>`, the loop is Revolt's, and no function is marked `async`:
+the body runs in the calling fiber, so a Symfony command or a request handler enters a block
+without starting a loop (`../design/concurrency.md`).
+
+```php
+return concurrently (timeout: 5.0) {
+    $user = spawn $this->users->find($id);          // Amp\Future<User>
+    $orders = spawn $this->orders->forUser($id);    // Amp\Future<list<Order>>
+
+    return new Profile($user->await(), $orders->await());
+};
+```
+
+```php
+return Scope::run(function () use ($id) {
+    $user = Scope::spawn(fn () => $this->users->find($id));
+    $orders = Scope::spawn(fn () => $this->orders->forUser($id));
+
+    return new Profile($user->await(), $orders->await());
+}, timeout: 5.0);
+```
+
+The `use` clause is computed the way a person writes it: variables the body reads by value, ones
+it assigns and the enclosing scope mentions by reference. `Scope::map($items, $f)` is the
+one-line fan-out, `Scope::all($tasks)` awaits handles under the block's cancellation,
+`Scope::cancellation()` is what to hand amp APIs so that they stop when the block does. The
+checker reports `spawn` outside a block, a handle leaving its block, `break`/`yield`/`goto`
+crossing it, a spawn body mutating an outer variable, and `sleep()`/`usleep()` inside a block
+(`P2601`–`P2606`). The runtime class is the Composer package `phaenon/concurrent`, separate from
+`phaenon/runtime` so that a project without concurrency installs no event loop.
+
 ## CLI
 
 ```sh
@@ -136,6 +173,7 @@ phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] 
 phn check [--json] [--no-deprecations] [--exclude PATH]... path...              # type-check .phn (and .php) files
 phn migrate [--keep-docblocks] [--keep-public] path... # rewrite .php as .phn
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Seq, Map, Str, Bytes), as phaenon/runtime ships it
+phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
 phn stdlib --plugin-stubs DIR  # the PhpStorm plugin's editor-only pseudo-classes (ListMethods.php, …) from the same sources
 phn lex   [--php] file                    # token stream
 phn print [--php] file                    # parse and pretty-print

@@ -28,6 +28,27 @@ func TestRuntimePackageFresh(t *testing.T) {
 	}
 }
 
+// TestConcurrentPackageFresh compares the compiled Scope.php with the copy
+// the phaenon/concurrent package ships in the sibling checkout:
+// `phn stdlib --concurrent-out ../concurrent/src` materialises it. Skipped
+// when the checkout is absent.
+func TestConcurrentPackageFresh(t *testing.T) {
+	dir := filepath.Join("..", "..", "..", "concurrent", "src")
+	if _, err := os.Stat(dir); err != nil {
+		t.Skip("no ../concurrent checkout")
+	}
+	compiled, err := Concurrent()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range compiled {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || !bytes.Equal(got, want) {
+			t.Errorf("%s is stale or missing in the concurrent package: run `phn stdlib --concurrent-out ../concurrent/src`", name)
+		}
+	}
+}
+
 // TestPluginStubsFresh compares the generated pseudo-classes with what the
 // PhpStorm plugin bundles in the sibling checkout: `phn stdlib
 // --plugin-stubs ../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`
