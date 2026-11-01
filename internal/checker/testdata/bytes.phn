@@ -111,6 +111,15 @@ function concatenation(bytes $a, bytes $b, string $s, ?bytes $maybe): void
     }
 }
 
+function inlineVar(string $text): void
+{
+    /** @var bytes $raw */
+    $raw = random_bytes(4);
+    takesBytes($raw);
+    /** @var bytes $retyped */
+    $retyped = strtoupper($text); // want P2212
+}
+
 function equality(bytes $a, string $b, bytes $c): void
 {
     if ($a === $b) { // want P2305

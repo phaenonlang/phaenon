@@ -63,3 +63,45 @@ function frame(bytes $header, list<bytes> $chunks): bytes
 
     return $header . $out;
 }
+
+// Written tags erase as the generated ones do (strings.md §5): with
+// `use Phaenon\Bytes;` above, a `bytes` left in a tag would be that class.
+final class Archive
+{
+    /** @var list<bytes> */
+    private array $entries = [];
+
+    /**
+     * @param list<bytes> $parts the bytes of each entry
+     */
+    public function addAll(array $parts): void
+    {
+        foreach ($parts as $part) {
+            $this->entries[] = $part;
+        }
+    }
+
+    /** @return bytes the archive's bytes */
+    public function bytes(): bytes
+    {
+        /** @var bytes $out */
+        $out = Bytes::concat(...$this->entries);
+
+        return $out;
+    }
+
+    /**
+     * @param bytes $entry
+     * @return array{bytes: int, data: bytes}
+     */
+    public function measure(bytes $entry): array
+    {
+        return ['bytes' => $entry->length(), 'data' => $entry];
+    }
+
+    /** @return bytes the first entry, or none */
+    public function first(list<bytes> $from): bytes
+    {
+        return $from[0] ?? (bytes) '';
+    }
+}
