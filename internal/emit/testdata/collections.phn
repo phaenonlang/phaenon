@@ -93,3 +93,8 @@ function prefixed(Id $id): bool
 {
     return $id->startsWith('u-');
 }
+
+function firstPair(list<(string, int)> $pairs): ?(string, int)
+{
+    return $pairs[0] ?? null;
+}

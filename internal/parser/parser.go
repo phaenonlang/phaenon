@@ -338,7 +338,12 @@ func (p *Parser) variable() *ast.Variable {
 func (p *Parser) typeExpr() ast.TypeExpr {
 	start := p.tok().Start
 	if p.accept(token.Kind('?')) {
-		t := p.singleType()
+		var t ast.TypeExpr
+		if p.mode == lexer.ModePhaenon && p.at(token.Kind('(')) {
+			t = p.unionMember() // a nullable tuple: ?(int, string)
+		} else {
+			t = p.singleType()
+		}
 		return &ast.NullableType{S: p.span(start), Type: t}
 	}
 	first := p.unionMember()
