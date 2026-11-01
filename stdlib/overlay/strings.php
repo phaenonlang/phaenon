@@ -6,7 +6,10 @@
  */
 
 /**
- * @return ($flags is 0 ? list<string>|false : list<string|array{string, int}>|false)
+ * Only PREG_SPLIT_OFFSET_CAPTURE (4) makes the pieces [string, int] pairs;
+ * PREG_SPLIT_NO_EMPTY (1) and PREG_SPLIT_DELIM_CAPTURE (2) keep them strings.
+ *
+ * @return ($flags is 0|1|2|3 ? list<string>|false : list<string|array{string, int}>|false)
  */
 function preg_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array|false {}
 
@@ -14,6 +17,11 @@ function preg_split(string $pattern, string $subject, int $limit = -1, int $flag
  * @return ($subject is array ? array<string> : string)
  */
 function str_replace(array|string $search, array|string $replace, string|array $subject, &$count = null): string|array {}
+
+/**
+ * @return ($string is array ? array<string> : string)
+ */
+function substr_replace(array|string $string, array|string $replace, array|int $offset, array|int|null $length = null): string|array {}
 
 /**
  * @return list<string>

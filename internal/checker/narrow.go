@@ -91,10 +91,6 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 			x.condValueType = types.TBool
 			return then, els
 		}
-	case *ast.Variable:
-		if c, ok := env.conds[e.Name]; ok {
-			return x.variableCondition(e, c, env)
-		}
 	case *ast.Assign:
 		// if ($x = expr): the assigned value's truthiness narrows $x.
 		t := x.assign(e, env)
@@ -121,75 +117,6 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		}
 	}
 	return then, els
-}
-
-// variableCondition narrows by the condition a boolean variable was
-// assigned from — `$ok = null !== $x; if ($ok)` — read again, silently,
-// against the current environment (nothing it reads has changed, or the
-// assignment would have dropped it), and by the variable's own value.
-func (x *fnCtx) variableCondition(v *ast.Variable, c condition, env *state) (then, els *state) {
-	saved := x.c.mark()
-	then, els = x.cond(c.expr, env)
-	x.c.rollback(saved)
-	t := x.pathType(v, env)
-	x.condValueType = t
-	x.narrowPath(then, v, types.Truthy(t), true)
-	x.narrowPath(els, v, types.Falsy(t), false)
-	return then, els
-}
-
-// conditionVars says whether an assigned expression is a condition a
-// boolean variable carries — a comparison, logic, instanceof, isset, empty
-// or a type predicate over variables, literals and constants — and lists
-// the variables it reads. Members, calls and nested assignments are not
-// carried: their value may change without the variable being reassigned.
-func conditionVars(e ast.Expr) (map[string]bool, bool) {
-	switch root := e.(type) {
-	case *ast.Paren:
-		return conditionVars(root.Expr)
-	case *ast.Unary:
-		if root.Op != token.Kind('!') {
-			return nil, false
-		}
-	case *ast.Binary:
-		switch root.Op {
-		case token.T_IS_IDENTICAL, token.T_IS_NOT_IDENTICAL, token.T_IS_EQUAL, token.T_IS_NOT_EQUAL,
-			token.Kind('<'), token.Kind('>'), token.T_IS_SMALLER_OR_EQUAL, token.T_IS_GREATER_OR_EQUAL,
-			token.T_BOOLEAN_AND, token.T_BOOLEAN_OR, token.T_LOGICAL_AND, token.T_LOGICAL_OR, token.T_LOGICAL_XOR:
-		default:
-			return nil, false
-		}
-	case *ast.Instanceof, *ast.IsExpr, *ast.Isset, *ast.Empty, *ast.Call:
-	default:
-		return nil, false
-	}
-	vars := map[string]bool{}
-	ok := true
-	ast.Inspect(e, func(n ast.Node) bool {
-		switch n := n.(type) {
-		case *ast.Variable:
-			vars[n.Name] = true
-		case *ast.Call:
-			name, isName := n.Callee.(*ast.Name)
-			if !isName || n.Args == nil || n.Args.FirstClassCallable {
-				ok = false
-				return false
-			}
-			if last := strings.ToLower(name.Parts[len(name.Parts)-1]); last != "count" && predicateTarget(last) == nil {
-				ok = false
-				return false
-			}
-		case *ast.PropertyFetch, *ast.StaticPropertyFetch, *ast.MethodCall, *ast.StaticCall, *ast.New,
-			*ast.Closure, *ast.ArrowFunc, *ast.Assign, *ast.VariableVariable, *ast.Match, *ast.Ternary:
-			ok = false
-			return false
-		}
-		return ok
-	})
-	if !ok || len(vars) == 0 {
-		return nil, false
-	}
-	return vars, true
 }
 
 // alwaysCheck reports conditions whose outcome is fixed by their type.
@@ -275,7 +202,10 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 			return
 		}
 		// Narrowing keeps the member paths: the object is the same one.
-		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define, native: narrowNative(info.native, t, x.p())}
+		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define, native: narrowNative(info.native, t, x.p()), conds: info.conds}
+		if ok {
+			env.applyConds(p.Name, t, x.p())
+		}
 		return
 	}
 	if key, ok := pathKey(e); ok {
