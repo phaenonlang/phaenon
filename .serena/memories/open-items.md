@@ -112,9 +112,8 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   until a PSI element for a block exists (M6, with the LSP); `spawn` results are typed as the
   value, not `Future<T>`.
 - ~~**Dogfood** `tq-cli`~~ — done 2026-11-01 ([[dogfood]]). `tequila/nats`: the `RevoltTransport`,
-  the pump lease and the opt-in reader task are in review as tequila/nats#13 (branch
-  `feat/revolt-transport`, worktree `~/labs/tequila/nats-revolt`), the ADR amendment as
-  tequila/platform#255 (2026-11-01). Merging both closes C8 and lets M5 close.
+  the pump lease and the opt-in reader task merged as tequila/nats#13, the ADR amendment as
+  tequila/platform#255 (2026-11-01). C8 done; M5 closed the same day.
 - ~~**tq-cli's 378 checker findings**~~ — `src` at 0 (2026-11-01), ~~213 in `tests/`~~ at 0
   (2026-11-01, [[dogfood]]). Whether a dogfood's tests must pass `phn check` is still open.
 - **Checker more lenient than PHPStan** (seen on tq-cli's compiled tests, 2026-11-01): offset
@@ -139,17 +138,15 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   (`../design/checker.md` §9, `1d9d6ff`): a key whose type is known numeric is an int key
   (literals, `decimal-int-string` = `(string)` of an int, the int part of `numeric-string`, a
   `(string)` cast looked through member by member); a general `string` key stays a string key
-  on purpose. Left on tq-cli's branch: twelve findings in `src` from ten `(string)` re-keying
-  loops over decoded YAML/JSON that declare string keys (`Val::map()`, `InstallationLoader`
-  ×3, `ResourcesCommand::stringMap()`, `Estate::secretData()`, `BlobPlan::decode()`,
-  `LocalTenant` `render_env`, `SecretsContext::renderedStores()`, `TestInfra\Manifest`
-  options), and one in `tests/` (`StoredZipTest::ints()`); each is retyped `map<int|string, …>`
-  or made to reject int keys. `InstallationLoader.phn:915` is a live bug: a numeric YAML key
-  under a build set reaches `$at(…, $key)` (a `string` parameter) and throws `TypeError` in
-  place of the intended message.
+  on purpose. tq-cli's thirteen findings closed the same day (`87fdad7`, `ad9ca25`): names are
+  refused at the boundary with the loader's own messages (a numeric key in a build set threw
+  `TypeError` before), data stays `map<int|string, …>` (the free-form `config:` trees, `unpack()`
+  results), `Val::map()` leaves int-keyed entries out and the callers that see lists use
+  `Val::arr()`. Quoting does not help: PHP turns `"5"` into `5` either way.
 - **bytes ergonomics** (from tq-cli's zip builder, relay frames, archives): ~~no `.` / `.=` for
   `bytes`~~ — `bytes . bytes` is `bytes` since 2026-11-01 (`strings.md` §2, §6; `07557a3`),
-  a buffer starts from `(bytes) ''`. Left: a text header inside binary needs
+  a buffer starts from `(bytes) ''`; tq-cli's builders use it (`b66fabf`, output byte-identical).
+  Left: a text header inside binary needs
   `('tree '.\strlen($b)."\0")->bytes()`; `file_get_contents()` returns `string`, so every
   binary read is `(bytes) $content`.
 - ~~**The emitter copies `bytes` verbatim from written docblock tags**~~ — done 2026-11-01

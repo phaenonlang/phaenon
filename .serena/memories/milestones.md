@@ -35,23 +35,21 @@ The roadmap puts the editor plugins in M6.
 | **M4** fourth slice (2026-11-01) | `fun` declares a named function or method, `public` implied (contextual `T_FUN`, parser `Fun`/`Head` on the declarations, emitter `lowerFunctions` writing the PSR-12 head, printer prints `fun` back); `private(set)` without a main visibility is public (emitter writes `public private(set)`); closures in constant expressions (`fn`/`function` in attribute arguments, constants, defaults, static initializers) lowered to `static function` with `P2531` for `$this`/`use`; `phn migrate` writes `fun` and drops a sole `public` (`--keep-public`) | Lexer test, emit golden `functions.phn` (runs on PHP 8.5.3, PHPStan max), checker golden `functions.phn`, lift golden `functions.php`; the stdlib `.phn` and all four dogfood trees respelled with byte-identical output | `5da3e09` · design `functions.md`, roadmap D15; plugin `603db11` |
 | **M5** first slice (2026-11-01) | `concurrently (opts) { … }` and `spawn` (contextual `T_CONCURRENTLY`/`T_SPAWN`, `ast.Concurrently`/`ast.Spawn`, printer), checker `P2601`–`P2606` (`internal/checker/concurrency.go`), emitter `lowerConcurrency` (`Scope::run(function () use (…) { … }, opts)`, `Scope::spawn(fn () => …)`, computed `use` clause), the runtime `stdlib/concurrent/Scope.phn` written in Phaenon with the amp/Revolt declarations beside it, `phn stdlib --concurrent-out`, the local package `../concurrent` (14 PHPUnit tests against the real amp, PHPStan max) | Checker golden `concurrency.phn`, emit golden `concurrency.phn` → `.php` under PHPStan max; the FrankenPHP worker-mode check (400 requests, loop persisting between requests) recorded in `concurrency.md` §9.2 | `df7d449` + the follow-up · design `concurrency.md` (C1–C10), roadmap D6 revised, D16 |
 | **M5** tq-cli dogfood (2026-11-01) | `tq-cli` compiled from 859 `.phn` on a local `phaenon-dogfood` worktree; the fifteen `Api::concurrently` fan-outs rewritten as `concurrently` blocks, the helper removed; `?(A, B)` parse fix; emitter capture rule refined (defined before or read first after, arrow parameters shadow) | PHPUnit **2045 tests green** on the compiled output, PHPStan level 10 no errors, cs 0 of 586; `phn check` 378 (none `P26xx`) | compiler `074979a` + the capture commit · tq-cli `c58cb76` (local) · [[dogfood]] |
+| **M5** closed (2026-11-01) | tq-cli's `phn check` to 0 over `src` and `tests` (three checker merges, the overlay, real fixes in tq-cli: the unchecked `curl_init()`, dead type checks, binary data as `bytes`, numeric YAML keys rejected at the boundary); closure types with `T...`/`T=`; numeric string keys are int keys; `.` joins two `bytes`; written docblock tags erase `bytes`; the runtime import joins the `use` block; `tequila/nats`'s `RevoltTransport` + pump lease + reader task merged (tequila/nats#13, ADR tequila/platform#255); the plugin re-indexes `.phn` on upgrade, resolves a bare `Closure(…)` as `\Closure`, keeps erased-only imports | tq-cli: 2052 tests, PHPStan 10, cs clean, `phn check` 0; nats: 175 tests against the server; core, mongodb-odm, object-mapper unchanged | compiler `0e1321a`…`3ea29fc` · design `d74fc84`, `ba20982`…`4f8dfdb`, §16 of `concurrency.md` · plugin `9f3225c`…`f630655` · [[dogfood]] |
 
 ## Next — a maintainer's choice
 
-Rewritten 2026-11-01 when M4 closed. Whoever lands the next one updates this section and
+Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoever lands the next one updates this section and
 [[open-items]].
 
 1. ~~**M4 — collections and strings**~~ — closed 2026-11-01 (`../design/roadmap.md` §3 has the
    summary): four slices, `tequila/core` green on the compiled output, the plugin following the
    language, the three earlier dogfood trees respelled with `fun`.
-2. **M5 — concurrency** (in progress): `../design/concurrency.md` reviewed 2026-11-01,
-   decisions C1–C10 in its §15, roadmap D6 revised and D16 added. Done: the FrankenPHP check
-   (C9), the syntax, checker, emitter and the `phaenon/concurrent` package (first slice above).
-   Done too: the `tq-cli` dogfood (second row above; [[dogfood]]) and the plugin's lexer
-   approximation (`../jetbrains` commit after `4689034`, zip 2026-11-01 07:17). Next: the
-   `RevoltTransport` and single-reader change for `tequila/nats` (C8, a Tequila-side PR);
-   then closing M5 per [[working-method]]. `phaenonlang/concurrent` exists since 2026-11-01
-   (`fb494b7` pushed).
+2. ~~**M5 — concurrency**~~ — closed 2026-11-01 (`../design/roadmap.md` §3; decisions C1–C10 in
+   `concurrency.md` §15, the ones taken while building in §16): the syntax, checker, emitter and
+   `phaenon/concurrent`, `tq-cli` green and `phn check`-clean on the compiled output,
+   `tequila/nats` able to serve concurrent tasks. Next is a maintainer's choice: M6 (tooling and
+   distribution, `roadmap.md` §3).
 3. Beside it, when wanted: the Composer plugin (M6, D13); the three earlier dogfood branches on
    the sibling layout (D12); the checker items in [[open-items]].
 

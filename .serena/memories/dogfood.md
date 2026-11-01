@@ -174,8 +174,9 @@ push dogfood work without a maintainer's go-ahead.
   `origin/main` at `37201c8`: `c58cb76` *build: compile tq-cli from Phaenon sources, fan-outs as
   concurrently blocks*, then the `src` pass of 2026-11-01 (`c351d37` curl handle checked,
   `f65d9e3` dead type checks dropped, `f2323e0` `phaenon/runtime` required, `62e2b3f` binary data
-  is `bytes`, `2ba375f` closure seams lifted to `Closure(string...)`). **Local only — never
-  pushed.**
+  is `bytes`, `2ba375f` closure seams lifted to `Closure(string...)`), the tests pass (`635ae30`…`4de7cc0`),
+  and the move onto the numeric-key rule and `.` on bytes (`87fdad7`, `ad9ca25`, `b66fabf`).
+  **Local only — never pushed.**
 - 859 `.phn` (585 `src/`, 274 `tests/`), `phaenon.json` builds `src`/`tests` into `.src`/`.tests`
   (ignored), where Composer, PHPUnit, PHPStan (level 10, `src` only) and php-cs-fixer point (the
   four line-1 rules off, as in core). `phaenon/concurrent` comes from `../../phaenon/concurrent`
@@ -187,16 +188,17 @@ push dogfood work without a maintainer's go-ahead.
   …` in a loop, `return Scope::all($tasks)`; `spawn { try … }` for the probes that catch;
   one `Scope::map`), `Api::concurrently()` removed. `PlatformOnlyFiles` and the three tests
   that read source files from disk read `.src/` — the PHP that ships.
-- Verify (`PATH` with `phn`): `phn build --emit-on-error`, `vendor/bin/phpunit` (**2045 tests
+- Verify (`PATH` with `phn`): `phn build --emit-on-error`, `vendor/bin/phpunit` (**2052 tests
   green**, ≈3 min), `composer phpstan` (level 10, no errors), `composer cs:check` (0 of 586).
 - `phn check`: **`src` 0 errors** (2026-11-01; 378 at `c58cb76`, 125 of them in `src`), **`tests`
   0 errors** since the tests pass (2026-11-01, below). The `src` ones were the checker's (offset
   narrowing, array inference through writes and loops, conditions held in variables, conditional
   returns, SPL generics: the three checker merges and `b90a878`…`4693d71`) or real: the
   unchecked `curl_init()` (PHPStan lets it through as a benevolent union), dead `is_string()`
-  checks the declarations made dead, binary data typed as text. Two loops keep their
-  `is_string($key)`: `Val::map()` declares `map<string, mixed>` but
-  PHP turns numeric keys into ints, so they iterate `Val::arr()` instead (see [[open-items]]).
+  checks the declarations made dead, binary data typed as text. Numeric keys (the rule of
+  `checker.md` §9): names are refused at the boundary with the loader's own messages, the
+  free-form `config:` trees are `map<int|string, mixed>` read with `Val::arr()`, and `Val::map()`
+  leaves int-keyed entries out (its promise is to degrade, never throw).
 - **The tests pass** (2026-11-01): 213 errors in `tests/`, compared line by line (through a
   diff line map, since the emitter adds `@return` lines) with the parity PHPStan at level 10 on
   the compiled `.tests`: 203 on lines PHPStan reports too. Checker gaps (compiler `8eeab3b`
