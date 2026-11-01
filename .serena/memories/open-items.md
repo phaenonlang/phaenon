@@ -171,9 +171,10 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   filtered since `2a9b153` (the readonly error already was). ~~Names inside erased types are
   text, not references~~ — since `0a22b5d` erasure goes to a token of its own
   (`PHAENON_ERASED`, a comment to the parser) whose leaf carries a reference per class name:
-  navigation, find-usages, rename and the unused-import inspection work. Left: no completion
-  inside `<…>`; the erased leaf is a `PsiComment`, so comment-based features (spell-checking,
-  "commented-out code" style inspections) see Phaenon types as comments. PhpStorm 2025.1 does
+  navigation, find-usages, rename and the unused-import inspection work; since `65a70f3`
+  completion inside `<…>` (classes with import insertion, type parameters, keywords; qualified
+  names not completed) and no spell-checking of the erased leaf. Left: the leaf is a
+  `PsiComment`, so any other comment-based feature sees Phaenon types as comments. PhpStorm 2025.1 does
   not parse `[...$a][0]` in plain PHP either (core's `DeadlineMetricsTest.phn:114`); the
   real-tree test lists such files instead of counting them.
 - The implied `declare(strict_types=1)` is not modelled.
