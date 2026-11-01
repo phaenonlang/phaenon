@@ -45,6 +45,10 @@ type Checker struct {
 	diags []Diagnostic
 	seen  map[string]bool
 	file  *program.File
+	// stdlibUsed names the stdlib classes (Phaenon\Str, …) the current
+	// file's method syntax compiles to: an import of one of them is used by
+	// the output even when the source never writes the class name.
+	stdlibUsed map[string]bool
 	// callSeq numbers call sites so a callee's type parameters get fresh
 	// identities per call (T of the callee is not T of the caller).
 	callSeq int
@@ -170,10 +174,14 @@ func (c *Checker) rollback(mark int) {
 func (c *Checker) checkFile(f *program.File) {
 	phaenon := f.Mode == lexer.ModePhaenon
 	c.ignored[f.Path] = ignoredLines(f.Src, f.Mode)
+	c.stdlibUsed = map[string]bool{}
 	// Top-level code runs in a context without a class.
 	scope := f.ScopeAt(0)
 	ctx := c.newCtx(f, scope, nil, true)
 	env := newEnv()
+	// Imports are judged once the bodies have been checked: a method call
+	// on a string or a list is what uses `use Phaenon\Str;`.
+	var uses []*ast.Use
 	var visit func(stmts []ast.Stmt)
 	visit = func(stmts []ast.Stmt) {
 		for _, s := range stmts {
@@ -185,7 +193,7 @@ func (c *Checker) checkFile(f *program.File) {
 				}
 			case *ast.Use:
 				if phaenon {
-					c.checkUse(f, s)
+					uses = append(uses, s)
 				}
 			case *ast.ClassDecl:
 				c.checkClassDecl(f, f.ScopeAt(s.S.Start), s)
@@ -205,17 +213,24 @@ func (c *Checker) checkFile(f *program.File) {
 		}
 	}
 	visit(f.AST.Stmts)
+	for _, u := range uses {
+		c.checkUse(f, u)
+	}
 }
 
 // checkUse reports unused imports (P2013) — only when nothing in the file
 // mentions the alias. Cheap text scan: the alias as a word outside the use
-// statement itself.
+// statement itself; an import of the stdlib class behind the file's method
+// syntax counts as used, since the compiled code names it.
 func (c *Checker) checkUse(f *program.File, u *ast.Use) {
 	src := string(f.Src)
 	for _, it := range u.Items {
 		alias := it.Name.Parts[len(it.Name.Parts)-1]
 		if it.Alias != nil {
 			alias = it.Alias.Name
+		}
+		if it.Alias == nil && c.stdlibUsed[strings.Join(it.Name.Parts, "\\")] {
+			continue
 		}
 		before := src[:it.S.Start]
 		after := src[it.S.End:]

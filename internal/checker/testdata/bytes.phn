@@ -1,6 +1,7 @@
 namespace Bin;
 
 use Phaenon\Bytes;
+use Phaenon\Str; // named by nothing but the method syntax: `$name->bytes()` compiles to a static call on it
 
 // bytes: binary data kept apart from text (design/strings.md §2, §5). The
 // overlay types PHP's producers, (bytes) retypes a string, (string) is the
