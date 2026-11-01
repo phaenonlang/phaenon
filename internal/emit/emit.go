@@ -9,7 +9,9 @@
 // point at the Phaenon source without source maps.
 //
 // The price is paid on line 1: the PHP open tag, the @generated marker and
-// declare(strict_types=1) share it with whatever the .phn has there.
+// declare(strict_types=1) share it with whatever the .phn has there. An
+// import the compiler adds shares a line too, the line of its neighbour in
+// the file's own use block (roadmap D11).
 //
 // Phaenon constructs that need rewriting (generics erasure, is/as, …) become
 // further edits in later milestones; the printer renders synthesised
@@ -106,10 +108,12 @@ func IsGenerated(src []byte) bool {
 // ------------------------------------------------------------------ edits
 
 // edit replaces src[Start:End) with Text. Text must contain as many line
-// breaks as the span it replaces.
+// breaks as the span it replaces. Early puts an insertion ahead of every
+// other edit at its offset (an import before a generated docblock).
 type edit struct {
 	ast.Span
-	Text string
+	Text  string
+	Early bool
 }
 
 type emitter struct {
@@ -129,7 +133,7 @@ func (e *emitter) replace(s ast.Span, text string) {
 	if got, want := strings.Count(text, "\n"), bytes.Count(e.src[s.Start:s.End], []byte("\n")); got != want {
 		panic(fmt.Sprintf("emit: edit at %d changes the line count (%d → %d): %q", s.Start, want, got, text))
 	}
-	e.edits = append(e.edits, edit{s, text})
+	e.edits = append(e.edits, edit{Span: s, Text: text})
 }
 
 func (e *emitter) insert(at int, text string) {
@@ -139,17 +143,28 @@ func (e *emitter) insert(at int, text string) {
 // replaceLines is replace for the one kind of edit that may add lines: a
 // docblock, which PHPStan reads one tag per line. Lines after it shift.
 func (e *emitter) replaceLines(s ast.Span, text string) {
-	e.edits = append(e.edits, edit{s, text})
+	e.edits = append(e.edits, edit{Span: s, Text: text})
 }
 
 func (e *emitter) insertLines(at int, text string) {
 	e.replaceLines(ast.Span{Start: at, End: at}, text)
 }
 
-// apply splices the edits into the source. Edits must not overlap; insertions
-// at the same offset keep their order of registration.
+// apply splices the edits into the source. Edits must not overlap. At one
+// offset, early insertions come first, then the other insertions, then a
+// replacement starting there; insertions of a kind keep their order of
+// registration.
 func (e *emitter) apply() []byte {
-	sort.SliceStable(e.edits, func(i, j int) bool { return e.edits[i].Start < e.edits[j].Start })
+	sort.SliceStable(e.edits, func(i, j int) bool {
+		a, b := e.edits[i], e.edits[j]
+		if a.Start != b.Start {
+			return a.Start < b.Start
+		}
+		if a.Early != b.Early {
+			return a.Early
+		}
+		return a.Start == a.End && b.Start != b.End
+	})
 	var out bytes.Buffer
 	out.Grow(len(e.src) + 128)
 	pos := 0
@@ -189,35 +204,148 @@ func (e *emitter) prologue(f *ast.File) {
 	if e.opts.StrictTypes && !declaresStrictTypes(f) {
 		sb.WriteString("declare(strict_types=1); ")
 	}
-	// The imports the lowering asked for go after the namespace statement,
-	// on its line; a file without one gets them on this line.
-	if uses := e.useStatements(); uses != "" {
-		if end := namespaceEnd(f); end >= 0 {
-			e.insert(end, " "+uses)
-		} else {
-			sb.WriteString(uses + " ")
-		}
+	// The imports the lowering asked for join the file's own; a file with
+	// neither imports nor a namespace gets them on this line.
+	sites := e.importSites(f)
+	if len(sites) == 1 && sites[0].at < 0 {
+		sb.WriteString(sites[0].text + " ")
+		sites = nil
 	}
 	e.insert(0, sb.String())
+	for _, s := range sites {
+		e.edits = append(e.edits, edit{Span: ast.Span{Start: s.at, End: s.at}, Text: s.text, Early: true})
+	}
 }
 
-// useStatements renders the compiler's imports, sorted.
-func (e *emitter) useStatements() string {
+// importSite is where the text of compiler imports goes; at < 0 is line 1.
+type importSite struct {
+	at   int
+	text string
+}
+
+// importSites places the compiler's imports where a person would write
+// them, on a line that already holds a statement, since a line of their
+// own would shift every line below (roadmap D11, 2026-11-02):
+//
+//   - into the file's class imports, beside the neighbour it sorts after
+//     (before the first one when it sorts first) if the block is sorted as
+//     php-cs-fixer sorts, after the last class import otherwise;
+//   - before the first function or constant import when the file has
+//     only those (class imports come first);
+//   - at the start of the line of the first statement after the namespace
+//     in a file without imports, or after the namespace statement when
+//     that statement shares its line;
+//   - on line 1 in a file without a namespace.
+//
+// Sharing a line costs php-cs-fixer's single_line_after_imports, one rule
+// about imports, where line 1 after the namespace cost
+// blank_line_after_namespace and no_extra_blank_lines.
+func (e *emitter) importSites(f *ast.File) []importSite {
 	var names []string
 	for fqcn, short := range e.imports {
 		if short != "" && !e.ownImports[fqcn] {
 			names = append(names, fqcn)
 		}
 	}
-	sort.Strings(names)
-	var sb strings.Builder
-	for i, n := range names {
-		if i > 0 {
-			sb.WriteString(" ")
-		}
-		sb.WriteString("use " + n + ";")
+	if len(names) == 0 {
+		return nil
 	}
-	return sb.String()
+	sort.Slice(names, func(i, j int) bool { return compareImports(names[i], names[j]) < 0 })
+	use := func(ns []string, sep, end string) string {
+		var sb strings.Builder
+		for i, n := range ns {
+			if i > 0 {
+				sb.WriteString(sep)
+			}
+			sb.WriteString("use " + n + ";")
+		}
+		return sb.String() + end
+	}
+	var classes, others []*ast.Use
+	nsEnd := namespaceEnd(f)
+	for _, st := range f.Stmts {
+		if u, ok := st.(*ast.Use); ok {
+			if u.Kind == ast.UseClass {
+				classes = append(classes, u)
+			} else {
+				others = append(others, u)
+			}
+		}
+	}
+	switch {
+	case len(classes) > 0:
+		sorted := true
+		for i := 1; i < len(classes); i++ {
+			if compareImports(importKey(classes[i-1]), importKey(classes[i])) > 0 {
+				sorted = false
+			}
+		}
+		// Each name goes after the import it sorts after; names sorting
+		// before the first import open its line.
+		var first []string
+		after := map[int][]string{}
+		for _, n := range names {
+			i := len(classes)
+			if sorted {
+				for j, u := range classes {
+					if compareImports(importKey(u), n) > 0 {
+						i = j
+						break
+					}
+				}
+			}
+			if i == 0 {
+				first = append(first, n)
+			} else {
+				after[i-1] = append(after[i-1], n)
+			}
+		}
+		var sites []importSite
+		if len(first) > 0 {
+			sites = append(sites, importSite{classes[0].S.Start, use(first, " ", " ")})
+		}
+		for i, u := range classes {
+			if ns := after[i]; len(ns) > 0 {
+				sites = append(sites, importSite{u.S.End, " " + use(ns, " ", "")})
+			}
+		}
+		return sites
+	case len(others) > 0:
+		return []importSite{{others[0].S.Start, use(names, " ", " ")}}
+	case nsEnd >= 0:
+		next := nsEnd
+		for next < len(e.src) && (e.src[next] == ' ' || e.src[next] == '\t' || e.src[next] == '\r' || e.src[next] == '\n') {
+			next++
+		}
+		if next == len(e.src) || !bytes.Contains(e.src[nsEnd:next], []byte("\n")) {
+			return []importSite{{nsEnd, " " + use(names, " ", "")}}
+		}
+		return []importSite{{next, use(names, " ", " ")}}
+	}
+	return []importSite{{-1, use(names, " ", "")}}
+}
+
+// importKey is the name an import statement sorts by: its first imported
+// name, with a group's prefix.
+func importKey(u *ast.Use) string {
+	var parts []string
+	if u.Prefix != nil {
+		parts = append(parts, u.Prefix.Parts...)
+	}
+	if len(u.Items) > 0 {
+		parts = append(parts, u.Items[0].Name.Parts...)
+	}
+	return strings.Join(parts, "\\")
+}
+
+// compareImports orders two imported names as php-cs-fixer's ordered_imports
+// does by default: case-insensitively, a namespace separator read as a
+// space (so `Foo\Bar` sorts before `FooBar`).
+func compareImports(a, b string) int {
+	norm := func(s string) string {
+		return strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(s, "\\"), "\\", " "))
+	}
+	return strings.Compare(norm(a), norm(b))
 }
 
 // namespaceEnd is the offset after the file's single unbraced namespace

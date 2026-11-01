@@ -1,0 +1,21 @@
+namespace App\Report;
+
+use DateTimeImmutable;
+
+use function sprintf;
+
+// Function imports form their own group after the class imports: the import
+// the compiler adds is a class import and joins the class group, sorted after
+// DateTimeImmutable (roadmap D11).
+
+final class Stamp
+{
+    public function __construct(private readonly DateTimeImmutable $at)
+    {
+    }
+
+    public function label(string $who): string
+    {
+        return sprintf('%s at %s', $who->upper(), $this->at->format('H:i'));
+    }
+}
