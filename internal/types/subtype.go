@@ -15,17 +15,6 @@ func IsAcceptable(arg, param Type, h Hierarchy) bool {
 	if subtype(arg, param, h, 0) {
 		return true
 	}
-	// A shape with keys the parameter's shape does not name is accepted,
-	// as PHPStan accepts it: the keys named are there with their types.
-	if as, ok := arg.(Shape); ok {
-		if ps, ok := param.(Shape); ok && !ps.Unsealed {
-			open := ps
-			open.Unsealed = true
-			if subtype(as, open, h, 0) {
-				return true
-			}
-		}
-	}
 	// mixed is accepted where a type parameter without a bound is expected:
 	// the parameter can be anything, including mixed (PHPStan's
 	// TemplateMixedType).
@@ -405,12 +394,15 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 					return false
 				}
 			}
-			if !b.Unsealed {
-				for _, ae := range a.Entries {
-					if _, found := shapeLookup(b, ae); !found {
-						return false
-					}
-				}
+			// Keys b does not name are fine: `array{a: int, b: int}` is an
+			// `array{a: int}`, and `list{int, string, string}` a
+			// `list{int, string}`, as PHPStan has it. Only `array{}` names
+			// its whole content: nothing with a key is the empty array.
+			if len(b.Entries) == 0 && !b.Unsealed && len(a.Entries) > 0 {
+				return false
+			}
+			if b.List && !a.List && !shapeIsList(a) {
+				return false
 			}
 			return true
 		case Iterable:
