@@ -19,9 +19,19 @@ function takesInt(int $i): void
 {
 }
 
-function producers(): void
+/** @param \Closure(int): bytes $draw */
+function takesDraw(\Closure $draw): void
+{
+}
+
+function producers(int $n): void
 {
     $key = random_bytes(32);
+    random_bytes($n); // want P2103
+    if ($n > 0) {
+        takesBytes(random_bytes($n));
+    }
+    takesDraw(random_bytes(...)); // want P2103
     takesBytes($key);
     takesString($key); // want P2103
     takesBytes(hash('sha256', 'abc', true));

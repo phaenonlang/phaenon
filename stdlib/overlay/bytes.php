@@ -7,7 +7,12 @@
  * binary when its input is binary says so with a conditional return.
  */
 
-/** @return bytes */
+/**
+ * PHP refuses a length below 1 with a ValueError; PHPStan says positive-int.
+ *
+ * @param positive-int $length
+ * @return bytes
+ */
 function random_bytes(int $length): string {}
 
 /**
