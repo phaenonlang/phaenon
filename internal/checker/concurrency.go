@@ -1,7 +1,6 @@
 package checker
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -164,13 +163,7 @@ func (x *fnCtx) blockExit(span ast.Span, levels ast.Expr, what string) {
 	if x.blockBody == nil {
 		return
 	}
-	n := 1
-	if lit, ok := levels.(*ast.IntLit); ok {
-		if v, err := strconv.Atoi(strings.ReplaceAll(lit.Raw, "_", "")); err == nil {
-			n = v
-		}
-	}
-	if n > x.loopDepth {
+	if jumpLevels(levels) > x.loopDepth {
 		x.report(span, P2603, "%s leaves the concurrently block: the block is a closure in the output; return from it instead", what)
 	}
 }
