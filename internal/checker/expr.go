@@ -1283,6 +1283,21 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		if types.IsSubtype(l, types.TString, nil) && types.IsSubtype(r, types.TString, nil) {
 			return types.TString
 		}
+		// Flags combine into a literal: PREG_SPLIT_NO_EMPTY |
+		// PREG_SPLIT_DELIM_CAPTURE is 3, which a conditional return type
+		// on the flags can tell apart (PHPStan folds it too).
+		if a, ok := types.IsIntLit(l); ok {
+			if b, ok := types.IsIntLit(r); ok {
+				switch op {
+				case token.Kind('&'):
+					return types.IntLit(a & b)
+				case token.Kind('|'):
+					return types.IntLit(a | b)
+				default:
+					return types.IntLit(a ^ b)
+				}
+			}
+		}
 		x.arithResult(l, r, span, string(rune(op)))
 		return types.TInt
 	case token.T_SL, token.T_SR:
