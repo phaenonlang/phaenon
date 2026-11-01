@@ -12,10 +12,23 @@ import (
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
-// superglobals are always defined arrays.
+// superglobals are always defined arrays. $argv and $argc are among them
+// for a script's top level; see localArgs.
 var superglobals = map[string]bool{
 	"GLOBALS": true, "_SERVER": true, "_GET": true, "_POST": true, "_FILES": true,
 	"_COOKIE": true, "_SESSION": true, "_REQUEST": true, "_ENV": true, "argv": true, "argc": true,
+}
+
+// localArgs reports whether $argv or $argc names a variable the code itself
+// assigned: PHP defines the two only in the global scope, so a function's
+// `$argv = $_SERVER['argv'] ?? []` is an ordinary local with the type of
+// what it was given, not the script's list<string>.
+func localArgs(name string, env *state) bool {
+	if name != "argv" && name != "argc" {
+		return false
+	}
+	_, local := env.get(name)
+	return local
 }
 
 // expr types an expression in env, with an optional expected type for
@@ -196,7 +209,7 @@ func (x *fnCtx) variable(v *ast.Variable, env *state, lenient bool) types.Type {
 		}
 		return x.thisType
 	}
-	if superglobals[v.Name] {
+	if superglobals[v.Name] && !localArgs(v.Name, env) {
 		if v.Name == "argc" {
 			return types.TInt
 		}
