@@ -42,9 +42,11 @@ Rewritten 2026-11-01 when M4 closed. Whoever lands the next one updates this sec
 1. ~~**M4 — collections and strings**~~ — closed 2026-11-01 (`../design/roadmap.md` §3 has the
    summary): four slices, `tequila/core` green on the compiled output, the plugin following the
    language, the three earlier dogfood trees respelled with `fun`.
-2. **M5 — concurrency** (go-ahead given 2026-11-01): starts with `../design/concurrency.md`
-   (pending; `language-overview.md` §5 names it), then goldens, the checker, the emitter, and
-   `tequila/nats` as the dogfood target (roadmap §3). Nothing of it exists yet.
+2. **M5 — concurrency** (in progress): `../design/concurrency.md` reviewed 2026-11-01,
+   decisions C1–C10 in its §15, roadmap D6 revised and D16 added. Order (C8, C9): the
+   FrankenPHP worker-mode check of Revolt between requests, goldens, checker (`P26xx`), emitter,
+   the package `phaenon/concurrent`; dogfood `tq-cli` first, then the `RevoltTransport` for
+   `tequila/nats`. No compiler code exists yet.
 3. Beside it, when wanted: the Composer plugin (M6, D13); the three earlier dogfood branches on
    the sibling layout (D12); the checker items in [[open-items]].
 
