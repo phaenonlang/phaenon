@@ -294,10 +294,11 @@ func (l *layout) function(name *ast.Ident, tps []*ast.TypeParam, ret ast.TypeExp
 
 // arrowCandidate returns the expression a body may be written as, nil when
 // it stays a block: exactly one `return expr;`, or one expression
-// statement under void or never; no comment inside the braces; not a
-// constructor, a destructor or a generator (design/functions.md §3.1).
-func (l *layout) arrowCandidate(name *ast.Ident, ret ast.TypeExpr, body []ast.Stmt, open, close int) ast.Expr {
-	if len(body) != 1 || l.hasComment(open, close) {
+// statement under void or never; no comment from the end of the signature
+// (sigEnd) to the closing brace (end); not a constructor, a destructor or a
+// generator (design/functions.md §3.1).
+func (l *layout) arrowCandidate(name *ast.Ident, ret ast.TypeExpr, body []ast.Stmt, sigEnd, end int) ast.Expr {
+	if len(body) != 1 || l.hasComment(sigEnd, end) {
 		return nil
 	}
 	switch strings.ToLower(name.Name) {
