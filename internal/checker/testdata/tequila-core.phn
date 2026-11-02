@@ -327,7 +327,7 @@ function userReferenceIsMixed(): void
 {
     $carrier = [];
     untypedReference($carrier);
-    sink($carrier['k'] ?? null);
+    sink($carrier['k'] ?? null); // want P2302
     if (\is_string($carrier)) {
         takesString($carrier);
     }

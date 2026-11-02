@@ -98,3 +98,15 @@ function firstPair(list<(string, int)> $pairs): ?(string, int)
 {
     return $pairs[0] ?? null;
 }
+
+// json_decode() gives mixed: an offset is read once the value is known to be
+// a map (P2302 before, PHPStan's offsetAccess.nonOffsetAccessible).
+function port(string $json): int
+{
+    $config = \json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+    if ($config is map<string, mixed> && \is_int($config['port'] ?? null)) {
+        return $config['port'];
+    }
+
+    return 80;
+}

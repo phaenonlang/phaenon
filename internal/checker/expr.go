@@ -179,6 +179,9 @@ func (x *fnCtx) exprLenient(e ast.Expr, env *state) types.Type {
 				return t
 			}
 		}
+		if t, ok := x.narrowedByLiteralKeys(e, env); ok {
+			return t
+		}
 		base := x.exprLenient(e.Array, env)
 		if e.Index != nil {
 			x.expr(e.Index, env, nil)
@@ -915,6 +918,33 @@ func (x *fnCtx) staticPropertyFetch(e *ast.StaticPropertyFetch, env *state) (typ
 	return types.TMixed, nil
 }
 
+// narrowedByLiteralKeys reads `$a[$k]` with $k one of a few literals (a
+// foreach over them) after a check narrowed those offsets one by one
+// (narrowPath): the union of the narrowings, when each offset has one.
+func (x *fnCtx) narrowedByLiteralKeys(e *ast.Index, env *state) (types.Type, bool) {
+	v, ok := e.Index.(*ast.Variable)
+	if !ok {
+		return nil, false
+	}
+	base, ok := pathKey(e.Array)
+	if !ok {
+		return nil, false
+	}
+	keys := literalOffsetKeys(x.pathType(v, env))
+	if keys == nil {
+		return nil, false
+	}
+	ts := make([]types.Type, 0, len(keys))
+	for _, k := range keys {
+		t, found := env.getPath(base + k)
+		if !found {
+			return nil, false
+		}
+		ts = append(ts, t)
+	}
+	return types.MakeUnion(ts...), true
+}
+
 // shapeValueTypes lists a shape's entry types.
 func shapeValueTypes(m types.Shape) []types.Type {
 	out := make([]types.Type, 0, len(m.Entries))
@@ -929,6 +959,9 @@ func (x *fnCtx) index(e *ast.Index, env *state) types.Type {
 		if t, ok := env.getPath(key); ok {
 			return t
 		}
+	}
+	if t, ok := x.narrowedByLiteralKeys(e, env); ok {
+		return t
 	}
 	base := x.expr(e.Array, env, nil)
 	if e.Index == nil {
@@ -948,6 +981,7 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 		if _, unknown := base.(types.Unknown); unknown {
 			return base // an offset of what was already reported stays reported
 		}
+		x.reportNoOffsets(e, base, raw, env)
 		return types.TMixed
 	}
 	var out []types.Type
@@ -987,6 +1021,12 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 			}
 			out = append(out, types.TNull)
 		case types.Class, types.Static, types.This, types.Intersection, types.Param:
+			if p, isParam := m.(types.Param); isParam && openParam(p) {
+				// `T` or `T of object`: what arrives may have no offsets.
+				x.reportNoOffsets(e, m, raw, env)
+				out = append(out, types.TMixed)
+				continue
+			}
 			var handled bool
 			for _, cl := range x.classesOf(m, e.Array.Span()) {
 				if cl.IsSubclassOf("ArrayAccess") {
@@ -1007,7 +1047,12 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 			if !handled {
 				out = append(out, types.TMixed)
 			}
-		case types.Object, types.Iterable, types.Unknown:
+		case types.Object, types.Iterable:
+			// An ArrayAccess, or an array for iterable, is one possibility
+			// among others that have no offsets.
+			x.reportNoOffsets(e, m, raw, env)
+			out = append(out, types.TMixed)
+		case types.Unknown:
 			out = append(out, types.TMixed)
 		default:
 			if !lenient {
@@ -1017,6 +1062,47 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 		}
 	}
 	return types.MakeUnion(out...)
+}
+
+// reportNoOffsets reports an offset access on a value not known to have
+// offsets — mixed, object, iterable, an open type parameter — as PHPStan
+// does at level max (offsetAccess.nonOffsetAccessible): one of the values
+// PHP refuses an offset on may be what arrives. It is reported inside
+// isset(), ?? and empty() too, where PHP keeps quiet about a missing key
+// but not about a value that has no keys; a narrowed path (`is_array($m)`,
+// `isset($m['k'])` for that same offset) never gets here. An undefined
+// variable reads as mixed under isset() and on the left of a nested write,
+// but holds no value whose offsets could be refused: PHP creates the array.
+func (x *fnCtx) reportNoOffsets(e *ast.Index, base, raw types.Type, env *state) {
+	if x.undefinedRoot(e.Array, env) {
+		return
+	}
+	if e.Index == nil {
+		x.report(e.Array.Span(), P2302, "cannot access an offset on %s", x.typeName(base))
+		return
+	}
+	x.report(e.Array.Span(), P2302, "cannot access offset %s on %s", x.typeName(raw), x.typeName(base))
+}
+
+// undefinedRoot reports whether an offset chain `$v[…][…]` starts at a
+// variable that is not defined at this point.
+func (x *fnCtx) undefinedRoot(e ast.Expr, env *state) bool {
+	for {
+		switch n := e.(type) {
+		case *ast.Index:
+			e = n.Array
+		case *ast.Paren:
+			e = n.Expr
+		case *ast.Variable:
+			if n.Name == "this" || superglobals[n.Name] {
+				return false
+			}
+			_, defined := env.get(n.Name)
+			return !defined
+		default:
+			return false
+		}
+	}
 }
 
 // shapeOffset finds the entry for a literal key; certain says the key was
@@ -1911,14 +1997,14 @@ func (x *fnCtx) isConstructorOf(cl *program.Class) bool { return false }
 // assignIndex handles $a[k] = v and $a[] = v, updating the array's type.
 func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Span) {
 	base := x.exprLenient(t.Array, env)
-	var keyT types.Type
+	var keyT, keyRaw types.Type
 	if t.Index != nil {
 		raw, key := x.keyExpr(t.Index, env)
 		if types.IsMixed(raw) {
 			// PHPStan at level max: a mixed key may be anything PHP refuses.
 			x.report(t.Index.Span(), P2316, "possibly invalid array key type mixed")
 		}
-		keyT = key
+		keyT, keyRaw = key, raw
 	}
 	// Undefined variable used as an array: it becomes one.
 	if v, ok := t.Array.(*ast.Variable); ok {
@@ -1930,6 +2016,11 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 	// inner array, so the assignment starts from an empty one, not from
 	// the mixed an unknown offset reads as.
 	if _, nested := t.Array.(*ast.Index); nested && (types.IsMixed(base) || types.IsNullable(base) && types.IsMixed(types.StripNull(base))) {
+		if _, isMixed := base.(types.Mixed); isMixed {
+			// An entry that exists and is mixed (`array<string, mixed>`'s)
+			// may be a value with no offsets: PHPStan reports the write.
+			x.reportNoOffsets(t, base, keyRaw, env)
+		}
 		base = types.Shape{}
 	}
 	// An offset the flow has seen — the key of the foreach over this array,
@@ -1963,7 +2054,10 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 				k = types.MakeUnion(k, types.TInt)
 			}
 			out = append(out, types.Array{Key: widenKeys(k), Value: types.MakeUnion(m.Value, vt), List: list, NonEmpty: true})
-		case types.Mixed, types.Unknown:
+		case types.Mixed:
+			x.reportNoOffsets(t, m, keyRaw, env)
+			out = append(out, m)
+		case types.Unknown:
 			out = append(out, m)
 		case types.Class, types.Static, types.This, types.Intersection:
 			handled := false
@@ -2114,6 +2208,11 @@ func shapeEntriesForKeys(s types.Shape, key, vt types.Type) ([]types.ShapeEntry,
 func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast.Span, src ast.Expr) {
 	if t.Kind == ast.ArrayList {
 		x.removed(t.S, "list()", "[...] destructuring")
+	}
+	if _, isMixed := vt.(types.Mixed); isMixed {
+		// PHPStan's offsetAccess.nonArray at level max: what is unpacked
+		// may be a value with no offsets.
+		x.report(t.S, P2302, "cannot use array destructuring on mixed")
 	}
 	pos := int64(0)
 	for _, item := range t.Items {

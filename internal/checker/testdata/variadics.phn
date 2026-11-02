@@ -1,0 +1,117 @@
+declare(strict_types=1);
+
+namespace App\Variadics;
+
+// Inside its function a variadic `T ...$xs` is array<int<0, max>|string, T>,
+// not list<T>: named arguments collect under their names since PHP 8.0, so
+// `glue(a: 'x')` hands the body ['a' => 'x']. PHPStan types it so on PHP 8.
+// A caller still passes T values or spreads an iterable of T.
+
+/** @param list<string> $l */
+function takesList(array $l): void
+{
+}
+
+/** @param array<string> $a */
+function takesArray(array $a): void
+{
+}
+
+/** @param array<string, string> $a */
+function takesStringMap(array $a): void
+{
+}
+
+function takesInt(int $i): void
+{
+}
+
+function glue(string ...$parts): string
+{
+    takesList($parts); // want P2103 "array<int<0, max>|string, string> given"
+    takesArray($parts);
+    takesStringMap($parts); // want P2103
+    takesList(\array_values($parts));
+    takesList([...$parts]); // want P2103
+    foreach ($parts as $key => $part) {
+        takesInt($key); // want P2103 "int<0, max>|string given"
+    }
+
+    return \implode(',', $parts) . ($parts[0] ?? '') . \sprintf('%s', ...$parts);
+}
+
+/** @param list<string> $xs */
+function callers(array $xs): void
+{
+    glue('a', 'b');
+    glue(...$xs);
+    glue(...['x' => 'a']);
+    glue(a: 'x', b: 'y');
+    glue(1); // want P2103
+}
+
+function forward(string ...$args): string
+{
+    return glue(...$args);
+}
+
+function byReference(string &...$refs): void
+{
+    takesList($refs); // want P2103
+}
+
+function untyped(...$args): void // want P2516
+{
+    takesList($args); // want P2103
+}
+
+/** @param list<string> ...$groups */
+function listElements(array ...$groups): void
+{
+    foreach ($groups as $group) {
+        takesList($group);
+    }
+    takesList($groups); // want P2103
+}
+
+final class Command
+{
+    /** @var list<string> */
+    private array $names;
+
+    public function __construct(string ...$names)
+    {
+        $this->names = $names; // want P2201
+    }
+
+    public static function of(string ...$names): self
+    {
+        return new self(...$names);
+    }
+
+    /** @return list<int> */
+    public function numbers(int ...$ns): array
+    {
+        return $ns; // want P2202
+    }
+
+    /** @return list<string> */
+    public function names(): array
+    {
+        return $this->names;
+    }
+}
+
+function closures(): void
+{
+    $count = static function (string ...$xs): int {
+        takesList($xs); // want P2103
+
+        return \count($xs);
+    };
+    $first = static fn (string ...$xs): string => $xs[0] ?? '';
+    $values = static fn (string ...$xs): array => \array_values($xs);
+    takesInt($count('a', 'b'));
+    glue($first('a'));
+    takesList($values('a'));
+}

@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -114,9 +115,13 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 				x.variable(t, env, true)
 				env.unset(t.Name)
 			case *ast.Index:
-				x.exprLenient(t.Array, env)
+				base := x.exprLenient(t.Array, env)
+				var raw types.Type
 				if t.Index != nil {
-					x.expr(t.Index, env, nil)
+					raw = x.expr(t.Index, env, nil)
+				}
+				if _, isMixed := base.(types.Mixed); isMixed {
+					x.reportNoOffsets(t, base, raw, env) // PHPStan: on mixed, not on object
 				}
 				x.unsetIndex(t, env)
 			default:
@@ -503,13 +508,43 @@ func (x *fnCtx) forStmt(s *ast.For, env *state) {
 	*env = *after
 }
 
+// mayNotIterate reports whether t has a member that foreach may refuse or
+// that iterates as properties rather than as a collection — mixed, object,
+// an open type parameter — which PHPStan reports at level max
+// (foreach.nonIterable) where IterableKV, serving inference, lets them
+// through as mixed.
+func mayNotIterate(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.Mixed, types.Object:
+			return true
+		case types.Param:
+			if openParam(m) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// openParam reports whether a type parameter's bound says nothing about
+// offsets or iteration: none, mixed or object.
+func openParam(p types.Param) bool {
+	switch p.Bound.(type) {
+	case nil, types.Mixed, types.Object:
+		return true
+	default:
+		return false
+	}
+}
+
 func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 	if s.Alt {
 		x.removed(s.S, "the alternative foreach syntax", "braces")
 	}
 	it := x.expr(s.Expr, env, nil)
 	k, v, ok := types.IterableKV(it, x.p())
-	if !ok {
+	if !ok || mayNotIterate(it) {
 		x.report(s.Expr.Span(), P2303, "foreach over %s", x.typeName(it))
 	}
 	if s.Doc != "" {
@@ -897,6 +932,15 @@ func bodyHasYield(stmts []ast.Stmt) bool {
 	return false
 }
 
+// variadicArray is what a variadic parameter declared `T ...$xs` holds
+// inside its function: the positional arguments under 0, 1, … and, since
+// PHP 8.0, the named arguments under their names, so
+// array<int<0, max>|string, T>, as PHPStan types it — not list<T>. A
+// caller still passes T values, or spreads any iterable of T.
+func variadicArray(elem types.Type) types.Type {
+	return types.Array{Key: types.MakeUnion(types.Int{Lo: 0, Hi: math.MaxInt64}, types.TString), Value: elem}
+}
+
 // body checks a function body: parameters become variables, statements run,
 // and a missing return is reported.
 func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.Stmt, span ast.Span) *state {
@@ -904,7 +948,7 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 	for i, p := range params {
 		t := p.Type
 		if p.Variadic {
-			t = types.Array{Key: types.TInt, Value: t, List: true}
+			t = variadicArray(t)
 		}
 		env.set(p.Name, t)
 		// What PHP holds the parameter to: the erasure of what was written
@@ -914,7 +958,7 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 			native = types.Erase(p.NativeType)
 		}
 		if p.Variadic {
-			native = types.Array{Key: types.TInt, Value: native, List: true}
+			native = variadicArray(native)
 		}
 		env.setNative(p.Name, native)
 		if p.ByRef {
@@ -1037,7 +1081,7 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 	for _, p := range params {
 		t := p.Type
 		if p.Variadic {
-			t = types.Array{Key: types.TInt, Value: t, List: true}
+			t = variadicArray(t)
 		}
 		cenv.set(p.Name, t)
 	}
@@ -1180,7 +1224,7 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 	for _, p := range params {
 		t := p.Type
 		if p.Variadic {
-			t = types.Array{Key: types.TInt, Value: t, List: true}
+			t = variadicArray(t)
 		}
 		cenv.set(p.Name, t)
 	}

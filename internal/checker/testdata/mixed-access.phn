@@ -1,0 +1,239 @@
+declare(strict_types=1);
+
+namespace App\MixedAccess;
+
+// An offset on a value not known to have offsets — mixed, object, iterable,
+// an open type parameter — is P2302, as PHPStan reports it at level max
+// (offsetAccess.nonOffsetAccessible): one of the values PHP refuses an
+// offset on may be what arrives. Inside isset(), ?? and empty() too: PHP
+// keeps quiet about a missing key there, not about a value without keys.
+// A foreach over mixed, object or an open type parameter is P2303
+// (foreach.nonIterable).
+
+function sink(mixed $v): void
+{
+}
+
+function reads(mixed $m): void
+{
+    sink($m['k']); // want P2302 "cannot access offset 'k' on mixed"
+    sink($m[0]); // want P2302 "cannot access offset 0 on mixed"
+    sink($m['a']['b']); // want P2302 "offset 'a' on mixed", P2302 "offset 'b' on mixed"
+    sink("{$m['k']}"); // want P2302, P2312
+}
+
+function writes(mixed $m): void
+{
+    $m['k'] = 1; // want P2302
+    $m[] = 1; // want P2302 "cannot access an offset on mixed"
+    $m['a']['b'] = 2; // want P2302, P2302
+    $m['n'] += 1; // want P2302
+    $m['c'] ??= 1; // want P2302
+    unset($m['k']); // want P2302
+}
+
+function refOffset(mixed $m): void
+{
+    $r = &$m['k']; // want P2302
+    $r = 1;
+}
+
+/** @param array<string, mixed> $data */
+function nestedWriteOnMixedEntry(array $data): void
+{
+    $data['x']['y'] = 1; // want P2302 "cannot access offset 'y' on mixed"
+    sink($data);
+}
+
+function issetCoalesceEmpty(mixed $m): void
+{
+    if (isset($m['k'])) { // want P2302
+        sink($m['k']); // the offset isset() proved
+        sink($m['other']); // want P2302
+    }
+    sink($m['k'] ?? null); // want P2302
+    if (empty($m['k'])) { // want P2302
+        return;
+    }
+    sink($m['a']['b'] ?? null); // want P2302, P2302
+}
+
+function destructuring(mixed $m): void
+{
+    [$a, $b] = $m; // want P2302 "cannot use array destructuring on mixed"
+    ['k' => $c] = $m; // want P2302
+    sink([$a, $b, $c]);
+}
+
+/** @param list<mixed> $rows */
+function destructuringInForeach(array $rows): void
+{
+    foreach ($rows as [$a, $b]) { // want P2302
+        sink([$a, $b]);
+    }
+}
+
+function untypedParameter($m): void // want P2516
+{
+    sink($m['k']); // want P2302
+}
+
+function fromJson(string $s): void
+{
+    $data = json_decode($s, true, 512, JSON_THROW_ON_ERROR);
+    sink($data['k']); // want P2302
+    if (\is_array($data)) {
+        sink($data['k']);
+        sink($data['k']['x']); // want P2302
+    }
+}
+
+/** @param array<string, mixed> $config */
+function configEntry(array $config): void
+{
+    $db = $config['db'];
+    sink($db['host']); // want P2302
+    if (\is_array($config['db'])) {
+        sink($config['db']['host']);
+    }
+}
+
+final class Holder
+{
+    public mixed $data = null;
+    public static mixed $cache = null;
+
+    public function read(): mixed
+    {
+        sink(self::$cache['k']); // want P2302
+
+        return $this->data['k']; // want P2302
+    }
+}
+
+function produce(): mixed
+{
+    return null;
+}
+
+function fromCall(): void
+{
+    sink(produce()['k']); // want P2302
+}
+
+function untypedReference(&$x): void // want P2516
+{
+    $x = 1;
+}
+
+function afterUntypedReference(): void
+{
+    $carrier = [];
+    untypedReference($carrier);
+    sink($carrier['k'] ?? null); // want P2302
+}
+
+/** @param iterable<string, int> $it */
+function objectAndIterable(object $o, iterable $it): void
+{
+    sink($o['k']); // want P2302 "cannot access offset 'k' on object"
+    sink(isset($o['k'])); // want P2302
+    sink($it['k']); // want P2302 "on iterable<string, int>"
+    sink($it['k'] ?? null); // want P2302
+}
+
+/**
+ * @template T
+ * @template O of object
+ * @param T $t
+ * @param O $obj
+ */
+function typeParameters(mixed $t, object $obj): void
+{
+    sink($t['k']); // want P2302 "cannot access offset 'k' on T"
+    sink($obj['k']); // want P2302 "on O"
+}
+
+// Narrowed first: silent.
+function narrowed(mixed $m): void
+{
+    if (\is_array($m)) {
+        sink($m['k']);
+    }
+    if (\is_string($m)) {
+        sink($m[0]);
+    }
+    sink(\is_array($m) && isset($m['k']) ? $m['k'] : null);
+}
+
+function keyExists(mixed $m): void
+{
+    if (\array_key_exists('k', $m)) { // want P2103
+        sink($m['k']);
+    }
+}
+
+// An undefined variable is no value with refused offsets: PHP creates the
+// array.
+function fresh(): void
+{
+    $u['a']['b'] = 1;
+    sink($u);
+}
+
+// Arrays whose entries are mixed read as mixed, then the next offset is
+// the finding.
+/** @param list<mixed> $rows */
+function rowsLoop(array $rows): void
+{
+    foreach ($rows as $row) {
+        sink($row['id']); // want P2302
+    }
+    sink($_SERVER['argv'][0]); // want P2302
+}
+
+/**
+ * @template T
+ * @param T $t
+ */
+function iteration(mixed $m, object $o, mixed $t): void
+{
+    foreach ($m as $v) { // want P2303 "foreach over mixed"
+        sink($v);
+    }
+    foreach ($o as $v) { // want P2303 "foreach over object"
+        sink($v);
+    }
+    foreach ($t as $v) { // want P2303 "foreach over T"
+        sink($v);
+    }
+    foreach ($m['list'] as $v) { // want P2302, P2303
+        sink($v);
+    }
+    if (\is_iterable($m)) {
+        foreach ($m as $v) {
+            sink($v);
+        }
+    }
+}
+
+// An offset narrowed through a key that is one of a few literals reads back
+// narrowed through the same key (tq-cli's composer.lock sections).
+function lockedSections(string $composerLock): void
+{
+    $lock = json_decode($composerLock, true);
+    if (!\is_array($lock)) {
+        return;
+    }
+    foreach (['packages', 'packages-dev'] as $section) {
+        foreach (\is_array($lock[$section] ?? null) ? $lock[$section] : [] as $package) {
+            sink($package);
+        }
+    }
+    $key = 'packages';
+    if (\is_array($lock[$key] ?? null)) {
+        foreach ($lock[$key] as $package) {
+            sink($package);
+        }
+    }
+}
