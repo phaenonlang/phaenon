@@ -441,6 +441,9 @@ type Partial struct {
 	Pipe, Direct bool
 	// Rest marks a `...` placeholder; Named a named argument before it.
 	Rest, Named bool
+	// Void says the callee returns void: a closure body calls it without
+	// returning its result.
+	Void bool
 }
 
 // PartialParam is one parameter of the closure a partial application
@@ -453,6 +456,9 @@ type PartialParam struct {
 	// Native is the callee parameter's declared type as PHP code, class
 	// names fully qualified; "" when it declares none.
 	Native string
+	// Doc is its type for a docblock when the type says more than PHP can
+	// declare (list<int>, a literal, a generic class); "" otherwise.
+	Doc string
 	// Default is an optional parameter's default as PHP code that means
 	// the same in any file; "" when required or when it cannot be written
 	// so (Unwritable).

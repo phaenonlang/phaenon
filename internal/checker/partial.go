@@ -183,8 +183,9 @@ func partialClosure(shape *pfaShape, paramType func(*program.Param) types.Type, 
 // recordPartial stores the emitter's account of a partial application and,
 // for an 8.5 target, reports a form with no exact lowering (§5.3). inPipe
 // says the application is a pipe's right side that PHP turns into a call;
-// callee is the call node.
-func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature, slots []pfaSlot, rest, named, inPipe bool) {
+// callee is the call node; typeOf gives a parameter's type as the call
+// resolved it.
+func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature, slots []pfaSlot, rest, named, inPipe bool, typeOf func(*program.Param) types.Type) {
 	rec := &program.Partial{}
 	for _, s := range slots {
 		pp := program.PartialParam{Name: s.name, Optional: !s.required, Variadic: s.variadic, ByRef: s.param.ByRef, Arg: s.arg}
@@ -192,6 +193,11 @@ func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature
 			if n, ok := types.Native(x.selfResolved(s.param.NativeType, sig)); ok {
 				pp.Native = n
 			}
+		}
+		if t := typeOf(s.param); t != nil && !types.Equal(t, types.Erase(t)) && !mentionsParam(t) && !mentionsBytesType(t) {
+			// A type PHP cannot declare (list<int>, a literal, a generic
+			// class) goes into the closure's docblock, for PHPStan.
+			pp.Doc = types.PrintQualified(x.selfResolved(t, sig))
 		}
 		if pp.Optional && !pp.Variadic {
 			if d, ok := x.writableDefault(s.param.Default); ok {
@@ -203,6 +209,7 @@ func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature
 		rec.Params = append(rec.Params, pp)
 	}
 	rec.Pipe, rec.Rest, rec.Named = inPipe, rest, named
+	_, rec.Void = sig.ret.(types.Void)
 	rec.Direct = inPipe && pipeDirect(args)
 	rec.Refused = x.partialRefusal(callee, args, sig, rec, rest, named, inPipe)
 	if x.c.file.Partials == nil {
@@ -212,6 +219,18 @@ func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature
 	if rec.Refused != "" {
 		x.c.needsPHP(callee.Span(), phpversion.PHP86, "this partial application", rec.Refused+", or target PHP 8.6")
 	}
+}
+
+// mentionsBytesType reports a type with bytes in it, which PHPStan does
+// not know.
+func mentionsBytesType(t types.Type) bool {
+	found := false
+	types.Walk(t, func(m types.Type) {
+		if _, ok := m.(types.Bytes); ok {
+			found = true
+		}
+	})
+	return found
 }
 
 // selfResolved replaces self and static in a parameter type by the class

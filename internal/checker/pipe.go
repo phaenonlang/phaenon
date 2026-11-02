@@ -3,6 +3,7 @@ package checker
 import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/types"
 )
 
 // pipeCall is the call PHP turns a pipe into when its right side is a
@@ -88,7 +89,8 @@ func (x *fnCtx) recordPipePartial(right ast.Expr, args *ast.ArgList, sig *signat
 		}
 	}
 	slot := pfaSlot{param: param, name: param.Name, required: true, arg: placeholder}
-	x.recordPartial(right, args, sig, []pfaSlot{slot}, false, false, true)
+	t := x.pipeParamType
+	x.recordPartial(right, args, sig, []pfaSlot{slot}, false, false, true, func(*program.Param) types.Type { return t })
 }
 
 // pipeDirect reports whether a pipe into a partial application lowers to

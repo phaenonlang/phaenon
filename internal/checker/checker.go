@@ -348,6 +348,8 @@ type fnCtx struct {
 	pipeOperand ast.Expr
 	pipeParam   *program.Param
 	pipeSig     *signature
+	// pipeParamType is pipeParam's type as the call resolved it.
+	pipeParamType types.Type
 }
 
 func (c *Checker) newCtx(f *program.File, scope *program.Scope, class *program.Class, static bool) *fnCtx {
