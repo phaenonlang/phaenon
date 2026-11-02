@@ -213,6 +213,7 @@ func (c *Checker) checkFile(f *program.File) {
 		}
 	}
 	visit(f.AST.Stmts)
+	c.partialSyntax(f)
 	for _, u := range uses {
 		c.checkUse(f, u)
 	}
@@ -339,6 +340,14 @@ type fnCtx struct {
 	// throwEnvs collects the environment after every statement inside a
 	// try body, for the catch blocks.
 	throwEnvs []*state
+	// argKnown holds a pipe's left side, typed before the stage it feeds
+	// is checked as a call that takes it as an argument; pipeOperand is
+	// that expression while its stage is checked, and pipeParam the
+	// parameter it was bound to (design/php-versions.md §5.4).
+	argKnown    map[ast.Expr]types.Type
+	pipeOperand ast.Expr
+	pipeParam   *program.Param
+	pipeSig     *signature
 }
 
 func (c *Checker) newCtx(f *program.File, scope *program.Scope, class *program.Class, static bool) *fnCtx {

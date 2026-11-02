@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 )
 
@@ -21,6 +22,10 @@ import (
 // message). The set of (line, code) pairs must match exactly.
 
 var reWant = regexp.MustCompile(`//\s*want\s+(.*)$`)
+
+// reTarget reads a golden file's target from a first line `// target: 8.6`;
+// without one the file is checked for the floor, PHP 8.5.
+var reTarget = regexp.MustCompile(`^//\s*target:\s*(\d+\.\d+)`)
 var reWantItem = regexp.MustCompile(`(P\d{4})(?:\s+"([^"]*)")?`)
 
 type want struct {
@@ -74,6 +79,13 @@ func TestGolden(t *testing.T) {
 				t.Fatal(err)
 			}
 			p := newProgram(t)
+			if m := reTarget.FindSubmatch(src); m != nil {
+				v, err := phpversion.Parse(string(m[1]))
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.SetTarget(v)
+			}
 			if _, err := p.AddFile(path, src, lexer.ModePhaenon, true); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
