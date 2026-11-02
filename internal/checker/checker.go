@@ -44,7 +44,10 @@ type Checker struct {
 	opts  Options
 	diags []Diagnostic
 	seen  map[string]bool
-	file  *program.File
+	// guards are the version guards around the code being checked
+	// (guards.go).
+	guards []libraryGuard
+	file   *program.File
 	// stdlibUsed names the stdlib classes (Phaenon\Str, …) the current
 	// file's method syntax compiles to: an import of one of them is used by
 	// the output even when the source never writes the class name.

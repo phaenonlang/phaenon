@@ -14,6 +14,10 @@ import (
 // stmts checks a statement list in sequence.
 func (x *fnCtx) stmts(ss []ast.Stmt, env *state) {
 	reported := false
+	// `if (PHP_VERSION_ID < 80600) { return …; }` guards the statements
+	// after it, to the end of the list.
+	depth := len(x.c.guards)
+	defer func() { x.c.guards = x.c.guards[:depth] }()
 	for _, s := range ss {
 		if env.dead && !reported {
 			switch s.(type) {
@@ -26,6 +30,10 @@ func (x *fnCtx) stmts(ss []ast.Stmt, env *state) {
 		x.stmt(s, env)
 		if n := len(x.throwEnvs); n > 0 && !env.dead {
 			x.throwEnvs[n-1] = join(x.throwEnvs[n-1], env)
+		}
+		if is, ok := s.(*ast.If); ok && len(is.ElseIfs) == 0 && is.Else == nil && alwaysExits(is.Then) {
+			_, negative := x.guardOf(is.Cond)
+			x.c.pushGuard(negative) // popped when the list ends
 		}
 	}
 }
@@ -336,17 +344,37 @@ func (x *fnCtx) ifStmt(s *ast.If, env *state) {
 		x.removed(s.S, "the alternative if syntax", "braces")
 	}
 	thenEnv, elseEnv := x.cond(s.Cond, env)
+	positive, negative := x.guardOf(s.Cond)
+	pop := x.c.pushGuard(positive)
 	x.stmt(s.Then, thenEnv)
+	pop()
 	ends := []*state{thenEnv}
 	cur := elseEnv
+	negatives := []libraryGuard{negative}
 	for _, ei := range s.ElseIfs {
 		t, f := x.cond(ei.Cond, cur)
+		p, n := x.guardOf(ei.Cond)
+		pops := []func(){x.c.pushGuard(p)}
+		for _, g := range negatives {
+			pops = append(pops, x.c.pushGuard(g))
+		}
 		x.stmt(ei.Body, t)
+		for i := len(pops) - 1; i >= 0; i-- {
+			pops[i]()
+		}
+		negatives = append(negatives, n)
 		ends = append(ends, t)
 		cur = f
 	}
 	if s.Else != nil {
+		var pops []func()
+		for _, g := range negatives {
+			pops = append(pops, x.c.pushGuard(g))
+		}
 		x.stmt(s.Else, cur)
+		for i := len(pops) - 1; i >= 0; i-- {
+			pops[i]()
+		}
 	}
 	ends = append(ends, cur)
 	*env = *joinAll(ends...)
