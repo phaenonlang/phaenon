@@ -114,11 +114,10 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   3.1; a method missing there is a declaration to add, not a checker bug.
 - **`Scope::first` / a race** (C6) and a `Scope::settle` that returns results and failures side
   by side: library additions when a use site appears.
-- **PhpStorm plugin**: the lexer approximation of `concurrency.md` §11 is in (2026-11-01): a
-  statement block parses as a block, `spawn expr` as `expr`, both words coloured as keywords. The
-  expression forms (`return concurrently { … };`, `spawn { … }`) are syntax errors in the editor
-  until a PSI element for a block exists (M6, with the LSP); `spawn` results are typed as the
-  value, not `Future<T>`.
+- ~~**PhpStorm plugin**: the expression forms (`return concurrently { … };`, `spawn { … }`) are
+  syntax errors in the editor until a PSI element for a block exists~~ — done 2026-11-02 without
+  one (`../jetbrains` branch `feat/class-string-and-php86`, PhpStorm plugin section below): a
+  block used as a value and `spawn` reach PhpStorm as the closures they compile to.
 - ~~**Dogfood** `tq-cli`~~ — done 2026-11-01 ([[dogfood]]). `tequila/nats`: the `RevoltTransport`,
   the pump lease and the opt-in reader task merged as tequila/nats#13, the ADR amendment as
   tequila/platform#255 (2026-11-01). C8 done; M5 closed the same day.
@@ -312,6 +311,42 @@ Decisions are in `../design/php-versions.md` §9; what was left:
 
 ## PhpStorm plugin (`../jetbrains`)
 
+- ~~**`class<T>` hovered as `string|string`; PHP 8.6 and the value forms of `concurrently` and
+  `spawn` were errors in the editor**~~ — done 2026-11-02 (`../jetbrains` branch
+  `feat/class-string-and-php86`, not merged: `16b7897` class-strings, `b573956` PHP 8.6,
+  `0db2717` blocks, docs `9625f1b`):
+  - `class<T>` was `string` plus `\class-string<Bound>`. PhpStorm prints every class-string as
+    `string`, and 2026.2 prints a docblock class-string beside a native `string` as
+    `string|string` in plain PHP too (2025.1: `string`). Now `\class-string<Bound>` alone, the type
+    PhpStorm gives a docblock-only `@return class-string<Foo>`; static calls, `new`, constants,
+    `::class`, string parameters and `->` Str methods keep working. PhpStorm's type printer has no
+    extension point, so quick documentation, the Ctrl+hover hint and parameter info print
+    Phaenon's spelling through a documentation provider and a parameter-info handler ahead of
+    PhpStorm's (`aggregateClass(): class<T>`, `$class: class<EventSourcedAggregate>`); inline hints,
+    completion's type column and inspection messages stay PhpStorm's.
+  - The report "Ctrl+hover on `aggregateClass` shows the interface" did not reproduce in the test
+    framework on 2025.1 or 2026.2.3 — old or new type, the whole core tree, the compiled copy
+    indexed: every position shows and goes to the method, and nothing in the plugin maps a getter
+    to its class-string's class. Left open; candidates are the goto handlers of the third-party
+    plugins in that IDE (Symfony, Laravel Idea, PHP Annotations) or a stale index.
+  - PHP 8.6: no PhpStorm parses it (levels stop at 8.4 and 8.5). A placeholder `?` goes to the
+    parser as an identifier; partial applications are typed as their closures and pipe stages as
+    their calls; PhpStorm's findings on 8.6 code are dropped by target (`phaenon.json` `"php"`,
+    else composer.json's floor): readonly defaults, enum `__debugInfo()`, writes through a constant
+    on 8.6 only, `#[\Override]` on constants on both.
+  - `concurrently` as a value, `spawn { … }`, `spawn expr`: closures to PhpStorm (the keyword's
+    characters split into `function ( )` / `fn ( ) =>`), undefined and unused findings across a
+    block's boundary filtered, block values and `Amp\Future<T>` typed on the variables they are
+    assigned to; a statement block is formatted as one statement. tq-cli is back in the real-tree
+    test: 859 files, no syntax error or stub mismatch. PSI_VERSION 5.
+  - Left: to PhpStorm a partial application is also its callee's result, and a block or a spawn
+    also a `\Closure`, whose value is not typed as an argument or an array-literal element; a
+    `return` in a statement block reads as the function's; the options of a value block are erased;
+    `#[\Override]` on a constant that overrides nothing (`P2503`) and the lowering's 8.5 refusals are
+    not reported; on an 8.5 target the remaining findings are in PhpStorm's words; quick
+    documentation's docblock sections show an erased parameter type as missing. The three tests
+    that fail on 2026.2 on `main` still do (constant-expression closure finding, `map()` chain
+    typing, the spell-checker inspection).
 - ~~**Reformat Code does nothing to a `.phn`**~~ — fixed 2026-11-02 (`../jetbrains` branch
   `fix/editing-actions`: formatter `ce18349`, docblock stub `b61b652`, overrides `e8f1469`, test IDE
   `9d7e667`, pipe `532075f`, docs `88a2d3c`), with the editing actions that relied on it:
