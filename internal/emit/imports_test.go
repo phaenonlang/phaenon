@@ -1,6 +1,7 @@
 package emit
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -117,6 +118,95 @@ func TestImportPlacement(t *testing.T) {
 				if n > len(got) || got[n-1] != want {
 					t.Errorf("line %d:\n got %q\nwant %q\n%s", n, got[n-1], want, out)
 				}
+			}
+		})
+	}
+}
+
+// TestImportShadowing pins when a short name is not free for an import the
+// compiler adds (roadmap D11): a class of the file's namespace with that
+// name, and a relative qualified name — in code or in a docblock — whose
+// first segment is that name, which PHP and PHPStan would resolve through
+// the import. A name that merely starts with the same letters
+// (`Strings\Pad` against `Str`) or is fully qualified leaves it free.
+func TestImportShadowing(t *testing.T) {
+	pad := "namespace App\\Str;\n\nfinal class Pad\n{\n    public static fun left(string $s): string\n    {\n        return ' ' . $s;\n    }\n}\n"
+	pads := "namespace App\\Strings;\n\nfinal class Pad\n{\n    public static fun left(string $s): string\n    {\n        return ' ' . $s;\n    }\n}\n"
+	sameName := "namespace App;\n\nfinal class Str\n{\n}\n"
+	cases := []struct {
+		name   string
+		others []string
+		src    string
+		line   int
+		want   string
+	}{
+		{
+			name:   "a relative qualified name begins with the short name: FQCN",
+			others: []string{pad},
+			src:    "namespace App;\n\nfun f(string $s): string\n{\n    return Str\\Pad::left($s->upper());\n}\n",
+			line:   5,
+			want:   "    return Str\\Pad::left(\\Phaenon\\Str::upper($s));",
+		},
+		{
+			name:   "a docblock's relative qualified name begins with it: FQCN",
+			others: []string{pad},
+			src:    "namespace App;\n\n/** @param Str\\Pad $p */\nfun f(object $p, string $s): string\n{\n    return $s->upper();\n}\n",
+			line:   6,
+			want:   "    return \\Phaenon\\Str::upper($s);",
+		},
+		{
+			name:   "a class of the namespace has the short name: FQCN",
+			others: []string{sameName},
+			src:    "namespace App;\n\nfun f(string $s): string\n{\n    return $s->upper();\n}\n",
+			line:   5,
+			want:   "    return \\Phaenon\\Str::upper($s);",
+		},
+		{
+			name:   "a longer first segment is another name: imported",
+			others: []string{pads},
+			src:    "namespace App;\n\nfun f(string $s): string\n{\n    return Strings\\Pad::left($s->upper());\n}\n",
+			line:   5,
+			want:   "    return Strings\\Pad::left(Str::upper($s));",
+		},
+		{
+			name:   "a fully qualified name goes through no import: imported",
+			others: []string{pad},
+			src:    "namespace App;\n\nfun f(string $s): string\n{\n    return \\App\\Str\\Pad::left($s->upper());\n}\n",
+			line:   5,
+			want:   "    return \\App\\Str\\Pad::left(Str::upper($s));",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := program.New()
+			if err := p.LoadStubs(); err != nil {
+				t.Fatal(err)
+			}
+			for i, other := range c.others {
+				if _, err := p.AddFile(fmt.Sprintf("other%d.phn", i), []byte(other), lexer.ModePhaenon, true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f, err := p.AddFile("x.phn", []byte(c.src), lexer.ModePhaenon, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, d := range checker.New(p, checker.Options{}).Check() {
+				if d.Severity == checker.Error {
+					t.Fatalf("checker: %s:%d: %s: %s", d.File, d.Line, d.Code, d.Message)
+				}
+			}
+			out, err := File([]byte(c.src), Options{StrictTypes: true, Program: p, File: f})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Split(string(out), "\n")
+			if c.line > len(got) || got[c.line-1] != c.want {
+				t.Errorf("line %d:\n got %q\nwant %q\n%s", c.line, got[c.line-1], c.want, out)
+			}
+			imported := strings.Contains(string(out), "use Phaenon\\Str;")
+			if wantImport := !strings.Contains(c.want, "\\Phaenon\\Str::"); imported != wantImport {
+				t.Errorf("use Phaenon\\Str; present = %v, want %v\n%s", imported, wantImport, out)
 			}
 		})
 	}
