@@ -2,15 +2,18 @@ package emit
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/linemap"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/stdlib"
@@ -159,11 +162,24 @@ func compileGolden(t *testing.T, path string, src []byte, target phpversion.Vers
 		os.WriteFile(cfg, []byte("parameters:\n    level: max\n    scanFiles:\n        - "+strings.Join(runtimeStubs, "\n        - ")+"\n"), 0o644)
 		out, err := exec.Command(phpstan, "analyse", "--no-progress", "--error-format=raw", "-c", cfg, wantPath).CombinedOutput()
 		if err != nil {
+			// Raw findings are `path.php:N:message`; the map turns N into the
+			// golden's line.
+			m, _ := linemap.Find(got)
 			var findings []string
 			for _, line := range strings.Split(string(out), "\n") {
-				if strings.Contains(line, ".php:") {
-					findings = append(findings, line)
+				i := strings.Index(line, ".php:")
+				if i < 0 {
+					continue
 				}
+				rest := line[i+len(".php:"):]
+				if j := strings.IndexByte(rest, ':'); j > 0 && m != nil {
+					if n, err := strconv.Atoi(rest[:j]); err == nil {
+						if src, ok := m.Forward(n); ok {
+							line = fmt.Sprintf("%s:%d (output line %d):%s", path, src, n, rest[j+1:])
+						}
+					}
+				}
+				findings = append(findings, line)
 			}
 			t.Errorf("phpstan:\n%s", strings.Join(findings, "\n"))
 		}

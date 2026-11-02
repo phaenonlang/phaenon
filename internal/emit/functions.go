@@ -2,11 +2,9 @@ package emit
 
 import (
 	"bytes"
-	"sort"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
-	"github.com/phaenonlang/phaenon/internal/lexer"
 )
 
 // lowerFunctions compiles the syntax of design/functions.md, none of which
@@ -14,10 +12,11 @@ import (
 // with `public` written out, a class constant or a property or promoted
 // parameter with an asymmetric visibility and no main one gets its implied
 // `public`, a closure in a constant expression becomes the `static
-// function` PHP 8.5 accepts there, an expression body becomes a block on
-// the same lines and a `throws` clause a @throws tag. It runs after the
-// generics lowering, so that a docblock that pass inserts at a
-// declaration's start precedes the rewritten head, and so that the
+// function` PHP 8.5 accepts there, an expression body becomes a PSR-12
+// block and a `throws` clause a @throws tag. The opening braces of named
+// functions, methods and class-likes go where PSR-12 puts them (layout.go).
+// It runs after the generics lowering, so that a docblock that pass inserts
+// at a declaration's start precedes the rewritten head, and so that the
 // @throws tag joins that docblock when there is one.
 func (e *emitter) lowerFunctions(f *ast.File) {
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -26,14 +25,20 @@ func (e *emitter) lowerFunctions(f *ast.File) {
 			if n.Fun {
 				e.replace(n.Head, "function")
 			}
-			e.lowerThrows(n, n.S.Start, n.Name.S.Start, n.Doc, n.Throws)
-			e.lowerExprBody(n.Arrow, n.Body, n.Throws)
+			e.throwsDoc(n, n.S.Start, n.Name.S.Start, n.Doc, n.Throws)
+			e.layoutFunction(function{kwAt: n.Head.Start, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, throws: n.Throws,
+				arrow: n.Arrow, body: n.Body, hasBody: true, end: n.S.End})
 		case *ast.MethodDecl:
 			if n.Fun {
 				e.methodHead(n)
 			}
-			e.lowerThrows(n, n.S.Start, n.Name.S.Start, n.Doc, n.Throws)
-			e.lowerExprBody(n.Arrow, n.Body, n.Throws)
+			e.throwsDoc(n, n.S.Start, n.Name.S.Start, n.Doc, n.Throws)
+			e.layoutFunction(function{kwAt: n.Head.End - 1, name: n.Name, tps: n.TypeParams,
+				ret: n.ReturnType, throws: n.Throws, arrow: n.Arrow, body: n.Body, hasBody: n.HasBody, end: n.S.End})
+		case *ast.ClassDecl:
+			if n.Name != nil {
+				e.classBrace(n)
+			}
 		case *ast.PropertyDecl:
 			e.impliedPublic(n.Modifiers, n.Mods)
 		case *ast.ClassConstDecl:
@@ -72,70 +77,6 @@ func (e *emitter) lowerFunctions(f *ast.File) {
 	})
 }
 
-// lowerExprBody writes an expression body as the block it stands for
-// (design/functions.md §3.2): the arrow becomes `{ return` (`{` when the
-// parser made the body a statement, under void and never) and the final
-// semicolon `; }`, each on its own line, so line N stays line N.
-//
-// An arrow that opens a continuation line, the long form, hands its brace
-// to the end of the signature's line, after the return type (or the
-// parameters), and becomes `return` itself, or vanishes under void and
-// never: the statement then stands one level in from the declaration, as
-// the expression's own continuation lines already do, and the output is
-// the block a person writes, the brace placement aside.
-func (e *emitter) lowerExprBody(b *ast.ExprBody, body []ast.Stmt, throws *ast.Throws) {
-	if b == nil {
-		return
-	}
-	ret := false
-	if len(body) == 1 {
-		_, ret = body[0].(*ast.Return)
-	}
-	lineStart := bytes.LastIndexByte(e.src[:b.Arrow.Start], '\n') + 1
-	if len(bytes.TrimSpace(e.src[lineStart:b.Arrow.Start])) == 0 {
-		before := b.Arrow.Start
-		if throws != nil {
-			before = throws.Kw.Start // the clause leaves the signature
-		}
-		if sig := e.codeEndBefore(before); sig >= 0 {
-			e.insert(sig, " {")
-			kw := ""
-			if ret {
-				kw = "return"
-			}
-			end := b.Arrow.End
-			if !ret && end < len(e.src) && e.src[end] == ' ' {
-				end++ // `=> expr` becomes `expr` where the arrow stood
-			}
-			e.replace(ast.Span{Start: b.Arrow.Start, End: end}, kw)
-			e.replace(b.Semi, "; }")
-			return
-		}
-	}
-	open := "{"
-	if ret {
-		open = "{ return"
-	}
-	e.replace(b.Arrow, open)
-	e.replace(b.Semi, "; }")
-}
-
-// codeEndBefore is the end of the last token before offset off that is no
-// whitespace or comment, -1 when there is none.
-func (e *emitter) codeEndBefore(off int) int {
-	if e.toks == nil {
-		e.toks = lexer.Tokenize(e.src, lexer.ModePhaenon)
-	}
-	i := sort.Search(len(e.toks), func(i int) bool { return e.toks[i].Start >= off }) - 1
-	for i >= 0 && e.toks[i].Kind.IsTrivia() {
-		i--
-	}
-	if i < 0 {
-		return -1
-	}
-	return e.toks[i].End
-}
-
 // lineIndent is the whitespace that starts the line holding off.
 func (e *emitter) lineIndent(off int) string {
 	start := bytes.LastIndexByte(e.src[:off], '\n') + 1
@@ -160,24 +101,22 @@ func (e *emitter) throwsTag(t *ast.Throws) string {
 	return "@throws " + strings.Join(parts, "|")
 }
 
-// lowerThrows takes a `throws` clause out of the signature and writes its
-// @throws tag (design/functions.md §4.2), unless the generics lowering
-// already wrote it into the docblock it generated for the declaration.
-func (e *emitter) lowerThrows(decl ast.Node, declStart, nameStart int, doc string, t *ast.Throws) {
-	if t == nil {
-		return
-	}
-	e.removeThrows(t, e.lineIndent(nameStart))
-	if !e.throwsWritten[decl] {
+// throwsDoc writes the @throws tag of a `throws` clause (design/functions.md
+// §4.2), unless the generics lowering already wrote it into the docblock
+// it generated for the declaration. The clause itself leaves the signature
+// with the body's layout (layoutFunction).
+func (e *emitter) throwsDoc(decl ast.Node, declStart, nameStart int, doc string, t *ast.Throws) {
+	if t != nil && !e.throwsWritten[decl] {
 		e.mergeThrows(declStart, nameStart, doc, e.throwsTag(t))
 	}
 }
 
-// removeThrows deletes a `throws` clause, keeping its line breaks. The
-// space before the keyword goes with it (`): T throws X {` → `): T {`).
-// A clause that opens a line hands its place to what follows on the line —
-// the body's brace or arrow, which then stands at the declaration's
-// indentation (indent) as lowerExprBody puts it — or leaves the line empty.
+// removeThrows deletes a `throws` clause in place, keeping its line breaks:
+// the fallback when a comment between the signature and the body keeps
+// the layout as written. The space before the keyword goes with it (`): T
+// throws X {` → `): T {`). A clause that opens a line hands its place to
+// what follows on the line, which then stands at the declaration's
+// indentation (indent), or leaves the line empty.
 func (e *emitter) removeThrows(t *ast.Throws, indent string) {
 	src := e.src
 	start, end := t.Kw.Start, t.S.End
@@ -203,26 +142,63 @@ func (e *emitter) removeThrows(t *ast.Throws, indent string) {
 	e.replace(ast.Span{Start: start, End: end}, strings.Repeat("\n", bytes.Count(src[start:end], []byte("\n")))+text)
 }
 
-// mergeThrows writes a @throws tag into a declaration's docblock without
-// adding a line:
+// docBlock renders a multi-line docblock at indent: the content of a
+// one-line docblock it replaces (if any) and then the tags, one per line,
+// without a line break after the closing `*/`.
+func docBlock(indent, content string, tags []string) string {
+	var b strings.Builder
+	b.WriteString("/**\n")
+	if content != "" {
+		b.WriteString(indent + " * " + content + "\n")
+	}
+	for _, t := range tags {
+		b.WriteString(indent + " * " + t + "\n")
+	}
+	b.WriteString(indent + " */")
+	return b.String()
+}
+
+// rewriteDoc replaces the one-line docblock doc at idx with a multi-line
+// block of its content and the tags. A declaration that stood on the
+// docblock's line moves to the line after it.
+func (e *emitter) rewriteDoc(idx int, doc, content string, tags []string) {
+	indent := e.lineIndent(idx)
+	end := idx + len(doc)
+	next := end
+	for next < len(e.src) && (e.src[next] == ' ' || e.src[next] == '\t') {
+		next++
+	}
+	text := docBlock(indent, content, tags)
+	if next < len(e.src) && e.src[next] != '\n' && e.src[next] != '\r' {
+		e.replaceFree(ast.Span{Start: idx, End: next}, text+"\n"+indent)
+		return
+	}
+	e.replaceFree(ast.Span{Start: idx, End: end}, text)
+}
+
+// oneLineContent is what a one-line docblock says, without its delimiters.
+func oneLineContent(doc string) string {
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(doc, "/**"), "*/"))
+}
+
+// mergeThrows writes a @throws tag into a declaration's docblock, one tag
+// per line, which is all PHPStan reads:
 //
-//   - no docblock: `/** @throws A|B */ ` at the start of the declaration,
-//     before its attributes and modifiers, where PHP, PHPStan and PhpStorm
-//     attach it as they would on the line above;
-//   - a docblock whose `*/` stands on a line of its own: the tag takes that
-//     line, ` * @throws A|B */`;
-//   - otherwise (a one-line docblock, or content beside the `*/`): the `*/`
-//     moves to the next line with the tag, ahead of what stands there —
-//     `/** Summary.` over ` * @throws A|B */ public function f()` — or onto
-//     a blank line between the docblock and the declaration.
-//
-// A docblock on the declaration's own line has no next line to move to,
-// and gains one: the single exception, recorded beside the generic
-// docblocks' (design/functions.md, decisions made while building D18).
-// One tag per line throughout, which is all PHPStan reads.
+//   - no docblock: a new one on lines of its own before the declaration and
+//     its attributes, where PHP, PHPStan and PhpStorm attach it;
+//   - a docblock whose `*/` stands on a line of its own: the tag takes a
+//     new line before it;
+//   - a multi-line docblock with content beside its `*/`: the `*/` moves to
+//     a line of its own after the tag's;
+//   - a one-line docblock: it becomes a multi-line block, and a
+//     declaration on its line moves below it.
 func (e *emitter) mergeThrows(declStart, nameStart int, doc, tag string) {
+	indent := e.lineIndent(declStart)
+	newDoc := func() {
+		e.insertFree(declStart, docBlock(indent, "", []string{tag})+"\n"+indent)
+	}
 	if doc == "" {
-		e.insert(declStart, "/** "+tag+" */ ")
+		newDoc()
 		return
 	}
 	idx := bytes.LastIndex(e.src[:nameStart], []byte(doc))
@@ -230,52 +206,46 @@ func (e *emitter) mergeThrows(declStart, nameStart int, doc, tag string) {
 		// A docblock between the attributes and the declaration is not the
 		// one PHPStan reads (it reads the comment before the attributes):
 		// the tag gets a docblock of its own there.
-		e.insert(declStart, "/** "+tag+" */ ")
+		newDoc()
 		return
 	}
 	if len(missingTags(doc, []string{tag})) == 0 {
 		return // the docblock states it already
 	}
+	if !strings.Contains(doc, "\n") {
+		e.rewriteDoc(idx, doc, eraseBytesInDoc(oneLineContent(doc)), []string{tag})
+		return
+	}
 	src := e.src
 	end := idx + len(doc)
 	closeAt := end - len("*/")
 	lineStart := bytes.LastIndexByte(src[:closeAt], '\n') + 1
-	if lineStart > idx && len(bytes.TrimSpace(src[lineStart:closeAt])) == 0 {
-		e.replace(ast.Span{Start: closeAt, End: end}, "* "+tag+" */")
+	if len(bytes.TrimSpace(src[lineStart:closeAt])) == 0 {
+		e.insertFree(lineStart, string(src[lineStart:closeAt])+"* "+tag+"\n")
 		return
 	}
-	// The `*/` and the spaces before it move to the next line.
+	// The `*/` and the spaces before it move to a line after the tag's.
 	from := closeAt
 	for from > idx+len("/**") && (src[from-1] == ' ' || src[from-1] == '\t') {
 		from--
 	}
-	docLine := bytes.LastIndexByte(src[:idx], '\n') + 1
-	indent := string(src[docLine:idx])
-	if strings.TrimSpace(indent) != "" {
-		indent = strings.Repeat(" ", len(indent)) // code before the docblock on its line
-	}
-	tagLine := "\n" + indent + " * " + tag + " */"
+	docIndent := e.lineIndent(idx)
+	text := "\n" + docIndent + " * " + tag + "\n" + docIndent + " */"
 	next := end
-	for next < len(src) && (src[next] == ' ' || src[next] == '\t' || src[next] == '\n' || src[next] == '\r') {
+	for next < len(src) && (src[next] == ' ' || src[next] == '\t') {
 		next++
 	}
-	gap := string(src[end:next])
-	switch strings.Count(gap, "\n") {
-	case 0:
-		e.replaceLines(ast.Span{Start: from, End: end}, tagLine)
-	case 1:
-		e.replace(ast.Span{Start: from, End: next}, tagLine+" ")
-	default:
-		// A blank line below the docblock takes the tag.
-		lines := strings.SplitAfter(gap, "\n")
-		e.replace(ast.Span{Start: from, End: next}, tagLine+"\n"+strings.Join(lines[2:], ""))
+	if next < len(src) && src[next] != '\n' && src[next] != '\r' {
+		e.replaceFree(ast.Span{Start: from, End: next}, text+"\n"+docIndent)
+		return
 	}
+	e.replaceFree(ast.Span{Start: from, End: end}, text)
 }
 
 // methodHead rewrites `[modifiers] fun` as `[modifiers] function` in PSR-12
 // order with `public` written out. A head broken over lines or holding a
 // comment keeps its modifiers as written and has only the keyword replaced,
-// so the line count holds and nothing the programmer wrote is lost.
+// so nothing the programmer wrote is lost.
 func (e *emitter) methodHead(n *ast.MethodDecl) {
 	head := e.src[n.Head.Start:n.Head.End]
 	if bytes.ContainsAny(head, "\n\r/#") {
@@ -326,9 +296,11 @@ func (e *emitter) impliedPublic(m ast.Modifier, mods ast.Span) {
 
 // constClosures rewrites the closures of a constant expression — an
 // attribute argument, a constant, a default — as the `static function`
-// closures PHP accepts there: `fn (…) => expr` becomes
-// `static function (…) { return expr; }` and a `function` closure gets
-// `static`. The closures' own bodies are ordinary code and are left alone.
+// closures PHP accepts there: `fn (…) => expr` becomes `static function
+// (…) {` with `return expr;` on a line of its own (closureBody), and a
+// `function` closure gets `static`. The closures' own bodies are ordinary
+// code and are left alone; a closure keeps its brace on its line, as
+// PSR-12 has it.
 func (e *emitter) constClosures(root ast.Expr) {
 	ast.Inspect(root, func(n ast.Node) bool {
 		switch n := n.(type) {
@@ -338,8 +310,7 @@ func (e *emitter) constClosures(root ast.Expr) {
 				kw = "function"
 			}
 			e.replace(n.Kw, kw)
-			e.replace(n.Arrow, "{ return")
-			e.insert(n.Body.Span().End, "; }")
+			e.closureBody(n)
 			return false
 		case *ast.Closure:
 			if !n.Static {
@@ -351,4 +322,31 @@ func (e *emitter) constClosures(root ast.Expr) {
 		}
 		return true
 	})
+}
+
+// closureBody writes the body of an arrow function lowered to a closure as
+// the block PSR-12 gives a closure: the brace on the closure's line, the
+// statement one level in on a line of its own, the closing brace at the
+// indentation of the closure's line. A multi-line body moves in with it; a
+// comment after the arrow keeps the one-line form, `{ return expr; }`.
+func (e *emitter) closureBody(n *ast.ArrowFunc) {
+	toks := e.tokens()
+	first := e.nextCode(e.tokenAt(n.Arrow.End))
+	end := n.Body.Span().End
+	if first >= len(toks) || e.hasComment(n.Arrow.End, toks[first].Start) {
+		e.replace(n.Arrow, "{ return")
+		e.insert(end, "; }")
+		return
+	}
+	indent := e.lineIndent(n.Kw.Start)
+	level := "    "
+	if strings.Contains(indent, "\t") {
+		level = "\t"
+	}
+	bodyStart := toks[first].Start
+	e.replaceFree(ast.Span{Start: n.Arrow.Start, End: bodyStart}, "{\n"+indent+level+"return ")
+	e.insertFree(end, ";\n"+indent+"}")
+	if e.lineOf(bodyStart) != e.lineOf(end) && !e.multiLineToken(bodyStart, end) {
+		e.indents = append(e.indents, indentReq{Span: ast.Span{Start: bodyStart, End: end}, Text: level})
+	}
 }
