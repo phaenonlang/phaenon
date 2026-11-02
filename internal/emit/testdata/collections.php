@@ -134,3 +134,17 @@ function port(string $json): int
 
     return 80;
 }
+
+// A member of `object` is called once method_exists() proved it (P2006
+// before, PHPStan's method.notFound); its result is mixed until checked.
+/** @return array<string, mixed> */
+function exported(object $value): array
+{
+    if (\method_exists($value, 'toArray')) {
+        $data = $value->toArray();
+
+        return Type::map(Type::string(), Type::mixed())->check($data) ? $data : [];
+    }
+
+    return [];
+}

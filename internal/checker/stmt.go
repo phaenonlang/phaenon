@@ -92,10 +92,13 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 			doc = docblock.Parse(s.Doc)
 		}
 		for _, v := range s.Vars {
-			t := types.TNull
+			// The value outlives the call: the initialiser is only what the
+			// first call starts from, so without a `@var` (the declaration
+			// PHP leaves a static variable) it is mixed, as PHPStan has it.
+			t := types.TMixed
 			if v.Default != nil {
 				x.inConst = true
-				t = widenType(x.expr(v.Default, env, nil))
+				x.expr(v.Default, env, nil)
 				x.inConst = false
 			}
 			if doc != nil {
@@ -120,9 +123,7 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 				if t.Index != nil {
 					raw = x.expr(t.Index, env, nil)
 				}
-				if _, isMixed := base.(types.Mixed); isMixed {
-					x.reportNoOffsets(t, base, raw, env) // PHPStan: on mixed, not on object
-				}
+				x.unsetOffsetCheck(t, base, raw, env)
 				x.unsetIndex(t, env)
 			default:
 				x.exprLenient(v, env)
@@ -318,6 +319,47 @@ func isLiteralExpr(e ast.Expr) bool {
 		}
 	}
 	return false
+}
+
+// unsetOffsetCheck reports unset() of an offset on a value that has none,
+// as PHPStan does: mixed, object, iterable, an open type parameter or an
+// object that is no ArrayAccess may refuse it (its
+// offsetAccess.nonOffsetAccessible), and on a scalar, a string or null PHP
+// throws (unset.offset). A union with an array in it is let through.
+func (x *fnCtx) unsetOffsetCheck(t *ast.Index, base, raw types.Type, env *state) {
+	if _, isMixed := base.(types.Mixed); isMixed {
+		x.reportNoOffsets(t, base, raw, env)
+		return
+	}
+	members := types.Members(base)
+	scalarOnly := len(members) > 0
+	for _, m := range members {
+		switch m := m.(type) {
+		case types.Object, types.Iterable:
+			x.reportNoOffsets(t, m, raw, env)
+			return
+		case types.Class, types.Static, types.This, types.Intersection, types.Param:
+			if p, isParam := m.(types.Param); isParam && openParam(p) {
+				x.reportNoOffsets(t, m, raw, env)
+				return
+			}
+			if classes := x.classesOf(m, t.Array.Span()); len(classes) > 0 && !x.arrayAccess(m, t.Array.Span()) {
+				x.report(t.Array.Span(), P2302, "cannot use %s as an array", classTypeName(x, m, classes))
+				return
+			}
+			scalarOnly = false
+		case types.Int, types.Float, types.FloatLit, types.Bool, types.BoolLit, types.Null, types.String, types.StringLit, types.ClassString:
+		default:
+			scalarOnly = false
+		}
+	}
+	if scalarOnly {
+		what := "an offset"
+		if raw != nil {
+			what = "offset " + x.typeName(raw)
+		}
+		x.report(t.Array.Span(), P2302, "cannot unset %s on %s", what, x.typeName(base))
+	}
 }
 
 func (x *fnCtx) unsetIndex(t *ast.Index, env *state) {
