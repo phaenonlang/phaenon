@@ -201,11 +201,11 @@ func (x *fnCtx) variable(v *ast.Variable, env *state, lenient bool) types.Type {
 	if v.Name == "this" {
 		if x.constClosure {
 			x.report(v.S, P2531, "a closure in a constant expression cannot use $this")
-			return types.TObject
+			return types.TError // reported: its members are not reported again
 		}
 		if x.class == nil || x.static {
 			x.report(v.S, P2311, "$this is not available in a static context")
-			return types.TObject
+			return types.TError
 		}
 		if t, ok := env.getPath("$this"); ok {
 			return t
@@ -336,7 +336,7 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 		if item.Unpack {
 			t := x.expr(item.Value, env, nil)
 			k, v, ok := types.IterableKV(t, x.p())
-			if !ok {
+			if !ok || mayNotIterate(t) {
 				x.report(item.Value.Span(), P2303, "cannot unpack %s", x.typeName(t))
 			}
 			isShape = false
@@ -594,6 +594,9 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 		x.expr(e.Name, env, nil)
 		return types.TMixed
 	}
+	if _, dynamic := e.Class.(*ast.Name); !dynamic && !strings.EqualFold(name, "class") {
+		x.memberOnMixed(recv, e.Class.Span(), "cannot access constant %s on mixed", name)
+	}
 	if strings.EqualFold(name, "class") {
 		if lit, ok := recv.(types.Class); ok && !strings.EqualFold(lit.Name, "static") {
 			if _, isName := e.Class.(*ast.Name); isName {
@@ -643,6 +646,7 @@ func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) ty
 	name, ok := identName(e.Name)
 	if !ok {
 		x.expr(e.Name, env, nil)
+		x.memberOnMixed(obj, e.Object.Span(), "cannot access a property on mixed")
 		return types.TMixed
 	}
 	if !e.NullSafe && types.IsNullable(obj) && !types.IsMixed(obj) {
@@ -774,6 +778,12 @@ func (x *fnCtx) propertyType(obj types.Type, name string, e *ast.PropertyFetch, 
 	}
 	base := types.StripNull(obj)
 	if types.IsMixed(base) {
+		if _, unknown := base.(types.Unknown); unknown {
+			return base // a member of what was already reported stays reported
+		}
+		// Under isset() and ?? too, as PHPStan has it: they forgive a
+		// missing property, not a value that may be no object at all.
+		x.memberOnMixed(base, e.Object.Span(), "cannot access property $%s on mixed", name)
 		return types.TMixed
 	}
 	if !types.IsObjectLike(base) {
@@ -785,6 +795,13 @@ func (x *fnCtx) propertyType(obj types.Type, name string, e *ast.PropertyFetch, 
 	var out []types.Type
 	for _, m := range types.Members(base) {
 		if _, isObj := m.(types.Object); isObj {
+			if !lenient && !provenMember(env, e.Object, false, name) {
+				// `object` declares no properties (PHPStan's property.notFound),
+				// unless property_exists() said so.
+				x.report(span, P2005, "unknown property object::$%s", name)
+				out = append(out, types.TError) // reported: the chain goes on silently
+				continue
+			}
 			out = append(out, types.TMixed)
 			continue
 		}
@@ -895,6 +912,9 @@ func (x *fnCtx) staticPropertyFetch(e *ast.StaticPropertyFetch, env *state) (typ
 	if !ok {
 		x.expr(e.Name, env, nil)
 		return types.TMixed, nil
+	}
+	if _, named := e.Class.(*ast.Name); !named {
+		x.memberOnMixed(recv, e.Class.Span(), "cannot access static property $%s on mixed", v.Name)
 	}
 	for _, cl := range classes {
 		pr := cl.FindProperty(v.Name)
@@ -1027,24 +1047,28 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 				out = append(out, types.TMixed)
 				continue
 			}
-			var handled bool
-			for _, cl := range x.classesOf(m, e.Array.Span()) {
+			classes := x.classesOf(m, e.Array.Span())
+			var access *program.Class
+			for _, cl := range classes {
 				if cl.IsSubclassOf("ArrayAccess") {
-					if g := cl.FindMethod("offsetGet"); g != nil {
-						out = append(out, x.bindReceiver(g.Return, m, g.Class))
-						handled = true
-						continue
-					}
+					access = cl // `Countable&ArrayAccess`: one member is enough
+					break
 				}
-				if !lenient && cl.Kind != ast.KindInterface && !cl.Abstract {
-					// An interface or abstract class may be implemented by an
-					// ArrayAccess; PHPStan does not report either.
-					x.report(e.Array.Span(), P2302, "cannot use %s as an array", cl.Name)
-				}
-				handled = true
-				out = append(out, types.TMixed)
 			}
-			if !handled {
+			switch {
+			case access != nil:
+				if g := access.FindMethod("offsetGet"); g != nil {
+					out = append(out, x.bindReceiver(g.Return, m, g.Class))
+				} else {
+					out = append(out, types.TMixed)
+				}
+			case len(classes) > 0:
+				// An interface or abstract class too, and under isset() and
+				// ??, as PHPStan reports them: a value of the type need not
+				// be an ArrayAccess.
+				x.report(e.Array.Span(), P2302, "cannot use %s as an array", classTypeName(x, m, classes))
+				out = append(out, types.TMixed)
+			default:
 				out = append(out, types.TMixed)
 			}
 		case types.Object, types.Iterable:
@@ -1062,6 +1086,17 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 		}
 	}
 	return types.MakeUnion(out...)
+}
+
+// memberOnMixed reports a member access — a method call, a property, a
+// class constant or static member through `$x::` — on mixed, as PHPStan
+// does at level max (method.nonObject, property.nonObject and their static
+// siblings): the value may be no object. An already reported value (the
+// error type) and other types are left to the caller.
+func (x *fnCtx) memberOnMixed(t types.Type, span ast.Span, format string, args ...any) {
+	if _, isMixed := t.(types.Mixed); isMixed {
+		x.report(span, P2105, format, args...)
+	}
 }
 
 // reportNoOffsets reports an offset access on a value not known to have
@@ -1934,11 +1969,17 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 		x.report(t.Object.Span(), P2105, "cannot assign property $%s on %s (possibly null)", name, x.typeName(obj))
 	}
 	if types.IsMixed(base) {
+		x.memberOnMixed(base, t.Object.Span(), "cannot access property $%s on mixed", name) // the read's words: one finding for `$m->n++`
 		return
 	}
 	if !types.IsObjectLike(base) {
 		x.report(t.Object.Span(), P2105, "cannot assign property $%s on %s", name, x.typeName(base))
 		return
+	}
+	for _, m := range types.Members(base) {
+		if _, isObj := m.(types.Object); isObj && !provenMember(env, t.Object, false, name) {
+			x.report(t.Name.Span(), P2005, "unknown property object::$%s", name)
+		}
 	}
 	for _, cl := range x.classesOf(base, t.Object.Span()) {
 		pr := cl.FindProperty(name)
@@ -2209,10 +2250,10 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 	if t.Kind == ast.ArrayList {
 		x.removed(t.S, "list()", "[...] destructuring")
 	}
-	if _, isMixed := vt.(types.Mixed); isMixed {
-		// PHPStan's offsetAccess.nonArray at level max: what is unpacked
-		// may be a value with no offsets.
-		x.report(t.S, P2302, "cannot use array destructuring on mixed")
+	if !x.destructurable(vt, t.S) {
+		// PHPStan's offsetAccess.nonArray: PHP reads null from a scalar or
+		// null, and throws for an object that is no ArrayAccess.
+		x.report(t.S, P2302, "cannot use array destructuring on %s", x.typeName(vt))
 	}
 	pos := int64(0)
 	for _, item := range t.Items {
@@ -2271,6 +2312,47 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 		}
 		x.assignTo(item.Value, elem, env, span)
 	}
+}
+
+// classTypeName names an object type in a diagnostic: the class for one,
+// the type as written otherwise (an intersection, `static`).
+func classTypeName(x *fnCtx, m types.Type, classes []*program.Class) string {
+	if _, isClass := m.(types.Class); isClass && len(classes) == 1 {
+		return classes[0].Name
+	}
+	return x.typeName(m)
+}
+
+// destructurable reports whether every member of t can be destructured:
+// an array, or an object that is an ArrayAccess. An already reported value
+// (the error type) is let through, one mistake one diagnostic.
+func (x *fnCtx) destructurable(t types.Type, span ast.Span) bool {
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.Array, types.Shape, types.Never, types.Unknown:
+		case types.Class, types.Static, types.This, types.Intersection, types.Param:
+			if p, isParam := m.(types.Param); isParam && openParam(p) {
+				return false
+			}
+			if !x.arrayAccess(m, span) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// arrayAccess reports whether an object type is an ArrayAccess: for an
+// intersection, any of its classes being one is enough.
+func (x *fnCtx) arrayAccess(m types.Type, span ast.Span) bool {
+	for _, cl := range x.classesOf(m, span) {
+		if cl.IsSubclassOf("ArrayAccess") {
+			return true
+		}
+	}
+	return false
 }
 
 // ------------------------------------------------------------------ removed constructs

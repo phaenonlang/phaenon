@@ -1,0 +1,36 @@
+declare(strict_types=1);
+
+namespace App\StaticVariables;
+
+// A static variable outlives the call: its initialiser is only where the
+// first call starts. Without a `@var` (the one declaration PHP leaves it) it
+// is mixed, as PHPStan types it; with one, it is the declared type.
+
+function lengths(string $k): int
+{
+    static $cache = [];
+    if (isset($cache[$k])) { // want P2302 "cannot access offset string on mixed"
+        return $cache[$k]; // want P2202
+    }
+    $cache[$k] = \strlen($k); // want P2302
+
+    return \strlen($k);
+}
+
+function declared(string $k): int
+{
+    /** @var array<string, int> $cache */
+    static $cache = [];
+
+    return $cache[$k] ??= \strlen($k);
+}
+
+function flag(): bool
+{
+    /** @var bool $done */
+    static $done = false;
+    $first = !$done;
+    $done = true;
+
+    return $first;
+}

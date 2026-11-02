@@ -918,6 +918,7 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 	name, ok := identName(e.Name)
 	if !ok {
 		x.expr(e.Name, env, nil)
+		x.memberOnMixed(obj, e.Object.Span(), "cannot call a method on mixed")
 		x.argsOnly(e.Args, env)
 		return types.TMixed
 	}
@@ -935,7 +936,11 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 	}
 	base := types.StripNull(obj)
 	if types.IsMixed(base) {
+		x.memberOnMixed(base, e.Object.Span(), "cannot call method %s() on mixed", name)
 		x.argsOnly(e.Args, env)
+		if _, unknown := base.(types.Unknown); unknown {
+			return base // a call on what was already reported stays reported
+		}
 		return types.TMixed
 	}
 	if cls, ambiguous := x.stdlibReceiver(base); cls != "" || ambiguous {
@@ -957,7 +962,14 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 	var out []types.Type
 	for _, m := range types.Members(base) {
 		if _, isObj := m.(types.Object); isObj {
+			// `object` declares no methods (PHPStan's method.notFound),
+			// unless method_exists() said so.
 			x.argsOnly(e.Args, env)
+			if !provenMember(env, e.Object, true, name) {
+				x.report(e.Name.Span(), P2006, "unknown method object::%s()", name)
+				out = append(out, types.TError) // reported: the chain goes on silently
+				continue
+			}
 			out = append(out, types.TMixed)
 			continue
 		}
@@ -1096,6 +1108,7 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 		}
 	} else {
 		ct := x.expr(e.Class, env, nil)
+		x.memberOnMixed(ct, e.Class.Span(), "cannot call static method %s() on mixed", name)
 		// $obj::method() and $classString::method()
 		for _, m := range types.Members(ct) {
 			switch m := m.(type) {
@@ -1472,7 +1485,7 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 					continue
 				}
 				t := x.expr(a.Value, env, nil)
-				if _, _, ok := types.IterableKV(t, x.p()); !ok && !types.IsMixed(t) {
+				if _, _, ok := types.IterableKV(t, x.p()); (!ok && !types.IsMixed(t)) || mayNotIterate(t) {
 					x.report(a.S, P2303, "cannot unpack %s", x.typeName(t))
 				}
 				continue
@@ -1590,6 +1603,12 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		argTypes[i] = at
 		if b.arg.Unpack {
 			_, v, ok := types.IterableKV(at, x.p())
+			if mayNotIterate(at) {
+				// PHPStan's argument.unpackNonIterable; its elements are not
+				// checked again against the parameter.
+				x.report(b.arg.S, P2303, "cannot unpack %s", x.typeName(at))
+				continue
+			}
 			if !ok {
 				if !types.IsMixed(at) {
 					x.report(b.arg.S, P2303, "cannot unpack %s", x.typeName(at))

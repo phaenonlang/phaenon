@@ -237,3 +237,101 @@ function lockedSections(string $composerLock): void
         }
     }
 }
+
+// Destructuring anything but an array or an ArrayAccess is P2302: PHP reads
+// null from a scalar or null and throws for another object
+// (offsetAccess.nonArray).
+/**
+ * @template T
+ * @param T $t
+ * @param array<int, int>|false $af
+ * @param list<int>|null $ln
+ * @param iterable<int, int> $it
+ * @param \ArrayAccess<int, int> $aa
+ */
+function destructuringNonArrays(float $f, mixed $t, array|false $af, ?array $ln, iterable $it, \ArrayAccess $aa, string $s, \Countable $c, object $o): void
+{
+    [$a] = $f; // want P2302 "cannot use array destructuring on float"
+    [$a] = $t; // want P2302 "on T"
+    [$a] = $af; // want P2302
+    [$a] = $ln; // want P2302 "list<int>|null"
+    [$a] = $it; // want P2302
+    [$a] = $s; // want P2302
+    [$a] = $c; // want P2302 "on Countable"
+    [$a] = $o; // want P2302
+    [$a] = $aa;
+    sink($a);
+}
+
+/** @param list<array{int, int}|null> $rows */
+function destructuringNullableRows(array $rows): void
+{
+    foreach ($rows as [$a, $b]) { // want P2302
+        sink([$a, $b]);
+    }
+}
+
+function destructuringMatches(string $s): void
+{
+    if (preg_match('/(a)(b)/', $s, $m) === 1) {
+        [, $a, $b] = $m;
+        sink([$a, $b]);
+    }
+}
+
+// Spreading mixed, object or an open type parameter is P2303
+// (arrayUnpacking.nonIterable, argument.unpackNonIterable).
+/**
+ * @template T
+ * @param T $t
+ */
+function spreads(mixed $m, object $o, mixed $t): void
+{
+    sink([...$m]); // want P2303 "cannot unpack mixed"
+    sink([...$o]); // want P2303 "cannot unpack object"
+    sink([...$t]); // want P2303 "cannot unpack T"
+    sink(\max(...$m)); // want P2303
+    sink(\sprintf('%s', ...$o)); // want P2303
+}
+
+// unset() of an offset on a value that has none: P2302.
+function unsets(object $o, string $s, int $i, \Countable $c): void
+{
+    unset($o['k']); // want P2302 "cannot access offset 'k' on object"
+    unset($s['k']); // want P2302 "cannot unset offset 'k' on string"
+    unset($i['k']); // want P2302 "cannot unset offset 'k' on int"
+    unset($c['k']); // want P2302 "cannot use Countable as an array"
+}
+
+/** @param array<string, int>|null $a */
+function unsetNullableArray(?array $a): void
+{
+    unset($a['k']);
+    sink($a);
+}
+
+// An interface or an abstract class that is no ArrayAccess has no offsets,
+// under isset() and ?? too.
+interface Repository
+{
+}
+
+abstract class Base
+{
+}
+
+interface Indexed extends \ArrayAccess
+{
+}
+
+function classOffsets(Repository $r, Base $b, \Countable $c, Indexed $indexed, \Countable&\ArrayAccess $both): void
+{
+    sink($r['k']); // want P2302 "cannot use App\MixedAccess\Repository as an array"
+    sink($b['k']); // want P2302
+    sink(isset($r['k'])); // want P2302
+    sink($b['k'] ?? null); // want P2302
+    sink(empty($c['k'])); // want P2302
+    $r['k'] = 1; // want P2302
+    sink($indexed['k']);
+    sink($both['k']);
+}
