@@ -118,10 +118,20 @@ func TestPHPStanParity(t *testing.T) {
 			// binary, PHPStan 2.2, accepts no version above 8.5.)
 			argv := []string{phpstan}
 			if target, _ := goldenSetup(t, src); target != phpversion.Floor {
+				// PHAENON_PHP86 names a php 8.6; PHAENON_PHP, the
+				// conformance oracle, serves when it is one.
 				variable := "PHAENON_PHP" + strings.ReplaceAll(target.String(), ".", "")
 				php := os.Getenv(variable)
 				if php == "" {
-					t.Skipf("target %s: %s (a php %s) not set", target, variable, target)
+					if oracle := os.Getenv("PHAENON_PHP"); oracle != "" {
+						out, err := exec.Command(oracle, "-r", `echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;`).Output()
+						if err == nil && string(out) == target.String() {
+							php = oracle
+						}
+					}
+				}
+				if php == "" {
+					t.Skipf("target %s: neither %s nor PHAENON_PHP names a php %s", target, variable, target)
 				}
 				argv = []string{php, phpstan}
 			}
