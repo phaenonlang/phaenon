@@ -1,7 +1,7 @@
 ---
 type: backlog
 tags: [phaenon, backlog]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Open and deferred items
@@ -116,12 +116,26 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   tequila/platform#255 (2026-11-01). C8 done; M5 closed the same day.
 - ~~**tq-cli's 378 checker findings**~~ — `src` at 0 (2026-11-01), ~~213 in `tests/`~~ at 0
   (2026-11-01, [[dogfood]]). Whether a dogfood's tests must pass `phn check` is still open.
-- **Checker more lenient than PHPStan** (seen on tq-cli's compiled tests, 2026-11-01): offset
+- ~~**Checker more lenient than PHPStan** (seen on tq-cli's compiled tests, 2026-11-01): offset
   reads on `mixed` are silent (PHPStan `offsetAccess.nonOffsetAccessible`, 88 sites there); a
   variadic `string ...$args` is `list<string>`, where PHPStan says `array<int|string, string>`
-  because named arguments collect under their names (`ControlTest.php:75`, `LockChangeTest`).
-  Both are parity gaps against the "never more lenient" rule; closing them would add findings
-  in the dogfood trees (not measured), so they wait for a decision.
+  because named arguments collect under their names (`ControlTest.php:75`, `LockChangeTest`).~~
+  — done 2026-11-02, `546e2b0` (`../design/checker.md` §9): an offset on `mixed`, `object`,
+  `iterable` or an open type parameter is `P2302`, destructuring `mixed` too, a `foreach` over
+  them `P2303`; a variadic is `array<int<0, max>|string, T>` in its body. Of the dogfood trees
+  only tq-cli's `tests/` gain findings, 85, each on a line PHPStan reports on the compiled
+  output: 29 reads of a `json_decode()` result, 50 reads and writes down `map<string, mixed>`
+  fixtures, 2 `foreach` over decoded values, 4 variadics used as a `list<string>`. Their fixes
+  in the tree are pending.
+- **Parity gaps of the same family still open** (found 2026-11-02 while probing PHPStan 2.2.5
+  at level max): method calls and property access on `mixed` (`method.nonObject`,
+  `property.nonObject`; 8 property reads in tq-cli's compiled tests); spreading `mixed`
+  (`arrayUnpacking.nonIterable`, `argument.unpackNonIterable`); destructuring `int`, `string`,
+  `null`, `?array` or `iterable` (`offsetAccess.nonArray`); an offset read on an interface or
+  abstract class that is not `ArrayAccess` (exempted on 2026-10-30, `32e5ded`, on the belief
+  that PHPStan is silent; 2.2.5 reports it); `static $cache = []` typed from its initialiser
+  where PHPStan says `mixed`. Deliberately not matched: PHPStan reports `$r = [];
+  $r['a']['b'] = 1` as an offset on `mixed`, which PHP runs without complaint.
 - **PHPStan ignores `@param` / `@return` docblocks on closures and arrow functions** (2.2.5,
   any placement): the docblock the emitter writes before a closure with a `map<…>` or tuple
   parameter is invisible to PHPStan, which sees the erased `array`.
