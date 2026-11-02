@@ -52,7 +52,7 @@ squash merges).
 ## This repository
 
 ```text
-cmd/phn/              CLI: build, check, migrate, lex, print
+cmd/phn/              CLI: build, check, migrate, stdlib, trace, lex, print
 internal/token        token set: PHP 8.5's plus Phaenon's, named like token_name()
 internal/lexer        hand-written port of zend_language_scanner.l; lossless
 internal/ast          typed node families; Phaenon constructs are additions to the PHP tree
@@ -62,7 +62,9 @@ internal/docblock     PHPDoc tags and the PHPStan/Psalm type grammar
 internal/types        the type lattice (PHPStan semantics): subtyping, narrowing, printing
 internal/program      program model: project files, Composer vendor code (lazy), stubs + overlay
 internal/checker      the type checker behind `phn check`
-internal/emit         patch-based, line-preserving emitter; generics erasure, is/as lowering
+internal/emit         patch-based emitter: PSR-12 layout of what it writes, the line map; generics erasure, is/as lowering
+internal/linemap      the `// phaenon-map v1 …` comment every compiled file ends with: parse, write, lookups
+internal/trace        `phn trace`: positions in compiled files → `.phn` positions
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
 internal/conformance  suites over the php-src corpus with `php` as the oracle
 stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime and phaenon/concurrent sources (.phn), the amp/Revolt declarations;
@@ -88,7 +90,7 @@ PHAENON_PHP86=/opt/homebrew/opt/php@8.6/bin/php go test ./internal/emit  # golde
 PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go generate ./stdlib        # refresh stubs + version table (vault `testing`)
 ```
 
-`phn` itself: `phn build|check|migrate|stdlib|lex|print` — run `phn` without arguments for usage; the
+`phn` itself: `phn build|check|migrate|stdlib|trace|lex|print` — run `phn` without arguments for usage; the
 README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`. `phn stdlib` writes the
 runtime package (`--out ../runtime/src`), the concurrent package (`--concurrent-out
 ../concurrent/src`) and the PhpStorm plugin's pseudo-classes (`--plugin-stubs
@@ -120,9 +122,13 @@ worktree kept elsewhere: there, `phn stdlib … --check` with the sibling paths 
   `internal/emit`); comments explain why, not what.
 - Diagnostic codes are stable once published: `P1xxx` syntax and removed constructs, `P2xxx` types
   and flow, `P3xxx` generics, `P4xxx` interop. One mistake, one diagnostic.
-- The emitter edits spans and keeps every edit's line count, so line N of the `.php` is line N of
-  the `.phn`. The only exception, a generic declaration's docblock, is a recorded decision; a new
-  exception needs one too.
+- The emitter edits spans; plain PHP passes through byte for byte. What it writes or rewrites (the
+  header, imports, docblocks, expression bodies, declaration braces) is laid out as PSR-12 wants
+  it, and every compiled file ends with a line map (`../design/line-map.md`): an edit is in place
+  (its line breaks stand for the span's) or free (its own lines, holds in the map). The invariant
+  is `TestLineMapProperty`: every source byte that reaches the output sits on a line whose forward
+  lookup gives its source line. A position reported in compiled PHP goes through the map
+  (`phn trace`), never by line number alone.
 - Emitted PHP must pass `php -l` and PHPStan at level max.
 
 ### Tests, fixtures, golden files
@@ -136,7 +142,9 @@ worktree kept elsewhere: there, `phn stdlib … --check` with the sibling paths 
   Phaenon deliberately lacks goes into the allow-list in `internal/checker/phpstan_test.go` with its
   reason.
 - **Emitter goldens** `internal/emit/testdata/X.phn` → `X.php`: regenerate with `PHAENON_UPDATE=1`,
-  never edit by hand, and read the diff before committing it.
+  never edit by hand, and read the diff before committing it, the map line included.
+- **Line map vectors** `internal/linemap/testdata/vectors.json` are the reference of the format's
+  three readers; the plugin and the runtime keep copies, which `TestVectorCopiesFresh` compares.
 - **Migrate goldens** `internal/migrate/testdata/lift/X.php` → `X.phn` + `X.notes` (the tags left
   in place and why): same `PHAENON_UPDATE=1` rule; the `.phn` must parse and lift to itself.
 - **Printer golden** `internal/printer/testdata/sample.golden`: regenerate with
