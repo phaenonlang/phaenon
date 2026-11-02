@@ -24,8 +24,8 @@ final class MemoryStore implements Store {
     /** @var array<int, string> */
     private array $items = [];
 
-    /** @throws NotFound */ public function get(int $id): string
-    { return $this->items[$id] ?? throw new NotFound((string) $id); }
+    /** @throws NotFound */ public function get(int $id): string {
+        return $this->items[$id] ?? throw new NotFound((string) $id); }
 
     /** Removes the entry.
      * @throws NotFound|Failure */ public function remove(int $id): void {
@@ -69,21 +69,21 @@ final class MemoryStore implements Store {
      * @return array<int, string>
      * @throws \LogicException when the store is empty
      * @throws NotFound */
-    public function all(): array
-    { return $this->items === [] ? throw new \LogicException('empty') : $this->items + [0 => $this->get(0)]; }
+    public function all(): array {
+        return $this->items === [] ? throw new \LogicException('empty') : $this->items + [0 => $this->get(0)]; }
 
     /** @throws NotFound */
     public function stated(int $id): string { return $this->get($id); }
 
     /**
+     * @param list<T> $items the candidates, the first one returned
      * @template T of object
      * @param class-string<T> $class
-     * @param list<T> $items
      * @return T
      * @throws NotFound
      */
-    public function first(string $class, array $items): object
-    { return $items[0] ?? throw new NotFound($class); }
+    public function first(string $class, array $items): object {
+        return $items[0] ?? throw new NotFound($class); }
 
     /**
      * Rethrows what it is given.

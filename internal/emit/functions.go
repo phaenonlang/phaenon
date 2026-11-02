@@ -2,9 +2,11 @@ package emit
 
 import (
 	"bytes"
+	"sort"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/lexer"
 )
 
 // lowerFunctions compiles the syntax of design/functions.md, none of which
@@ -25,13 +27,13 @@ func (e *emitter) lowerFunctions(f *ast.File) {
 				e.replace(n.Head, "function")
 			}
 			e.lowerThrows(n, n.S.Start, n.Name.S.Start, n.Doc, n.Throws)
-			e.lowerExprBody(n.Arrow, n.Body, n.Name.S.Start)
+			e.lowerExprBody(n.Arrow, n.Body, n.Throws)
 		case *ast.MethodDecl:
 			if n.Fun {
 				e.methodHead(n)
 			}
 			e.lowerThrows(n, n.S.Start, n.Name.S.Start, n.Doc, n.Throws)
-			e.lowerExprBody(n.Arrow, n.Body, n.Name.S.Start)
+			e.lowerExprBody(n.Arrow, n.Body, n.Throws)
 		case *ast.PropertyDecl:
 			e.impliedPublic(n.Modifiers, n.Mods)
 		case *ast.ClassConstDecl:
@@ -73,26 +75,65 @@ func (e *emitter) lowerFunctions(f *ast.File) {
 // lowerExprBody writes an expression body as the block it stands for
 // (design/functions.md §3.2): the arrow becomes `{ return` (`{` when the
 // parser made the body a statement, under void and never) and the final
-// semicolon `; }`, each on its own line, so line N stays line N. An arrow
-// that opens a continuation line leaves its brace at the declaration's
-// indentation, where PSR-12 puts a body's brace on a line of its own.
-// nameAt is the offset of the declaration's name.
-func (e *emitter) lowerExprBody(b *ast.ExprBody, body []ast.Stmt, nameAt int) {
+// semicolon `; }`, each on its own line, so line N stays line N.
+//
+// An arrow that opens a continuation line, the long form, hands its brace
+// to the end of the signature's line, after the return type (or the
+// parameters), and becomes `return` itself, or vanishes under void and
+// never: the statement then stands one level in from the declaration, as
+// the expression's own continuation lines already do, and the output is
+// the block a person writes, the brace placement aside.
+func (e *emitter) lowerExprBody(b *ast.ExprBody, body []ast.Stmt, throws *ast.Throws) {
 	if b == nil {
 		return
 	}
-	open := "{"
+	ret := false
 	if len(body) == 1 {
-		if _, ok := body[0].(*ast.Return); ok {
-			open = "{ return"
+		_, ret = body[0].(*ast.Return)
+	}
+	lineStart := bytes.LastIndexByte(e.src[:b.Arrow.Start], '\n') + 1
+	if len(bytes.TrimSpace(e.src[lineStart:b.Arrow.Start])) == 0 {
+		before := b.Arrow.Start
+		if throws != nil {
+			before = throws.Kw.Start // the clause leaves the signature
+		}
+		if sig := e.codeEndBefore(before); sig >= 0 {
+			e.insert(sig, " {")
+			kw := ""
+			if ret {
+				kw = "return"
+			}
+			end := b.Arrow.End
+			if !ret && end < len(e.src) && e.src[end] == ' ' {
+				end++ // `=> expr` becomes `expr` where the arrow stood
+			}
+			e.replace(ast.Span{Start: b.Arrow.Start, End: end}, kw)
+			e.replace(b.Semi, "; }")
+			return
 		}
 	}
-	if lineStart := bytes.LastIndexByte(e.src[:b.Arrow.Start], '\n') + 1; lineStart > nameAt && len(bytes.TrimSpace(e.src[lineStart:b.Arrow.Start])) == 0 {
-		e.replace(ast.Span{Start: lineStart, End: b.Arrow.End}, e.lineIndent(nameAt)+open)
-	} else {
-		e.replace(b.Arrow, open)
+	open := "{"
+	if ret {
+		open = "{ return"
 	}
+	e.replace(b.Arrow, open)
 	e.replace(b.Semi, "; }")
+}
+
+// codeEndBefore is the end of the last token before offset off that is no
+// whitespace or comment, -1 when there is none.
+func (e *emitter) codeEndBefore(off int) int {
+	if e.toks == nil {
+		e.toks = lexer.Tokenize(e.src, lexer.ModePhaenon)
+	}
+	i := sort.Search(len(e.toks), func(i int) bool { return e.toks[i].Start >= off }) - 1
+	for i >= 0 && e.toks[i].Kind.IsTrivia() {
+		i--
+	}
+	if i < 0 {
+		return -1
+	}
+	return e.toks[i].End
 }
 
 // lineIndent is the whitespace that starts the line holding off.

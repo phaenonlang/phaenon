@@ -4,8 +4,8 @@ use LogicException;
 
 // An expression body compiles to the block it stands for, on the lines it
 // stands on: `=> expr;` is `{ return expr; }`, or `{ expr; }` under void and
-// never; a body wrapped after the arrow keeps its brace at the declaration's
-// indentation (design/functions.md §3).
+// never; a body wrapped after the arrow hands its brace to the signature's
+// line, and the arrow becomes `return` (design/functions.md §3).
 
 interface Named
 {
@@ -29,11 +29,22 @@ final class User implements Named, \Stringable {
 
     public function calls(): int { return $this->calls; }
 
-    public static function of(string $name): self
-    { return new self(\trim($name)); }
+    public static function of(string $name): self {
+        return new self(\trim($name)); }
 
-    public function greeting(string $salutation, string $punctuation, bool $shout = false): string
-    { return $shout ? \strtoupper($salutation . ', ' . $this->name . $punctuation) : $salutation . ', ' . $this->name . $punctuation; }
+    public function greeting(string $salutation, string $punctuation, bool $shout = false): string {
+        return $shout ? \strtoupper($salutation . ', ' . $this->name . $punctuation) : $salutation . ', ' . $this->name . $punctuation; }
+
+    public function described(string $prefix, string $suffix): string {
+        return \sprintf(
+            '%s %s %s',
+            $prefix,
+            $this->name,
+            $suffix,
+        ); }
+
+    public function logged(string $message, string $context): void {
+        $this->record($message . ' (' . $context . ')'); }
 
     public function counter(): \Closure { return fn (): int => $this->calls; }
 
