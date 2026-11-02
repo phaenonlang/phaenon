@@ -58,5 +58,12 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
    distribution, `roadmap.md` §3).
 3. Beside it, when wanted: the Composer plugin (M6, D13); the three earlier dogfood branches on
    the sibling layout (D12); the checker items in [[open-items]].
+4. 2026-11-02: D18 (expression bodies, `throws`, canonical layout) and D19 (the line map in place
+   of the line rule, `../design/line-map.md`; empty bodies and empty class-likes `{}`) are done in
+   the compiler, the plugin, `phaenon/runtime` and the five dogfood trees. **M6 has the go-ahead**;
+   it starts with its design document. The PHP 8.6 milestone stays open beside it until 8.6.0's
+   release (2026-11-19). The debugger is to be tried in PhpStorm on a real tree by the end of the
+   week of 2026-11-09 (procedure: `~/labs/phaenon/.cache/line-map/manual-procedure.md`); what it
+   finds goes into [[open-items]] § the plugin's line map.
 
 ← [[Home]]
