@@ -72,7 +72,7 @@ The branches as extracted: `PHP-8.6` at `0761161562c`, `PHP-8.5` at `a1a9f70cb2d
 
 Since D19 (2026-11-02) the emit execution suite translates the compiled run's positions through
 its line map before comparing (`translateLines` in `internal/conformance/emit_test.go`). Re-run on
-both branches that day: emit execution **4,614/4,614** (`PHP-8.5`, PHP 8.5.3) and **4,862/4,862**
+both branches that day: emit execution **4,615/4,615** (`PHP-8.5`, PHP 8.5.3) and **4,862/4,862**
 (`PHP-8.6`, PHP 8.6.0-dev), plus **29** tests in each that read a line as a value (an error
 handler's `$errline`, `getLine()`, reflection's start line, `debug_backtrace()` as data, an
 assertion callback): the compiled file reports its own line there, so they must match with digits
