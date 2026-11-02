@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/emit"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
@@ -39,10 +40,12 @@ func TestPHPStanParity(t *testing.T) {
 		"void.pure":                 true,
 		"method.unused":             true, // dead-code analysis is tooling (M6)
 		"property.unused":           true,
+		"property.onlyWritten":      true,
 		"constant.unused":           true,
 		"classConstant.unused":      true,
 		"phpstan.dumpType":          true,
 		"catch.neverThrown":         true, // throw analysis is not in M2
+		"throws.unusedType":         true, // the same: a `throws` clause is not checked against the body (functions.md §4)
 		"return.unusedType":         true, // unused-type analysis is tooling (M6)
 		"parameterByRef.unusedType": true,
 	}
@@ -101,7 +104,14 @@ func TestPHPStanParity(t *testing.T) {
 				t.Skip(why)
 			}
 			phpName := strings.TrimSuffix(name, ".phn") + ".php"
-			if err := os.WriteFile(filepath.Join(dir, phpName), append([]byte("<?php "), src...), 0o644); err != nil {
+			php := append([]byte("<?php "), src...)
+			if usesFunctionSyntax(src) {
+				// `fun`, expression bodies and `throws` lower line for line
+				// (design/functions.md): PHPStan judges the compiled file,
+				// whose line N is the golden's line N.
+				php = compileForParity(t, path, src)
+			}
+			if err := os.WriteFile(filepath.Join(dir, phpName), php, 0o644); err != nil {
 				t.Fatal(err)
 			}
 			wants := map[int]bool{}
@@ -193,9 +203,54 @@ var skipParity = map[string]string{
 		"(unknown symbols, PHP_VERSION_ID < 80600 always true), on 8.6 the 8.5 side is dead code",
 }
 
+// usesFunctionSyntax reports whether a corpus file declares with the
+// syntax of design/functions.md — `fun`, an expression body, `throws` —
+// which the emitter lowers without type information and line for line.
+func usesFunctionSyntax(src []byte) bool {
+	f, err := parser.Parse(src, lexer.ModePhaenon)
+	if err != nil {
+		return false
+	}
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FunctionDecl:
+			found = found || n.Fun || n.Arrow != nil || n.Throws != nil
+		case *ast.MethodDecl:
+			found = found || n.Fun || n.Arrow != nil || n.Throws != nil
+		}
+		return !found
+	})
+	return found
+}
+
+// compileForParity compiles a golden file whose only Phaenon syntax is that
+// of design/functions.md, without declare(strict_types=1) as the PHP
+// copies of the other files are analysed.
+func compileForParity(t *testing.T, path string, src []byte) []byte {
+	t.Helper()
+	p := newProgram(t)
+	target, opts := goldenSetup(t, src)
+	p.SetTarget(target)
+	f, err := p.AddFile(path, src, lexer.ModePhaenon, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	New(p, opts).Check()
+	out, err := emit.File(src, emit.Options{SourceName: filepath.Base(path), Program: p, File: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Count(string(out), "\n"), strings.Count(string(src), "\n"); got != want {
+		t.Fatalf("compiled with %d lines for the golden's %d: the line map PHPStan's findings need is gone", got, want)
+	}
+	return out
+}
+
 // usesPhaenonSyntax reports whether a corpus file has constructs PHPStan
-// cannot parse: type parameters and arguments, is / as, type aliases,
-// Closure signatures, hyphenated type names, PHP 8.6 placeholders.
+// cannot parse and the emitter does not lower line for line: type
+// parameters and arguments, is / as, type aliases, Closure signatures,
+// hyphenated type names, PHP 8.6 placeholders, concurrency blocks.
 func usesPhaenonSyntax(src []byte) bool {
 	f, err := parser.Parse(src, lexer.ModePhaenon)
 	if err != nil {
@@ -209,10 +264,6 @@ func usesPhaenonSyntax(src []byte) bool {
 				found = true
 			case *ast.Placeholder:
 				found = true // PHP 8.6 syntax, which the parity PHPStan (2.2) does not parse
-			case *ast.FunctionDecl:
-				found = found || n.Fun
-			case *ast.MethodDecl:
-				found = found || n.Fun
 			case *ast.Cast:
 				found = n.Op == token.T_BYTES_CAST
 			case *ast.NamedType:

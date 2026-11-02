@@ -85,6 +85,10 @@ than the oracle").
   and the 8.5 one the same under PHP 8.5. PHPStan runs on the 8.5 output only when the source has
   placeholders: the parity PHPStan 2.2 does not parse PHP 8.6.
 - The checker's PHPStan parity skips goldens with placeholders for the same reason.
+- A checker golden whose only Phaenon syntax is that of `../design/functions.md` (`fun`, `=>`
+  bodies, `throws`) is compiled by the emitter, which keeps every line, and PHPStan judges the
+  output (2026-11-02); goldens with other Phaenon syntax are still skipped, covered by the emit
+  goldens. `functions.phn`, `expression-bodies.phn` and `throws.phn` run that way.
 
 ## PHPStan
 

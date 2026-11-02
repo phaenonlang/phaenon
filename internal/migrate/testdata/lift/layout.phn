@@ -1,0 +1,123 @@
+namespace App;
+
+use Closure;
+
+/** A greeting. */
+interface Greets {
+    fun greet(string $name): string;
+}
+
+trait Counts {
+    private int $count = 0;
+
+    fun count(): int => $this->count;
+}
+
+enum Level: int {
+    case Low = 1;
+
+    fun label(): string => match ($this) {
+        self::Low => 'low',
+    };
+}
+
+final class Greeter implements
+    Greets,
+    \Countable {
+    use Counts;
+
+    /** The salutation. */
+    private string $salutation = 'Hello';
+
+    /**
+     * Two lines
+     * of prose stay a block.
+     */
+    private string $punctuation = '!';
+
+    /**
+     * A docblock whose only line of content is long enough that collapsing it onto one line would pass the column limit.
+     */
+    private string $long = '';
+
+    fun __construct(private readonly string $suffix = '') {
+    }
+
+    fun greet(string $name): string => $this->salutation . ', ' . $name . $this->punctuation . $this->suffix;
+
+    fun log(string $message): void => $this->count += \strlen($message);
+
+    fun fail(string $why): never => throw new \LogicException($why);
+
+    fun noType() {
+        $this->count++;
+    }
+
+    fun twoStatements(): int {
+        $this->count++;
+        return $this->count;
+    }
+
+    fun commented(): int {
+        // the count so far
+        return $this->count;
+    }
+
+    fun documented(): int {
+        /** @var int $count */
+        $count = $this->count;
+        return $count;
+    }
+
+    fun inlineVar(): int {
+        /** @var int */
+        return $this->count;
+    }
+
+    fun tags(): array => [
+        'salutation' => $this->salutation,
+        'punctuation' => $this->punctuation,
+    ];
+
+    fun chained(string $name): string => \trim(
+        $this->greet($name),
+    );
+
+    fun longLine(string $firstName, string $lastName, string $title): string
+        => $this->greet($title . ' ' . $firstName . ' ' . $lastName) . $this->salutation . $this->punctuation;
+
+    fun heredoc(string $name): string
+        => <<<TEXT
+            Dear {$name},
+            TEXT;
+
+    fun generator(): \Generator {
+        return yield $this->count;
+    }
+
+    fun &reference(): int => $this->count;
+
+    fun oneLine(): int => $this->count;
+
+    fun factory(): Closure => function (string $name): string {
+        return $this->greet($name);
+    };
+
+    fun anonymous(): \Countable => new class () implements \Countable {
+        public function count(): int => 0;
+    };
+
+    fun braceComment(): int // a comment before the brace
+    {
+        return $this->count;
+    }
+
+    fun __destruct() {
+        $this->log('bye');
+    }
+}
+
+fun helper(int $x): int => $x * 2;
+
+fun noBody(): void {
+}

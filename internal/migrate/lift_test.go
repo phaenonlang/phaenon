@@ -32,9 +32,10 @@ func liftModel(t *testing.T, path string, src []byte, mode lexer.Mode) (*program
 	return p, f
 }
 
-// TestLift converts every testdata/lift/*.php and compares the result with
-// the .phn beside it and the notes with the .notes file. PHAENON_UPDATE=1
-// rewrites the expectations.
+// TestLift converts every testdata/lift/*.php as phn migrate does — tags
+// lifted, the canonical layout applied, except in a fixture named
+// keep-layout — and compares the result with the .phn beside it and the
+// notes with the .notes file. PHAENON_UPDATE=1 rewrites the expectations.
 func TestLift(t *testing.T) {
 	inputs, _ := filepath.Glob("testdata/lift/*.php")
 	if len(inputs) == 0 {
@@ -42,13 +43,14 @@ func TestLift(t *testing.T) {
 	}
 	for _, in := range inputs {
 		name := strings.TrimSuffix(filepath.Base(in), ".php")
+		layout := !strings.HasSuffix(name, "keep-layout")
 		t.Run(name, func(t *testing.T) {
 			src, err := os.ReadFile(in)
 			if err != nil {
 				t.Fatal(err)
 			}
 			p, f := liftModel(t, in, src, lexer.ModePHP)
-			got, notes, err := Convert(src, Options{Generics: true, Program: p, File: f})
+			got, notes, err := Convert(src, Options{Generics: true, Layout: layout, Program: p, File: f})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -74,11 +76,17 @@ func TestLift(t *testing.T) {
 			if string(wantNotes) != b.String() {
 				t.Errorf("notes differ from %s (PHAENON_UPDATE=1 to rewrite):\n%s", notesFile, b.String())
 			}
-			// Lifting is idempotent: the output has nothing left to lift.
+			// Lifting is idempotent: the output has nothing left to lift,
+			// nor to lay out.
 			p, f = liftModel(t, wantFile, got, lexer.ModePhaenon)
 			again, notes2, err := Lift(got, Options{Generics: true, Program: p, File: f})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if layout {
+				if again, err = Layout(again, nil); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if string(again) != string(got) {
 				t.Errorf("second lift changed the output:\n%s", again)

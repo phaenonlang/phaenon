@@ -1,0 +1,26 @@
+namespace App;
+
+/**
+ * With --keep-layout the tags are still lifted; braces, docblocks and
+ * bodies stay as they are.
+ */
+final class Account
+{
+    /**
+     * The balance.
+     */
+    private int $balance = 0;
+
+    /**
+     * Withdraws money.
+     */
+    fun withdraw(int $amount): void throws \DomainException
+    {
+        $this->balance -= $amount;
+    }
+
+    fun balance(): int
+    {
+        return $this->balance;
+    }
+}

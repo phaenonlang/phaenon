@@ -504,14 +504,37 @@ func mentionsBytes(t ast.TypeExpr) bool {
 // text is doc) the given tags, merging into an existing docblock. Tags
 // already present are not repeated.
 func (l *lowering) addDoc(declStart int, doc string, tags []string) {
+	l.addDocWith(declStart, doc, tags, "")
+}
+
+// addDocWith is addDoc with one more tag, extra, that joins the generated
+// ones only when they add lines to the docblock anyway (the recorded
+// exception to the line rule): a declaration's `@throws`, which on its own
+// is merged without adding a line (lowerFunctions). It reports whether
+// extra was written.
+func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra string) (wroteExtra bool) {
 	if len(tags) == 0 {
-		return
+		return false
 	}
 	indent := l.indentAt(declStart)
-	if doc == "" {
+	idx := -1
+	if doc != "" {
+		// A docblock between the attributes and the declaration
+		// (`#[A] /** … */ fun f()`) lies after declStart and is not the
+		// one PHPStan reads: it reads the comment before the attributes. The
+		// tags then go into a docblock of their own there.
+		idx = bytes.LastIndex(l.e.src[:declStart], []byte(doc))
+		if idx >= 0 && len(bytes.TrimSpace(l.e.src[idx+len(doc):declStart])) > 0 {
+			idx = -1 // the same text above an earlier declaration
+		}
+	}
+	if idx < 0 {
+		if extra != "" {
+			tags = append(tags, extra)
+		}
 		if len(tags) == 1 {
 			l.e.insertLines(declStart, "/** "+tags[0]+" */\n"+indent)
-			return
+			return extra != ""
 		}
 		var b strings.Builder
 		b.WriteString("/**\n")
@@ -520,24 +543,46 @@ func (l *lowering) addDoc(declStart int, doc string, tags []string) {
 		}
 		b.WriteString(indent + " */\n" + indent)
 		l.e.insertLines(declStart, b.String())
-		return
+		return extra != ""
 	}
-	idx := bytes.LastIndex(l.e.src[:declStart], []byte(doc))
-	if idx < 0 {
-		return
+	oneLine := !strings.Contains(doc, "\n")
+	filled := doc // a one-line docblock with the types of its own tags filled in
+	if oneLine {
+		// A one-line docblock that becomes several lines is rewritten as a
+		// whole, so the types its tags get (`/** @param $x - prose */`) are
+		// filled into its text rather than in place.
+		saved := l.e
+		l.e = &emitter{src: []byte(doc), opts: saved.opts}
+		tags = l.fillTypes(doc, 0, tags)
+		tags = l.replaceVar(doc, 0, tags)
+		inDoc := l.e
+		l.e = saved
+		tags = missingTags(doc, tags)
+		if len(tags) == 0 {
+			for _, ed := range inDoc.edits {
+				l.e.replace(ast.Span{Start: idx + ed.Start, End: idx + ed.End}, ed.Text)
+			}
+			return false
+		}
+		filled = string(inDoc.apply())
+	} else {
+		tags = l.fillTypes(doc, idx, tags)
+		tags = l.replaceVar(doc, idx, tags)
+		tags = missingTags(doc, tags)
+		if len(tags) == 0 {
+			return false
+		}
 	}
-	tags = l.fillTypes(doc, idx, tags)
-	tags = l.replaceVar(doc, idx, tags)
-	tags = missingTags(doc, tags)
-	if len(tags) == 0 {
-		return
+	if extra != "" && len(missingTags(doc, []string{extra})) > 0 {
+		tags = append(tags, extra)
+		wroteExtra = true
 	}
 	span := ast.Span{Start: idx, End: idx + len(doc)}
 	indent = l.indentAt(idx)
-	if !strings.Contains(doc, "\n") {
+	if oneLine {
 		// The content moves into a new docblock: its written types erase
 		// as eraseWrittenBytes would have erased them in place.
-		content := eraseBytesInDoc(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(doc, "/**"), "*/")))
+		content := eraseBytesInDoc(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(filled, "/**"), "*/")))
 		if len(tags) == 1 && strings.HasPrefix(tags[0], "@var ") {
 			// A property's one-line `/** what it holds */` keeps its line:
 			// `/** @var list<string> what it holds */` is the PHP it came from.
@@ -546,7 +591,7 @@ func (l *lowering) addDoc(declStart int, doc string, tags []string) {
 				text += " " + content
 			}
 			l.e.replace(span, text+" */")
-			return
+			return false
 		}
 		// `/** Summary. */` becomes a multi-line block.
 		var b strings.Builder
@@ -559,7 +604,7 @@ func (l *lowering) addDoc(declStart int, doc string, tags []string) {
 		}
 		b.WriteString(indent + " */")
 		l.e.replaceLines(span, b.String())
-		return
+		return wroteExtra
 	}
 	lastNL := strings.LastIndexByte(doc, '\n')
 	closeIndent := indent
@@ -583,6 +628,7 @@ func (l *lowering) addDoc(declStart int, doc string, tags []string) {
 		b.WriteString(closeIndent + " * " + t + "\n")
 	}
 	l.e.insertLines(at, b.String())
+	return wroteExtra
 }
 
 // fillTypes puts the type back into `@param $x description` lines, which
@@ -710,6 +756,11 @@ func tagKey(tag string) string {
 		return "@return"
 	case "@var", "@phpstan-var", "@psalm-var":
 		return "@var"
+	case "@throws", "@phpstan-throws":
+		// Several @throws tags add up; only the same type is the same tag.
+		if len(fields) > 1 {
+			return "@throws " + fields[1]
+		}
 	case "@extends", "@implements", "@phpstan-extends", "@phpstan-implements", "@template-extends", "@template-implements":
 		if len(fields) > 1 {
 			name := fields[1]
@@ -789,7 +840,9 @@ func (l *lowering) funcDecl(d *ast.FunctionDecl) error {
 	tags := l.templateTags(d.TypeParams, sc)
 	l.removeTypeParams(d.Name.S.End, d.TypeParams)
 	tags = append(tags, l.signature(d.Params, d.ReturnType, sc, nil)...)
-	l.addDoc(d.S.Start, d.Doc, tags)
+	if l.addDocWith(d.S.Start, d.Doc, tags, l.e.throwsTag(d.Throws)) {
+		l.e.throwsWritten[d] = true
+	}
 	return l.walkBody(d.Body, sc)
 }
 
@@ -888,7 +941,9 @@ func (l *lowering) methodDecl(cl *program.Class, d *ast.MethodDecl, csc *scope) 
 		overrides = l.overrideErasure(m, sc)
 	}
 	tags = append(tags, l.signature(d.Params, d.ReturnType, sc, overrides)...)
-	l.addDoc(d.S.Start, d.Doc, tags)
+	if l.addDocWith(d.S.Start, d.Doc, tags, l.e.throwsTag(d.Throws)) {
+		l.e.throwsWritten[d] = true
+	}
 	if !d.HasBody {
 		return nil
 	}
