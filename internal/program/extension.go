@@ -28,6 +28,10 @@ type Extension struct {
 	Version string
 }
 
+// ExtensionsPHP is the PHP_VERSION of the php whose extensions
+// LoadExtensions read ("8.5.3"), "" before it ran.
+func (p *Program) ExtensionsPHP() string { return p.extensionsPHP }
+
 // LoadExtensions declares the extensions php has loaded that embedded does
 // not cover, and returns the names it declared. cacheDir may be "" to
 // generate without caching. A php that cannot be run is an error; one
@@ -38,6 +42,7 @@ func (p *Program) LoadExtensions(php, cacheDir string, embedded func(lower strin
 	if err != nil {
 		return nil, err
 	}
+	p.extensionsPHP = phpVersion
 	var loaded []string
 	var problems []string
 	for _, e := range exts {

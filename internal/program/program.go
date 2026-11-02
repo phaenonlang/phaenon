@@ -52,6 +52,8 @@ type Program struct {
 	ConstType func(c *Constant) types.Type
 	stubs     bool
 	target    phpversion.Version
+	// extensionsPHP is the version of the php LoadExtensions reflected.
+	extensionsPHP string
 }
 
 // Problem is a finding attached to a declaration site.
