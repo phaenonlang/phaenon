@@ -685,7 +685,7 @@ func minMaxType(isMax bool, ts []types.Type) types.Type {
 // ImplodeFunctionReturnTypeExtension).
 func (x *fnCtx) implodeType(args *ast.ArgList, argType func(int) types.Type, ret types.Type) types.Type {
 	for _, a := range args.Args {
-		if a.Name != nil || a.Unpack || a.Placeholder {
+		if a.Name != nil || a.Unpack || a.Placeholder != nil {
 			return ret
 		}
 	}
@@ -1459,7 +1459,7 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	placeholder := false
 	if args != nil {
 		for i, a := range args.Args {
-			if a.Placeholder {
+			if a.Placeholder != nil {
 				placeholder = true
 				continue
 			}
