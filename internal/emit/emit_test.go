@@ -163,6 +163,16 @@ func TestBraces(t *testing.T) {
 			"function f(): string\n{\n    return <<<TXT\n  a\n  TXT;\n}\n",
 		},
 		{
+			"an expression body after a multi-line parameter list keeps `): T {` together",
+			"fun f(\n    int $a,\n): int => $a;\n",
+			"function f(\n    int $a,\n): int {\n    return $a;\n}\n",
+		},
+		{
+			"a method inside a moved-in expression body is laid out where its lines land",
+			"class A {\n    fun f(): object => new class {\n        fun g(): int => 1;\n    };\n}\n",
+			"class A\n{\n    public function f(): object\n    {\n        return new class {\n            public function g(): int\n            {\n                return 1;\n            }\n        };\n    }\n}\n",
+		},
+		{
 			"tabs",
 			"class A {\n\tfun f(): int => 1;\n}\n",
 			"class A\n{\n\tpublic function f(): int\n\t{\n\t\treturn 1;\n\t}\n}\n",

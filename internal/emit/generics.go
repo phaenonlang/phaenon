@@ -518,7 +518,7 @@ func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra st
 	if len(tags) == 0 {
 		return false
 	}
-	indent := l.indentAt(declStart)
+	indent := l.e.outIndent(declStart)
 	idx := -1
 	if doc != "" {
 		// A docblock between the attributes and the declaration

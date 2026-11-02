@@ -113,6 +113,7 @@ func Tree(src []byte, f *ast.File, opts Options) ([]byte, error) {
 // check the line map against.
 func compile(src []byte, f *ast.File, opts Options) ([]byte, *lineWriter, error) {
 	e := &emitter{src: src, opts: opts, throwsWritten: map[ast.Node]bool{}}
+	e.planIndents(f)
 	if err := e.lowerGenerics(f); err != nil {
 		return nil, nil, err
 	}

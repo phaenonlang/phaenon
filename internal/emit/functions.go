@@ -162,7 +162,7 @@ func docBlock(indent, content string, tags []string) string {
 // block of its content and the tags. A declaration that stood on the
 // docblock's line moves to the line after it.
 func (e *emitter) rewriteDoc(idx int, doc, content string, tags []string) {
-	indent := e.lineIndent(idx)
+	indent := e.outIndent(idx)
 	end := idx + len(doc)
 	next := end
 	for next < len(e.src) && (e.src[next] == ' ' || e.src[next] == '\t') {
@@ -193,7 +193,7 @@ func oneLineContent(doc string) string {
 //   - a one-line docblock: it becomes a multi-line block, and a
 //     declaration on its line moves below it.
 func (e *emitter) mergeThrows(declStart, nameStart int, doc, tag string) {
-	indent := e.lineIndent(declStart)
+	indent := e.outIndent(declStart)
 	newDoc := func() {
 		e.insertFree(declStart, docBlock(indent, "", []string{tag})+"\n"+indent)
 	}
@@ -229,7 +229,7 @@ func (e *emitter) mergeThrows(declStart, nameStart int, doc, tag string) {
 	for from > idx+len("/**") && (src[from-1] == ' ' || src[from-1] == '\t') {
 		from--
 	}
-	docIndent := e.lineIndent(idx)
+	docIndent := e.outIndent(idx)
 	text := "\n" + docIndent + " * " + tag + "\n" + docIndent + " */"
 	next := end
 	for next < len(src) && (src[next] == ' ' || src[next] == '\t') {
@@ -338,7 +338,7 @@ func (e *emitter) closureBody(n *ast.ArrowFunc) {
 		e.insert(end, "; }")
 		return
 	}
-	indent := e.lineIndent(n.Kw.Start)
+	indent := e.outIndent(n.Kw.Start)
 	level := "    "
 	if strings.Contains(indent, "\t") {
 		level = "\t"
