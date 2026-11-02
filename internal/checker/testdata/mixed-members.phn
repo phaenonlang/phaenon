@@ -1,0 +1,91 @@
+declare(strict_types=1);
+
+namespace App\MixedMembers;
+
+// A method call, a property or a static member through `$x::` on mixed is
+// P2105, as PHPStan reports it at level max (method.nonObject,
+// property.nonObject, staticMethod.nonObject, …), under isset() and ?? too.
+// A member of `object` is P2006 / P2005 (PHPStan's method.notFound,
+// property.notFound) unless method_exists() / property_exists() proved it.
+
+function sink(mixed $v): void
+{
+}
+
+function members(mixed $m): void
+{
+    $m->foo(); // want P2105 "cannot call method foo() on mixed"
+    sink($m->bar); // want P2105 "cannot access property $bar on mixed"
+    $m->baz = 1; // want P2105 "cannot access property $baz on mixed"
+    sink($m?->foo()); // want P2105
+    sink(isset($m->bar)); // want P2105
+    sink($m->bar ?? null); // want P2105
+    sink(empty($m->bar)); // want P2105
+    unset($m->bar); // want P2105
+    sink($m->foo()->bar()); // want P2105 "foo()", P2105 "bar()"
+    sink($m->a->b); // want P2105 "$a", P2105 "$b"
+    $m->list[] = 1; // want P2105, P2302
+    sink($m::create()); // want P2105 "cannot call static method create() on mixed"
+    sink($m::VERSION); // want P2105 "cannot access constant VERSION on mixed"
+    sink($m::$instances); // want P2105 "cannot access static property $instances on mixed"
+    $name = 'x';
+    sink($m->$name); // want P2105 "cannot access a property on mixed"
+    sink($m->$name()); // want P2105 "cannot call a method on mixed"
+}
+
+function decoded(string $json): void
+{
+    $o = json_decode($json);
+    sink($o->k); // want P2105
+    if (\is_object($o)) {
+        sink($o->k); // want P2005 "unknown property object::$k"
+    }
+    if ($o instanceof \stdClass) {
+        sink($o->k);
+    }
+}
+
+final class Holder
+{
+    public mixed $data = null;
+
+    public function read(): mixed
+    {
+        $this->data->call(); // want P2105
+
+        return $this->data->x; // want P2105
+    }
+}
+
+/**
+ * @template T
+ * @param T $t
+ */
+function typeParameter(mixed $t): void
+{
+    $t->foo(); // want P2105 "on T"
+}
+
+function objects(object $o): void
+{
+    $o->foo(); // want P2006 "unknown method object::foo()"
+    sink($o->bar); // want P2005 "unknown property object::$bar"
+    $o->baz = 1; // want P2005
+    sink($o->nested->deeper->call()); // want P2005 "$nested"
+    sink(isset($o->bar));
+    sink($o->bar ?? null);
+    if (method_exists($o, 'toArray')) {
+        sink($o->toArray());
+    }
+    if (property_exists($o, 'services') && \is_object($o->services)) {
+        sink(get_object_vars($o->services));
+    }
+}
+
+function provenAndReassigned(object $o): void
+{
+    if (property_exists($o, 'x')) {
+        $o = new \DateTimeImmutable();
+        sink($o->getTimestamp());
+    }
+}

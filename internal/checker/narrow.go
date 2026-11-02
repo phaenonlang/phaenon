@@ -141,6 +141,27 @@ func (x *fnCtx) alwaysCheck(e ast.Expr, t types.Type) {
 	}
 }
 
+// memberProof is the path under which a method_exists() or
+// property_exists() that held is remembered for a receiver; the `::`
+// makes an assignment to the receiver drop it, and no call does.
+func memberProof(receiver string, method bool, name string) string {
+	if method {
+		return receiver + "::#method " + strings.ToLower(name)
+	}
+	return receiver + "::#property " + name
+}
+
+// provenMember reports whether method_exists() or property_exists() proved
+// a member of the receiver expression.
+func provenMember(env *state, receiver ast.Expr, method bool, name string) bool {
+	base, ok := pathKey(receiver)
+	if !ok {
+		return false
+	}
+	_, proven := env.getPath(memberProof(base, method, name))
+	return proven
+}
+
 // narrowPath sets the narrowed type of a path expression in env; define
 // marks a variable as certainly defined.
 func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
@@ -826,7 +847,21 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 			then, els = x.cond(arg, env)
 			x.condValueType = types.TBool
 			return then, then.clone(), true
-		case "method_exists", "property_exists", "function_exists":
+		case "method_exists", "property_exists":
+			x.call(e, env, nil)
+			x.condValueType = types.TBool
+			then, els = env.clone(), env.clone()
+			// `method_exists($o, 'toArray')`: on an `object` the member is
+			// known from here on, as PHPStan's hasMethod / hasProperty.
+			if len(e.Args.Args) >= 2 {
+				if base, ok := pathKey(arg); ok {
+					if lit, ok := e.Args.Args[1].Value.(*ast.StringLit); ok {
+						then.setPath(memberProof(base, name == "method_exists", program.StringValue(lit)), types.TMixed)
+					}
+				}
+			}
+			return then, els, true
+		case "function_exists":
 			x.call(e, env, nil)
 			x.condValueType = types.TBool
 			return env.clone(), env.clone(), true
