@@ -178,6 +178,32 @@ func TestLiftKeepsAWrittenType(t *testing.T) {
 	}
 }
 
+// A .phn whose class-like braces an earlier migrate moved up gets them back
+// on lines of their own (design/line-map.md §7); a function's and an
+// anonymous class's stay up, and a second run changes nothing.
+func TestLayoutMovesClassBracesDown(t *testing.T) {
+	src := "final class A implements \\Countable {\n    fun count(): int {\n        $n = 1;\n        return $n;\n    }\n\n    fun make(): object {\n        $o = new class {\n        };\n        return $o;\n    }\n}\n\ninterface I {\n}\n\n    enum E: string {\n        case X = 'x';\n    }\n"
+	want := "final class A implements \\Countable\n{\n    fun count(): int {\n        $n = 1;\n        return $n;\n    }\n\n    fun make(): object {\n        $o = new class {\n        };\n        return $o;\n    }\n}\n\ninterface I\n{\n}\n\n    enum E: string\n    {\n        case X = 'x';\n    }\n"
+	var stats Stats
+	got, err := Layout([]byte(src), &stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	if stats.Down != 3 || stats.Braces != 0 {
+		t.Errorf("stats %+v, want 3 class braces down and none up", stats)
+	}
+	again, err := Layout(got, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(again) != string(got) {
+		t.Errorf("a second run changed the layout:\n%s", again)
+	}
+}
+
 // A prose-only @param whose description starts on the next line keeps it:
 // only a tag with no prose at all goes.
 func TestLiftKeepsParamProseOnLaterLines(t *testing.T) {

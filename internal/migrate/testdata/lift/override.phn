@@ -6,28 +6,35 @@ namespace Lift\Override;
  * so `@param T $aggregate` over `Aggregate $aggregate` is lifted although
  * T's own bound is narrower — the compiled method still takes an Aggregate.
  */
-interface Aggregate {
+interface Aggregate
+{
 }
 
-interface EventSourcedAggregate extends Aggregate {
+interface EventSourcedAggregate extends Aggregate
+{
 }
 
-interface AggregateId {
+interface AggregateId
+{
 }
 
-final class Order implements Aggregate {
+final class Order implements Aggregate
+{
 }
 
-final class OrderId implements AggregateId {
+final class OrderId implements AggregateId
+{
 }
 
-interface AggregateRepository<Id of AggregateId, T of Aggregate> {
+interface AggregateRepository<Id of AggregateId, T of Aggregate>
+{
     fun get(Id $id): ?T;
 
     fun save(T $aggregate): void;
 }
 
-abstract class AbstractEventSourcedRepository<Id of AggregateId, T of EventSourcedAggregate> implements AggregateRepository<Id, T> {
+abstract class AbstractEventSourcedRepository<Id of AggregateId, T of EventSourcedAggregate> implements AggregateRepository<Id, T>
+{
     abstract protected static fun aggregateClass(): class<T>;
 
     fun get(Id $id): ?T => null;
@@ -41,7 +48,8 @@ abstract class AbstractEventSourcedRepository<Id of AggregateId, T of EventSourc
 }
 
 /** A concrete type argument: the same widening. */
-final class OrderRepository implements AggregateRepository<OrderId, Order> {
+final class OrderRepository implements AggregateRepository<OrderId, Order>
+{
     /** @return Order|null */
     fun get(OrderId $id): ?Aggregate => null;
 
@@ -56,7 +64,8 @@ final class OrderRepository implements AggregateRepository<OrderId, Order> {
  * method's is not narrowed further: T|null compiles to its own erasure,
  * not the declared ?Aggregate. Both tags stay.
  */
-final class LenientRepository<T of EventSourcedAggregate> implements AggregateRepository<AggregateId, T> {
+final class LenientRepository<T of EventSourcedAggregate> implements AggregateRepository<AggregateId, T>
+{
     /** @return T|null */
     fun get(AggregateId $id): ?Aggregate => null;
 

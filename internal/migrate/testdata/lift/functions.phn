@@ -1,6 +1,7 @@
 namespace App;
 
-final class Account {
+final class Account
+{
     const int LIMIT = 10;
 
     final const string NAME = 'account';
