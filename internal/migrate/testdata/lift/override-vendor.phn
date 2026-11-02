@@ -26,8 +26,7 @@ final class UserRepository implements Repository<User>
     /** @return User|null */
     fun find(int $id): ?object => null;
 
-    fun save(User $entity): void {
-    }
+    fun save(User $entity): void {}
 }
 
 /**
@@ -37,8 +36,7 @@ final class UserRepository implements Repository<User>
 final class PrototypeFactory<T> implements Factory<T>
 {
     /** @param T $prototype */
-    fun __construct(private object $prototype) {
-    }
+    fun __construct(private object $prototype) {}
 
     fun create(): T => clone $this->prototype;
 }
@@ -46,8 +44,7 @@ final class PrototypeFactory<T> implements Factory<T>
 /** A parent in Phaenon compiles put(Item $item). */
 final class Shelf implements Store<Box>
 {
-    fun put(Box $item): void {
-    }
+    fun put(Box $item): void {}
 }
 
 /**
@@ -56,6 +53,5 @@ final class Shelf implements Store<Box>
  */
 final class SmallBoxStore extends BoxStore<SmallBox>
 {
-    fun put(SmallBox $item): void {
-    }
+    fun put(SmallBox $item): void {}
 }

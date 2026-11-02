@@ -12,23 +12,18 @@ final class Account
 
     protected(set) static ?string $owner = null;
 
-    fun __construct(private(set) string $id, protected string $note = '') {
-    }
+    fun __construct(private(set) string $id, protected string $note = '') {}
 
     fun id(): string => $this->id;
 
     final static fun open(string $id): self => new self($id);
 
-    protected fun touch(): void {
-    }
+    protected fun touch(): void {}
 
-    private static fun hidden(): void {
-    }
+    private static fun hidden(): void {}
 
     public
-    fun split(): void {
-    }
+    fun split(): void {}
 }
 
-fun helper(): void {
-}
+fun helper(): void {}

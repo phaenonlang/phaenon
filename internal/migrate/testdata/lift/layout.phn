@@ -44,8 +44,7 @@ final class Greeter implements
      */
     private string $long = '';
 
-    fun __construct(private readonly string $suffix = '') {
-    }
+    fun __construct(private readonly string $suffix = '') {}
 
     fun greet(string $name): string => $this->salutation . ', ' . $name . $this->punctuation . $this->suffix;
 
@@ -123,5 +122,4 @@ final class Greeter implements
 
 fun helper(int $x): int => $x * 2;
 
-fun noBody(): void {
-}
+fun noBody(): void {}

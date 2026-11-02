@@ -639,8 +639,8 @@ func migrateCmd(args []string) {
 	}
 	fmt.Printf("%d files migrated, %d skipped, %d .phn files updated, %d docblock tags kept\n", migrated, skipped, lifted, kept)
 	if stats != (migrate.Stats{}) {
-		fmt.Printf("%d @throws lifted, %d bodies written as =>, %d braces moved up, %d class braces moved down, %d docblocks collapsed; %d lines became %d\n",
-			stats.Throws, stats.Arrows, stats.Braces, stats.Down, stats.Docblocks, linesBefore, linesAfter)
+		fmt.Printf("%d @throws lifted, %d bodies written as =>, %d braces moved up, %d class braces moved down, %d empty bodies written as {}, %d docblocks collapsed; %d lines became %d\n",
+			stats.Throws, stats.Arrows, stats.Braces, stats.Down, stats.Empty, stats.Docblocks, linesBefore, linesAfter)
 	}
 }
 

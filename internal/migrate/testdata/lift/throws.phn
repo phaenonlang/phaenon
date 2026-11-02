@@ -37,8 +37,7 @@ final class MemoryStore<T of object> implements Store
     /** @throws void */
     fun count(): int => \count($this->items);
 
-    fun rethrow(T $item): void throws T {
-    }
+    fun rethrow(T $item): void throws T {}
 
     fun raise<E of \Throwable>(E $e): never throws E => throw $e;
 

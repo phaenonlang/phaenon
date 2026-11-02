@@ -36,30 +36,25 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
      * @param array{id: int} $row
      * @param non-empty-string ...$names
      */
-    fun closures(?Closure(object, object): object $mapping, Closure(int): string $f, callable $g, int $n, array $row, string ...$names, ?string $maybe = null): void {
-    }
+    fun closures(?Closure(object, object): object $mapping, Closure(int): string $f, callable $g, int $n, array $row, string ...$names, ?string $maybe = null): void {}
 
     /** @return list<int> */
     fun widened(list<int> $xs): iterable => $xs;
 
-    fun qualified(\App\Model\Row $row, Row $other): void {
-    }
+    fun qualified(\App\Model\Row $row, Row $other): void {}
 
     /**
      * @param int $n
      * @return iterable<string>
      */
-    fun untypedParts($n) {
-    }
+    fun untypedParts($n) {}
 
-    fun __construct<ClassType of object>(private ReflectorInterface<ClassType, \UnitEnum> $reflector, string $name = '') {
-    }
+    fun __construct<ClassType of object>(private ReflectorInterface<ClassType, \UnitEnum> $reflector, string $name = '') {}
 
     fun fluent(): static => $this;
 
     /** @phpstan-param positive-int $n */
-    fun prefixed(int $n): void {
-    }
+    fun prefixed(int $n): void {}
 
     fun count(): int => 0;
 }
@@ -78,8 +73,7 @@ fun tuples((string, int) $pair, list<(string, int)> $pairs, array $named, array 
     => [$pair[1], $pair[0]];
 
 /** @param non-empty-array<string, \stdClass> $objects */
-fun keyed(map<int, string> $map, array $objects, Closure(int, int=): int $withOptional): void {
-}
+fun keyed(map<int, string> $map, array $objects, Closure(int, int=): int $withOptional): void {}
 
 /**
  * A cluster reached over kubectl. PHPStan's `T...` and `T=` markers are
