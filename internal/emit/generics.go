@@ -3,6 +3,8 @@ package emit
 import (
 	"bytes"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -883,7 +885,7 @@ func (l *lowering) methodDecl(cl *program.Class, d *ast.MethodDecl, csc *scope) 
 	l.removeTypeParams(d.Name.S.End, d.TypeParams)
 	var overrides map[int]string
 	if m != nil && m.Class == cl {
-		overrides = l.overrideErasure(cl, m)
+		overrides = l.overrideErasure(m, sc)
 	}
 	tags = append(tags, l.signature(d.Params, d.ReturnType, sc, overrides)...)
 	l.addDoc(d.S.Start, d.Doc, tags)
@@ -893,60 +895,38 @@ func (l *lowering) methodDecl(cl *program.Class, d *ast.MethodDecl, csc *scope) 
 	return l.walkBody(d.Body, sc)
 }
 
-// overrideErasure applies the override-erasure rule: a method that
-// overrides keeps its parameters' erased types at least as wide as the
-// parent's, and its return type no wider.
-func (l *lowering) overrideErasure(cl *program.Class, m *program.Method) map[int]string {
-	var parent *program.Method
-	key := strings.ToLower(m.Name)
-	for _, a := range cl.Ancestors() {
-		if a == cl {
+// overrideErasure applies the override-erasure rule (program's
+// ErasureOverrides): a method that overrides keeps its parameters' erased
+// types at least as wide as the parent's, and its return type no wider.
+// A widened class is named as the file knows it, or imported (roadmap
+// D11): it is the compiler's word, where the source wrote `T`.
+func (l *lowering) overrideErasure(m *program.Method, sc *scope) map[int]string {
+	widened := m.ErasureOverrides()
+	// In slot order: the first class to claim a short name gets it.
+	slots := make([]int, 0, len(widened))
+	for k := range widened {
+		slots = append(slots, k)
+	}
+	sort.Ints(slots)
+	var out map[int]string
+	for _, k := range slots {
+		s, ok := types.Native(widened[k])
+		if !ok {
 			continue
 		}
-		a.Signature()
-		if pm := a.FindMethod(key); pm != nil && pm.Class != cl {
-			if pm.Vis == program.Private && pm.Class.Kind != ast.KindInterface {
-				continue
-			}
-			parent = pm
-			break
+		if out == nil {
+			out = map[int]string{}
 		}
-	}
-	if parent == nil {
-		return nil
-	}
-	if strings.EqualFold(m.Name, "__construct") && !parent.Abstract && parent.Class.Kind != ast.KindInterface {
-		return nil
-	}
-	out := map[int]string{}
-	for i, pp := range parent.Params {
-		if i >= len(m.Params) {
-			break
-		}
-		pe, ce := erasedOrMixed(pp.NativeType), erasedOrMixed(m.Params[i].NativeType)
-		if !types.IsSubtype(pe, ce, l.p) {
-			if s, ok := types.Native(pe); ok {
-				out[i] = s
-			}
-		}
-	}
-	if parent.NativeReturn != nil && m.NativeReturn != nil {
-		pe, ce := types.Erase(parent.NativeReturn), types.Erase(m.NativeReturn)
-		if !types.IsSubtype(ce, pe, l.p) {
-			if s, ok := types.Native(pe); ok {
-				out[-1] = s
-			}
-		}
+		out[k] = nativeClassName.ReplaceAllStringFunc(s, func(name string) string {
+			return l.e.importShort(name[1:], sc.res)
+		})
 	}
 	return out
 }
 
-func erasedOrMixed(t types.Type) types.Type {
-	if t == nil {
-		return types.TMixed
-	}
-	return types.Erase(t)
-}
+// nativeClassName matches a fully qualified class name as types.Native
+// prints it.
+var nativeClassName = regexp.MustCompile(`\\[^|&?()\s]+`)
 
 // ------------------------------------------------------------------ bodies
 

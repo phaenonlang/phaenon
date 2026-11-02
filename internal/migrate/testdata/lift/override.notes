@@ -1,0 +1,4 @@
+93: kept @return Order|null: it erases to a different type than the declared ?Aggregate
+121: kept @return T|null: it erases to a different type than the declared ?Aggregate
+129: kept @param T: the override-erasure rule compiles it to \Lift\Override\Aggregate, not the declared object
+140: kept @param EventSourcedAggregate: it erases to a different type than the declared Aggregate
