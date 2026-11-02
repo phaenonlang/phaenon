@@ -18,7 +18,7 @@ import (
 func runParseOracle(t *testing.T, files []string) map[string]string {
 	_, self, _, _ := runtimeCaller()
 	oracle := filepath.Join(filepath.Dir(self), "parse_oracle.php")
-	cmd := exec.Command("php", "-n", "-d", "memory_limit=-1", "-d", "display_errors=0", oracle)
+	cmd := exec.Command(oraclePHP(), "-n", "-d", "memory_limit=-1", "-d", "display_errors=0", oracle)
 	cmd.Stdin = strings.NewReader(strings.Join(files, "\n") + "\n")
 	cmd.Stderr = os.Stderr
 	out, err := cmd.StdoutPipe()
