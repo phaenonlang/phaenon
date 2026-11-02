@@ -1,10 +1,12 @@
 package checker
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
@@ -373,6 +375,13 @@ func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 	}
 	ctx := c.newCtx(cl.File, cl.Scope, cl, pr.Static)
 	ctx.inConst = true
+	if pr.Readonly && pr.HasDefault && pr.Default != nil && pr.FromTrait == nil {
+		// PHP 8.5 refuses the declaration at compile time. Lowering it into
+		// the constructor would change hasDefaultValue(),
+		// newInstanceWithoutConstructor() and unserialize()
+		// (design/php-versions.md §4), so it is refused.
+		c.needsPHP(pr.Default.Span(), phpversion.PHP86, fmt.Sprintf("a default for readonly property %s::$%s", cl.Name, pr.Name), "assign it in the constructor")
+	}
 	if pr.HasDefault && pr.Default != nil {
 		dt := ctx.expr(pr.Default, newEnv(), pr.Type)
 		if !types.IsAcceptable(dt, pr.Type, c.p) {

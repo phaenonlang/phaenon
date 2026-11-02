@@ -64,6 +64,9 @@ func TestPHPStanParity(t *testing.T) {
 		// Io\Poll\Context::wait() an array of mixed, where the overlay and
 		// the stub's docblock say T and list<Watcher>.
 		"library-php86-types.phn": {"argument.type": true, "method.nonObject": true},
+		// PHPStan 2.2 predates readonly property defaults (PHP 8.6) and
+		// refuses them on every PHP version.
+		"readonly-defaults.phn": {"property.readOnlyDefaultValue": true},
 	}
 	files, _ := filepath.Glob(filepath.Join("testdata", "*.phn"))
 	vendorSrc, err := os.ReadFile(filepath.Join("testdata", "vendor", "Acme", "Repo.php"))
