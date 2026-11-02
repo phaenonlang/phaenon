@@ -13,9 +13,7 @@ use Acme\Store;
  * the program model: vendor PHP (Acme\Repository, Acme\Factory) and project
  * files already in Phaenon (Acme\Store, Acme\BoxStore).
  */
-final class User
-{
-}
+final class User {}
 
 /**
  * Vendor PHP takes an object: save() is lifted, find() is not — User|null

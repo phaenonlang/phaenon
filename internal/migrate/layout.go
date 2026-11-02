@@ -11,8 +11,9 @@ package migrate
 //   - the opening brace of a class, interface, trait or enum stands on a
 //     line of its own (design/line-map.md §7), and moves back down where an
 //     earlier run of migrate moved it up;
-//   - an empty function or method body — no statement, no comment — is `{}`
-//     on the declaration's line, as PER-CS 2.0 allows;
+//   - an empty body — a function or method without statements, a class-like
+//     without members, and no comment inside — is `{}` on the declaration's
+//     line, as PER-CS 2.0 writes it;
 //   - a docblock with one line of content becomes one line;
 //   - a body that is exactly one `return expr;` — or one expression
 //     statement under void or never — with no comment inside the braces
@@ -42,7 +43,7 @@ type Stats struct {
 	Arrows    int // block bodies written as `=> expr;`
 	Braces    int // opening braces moved up to their declaration's line
 	Down      int // class-like braces moved back down to a line of their own
-	Empty     int // empty function and method bodies written as {}
+	Empty     int // empty bodies (functions, methods, class-likes) written as {}
 	Docblocks int // docblocks collapsed onto one line
 }
 
@@ -231,6 +232,14 @@ func (l *layout) classBrace(c *ast.ClassDecl) {
 	}
 	if c.Name == nil {
 		l.moveBrace(l.toks[prev].End)
+		return
+	}
+	// An empty body — no member, no comment — is `{}` on the header's line.
+	if close := l.nextCode(i + 1); len(c.Members) == 0 && close < len(l.toks) && l.toks[close].Kind == token.Kind('}') && !l.hasComment(l.toks[prev].End, l.toks[close].End) {
+		if string(l.src[l.toks[prev].End:l.toks[close].End]) != " {}" {
+			l.edits = append(l.edits, edit{ast.Span{Start: l.toks[prev].End, End: l.toks[close].End}, " {}"})
+			l.stats.Empty++
+		}
 		return
 	}
 	gap := l.src[l.toks[prev].End:l.toks[i].Start]
