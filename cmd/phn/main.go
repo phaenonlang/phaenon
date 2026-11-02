@@ -57,8 +57,9 @@ usage:
   phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--php X.Y] <path>...
                                                            rewrite .php files as .phn; lift generic docblocks and bare
                                                            @throws into syntax, function into fun; lay the code out
-                                                           (braces up, one-line docblocks, => bodies) unless
-                                                           --keep-layout; --php writes the target into phaenon.json
+                                                           (function braces up, class-like braces on their own line,
+                                                           one-line docblocks, => bodies) unless --keep-layout;
+                                                           --php writes the target into phaenon.json
   phn stdlib [--out DIR] [--concurrent-out DIR] [--plugin-stubs DIR] [--check]
                                                            write the compiled stdlib (Seq.php, …) into DIR, the compiled
                                                            phaenon/concurrent package into the second, or the PhpStorm
@@ -638,8 +639,8 @@ func migrateCmd(args []string) {
 	}
 	fmt.Printf("%d files migrated, %d skipped, %d .phn files updated, %d docblock tags kept\n", migrated, skipped, lifted, kept)
 	if stats != (migrate.Stats{}) {
-		fmt.Printf("%d @throws lifted, %d bodies written as =>, %d braces moved up, %d docblocks collapsed; %d lines became %d\n",
-			stats.Throws, stats.Arrows, stats.Braces, stats.Docblocks, linesBefore, linesAfter)
+		fmt.Printf("%d @throws lifted, %d bodies written as =>, %d braces moved up, %d class braces moved down, %d docblocks collapsed; %d lines became %d\n",
+			stats.Throws, stats.Arrows, stats.Braces, stats.Down, stats.Docblocks, linesBefore, linesAfter)
 	}
 }
 

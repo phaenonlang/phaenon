@@ -3,17 +3,20 @@ namespace App;
 use Closure;
 
 /** A greeting. */
-interface Greets {
+interface Greets
+{
     fun greet(string $name): string;
 }
 
-trait Counts {
+trait Counts
+{
     private int $count = 0;
 
     fun count(): int => $this->count;
 }
 
-enum Level: int {
+enum Level: int
+{
     case Low = 1;
 
     fun label(): string => match ($this) {
@@ -23,7 +26,8 @@ enum Level: int {
 
 final class Greeter implements
     Greets,
-    \Countable {
+    \Countable
+{
     use Counts;
 
     /** The salutation. */

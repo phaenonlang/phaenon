@@ -5,18 +5,21 @@ package migrate
 // Layout rewrites a Phaenon file into the style the PhpStorm plugin, `phn
 // migrate` and later `phn fmt` write:
 //
-//   - the opening brace of a class-like, a function, a method or a closure
-//     moves up to the declaration's line (control structures have theirs
-//     there already);
+//   - the opening brace of a function, a method, a closure or an anonymous
+//     class moves up to the declaration's line (control structures have
+//     theirs there already);
+//   - the opening brace of a class, interface, trait or enum stands on a
+//     line of its own (design/line-map.md §7), and moves back down where an
+//     earlier run of migrate moved it up;
 //   - a docblock with one line of content becomes one line;
 //   - a body that is exactly one `return expr;` — or one expression
 //     statement under void or never — with no comment inside the braces
 //     becomes `=> expr;`, wrapped after the arrow when the line would pass
 //     120 columns.
 //
-// Each of the three removes lines, which is the point of them: the .phn is
-// the new source, and nothing else in a file moves. A declaration with a
-// comment where the edit would go keeps its layout, so nothing the
+// The brace and body rewrites remove lines, which is the point of them: the
+// .phn is the new source, and nothing else in a file moves. A declaration
+// with a comment where the edit would go keeps its layout, so nothing the
 // programmer wrote is lost. Re-running is a no-op.
 
 import (
@@ -36,6 +39,7 @@ type Stats struct {
 	Throws    int // bare @throws tags lifted into `throws` clauses
 	Arrows    int // block bodies written as `=> expr;`
 	Braces    int // opening braces moved up to their declaration's line
+	Down      int // class-like braces moved back down to a line of their own
 	Docblocks int // docblocks collapsed onto one line
 }
 
@@ -195,6 +199,9 @@ func (l *layout) moveBrace(after int) {
 	l.stats.Braces++
 }
 
+// classBrace puts a named class-like's opening brace on a line of its own,
+// at the indentation of the line holding its name, and moves an anonymous
+// class's up, as a closure's.
 func (l *layout) classBrace(c *ast.ClassDecl) {
 	from := c.S.Start
 	switch {
@@ -216,9 +223,19 @@ func (l *layout) classBrace(c *ast.ClassDecl) {
 	for prev >= 0 && l.toks[prev].Kind.IsTrivia() {
 		prev--
 	}
-	if prev >= 0 {
-		l.moveBrace(l.toks[prev].End)
+	if prev < 0 {
+		return
 	}
+	if c.Name == nil {
+		l.moveBrace(l.toks[prev].End)
+		return
+	}
+	gap := l.src[l.toks[prev].End:l.toks[i].Start]
+	if bytes.ContainsAny(gap, "\n\r") || l.hasComment(l.toks[prev].End, l.toks[i].Start) {
+		return
+	}
+	l.edits = append(l.edits, edit{ast.Span{Start: l.toks[prev].End, End: l.toks[i].Start}, "\n" + indentOf(l.src, c.Name.S.Start)})
+	l.stats.Down++
 }
 
 func (l *layout) closureBrace(c *ast.Closure) {

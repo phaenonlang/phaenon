@@ -2,17 +2,20 @@ namespace App;
 
 use InvalidArgumentException;
 
-final class NotFound extends \RuntimeException {
+final class NotFound extends \RuntimeException
+{
 }
 
-interface Store {
+interface Store
+{
     fun get(int $id): string throws NotFound;
 
     /** Removes the entry. */
     fun remove(int $id): void throws NotFound|\RuntimeException|\LogicException;
 }
 
-final class MemoryStore<T of object> implements Store {
+final class MemoryStore<T of object> implements Store
+{
     private map<int, string> $items = [];
 
     fun get(int $id): string throws NotFound => $this->items[$id] ?? throw new NotFound((string) $id);

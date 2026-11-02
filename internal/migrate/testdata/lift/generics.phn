@@ -3,7 +3,8 @@ namespace App;
 use App\Model\Row;
 
 /** A cache of reflections, keyed by class name. */
-final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> implements \Countable, ReflectorInterface<ClassType, EnumType> {
+final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> implements \Countable, ReflectorInterface<ClassType, EnumType>
+{
     private map<class<ClassType>, \ReflectionClass<ClassType>> $cache = [];
 
     private list<string> $names = [];
@@ -63,7 +64,8 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
     fun count(): int => 0;
 }
 
-abstract class Repo<T> extends Base<T> {
+abstract class Repo<T> extends Base<T>
+{
 }
 
 fun firstOf<T of object>(list<T> $items): ?T => $items[0] ?? null;
@@ -84,7 +86,8 @@ fun keyed(map<int, string> $map, array $objects, Closure(int, int=): int $withOp
  * Phaenon's too; a parameter's name is dropped; a by-reference parameter
  * keeps its docblock.
  */
-final class KubeAccess {
+final class KubeAccess
+{
     private Closure(string...): (int, string) $kubectl;
     private Closure(string, string...): (int, string) $kubectlStdin;
     /** @var \Closure(int &$n): void */
