@@ -336,6 +336,41 @@ Built in the compiler (decisions: `../design/functions.md` §8). Left:
 
 ## PhpStorm plugin (`../jetbrains`)
 
+- ~~**D18 in the editor: expression bodies, `throws`, the canonical layout**~~ — done 2026-11-02
+  (`../jetbrains` branch `feat/d18`, not merged: `4db044d` parsing, `4451c65` `throws`, `05e2afd`
+  layout, `3de6c95` generated code, docs `eeceaa1`):
+  - Parsing: an expression body reaches PhpStorm's parser as the block it compiles to, the arrow's
+    two characters split into `{` and `return` (`{` and an erased `>` under `void` / `never`),
+    the block closed by `PhaenonPsiBuilder` after its one statement; `throws A|B` after a named
+    function's parameters or return type is erased whole. The lexer follows a named function's
+    header and ends it at the first token no return type has, so an array's `=>` below a signature
+    still being typed stays PHP's. `PSI_VERSION` 6.
+  - The body is code (completion, navigation, types), its value checked as a `return`'s; nothing
+    reports a missing `return`. `throws` names are references (find usages, rename, Optimize
+    Imports); completion after `throws` offers Throwables.
+  - PhpStorm's exception analysis reads `@throws` only, with no extension point: the filter drops
+    "Unhandled X" / "Unhandled exceptions" and the missing-`@throws` finding where the clauses the
+    compiled tags would carry answer every exception PhpStorm computed (its own sets, through
+    `PhpUnhandledExceptionInspection.Companion`'s `getExceptionClasses` and
+    `PhpDocMissingThrowsInspection.getAllUndocumentedExceptions`): the function's clause, an
+    enclosing function's for a closure, the overridden method's for a method with neither a
+    docblock nor a clause — PhpStorm's own reading of tags.
+  - Layout: the `.phn` formatter gets the project's PHP style with class, method, function and
+    closure braces at the end of the line; a wrapped arrow stays one level in. Reformat, Enter,
+    Complete Current Statement, Implement / Override Methods and override completion follow it;
+    docblock stubs and generated docblocks are one line when they hold one; overrides write the
+    parent's clause and lift a PHP parent's bare `@throws`.
+  - Real trees (`PHAENON_TREES`, 2025.1 and 2026.2.3): scratch copies of core and tq-cli re-lifted
+    with `phn migrate --keep-public` (core 849 arrows, 3,159 braces, 64 `@throws`; tq-cli 1,295 /
+    5,048 / 24; `phn check` as before) plus the five dogfood trees as they are: no syntax error, no
+    stub mismatch, no override finding; Reformat Code moves no brace and no arrow `phn migrate`
+    laid out (core's 73 moved braces are the `tests/PHPStan/Data` fixtures kept with
+    `--keep-layout`). The plugin no longer holds up the re-lift of the dogfood trees (D18 item
+    above).
+  - Left: a call of a `.phn` function is not "unhandled" for its clause (PhpStorm reads callees'
+    tags only); PhpStorm's quick-fixes add `@throws` tags, not clause members; Introduce Variable
+    on part of an expression body writes its statement between the arrow's two characters (no
+    conversion between arrow and block body yet); the three 2026.2 failures of `main` stay.
 - ~~**`class<T>` hovered as `string|string`; PHP 8.6 and the value forms of `concurrently` and
   `spawn` were errors in the editor**~~ — done 2026-11-02 (`../jetbrains` branch
   `feat/class-string-and-php86`, not merged: `16b7897` class-strings, `b573956` PHP 8.6,
