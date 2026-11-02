@@ -44,7 +44,10 @@ type Checker struct {
 	opts  Options
 	diags []Diagnostic
 	seen  map[string]bool
-	file  *program.File
+	// guards are the version guards around the code being checked
+	// (guards.go).
+	guards []libraryGuard
+	file   *program.File
 	// stdlibUsed names the stdlib classes (Phaenon\Str, …) the current
 	// file's method syntax compiles to: an import of one of them is used by
 	// the output even when the source never writes the class name.
@@ -192,6 +195,7 @@ func (c *Checker) checkFile(f *program.File) {
 					visit(s.Body)
 				}
 			case *ast.Use:
+				c.useAliases(s)
 				if phaenon {
 					uses = append(uses, s)
 				}
@@ -202,6 +206,7 @@ func (c *Checker) checkFile(f *program.File) {
 			case *ast.OpenTag, *ast.CloseTag, *ast.InlineHTML, *ast.Declare, *ast.ConstDecl, *ast.HaltCompiler:
 				if cd, ok := s.(*ast.ConstDecl); ok {
 					for _, k := range cd.Consts {
+						c.constantName(k.Name.S, k.Name.Name)
 						ctx.inConst = true
 						ctx.expr(k.Value, env, nil)
 						ctx.inConst = false
@@ -279,6 +284,8 @@ type fnCtx struct {
 	static          bool // no $this
 	inConst         bool // checking a constant expression: an attribute argument, a constant, a default
 	constClosure    bool // a closure inside a constant expression: static, capturing nothing (P2531)
+	nameOnly        bool // resolving a class name PHP does not load: X::class, instanceof X, catch (X)
+	inFinally       int  // depth of finally blocks around the statement being checked
 	returnType      types.Type
 	hasReturn       bool // a declared return type exists
 	name            string
@@ -414,9 +421,13 @@ func (x *fnCtx) resolveClassName(n *ast.Name, span ast.Span) (string, bool) {
 		x.report(span, P2011, "class %s has no parent", x.class.Name)
 		return "", false
 	}
-	if x.p().Class(name) == nil {
+	cl := x.p().Class(name)
+	if cl == nil {
 		x.report(span, P2001, "unknown class %s", name)
 		return name, false
+	}
+	if !x.nameOnly {
+		x.c.libraryClass(span, cl)
 	}
 	return name, true
 }

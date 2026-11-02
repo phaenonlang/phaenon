@@ -1,0 +1,47 @@
+// target: 8.6
+// The overlay's types for PHP 8.6's library (design/php-versions.md §6).
+namespace App\Php86;
+
+use Io\Poll\Context;
+use Io\Poll\Event;
+use Time\Duration;
+
+function takesString(string $s): string
+{
+    return $s;
+}
+
+// clamp<T>(T $value, T $min, T $max): T returns one of its arguments.
+function clamping(int $n, float $f, string $s): void
+{
+    echo takesString(clamp($n, 1, 10)); // want P2103 "int"
+    echo takesString(clamp($f, 0, 1)); // want P2103 "int<0, 1>|float"
+    echo takesString(clamp($s, 'a', 'z'));
+}
+
+// Two durations compare by length, with every comparison operator; a
+// duration against a number is converted to one.
+function durations(Duration $a, Duration $b, int $seconds): bool
+{
+    echo $a < $b ? 'shorter' : 'not shorter';
+    echo $a >= $b ? 'not shorter' : 'shorter';
+    echo $a <=> $b;
+    echo Duration::compare($a, $b);
+    echo $a > $seconds ? 'a' : 'b'; // want P2301 "comparison > between Time\Duration and int"
+    return $a == $b;
+}
+
+/**
+ * @param resource $stream
+ */
+function polling($stream): void
+{
+    $context = new Context();
+    $watcher = $context->add(new \StreamPollHandle($stream), [Event::Read, Event::Write]);
+    $watcher->modifyEvents([Event::Read]);
+    $watcher->modifyEvents([]); // want P2103
+    $context->add(new \StreamPollHandle($stream), ['read']); // want P2103
+    foreach ($context->wait(Duration::fromMilliseconds(10)) as $ready) {
+        echo $ready->hasTriggered(Event::Read) ? 'r' : '-';
+    }
+}

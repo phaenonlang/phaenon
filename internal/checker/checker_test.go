@@ -22,11 +22,45 @@ import (
 // message). The set of (line, code) pairs must match exactly.
 
 var reWant = regexp.MustCompile(`//\s*want\s+(.*)$`)
-
-// reTarget reads a golden file's target from a first line `// target: 8.6`;
-// without one the file is checked for the floor, PHP 8.5.
-var reTarget = regexp.MustCompile(`^//\s*target:\s*(\d+\.\d+)`)
 var reWantItem = regexp.MustCompile(`(P\d{4})(?:\s+"([^"]*)")?`)
+
+// The comment lines that open a golden file may set how it is checked:
+//
+//	// target: 8.6
+//	// deprecations: on
+//
+// target is the PHP version the file compiles for, the floor (PHP 8.5)
+// without one; deprecations: on reports deprecated constructs and library
+// symbols, as phn check does unless --no-deprecations.
+var reHeader = regexp.MustCompile(`^//\s*(target|deprecations):\s*(\d+\.\d+|on)\s*$`)
+
+func goldenSetup(t *testing.T, src []byte) (phpversion.Version, Options) {
+	t.Helper()
+	target, opts := phpversion.Floor, Options{}
+	for _, line := range strings.Split(string(src), "\n") {
+		if !strings.HasPrefix(line, "//") {
+			break
+		}
+		m := reHeader.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		switch m[1] {
+		case "target":
+			v, err := phpversion.Parse(m[2])
+			if err != nil || !v.Supported() {
+				t.Fatalf("golden: bad target %q", m[2])
+			}
+			target = v
+		case "deprecations":
+			if m[2] != "on" {
+				t.Fatalf("golden: deprecations: %q, expected on", m[2])
+			}
+			opts.Deprecations = true
+		}
+	}
+	return target, opts
+}
 
 type want struct {
 	line int
@@ -79,17 +113,12 @@ func TestGolden(t *testing.T) {
 				t.Fatal(err)
 			}
 			p := newProgram(t)
-			if m := reTarget.FindSubmatch(src); m != nil {
-				v, err := phpversion.Parse(string(m[1]))
-				if err != nil {
-					t.Fatal(err)
-				}
-				p.SetTarget(v)
-			}
+			target, opts := goldenSetup(t, src)
+			p.SetTarget(target)
 			if _, err := p.AddFile(path, src, lexer.ModePhaenon, true); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			diags := New(p, Options{}).Check()
+			diags := New(p, opts).Check()
 			wants := parseWants(string(src))
 			type key struct {
 				line int

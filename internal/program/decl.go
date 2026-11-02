@@ -124,10 +124,20 @@ type Function struct {
 	TypeParams []*TypeParam
 	Doc        *docblock.Doc
 	Deprecated bool
-	Asserts    []docblock.AssertTag
-	File       *File
-	Scope      *Scope
-	Decl       *ast.FunctionDecl
+	// DeprecatedNote is what PHP adds to "… is deprecated" from the
+	// #[\Deprecated] attribute: " since 8.6, use is_float() instead".
+	DeprecatedNote string
+	Asserts        []docblock.AssertTag
+	File           *File
+	Scope          *Scope
+	Decl           *ast.FunctionDecl
+	// replaced is the stub declaration an overlay function replaces, whose
+	// #[\Deprecated] the overlay need not repeat.
+	replaced *ast.FunctionDecl
+	// Polyfilled marks a stub function that project or vendor code declares
+	// too (a polyfill for older PHP versions): the stub's types win, and its
+	// absence from an older target is not reported.
+	Polyfilled bool
 	Span       ast.Span
 	ensured    uint8
 }
@@ -150,11 +160,13 @@ type Method struct {
 	TypeParams   []*TypeParam
 	Doc          *docblock.Doc
 	Deprecated   bool
-	Asserts      []docblock.AssertTag
-	SelfOut      types.Type
-	Attrs        []*ast.AttrGroup
-	Decl         *ast.MethodDecl
-	Span         ast.Span
+	// DeprecatedNote: see Function.
+	DeprecatedNote string
+	Asserts        []docblock.AssertTag
+	SelfOut        types.Type
+	Attrs          []*ast.AttrGroup
+	Decl           *ast.MethodDecl
+	Span           ast.Span
 	// Magic marks a @method tag entry (no body, no Decl).
 	Magic bool
 }
@@ -201,16 +213,23 @@ type Property struct {
 
 // Constant is a global or class constant.
 type Constant struct {
-	Name     string // for class constants the bare name; for globals the FQN
-	Class    *Class // nil for a global constant
-	Vis      Visibility
-	Final    bool
-	Type     types.Type // declared (native/docblock) type, nil = infer from Value
-	Doc      bool       // Type comes from a @var tag, which says more than the value
-	Value    ast.Expr
-	File     *File
-	Scope    *Scope
-	Span     ast.Span
+	Name  string // for class constants the bare name; for globals the FQN
+	Class *Class // nil for a global constant
+	Vis   Visibility
+	Final bool
+	Type  types.Type // declared (native/docblock) type, nil = infer from Value
+	Doc   bool       // Type comes from a @var tag, which says more than the value
+	Value ast.Expr
+	File  *File
+	Scope *Scope
+	Span  ast.Span
+	// Deprecated, DeprecatedNote and Polyfilled (of a global constant):
+	// see Function.
+	Deprecated     bool
+	DeprecatedNote string
+	Polyfilled     bool
+	// Attrs are the attribute groups of a class constant's declaration.
+	Attrs    []*ast.AttrGroup
 	evalType types.Type
 	evaled   uint8
 }
@@ -221,6 +240,10 @@ type EnumCase struct {
 	Class *Class
 	Value ast.Expr
 	Span  ast.Span
+	Attrs []*ast.AttrGroup
+	// Deprecated and DeprecatedNote: see Function.
+	Deprecated     bool
+	DeprecatedNote string
 }
 
 // ------------------------------------------------------------------ collection
@@ -287,16 +310,19 @@ func (p *Program) collect(f *File) {
 				// `/** @var int */ const X = …;` (the stubs declare most
 				// constants this way, with an UNKNOWN value).
 				var docT types.Type
-				if s.Doc != "" {
-					if doc := parseDoc(s.Doc); doc != nil && len(doc.Vars) > 0 {
-						docT = p.newResolver(f, scope, nil, s.S).docType(doc.Vars[0].Type)
-					}
+				doc := parseDoc(s.Doc)
+				if doc != nil && len(doc.Vars) > 0 {
+					docT = p.newResolver(f, scope, nil, s.S).docType(doc.Vars[0].Type)
 				}
+				deprecated, note := deprecation(scope, doc, s.Attrs)
 				for _, c := range s.Consts {
 					k := p.declareConstant(f, scope, scope.prefix()+c.Name.Name, c.Value, c.S)
 					if k != nil && k.Type == nil {
 						k.Type = docT
 						k.Doc = docT != nil
+					}
+					if k != nil {
+						k.Deprecated, k.DeprecatedNote = deprecated, note
 					}
 				}
 			case *ast.ExprStmt:
@@ -402,12 +428,59 @@ func (p *Program) DeclareAnonymous(f *File, scope *Scope, d *ast.ClassDecl) *Cla
 func (p *Program) declareFunction(f *File, scope *Scope, d *ast.FunctionDecl) *Function {
 	name := scope.prefix() + d.Name.Name
 	key := strings.ToLower(name)
-	if fn, exists := p.functions[key]; exists && !p.override {
-		return fn
+	existing, exists := p.functions[key]
+	if exists && !p.override {
+		if existing.File.IsStub() && !f.IsStub() {
+			existing.Polyfilled = true // `if (!function_exists('clamp')) { function clamp(…) }`
+		}
+		return existing
 	}
 	fn := &Function{Name: name, File: f, Scope: scope, Decl: d, Span: d.S, ByRef: d.ByRef}
+	if exists {
+		fn.replaced = existing.Decl
+	}
 	p.functions[key] = fn
 	return fn
+}
+
+// deprecation reads a declaration's #[\Deprecated] attribute (PHP 8.4) and
+// its @deprecated tag. note is what PHP's own message adds after "… is
+// deprecated" from the attribute's arguments: " since 8.6, use is_float()
+// instead" for #[\Deprecated(message: "use is_float() instead", since:
+// "8.6")].
+func deprecation(scope *Scope, doc *docblock.Doc, groups ...[]*ast.AttrGroup) (deprecated bool, note string) {
+	for _, attrs := range groups {
+		for _, g := range attrs {
+			for _, a := range g.Attrs {
+				if scope == nil || !strings.EqualFold(scope.ResolveClass(a.Name), "Deprecated") {
+					continue
+				}
+				var message, since string
+				if a.Args != nil {
+					for i, arg := range a.Args.Args {
+						lit, ok := arg.Value.(*ast.StringLit)
+						if !ok {
+							continue
+						}
+						switch {
+						case arg.Name != nil && arg.Name.Name == "message", arg.Name == nil && i == 0:
+							message = StringValue(lit)
+						case arg.Name != nil && arg.Name.Name == "since", arg.Name == nil && i == 1:
+							since = StringValue(lit)
+						}
+					}
+				}
+				if since != "" {
+					note += " since " + since
+				}
+				if message != "" {
+					note += ", " + message
+				}
+				return true, note
+			}
+		}
+	}
+	return doc != nil && doc.Deprecated, ""
 }
 
 // DeclareFunction registers a function declared inside a body (the
@@ -423,6 +496,9 @@ func (s *Scope) Prefix() string { return s.prefix() }
 func (p *Program) declareConstant(f *File, scope *Scope, fqn string, value ast.Expr, span ast.Span) *Constant {
 	key := constKey(fqn)
 	if existing, exists := p.constants[key]; exists && !p.override {
+		if existing.File.IsStub() && !f.IsStub() {
+			existing.Polyfilled = true
+		}
 		// php-src declares `const PHP_URL_USER = UNKNOWN` with a @var: the
 		// extension loaded into php knows the value, and the value is what
 		// a conditional type (`$component is int<0, max>`) decides on.

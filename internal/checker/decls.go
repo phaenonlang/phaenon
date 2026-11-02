@@ -1,10 +1,12 @@
 package checker
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
@@ -54,6 +56,7 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 		ctx.inScope[tp.Name] = true
 	}
 	ctx.checkSignatureTypes(fn.Decl.TypeParams, fn.Decl.Params, fn.Decl.ReturnType)
+	c.declaredName(fn.Decl.Name.S, "function", fn.Decl.Name.Name)
 	c.checkUntyped(f, fn.Decl.Params, fn.Params, fn.Decl.ReturnType, fn.Return, fn.Decl.Name.Name, fn.Decl.S)
 	ctx.body(fn.Params, fn.Decl.Params, fn.Decl.Body, fn.Decl.Name.S)
 }
@@ -122,6 +125,22 @@ func (c *Checker) checkClass(cl *program.Class) {
 	defer func() { c.file = savedFile }()
 	d := cl.Decl
 	c.checkHeader(cl)
+	if d.Name != nil {
+		c.declaredName(d.Name.S, kindWord(cl), d.Name.Name)
+	}
+	// Declared types name classes PHP resolves when it checks a value.
+	tctx := c.newCtx(cl.File, cl.Scope, cl, false)
+	for _, m := range d.Members {
+		switch m := m.(type) {
+		case *ast.PropertyDecl:
+			tctx.libraryTypes(m.Type)
+		case *ast.ClassConstDecl:
+			tctx.libraryTypes(m.Type)
+			for _, k := range m.Consts {
+				c.classConstName(k.Name.S, k.Name.Name)
+			}
+		}
+	}
 	phaenon := cl.File.Mode == lexer.ModePhaenon
 	if d.Modifiers&ast.ModVar != 0 && phaenon {
 		c.report(d.S, P1001, "`var` is not available in Phaenon; use public")
@@ -163,6 +182,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 	if cl.Kind == ast.KindEnum {
 		c.checkEnum(cl)
 	}
+	c.checkConstOverrides(cl)
 	if cl.Kind == ast.KindInterface {
 		for _, m := range cl.Methods {
 			if m.Vis != program.Public {
@@ -203,10 +223,12 @@ func (c *Checker) checkAttrs(cl *program.Class, g *ast.AttrGroup) {
 	ctx.inConst = true
 	for _, a := range g.Attrs {
 		name := ctx.res.ClassName(a.Name)
-		if c.p.Class(name) == nil {
+		ac := c.p.Class(name)
+		if ac == nil {
 			c.report(a.Name.S, P2001, "unknown attribute class %s", name)
 			continue
 		}
+		c.libraryClass(a.Name.S, ac)
 		if a.Args != nil {
 			for _, arg := range a.Args.Args {
 				if arg.Value != nil {
@@ -228,6 +250,7 @@ func (c *Checker) checkHeader(cl *program.Class) {
 			c.report(n.S, P2001, "unknown class %s", name)
 			continue
 		}
+		c.libraryClass(n.Name.S, super)
 		if cl.Kind == ast.KindInterface {
 			if super.Kind != ast.KindInterface {
 				c.report(n.S, P2510, "interface %s cannot extend %s, which is not an interface", cl.Name, super.Name)
@@ -251,6 +274,7 @@ func (c *Checker) checkHeader(cl *program.Class) {
 			c.report(n.S, P2001, "unknown interface %s", name)
 			continue
 		}
+		c.libraryClass(n.Name.S, iface)
 		if iface.Kind != ast.KindInterface {
 			c.report(n.S, P2510, "%s cannot implement %s, which is not an interface", cl.Name, iface.Name)
 		}
@@ -310,6 +334,15 @@ func (c *Checker) resolvedByInsteadof(cl *program.Class, method string) bool {
 	return false
 }
 
+// enumForbiddenMagic are the magic methods PHP refuses on an enum
+// (zend_verify_enum_magic_methods); __call, __callStatic and __invoke are
+// allowed, and __debugInfo since PHP 8.6.
+var enumForbiddenMagic = map[string]bool{
+	"__construct": true, "__destruct": true, "__clone": true, "__get": true, "__set": true, "__unset": true,
+	"__isset": true, "__tostring": true, "__serialize": true, "__unserialize": true, "__sleep": true,
+	"__wakeup": true, "__set_state": true,
+}
+
 func (c *Checker) checkEnum(cl *program.Class) {
 	seen := map[string]bool{}
 	ctx := c.newCtx(cl.File, cl.Scope, cl, true)
@@ -338,6 +371,24 @@ func (c *Checker) checkEnum(cl *program.Class) {
 			c.report(pr.Span, P2514, "enum %s cannot declare property $%s", cl.Name, pr.Name)
 		}
 	}
+	for _, m := range cl.Methods {
+		if m.Magic || m.Decl == nil {
+			continue
+		}
+		span := declSpan(m)
+		if m.FromTrait != nil && cl.Decl.Name != nil {
+			span = cl.Decl.Name.S // the trait is elsewhere; PHP names the enum
+		}
+		lower := strings.ToLower(m.Name)
+		switch {
+		case enumForbiddenMagic[lower]:
+			c.report(span, P2514, "enum %s cannot include magic method %s()", cl.Name, m.Name)
+		case lower == "__debuginfo":
+			// PHP 8.6 lets an enum describe itself to var_dump()
+			// (RFC debugable-enums); 8.5 refuses the method at compile time.
+			c.needsPHP(span, phpversion.PHP86, fmt.Sprintf("__debugInfo() on enum %s", cl.Name), "")
+		}
+	}
 	if cl.BackingType != nil {
 		if !types.IsSubtype(cl.BackingType, types.MakeUnion(types.TInt, types.TString), nil) || types.IsMixed(cl.BackingType) {
 			c.report(cl.Decl.BackingType.Span(), P2507, "enum %s must be backed by int or string", cl.Name)
@@ -352,6 +403,13 @@ func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 	}
 	ctx := c.newCtx(cl.File, cl.Scope, cl, pr.Static)
 	ctx.inConst = true
+	if pr.Readonly && pr.HasDefault && pr.Default != nil && pr.FromTrait == nil {
+		// PHP 8.5 refuses the declaration at compile time. Lowering it into
+		// the constructor would change hasDefaultValue(),
+		// newInstanceWithoutConstructor() and unserialize()
+		// (design/php-versions.md §4), so it is refused.
+		c.needsPHP(pr.Default.Span(), phpversion.PHP86, fmt.Sprintf("a default for readonly property %s::$%s", cl.Name, pr.Name), "assign it in the constructor")
+	}
 	if pr.HasDefault && pr.Default != nil {
 		dt := ctx.expr(pr.Default, newEnv(), pr.Type)
 		if !types.IsAcceptable(dt, pr.Type, c.p) {
@@ -412,6 +470,7 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 		c.report(m.Span, P2504, "abstract method %s::%s() cannot have a body", cl.Name, m.Name)
 	}
 	c.checkOverride(cl, m)
+	c.debugInfoReturn(m.Name, d.ReturnType)
 	c.checkUntyped(cl.File, d.Params, m.Params, d.ReturnType, m.Return, m.Name, m.Span)
 	if phaenon {
 		for _, p := range d.Params {
@@ -445,16 +504,78 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	ctx.body(m.Params, d.Params, d.Body, d.Name.S)
 }
 
-// checkOverride compares a method with the one it overrides.
-func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
-	hasOverrideAttr := false
-	for _, g := range m.Attrs {
+// hasOverride reports an #[\Override] attribute among a declaration's.
+func hasOverride(groups []*ast.AttrGroup) bool {
+	for _, g := range groups {
 		for _, a := range g.Attrs {
 			if strings.EqualFold(a.Name.Parts[len(a.Name.Parts)-1], "Override") {
-				hasOverrideAttr = true
+				return true
 			}
 		}
 	}
+	return false
+}
+
+// checkConstOverrides verifies #[\Override] on class constants and enum
+// cases (PHP 8.6, RFC override_constants), as PHP does when it links the
+// class: a parent class or an interface must declare a constant of that
+// name, a parent's private one not counting. On an 8.5 target the emitter
+// drops the attribute, which 8.5 refuses on constants; the check is all the
+// attribute does, so it applies to both targets. A trait's constants are
+// judged in the classes that use it, as PHP judges them.
+func (c *Checker) checkConstOverrides(cl *program.Class) {
+	if cl.Kind == ast.KindTrait {
+		return
+	}
+	judge := func(name string, attrs []*ast.AttrGroup, span ast.Span, what string) {
+		if !hasOverride(attrs) {
+			return
+		}
+		parent := c.parentConstant(cl, name)
+		if parent == nil {
+			c.report(span, P2503, "%s %s::%s has #[\\Override] but no parent class or interface declares it", what, cl.Name, name)
+			return
+		}
+		c.libraryClassConstant(span, parent.Class, name)
+	}
+	for _, k := range cl.Consts {
+		if k.Class != cl {
+			continue
+		}
+		span := k.Span
+		if k.File != cl.File && cl.Decl.Name != nil {
+			span = cl.Decl.Name.S // copied from a trait declared elsewhere
+		}
+		judge(k.Name, k.Attrs, span, "constant")
+	}
+	for _, m := range cl.Decl.Members {
+		if cs, ok := m.(*ast.EnumCase); ok {
+			judge(cs.Name.Name, cs.Attrs, cs.Name.S, "enum case")
+		}
+	}
+}
+
+// parentConstant finds the constant of that name a parent class or an
+// interface of cl declares, a class's private constant aside.
+func (c *Checker) parentConstant(cl *program.Class, name string) *program.Constant {
+	for _, a := range cl.Ancestors() {
+		a.Signature()
+		for _, k := range a.Consts {
+			if k.Name != name || k.Class != a {
+				continue
+			}
+			if k.Vis == program.Private && a.Kind != ast.KindInterface {
+				continue
+			}
+			return k
+		}
+	}
+	return nil
+}
+
+// checkOverride compares a method with the one it overrides.
+func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
+	hasOverrideAttr := hasOverride(m.Attrs)
 	var parent *program.Method
 	key := strings.ToLower(m.Name)
 	for _, a := range cl.Ancestors() {
@@ -472,6 +593,12 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 			c.report(declSpan(m), P2503, "%s::%s() has #[\\Override] but overrides nothing", cl.Name, m.Name)
 		}
 		return
+	}
+	if hasOverrideAttr {
+		// The override check runs on the target PHP: a method the target's
+		// library lacks overrides nothing there (SessionHandler::validateId()
+		// on 8.5).
+		c.libraryMethod(declSpan(m), parent)
 	}
 	if parent.Final {
 		c.report(declSpan(m), P2505, "%s::%s() overrides final method %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)

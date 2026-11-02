@@ -503,7 +503,7 @@ function locale_canonicalize(string $locale): ?string {}
 
 function locale_lookup(array $languageTag, string $locale, bool $canonicalize = false, ?string $defaultLocale = null): ?string {}
 
-function locale_accept_from_http(string $header, ?array $availableLocales = null): string|false {}
+function locale_accept_from_http(string $header): string|false {}
 
 function locale_is_right_to_left(string $locale): bool {}
 
@@ -639,8 +639,6 @@ function transliterator_create_from_rules(string $rules, int $direction = Transl
 function transliterator_list_ids(): array|false {}
 
 function transliterator_create_inverse(Transliterator $transliterator): ?Transliterator {}
-
-function transliterator_to_rules(Transliterator $transliterator, bool $escapeUnprintable = false): string|false {}
 
 function transliterator_transliterate(Transliterator|string $transliterator, string $string, int $start = 0, int $end = -1): string|false {}
 

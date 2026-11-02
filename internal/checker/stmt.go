@@ -15,6 +15,10 @@ import (
 // stmts checks a statement list in sequence.
 func (x *fnCtx) stmts(ss []ast.Stmt, env *state) {
 	reported := false
+	// `if (PHP_VERSION_ID < 80600) { return …; }` guards the statements
+	// after it, to the end of the list.
+	depth := len(x.c.guards)
+	defer func() { x.c.guards = x.c.guards[:depth] }()
 	for _, s := range ss {
 		if env.dead && !reported {
 			switch s.(type) {
@@ -27,6 +31,10 @@ func (x *fnCtx) stmts(ss []ast.Stmt, env *state) {
 		x.stmt(s, env)
 		if n := len(x.throwEnvs); n > 0 && !env.dead {
 			x.throwEnvs[n-1] = join(x.throwEnvs[n-1], env)
+		}
+		if is, ok := s.(*ast.If); ok && len(is.ElseIfs) == 0 && is.Else == nil && alwaysExits(is.Then) {
+			_, negative := x.guardOf(is.Cond)
+			x.c.pushGuard(negative) // popped when the list ends
 		}
 	}
 }
@@ -383,17 +391,37 @@ func (x *fnCtx) ifStmt(s *ast.If, env *state) {
 		x.removed(s.S, "the alternative if syntax", "braces")
 	}
 	thenEnv, elseEnv := x.cond(s.Cond, env)
+	positive, negative := x.guardOf(s.Cond)
+	pop := x.c.pushGuard(positive)
 	x.stmt(s.Then, thenEnv)
+	pop()
 	ends := []*state{thenEnv}
 	cur := elseEnv
+	negatives := []libraryGuard{negative}
 	for _, ei := range s.ElseIfs {
 		t, f := x.cond(ei.Cond, cur)
+		p, n := x.guardOf(ei.Cond)
+		pops := []func(){x.c.pushGuard(p)}
+		for _, g := range negatives {
+			pops = append(pops, x.c.pushGuard(g))
+		}
 		x.stmt(ei.Body, t)
+		for i := len(pops) - 1; i >= 0; i-- {
+			pops[i]()
+		}
+		negatives = append(negatives, n)
 		ends = append(ends, t)
 		cur = f
 	}
 	if s.Else != nil {
+		var pops []func()
+		for _, g := range negatives {
+			pops = append(pops, x.c.pushGuard(g))
+		}
 		x.stmt(s.Else, cur)
+		for i := len(pops) - 1; i >= 0; i-- {
+			pops[i]()
+		}
 	}
 	ends = append(ends, cur)
 	*env = *joinAll(ends...)
@@ -749,7 +777,10 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		cEnv := thrown.clone()
 		var ts []types.Type
 		for _, n := range c.Types {
+			saved := x.nameOnly
+			x.nameOnly = true // a catch of a class PHP lacks never matches, and fails nothing
 			name, ok := x.resolveClassName(n, n.S)
+			x.nameOnly = saved
 			if !ok {
 				ts = append(ts, types.TObject)
 				continue
@@ -775,7 +806,9 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 	if s.HasFinally {
 		fEnv := joinAll(append(append([]*state{}, ends...), thrown)...)
 		fEnv.dead = false
+		x.inFinally++
 		x.stmts(s.Finally, fEnv)
+		x.inFinally--
 		after := joinAll(ends...)
 		// Assignments in finally apply on every path.
 		for k, v := range fEnv.vars {
@@ -793,6 +826,14 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 }
 
 func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
+	if x.inFinally > 0 {
+		// It discards the exception in flight, or the try block's own
+		// return value.
+		x.c.deprecated(s.S, "return inside a finally block is deprecated since PHP 8.6: it discards what the try block returned or threw")
+	}
+	if s.Expr != nil && x.structor() != "" {
+		x.c.deprecated(s.S, "returning a value from a %s is deprecated since PHP 8.6", x.structor())
+	}
 	defer func() {
 		if x.trackReturns {
 			x.returnEnvs = append(x.returnEnvs, env.clone())
@@ -913,6 +954,7 @@ func (x *fnCtx) yield(e *ast.Yield, env *state) types.Type {
 	if !x.generator {
 		x.report(e.S, P2315, "yield outside a generator")
 	}
+	x.structorYield(e.S)
 	k, v, send := x.generatorKV()
 	var kt, vt types.Type = types.TInt, types.TNull // `yield;` yields null under the next int key
 	if e.Key != nil {
@@ -936,6 +978,7 @@ func (x *fnCtx) yieldFrom(e *ast.YieldFrom, env *state) types.Type {
 	if !x.generator {
 		x.report(e.S, P2315, "yield outside a generator")
 	}
+	x.structorYield(e.S)
 	t := x.expr(e.Expr, env, nil)
 	if k, v, ok := types.IterableKV(t, x.p()); ok {
 		x.yieldKeys = append(x.yieldKeys, k) // yield from keeps the inner keys

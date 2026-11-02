@@ -463,6 +463,10 @@ func (x *fnCtx) mentionsClassParam(t types.Type) bool {
 // checkSignatureTypes validates the written types of a function or
 // method: type arguments, and its own type parameters.
 func (x *fnCtx) checkSignatureTypes(tps []*ast.TypeParam, params []*ast.Param, ret ast.TypeExpr) {
+	for _, p := range params {
+		x.libraryTypes(p.Type)
+	}
+	x.libraryTypes(ret)
 	if x.file.Mode != lexer.ModePhaenon {
 		return
 	}

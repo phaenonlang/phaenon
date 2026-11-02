@@ -1,0 +1,74 @@
+// #[\Override] on class constants and enum cases (PHP 8.6, RFC
+// override_constants): a parent class or an interface must declare the
+// constant, a parent's private one not counting. The check holds whatever
+// the target; compiled for 8.5, the emitter drops the attribute, which is
+// all it does.
+namespace App\OverrideConstants;
+
+interface HasLimit
+{
+    public const int LIMIT = 10;
+}
+
+abstract class Base
+{
+    public const string NAME = 'base';
+    protected const int LEVEL = 1;
+    private const string SECRET = 's';
+}
+
+final class Child extends Base implements HasLimit
+{
+    #[\Override]
+    public const int LIMIT = 20;
+
+    #[\Override]
+    public const string NAME = 'child';
+
+    #[\Override]
+    protected const int LEVEL = 2;
+
+    #[\Override]
+    private const string SECRET = 'c'; // want P2503 "constant App\OverrideConstants\Child::SECRET has #[\Override] but no parent class or interface declares it"
+
+    #[\Override]
+    public const int FRESH = 1; // want P2503
+}
+
+interface Narrower extends HasLimit
+{
+    #[\Override]
+    public const int LIMIT = 5;
+}
+
+enum Suit: string implements HasLimit
+{
+    #[\Override]
+    public const int LIMIT = 4;
+
+    case Hearts = 'h';
+
+    #[\Override]
+    case Spades = 's'; // want P2503 "enum case App\OverrideConstants\Suit::Spades"
+}
+
+trait Limited
+{
+    #[\Override]
+    public const int LIMIT = 30;
+}
+
+final class UsesTrait implements HasLimit
+{
+    use Limited;
+}
+
+// Compiled for PHP 8.5, which has no SessionHandler::validateId(): the
+// #[\Override] that PHP checks on load finds nothing to override there.
+final class Sessions extends \SessionHandler
+{
+    #[\Override] public function validateId(string $id): bool // want P4011 "method SessionHandler::validateId() needs PHP 8.6 (target 8.5)"
+    {
+        return $id !== '';
+    }
+}
