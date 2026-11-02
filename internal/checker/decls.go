@@ -182,6 +182,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 	if cl.Kind == ast.KindEnum {
 		c.checkEnum(cl)
 	}
+	c.checkConstOverrides(cl)
 	if cl.Kind == ast.KindInterface {
 		for _, m := range cl.Methods {
 			if m.Vis != program.Public {
@@ -476,16 +477,78 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	ctx.body(m.Params, d.Params, d.Body, d.Name.S)
 }
 
-// checkOverride compares a method with the one it overrides.
-func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
-	hasOverrideAttr := false
-	for _, g := range m.Attrs {
+// hasOverride reports an #[\Override] attribute among a declaration's.
+func hasOverride(groups []*ast.AttrGroup) bool {
+	for _, g := range groups {
 		for _, a := range g.Attrs {
 			if strings.EqualFold(a.Name.Parts[len(a.Name.Parts)-1], "Override") {
-				hasOverrideAttr = true
+				return true
 			}
 		}
 	}
+	return false
+}
+
+// checkConstOverrides verifies #[\Override] on class constants and enum
+// cases (PHP 8.6, RFC override_constants), as PHP does when it links the
+// class: a parent class or an interface must declare a constant of that
+// name, a parent's private one not counting. On an 8.5 target the emitter
+// drops the attribute, which 8.5 refuses on constants; the check is all the
+// attribute does, so it applies to both targets. A trait's constants are
+// judged in the classes that use it, as PHP judges them.
+func (c *Checker) checkConstOverrides(cl *program.Class) {
+	if cl.Kind == ast.KindTrait {
+		return
+	}
+	judge := func(name string, attrs []*ast.AttrGroup, span ast.Span, what string) {
+		if !hasOverride(attrs) {
+			return
+		}
+		parent := c.parentConstant(cl, name)
+		if parent == nil {
+			c.report(span, P2503, "%s %s::%s has #[\\Override] but no parent class or interface declares it", what, cl.Name, name)
+			return
+		}
+		c.libraryClassConstant(span, parent.Class, name)
+	}
+	for _, k := range cl.Consts {
+		if k.Class != cl {
+			continue
+		}
+		span := k.Span
+		if k.File != cl.File && cl.Decl.Name != nil {
+			span = cl.Decl.Name.S // copied from a trait declared elsewhere
+		}
+		judge(k.Name, k.Attrs, span, "constant")
+	}
+	for _, m := range cl.Decl.Members {
+		if cs, ok := m.(*ast.EnumCase); ok {
+			judge(cs.Name.Name, cs.Attrs, cs.Name.S, "enum case")
+		}
+	}
+}
+
+// parentConstant finds the constant of that name a parent class or an
+// interface of cl declares, a class's private constant aside.
+func (c *Checker) parentConstant(cl *program.Class, name string) *program.Constant {
+	for _, a := range cl.Ancestors() {
+		a.Signature()
+		for _, k := range a.Consts {
+			if k.Name != name || k.Class != a {
+				continue
+			}
+			if k.Vis == program.Private && a.Kind != ast.KindInterface {
+				continue
+			}
+			return k
+		}
+	}
+	return nil
+}
+
+// checkOverride compares a method with the one it overrides.
+func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
+	hasOverrideAttr := hasOverride(m.Attrs)
 	var parent *program.Method
 	key := strings.ToLower(m.Name)
 	for _, a := range cl.Ancestors() {
@@ -503,6 +566,12 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 			c.report(declSpan(m), P2503, "%s::%s() has #[\\Override] but overrides nothing", cl.Name, m.Name)
 		}
 		return
+	}
+	if hasOverrideAttr {
+		// The override check runs on the target PHP: a method the target's
+		// library lacks overrides nothing there (SessionHandler::validateId()
+		// on 8.5).
+		c.libraryMethod(declSpan(m), parent)
 	}
 	if parent.Final {
 		c.report(declSpan(m), P2505, "%s::%s() overrides final method %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)

@@ -107,7 +107,7 @@ var (
 	// P2 — classes
 	P2501 = Code{"P2501", Error, "abstract method not implemented"}
 	P2502 = Code{"P2502", Error, "incompatible override"}
-	P2503 = Code{"P2503", Error, "#[Override] on a method that overrides nothing"}
+	P2503 = Code{"P2503", Error, "#[Override] on a member that overrides nothing"}
 	P2504 = Code{"P2504", Error, "abstract method in a concrete class"}
 	P2505 = Code{"P2505", Error, "final method overridden"}
 	P2506 = Code{"P2506", Error, "trait method conflict"}

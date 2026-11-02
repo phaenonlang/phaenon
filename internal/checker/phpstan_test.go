@@ -67,6 +67,10 @@ func TestPHPStanParity(t *testing.T) {
 		// PHPStan 2.2 predates readonly property defaults (PHP 8.6) and
 		// refuses them on every PHP version.
 		"readonly-defaults.phn": {"property.readOnlyDefaultValue": true},
+		// PHPStan 2.2 knows #[\Override] as PHP 8.5 declares it, for methods
+		// and properties; PHP 8.6 allows it on constants, and compiled for
+		// 8.5 the emitter drops it there.
+		"override-constants.phn": {"attribute.target": true},
 	}
 	files, _ := filepath.Glob(filepath.Join("testdata", "*.phn"))
 	vendorSrc, err := os.ReadFile(filepath.Join("testdata", "vendor", "Acme", "Repo.php"))
