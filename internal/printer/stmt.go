@@ -390,8 +390,13 @@ func (p *Printer) stmt(s ast.Stmt) {
 		p.typeParams(s.TypeParams)
 		p.params(s.Params)
 		p.returnType(s.ReturnType)
-		p.nl()
-		p.block(s.Body)
+		p.throws(s.Throws)
+		if s.Arrow != nil {
+			p.exprBody(s.Arrow)
+		} else {
+			p.nl()
+			p.block(s.Body)
+		}
 		p.nl()
 	case *ast.ClassDecl:
 		p.classDecl(s)
@@ -632,10 +637,14 @@ func (p *Printer) member(m ast.ClassMember) {
 		p.typeParams(m.TypeParams)
 		p.params(m.Params)
 		p.returnType(m.ReturnType)
-		if m.HasBody {
+		p.throws(m.Throws)
+		switch {
+		case m.Arrow != nil:
+			p.exprBody(m.Arrow)
+		case m.HasBody:
 			p.nl()
 			p.block(m.Body)
-		} else {
+		default:
 			p.w(";")
 		}
 		p.nl()

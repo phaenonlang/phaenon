@@ -221,6 +221,7 @@ func Inspect(n Node, f func(Node) bool) {
 		typeParams(n.TypeParams, f)
 		params(n.Params, f)
 		Inspect(n.ReturnType, f)
+		Inspect(n.Throws, f)
 		stmts(n.Body, f)
 	case *MethodDecl:
 		attrs(n.Attrs, f)
@@ -228,7 +229,10 @@ func Inspect(n Node, f func(Node) bool) {
 		typeParams(n.TypeParams, f)
 		params(n.Params, f)
 		Inspect(n.ReturnType, f)
+		Inspect(n.Throws, f)
 		stmts(n.Body, f)
+	case *Throws:
+		namedTypes(n.Types, f)
 	case *PropertyDecl:
 		attrs(n.Attrs, f)
 		Inspect(n.Type, f)
