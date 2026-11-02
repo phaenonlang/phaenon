@@ -432,3 +432,40 @@ function exactAssert(?Circle $c, ?Circle $d): void
         $d->radius();
     }
 }
+
+// A Phaenon method that implements a generic signature compiles with the
+// parameter widened to what the implemented method takes (the override-
+// erasure rule, design/generics.md §4.3): PHP holds `$item` to Item, not to
+// Box, so the guard is not dead code.
+interface Item
+{
+}
+
+final class Box implements Item
+{
+}
+
+interface Store<T of Item>
+{
+    fun put(T $item): void;
+}
+
+final class BoxStore<T of Box> implements Store<T>
+{
+    fun put(T $item): void
+    {
+        if (!$item instanceof Box) {
+            throw new \InvalidArgumentException('a box expected');
+        }
+    }
+}
+
+final class OnlyBoxes implements Store<Box>
+{
+    fun put(Box $item): void
+    {
+        if (!$item instanceof Box) {
+            throw new \InvalidArgumentException('a box expected');
+        }
+    }
+}

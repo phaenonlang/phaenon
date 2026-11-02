@@ -31,11 +31,15 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   checker.
 - ~~**Existential templates**~~ — decided 2026-10-29 (`generics.md` §11.2): a constructor's type
   parameter may type a promoted property; migrate lifts them natively, no new spelling.
-- **Erasure that follows the overridden signature**: `DateTimeNormalizer::denormalize(mixed
+- ~~**Erasure that follows the overridden signature**: `DateTimeNormalizer::denormalize(mixed
   $value)` with `@param UTCDateTime $value` must stay `mixed` natively because the interface's
   parameter is a type parameter erased to `mixed`. Phaenon could let the override declare
   `UTCDateTime $value` and erase it to the parent's erased type with a generated `@param`. Design
-  question for `generics.md`.
+  question for `generics.md`.~~ — done 2026-11-02: the override-erasure rule (`generics.md` §4.3
+  and the §11 row) already compiles it that way; `phn migrate` now predicts the rule and lifts such
+  tags (`74ce488`), the checker holds the widened parameter to what PHP checks (`3490338`), and the
+  emitter applies the rule down a chain of Phaenon classes (`c39ae1c`). odm's two normalizers wait
+  for the tree's uncommitted re-migration ([[dogfood]]).
 - Trait **properties** used on `$this` in a trait body are not yet looked up in the using classes
   (methods are, since 2026-10-29).
 
@@ -231,6 +235,11 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - **Line drift** below generic declarations ([[gotcha-phpstan-one-tag-per-line]]) — a `phn` line-map
   subcommand or plugin support could map `.php` stack-trace lines back to `.phn` if it bites.
 - **Monomorphisation** (§7) — open question.
+- **Emitter goldens are only `php -l`-ed** (2026-11-02): a signature PHP rejects when it links the
+  classes — an override that narrows a parameter, as the emitter compiled a grandchild of a generic
+  class until the override-erasure rule followed the parent's compiled signature — passes `php -l`
+  and is caught only by PHPStan's `method.childParameterType`. Loading each output with `php` (where
+  it declares only classes) would catch it without PHPStan.
 
 ## Small things
 
@@ -258,8 +267,9 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   is a template formatter keyed to the `<?php` tags a Phaenon file has not. Symptom: an import
   added by completion lands glued to the next line. The plugin's import optimiser lays out the
   `use` block itself (`f630655`); formatter support for `.phn` is its own job.
-- **Batch Inspect Code** still reports imports used only by erased constructs as unused (the
-  filter covers editor highlighting only); an `InspectionSuppressor` would cover batch runs.
+- **Batch Inspect Code** still reports imports used only by erased constructs as unused, and
+  PhpStorm's hierarchy findings on overrides with an erased type (the filter covers editor
+  highlighting only); an `InspectionSuppressor` would cover batch runs.
 - **A group-use member** used only by an erased construct comes back from Optimize Imports as
   its own statement next to the shrunk group.
 - No Phaenon-only syntax yet: generics, `is` / `as`, `type` aliases show as PHP syntax errors.
@@ -285,10 +295,34 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   (`PHAENON_ERASED`, a comment to the parser) whose leaf carries a reference per class name:
   navigation, find-usages, rename and the unused-import inspection work; since `65a70f3`
   completion inside `<…>` (classes with import insertion, type parameters, keywords, and the
-  members of a namespace after a qualifier) and no spell-checking of the erased leaf; a type parameter navigates to its `<T of …>` declaration, the declaration shows its usages (erased constructs and docblock types), and the hierarchy check skips methods with erased types (found on core's `AbstractAggregate::id(): T`); `fun` is the `function` keyword to the parser and the highlighter, with the PSR-12 visibility finding and the constant-expression findings filtered (`603db11`). A class constant without `public` is public too since `208cb21` / `4689034`. Left: the leaf is a
+  members of a namespace after a qualifier) and no spell-checking of the erased leaf; a type parameter navigates to its `<T of …>` declaration, the declaration shows its usages (erased constructs and docblock types), and ~~the hierarchy check skips methods with erased types~~ (found on core's `AbstractAggregate::id(): T`; replaced 2026-11-02 by the plugin's own check, next item); `fun` is the `function` keyword to the parser and the highlighter, with the PSR-12 visibility finding and the constant-expression findings filtered (`603db11`). A class constant without `public` is public too since `208cb21` / `4689034`. Left: the leaf is a
   `PsiComment`, so any other comment-based feature sees Phaenon types as comments. PhpStorm 2025.1 does
   not parse `[...$a][0]` in plain PHP either (core's `DeadlineMetricsTest.phn:114`); the
   real-tree test lists such files instead of counting them.
+- ~~**Erased types in PhpStorm's own checks**~~ — done 2026-11-02 (`../jetbrains` branch
+  `fix/erased-types`: `6be6db9`, `97c3c9c`, `5c14fd5`, docs `861d2dd`), found on core's
+  `AbstractEventSourcedRepository` and tq-cli's `DevUp`:
+  - A type parameter is typed as its bound (`mixed` without one), `?T`, unions and `list<T>`
+    included. PhpStorm's hierarchy check reads `Parameter.getDeclaredType()`, which no extension
+    point reaches, and saw `save(T $aggregate)` as `save(mixed)`. `PhaenonHierarchyInspection` now
+    judges every override with an erased type on either side (a `.phn`, or a `.php` implementing a
+    Phaenon interface) as the checker does (P2502): the parent's type parameters substituted along
+    `extends` / `implements`, type parameters by their bounds, a native child type equal to the
+    parent's erasure inheriting (`generics.md` §11.1). The filter drops PhpStorm's finding on those
+    overrides only, so real incompatibilities are reported. The real-tree test asserts no finding
+    on the dogfood trees: 2,219 overrides, core's `save(T $aggregate)` and odm's lifted normalizers
+    included.
+  - `class<T>` is `string` plus `class-string<Bound>`: `$c::m()`, `new $c`, `$c::CONST` resolve
+    against the class; `->` keeps the `Str` methods (the compiler lowers `$c->length()`), `::`
+    never gets them.
+  - `Closure(A, B=, C...): R` carries its signature in PhpStorm's docblock encoding (the variadic
+    element-typed, an optional parameter plain). PhpStorm's own encoding of a variadic literal or
+    first-class callable is `string[]` and may win its call check by hash order; the filter drops
+    such a finding where the argument fits the declared parameter.
+  - `PSI_VERSION` 3. Left: a tuple destructures to the union of its elements (`[$code] = …` is
+    `int|string`; PhpStorm keeps positions only for docblock shapes it reads from the PSI); a
+    method's own type parameters are compared by their bounds; Batch Inspect Code (above); quick
+    documentation of a closure call shows the stub's `Closure::__invoke(...$_)`.
 - The implied `declare(strict_types=1)` is not modelled.
 - Editor colouring relies on the internal extension point `com.jetbrains.php.baseLexerProvider`.
 
