@@ -1,0 +1,23 @@
+// golden: target=8.5
+// __debugInfo() on an enum compiled for PHP 8.5, which refuses it at compile
+// time: P1002 (design/php-versions.md §4).
+namespace App\EnumMagic;
+
+enum Level: int
+{
+    case Low = 1;
+    case High = 2;
+
+    /**
+     * @return array<string, int>
+     */
+    public function __debugInfo(): array // want P1002 "__debugInfo() on enum App\EnumMagic\Level needs PHP 8.6 (target 8.5)"
+    {
+        return ['level' => $this->value];
+    }
+
+    public function __invoke(): int
+    {
+        return $this->value;
+    }
+}

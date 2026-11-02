@@ -71,6 +71,9 @@ func TestPHPStanParity(t *testing.T) {
 		// and properties; PHP 8.6 allows it on constants, and compiled for
 		// 8.5 the emitter drops it there.
 		"override-constants.phn": {"attribute.target": true},
+		// PHPStan 2.2 predates __debugInfo() on enums (PHP 8.6) and refuses
+		// it on every version.
+		"enum-magic.phn": {"enum.magicMethod": true},
 	}
 	files, _ := filepath.Glob(filepath.Join("testdata", "*.phn"))
 	vendorSrc, err := os.ReadFile(filepath.Join("testdata", "vendor", "Acme", "Repo.php"))
