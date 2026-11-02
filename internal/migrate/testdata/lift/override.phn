@@ -54,8 +54,7 @@ final class OrderRepository implements AggregateRepository<OrderId, Order>
     fun get(OrderId $id): ?Aggregate => null;
 
     /** @param $aggregate - the order to store */
-    fun save(Order $aggregate): void {
-    }
+    fun save(Order $aggregate): void {}
 }
 
 /**
@@ -70,8 +69,7 @@ final class LenientRepository<T of EventSourcedAggregate> implements AggregateRe
     fun get(AggregateId $id): ?Aggregate => null;
 
     /** @param T $aggregate */
-    fun save(object $aggregate): void {
-    }
+    fun save(object $aggregate): void {}
 }
 
 /**
@@ -80,5 +78,4 @@ final class LenientRepository<T of EventSourcedAggregate> implements AggregateRe
  *
  * @param EventSourcedAggregate $aggregate
  */
-fun store(Aggregate $aggregate): void {
-}
+fun store(Aggregate $aggregate): void {}

@@ -15,6 +15,5 @@ final readonly class Binding<T of object>
         public map<string, int> $weights = [],
         /** the tags */
         public list<string> $tags = [],
-    ) {
-    }
+    ) {}
 }

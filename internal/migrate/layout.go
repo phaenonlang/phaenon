@@ -11,6 +11,8 @@ package migrate
 //   - the opening brace of a class, interface, trait or enum stands on a
 //     line of its own (design/line-map.md §7), and moves back down where an
 //     earlier run of migrate moved it up;
+//   - an empty function or method body — no statement, no comment — is `{}`
+//     on the declaration's line, as PER-CS 2.0 allows;
 //   - a docblock with one line of content becomes one line;
 //   - a body that is exactly one `return expr;` — or one expression
 //     statement under void or never — with no comment inside the braces
@@ -40,6 +42,7 @@ type Stats struct {
 	Arrows    int // block bodies written as `=> expr;`
 	Braces    int // opening braces moved up to their declaration's line
 	Down      int // class-like braces moved back down to a line of their own
+	Empty     int // empty function and method bodies written as {}
 	Docblocks int // docblocks collapsed onto one line
 }
 
@@ -305,8 +308,27 @@ func (l *layout) function(name *ast.Ident, tps []*ast.TypeParam, ret ast.TypeExp
 		l.arrows = append(l.arrows, span)
 		l.arrow(name, sigEnd, expr, body[0].Span(), span)
 	case expr == nil && !bodies:
-		l.moveBrace(sigEnd)
+		if !l.emptyBody(sigEnd, open, len(body)) {
+			l.moveBrace(sigEnd)
+		}
 	}
+}
+
+// emptyBody writes a body with nothing in it — no statement, no comment —
+// as `{}` on the declaration's line, and reports whether the body is one.
+func (l *layout) emptyBody(sigEnd, open, statements int) bool {
+	if statements != 0 {
+		return false
+	}
+	close := l.nextCode(open + 1)
+	if close >= len(l.toks) || l.toks[close].Kind != token.Kind('}') || l.hasComment(sigEnd, l.toks[close].End) {
+		return false
+	}
+	if string(l.src[sigEnd:l.toks[close].End]) != " {}" {
+		l.edits = append(l.edits, edit{ast.Span{Start: sigEnd, End: l.toks[close].End}, " {}"})
+		l.stats.Empty++
+	}
+	return true
 }
 
 // arrowCandidate returns the expression a body may be written as, nil when
