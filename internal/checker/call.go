@@ -79,6 +79,9 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	}
 	fn.Signature()
 	x.c.libraryFunction(n.S, fn)
+	if fn.File.IsStub() {
+		x.deprecatedCall(strings.ToLower(fn.Name), e, env)
+	}
 	if fn.Deprecated && x.c.opts.Deprecations {
 		x.report(n.S, P4006, "function %s() is deprecated%s", fn.Name, fn.DeprecatedNote)
 	}

@@ -54,6 +54,7 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 		ctx.inScope[tp.Name] = true
 	}
 	ctx.checkSignatureTypes(fn.Decl.TypeParams, fn.Decl.Params, fn.Decl.ReturnType)
+	c.declaredName(fn.Decl.Name.S, "function", fn.Decl.Name.Name)
 	c.checkUntyped(f, fn.Decl.Params, fn.Params, fn.Decl.ReturnType, fn.Return, fn.Decl.Name.Name, fn.Decl.S)
 	ctx.body(fn.Params, fn.Decl.Params, fn.Decl.Body, fn.Decl.Name.S)
 }
@@ -122,6 +123,9 @@ func (c *Checker) checkClass(cl *program.Class) {
 	defer func() { c.file = savedFile }()
 	d := cl.Decl
 	c.checkHeader(cl)
+	if d.Name != nil {
+		c.declaredName(d.Name.S, kindWord(cl), d.Name.Name)
+	}
 	// Declared types name classes PHP resolves when it checks a value.
 	tctx := c.newCtx(cl.File, cl.Scope, cl, false)
 	for _, m := range d.Members {
@@ -130,6 +134,9 @@ func (c *Checker) checkClass(cl *program.Class) {
 			tctx.libraryTypes(m.Type)
 		case *ast.ClassConstDecl:
 			tctx.libraryTypes(m.Type)
+			for _, k := range m.Consts {
+				c.classConstName(k.Name.S, k.Name.Name)
+			}
 		}
 	}
 	phaenon := cl.File.Mode == lexer.ModePhaenon
@@ -426,6 +433,7 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 		c.report(m.Span, P2504, "abstract method %s::%s() cannot have a body", cl.Name, m.Name)
 	}
 	c.checkOverride(cl, m)
+	c.debugInfoReturn(m.Name, d.ReturnType)
 	c.checkUntyped(cl.File, d.Params, m.Params, d.ReturnType, m.Return, m.Name, m.Span)
 	if phaenon {
 		for _, p := range d.Params {
