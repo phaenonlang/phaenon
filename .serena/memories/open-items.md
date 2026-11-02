@@ -17,9 +17,13 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   migrated. Left behind by it:
   - ~~A constructor-level `@template` used only by a promoted property stays a docblock~~ — lifted
     natively since 2026-10-29 (`generics.md` §11.2).
-  - `tequila/object-mapper` `tests/` carry 16 findings that PHPStan never saw (its `paths` is
+  - ~~`tequila/object-mapper` `tests/` carry 16 findings that PHPStan never saw (its `paths` is
     `src` only): Symfony container `get()` typing (needs a phpstan-symfony-like overlay) and
-    untyped closure parameters in fixtures. The tests are built with `phn build --emit-on-error tests`.
+    untyped closure parameters in fixtures. The tests are built with `phn build --emit-on-error tests`.~~
+    — done 2026-11-02 in the tests (object-mapper `df0e2a4`, [[dogfood]]): the fixtures' closures
+    take their source class, the integration tests assert the container's mapper. A
+    phpstan-symfony-like overlay for `get(Foo::class)` would still spare other projects the
+    assertion.
 - **`tequila/mongodb-odm`** (2026-10-29, [[dogfood]]): migrated and built on `phaenon-dogfood`; the
   checker reports 40 findings in `src`, all of PHPStan's level-9/10 kind (`mixed` from Symfony
   config arrays and untyped `array` parameters flowing into typed ones) — PHPStan at level max
