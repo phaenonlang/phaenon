@@ -1,0 +1,58 @@
+{
+  "format": "../design/line-map.md §3. Each reader (Go in phn, Kotlin in the PhpStorm plugin, PHP in phaenon/runtime) parses every map line, checks the source path and answers the queries; a reverse answer of null means the source line has no target.",
+  "valid": [
+    {
+      "name": "header hold, runs, a docblock hold before a declaration",
+      "map": "// phaenon-map v1 ../../src/Domain/Foo.phn 1-6=1 7:1 15-17=9 18:9",
+      "source": "../../src/Domain/Foo.phn",
+      "forward": [[1, 1], [6, 1], [7, 1], [8, 2], [14, 8], [15, 9], [17, 9], [18, 9], [19, 10], [100, 91]],
+      "reverse": [[1, 7], [2, 8], [8, 14], [9, 18], [10, 19], [91, 100]]
+    },
+    {
+      "name": "an expression body expanded into a signature line and a hold",
+      "map": "// phaenon-map v1 Foo.phn 1-6=1 7:1 20:14 21-23=14 24:15",
+      "source": "Foo.phn",
+      "forward": [[19, 13], [20, 14], [21, 14], [22, 14], [23, 14], [24, 15], [30, 21]],
+      "reverse": [[13, 19], [14, 20], [15, 24], [21, 30]]
+    },
+    {
+      "name": "a source line folded into its predecessor takes the next line's target",
+      "map": "// phaenon-map v1 Foo.phn 1:1 3:4",
+      "source": "Foo.phn",
+      "forward": [[1, 1], [2, 2], [3, 4], [4, 5]],
+      "reverse": [[1, 1], [2, 2], [3, 3], [4, 3], [5, 4]]
+    },
+    {
+      "name": "a trailing hold continues past its end and is never a target",
+      "map": "// phaenon-map v1 Foo.phn 1:1 10-12=10",
+      "source": "Foo.phn",
+      "forward": [[9, 9], [10, 10], [12, 10], [13, 10]],
+      "reverse": [[9, 9], [10, null], [11, null]]
+    },
+    {
+      "name": "the inline-HTML spelling and a percent-encoded path",
+      "map": "<?php // phaenon-map v1 ../src/My%20Templates/100%25.phn 1:1",
+      "source": "../src/My Templates/100%.phn",
+      "forward": [[1, 1], [5, 5]],
+      "reverse": [[1, 1], [5, 5]]
+    }
+  ],
+  "unsupported": [
+    "// phaenon-map v2 Foo.phn 1:1"
+  ],
+  "invalid": [
+    "// phaenon-map v1 Foo.phn",
+    "// phaenon-map v1 1:1",
+    "// phaenon-map v1 Foo.phn 2:1",
+    "// phaenon-map v1 Foo.phn 1:1 1:2",
+    "// phaenon-map v1 Foo.phn 1:1 5:2 4:3",
+    "// phaenon-map v1 Foo.phn 1-6=1 5:2",
+    "// phaenon-map v1 Foo.phn 1-6=1 8:2",
+    "// phaenon-map v1 Foo.phn 1:0",
+    "// phaenon-map v1 Foo.phn 0:1",
+    "// phaenon-map v1 Foo.phn 3-1=1",
+    "// phaenon-map v1 Foo.phn 1:1 x",
+    "// phaenon-map v1 Foo.phn 1:1  5:5",
+    "// phaenon-map v1 Foo.phn 1:-1"
+  ]
+}
