@@ -62,7 +62,7 @@ output whose source is gone is removed. `exclude` names the paths the checker le
 (fixtures another analyser owns); `phn build` compiles them all the same.
 
 ```sh
-phn migrate src tests          # once: Foo.php → Foo.phn, generic docblocks lifted into syntax, `public function` → `fun`
+phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function` → `fun`, canonical layout
 phn build                      # the roots of phaenon.json → their outputs
 phn build --check              # CI: fail when an output is missing, stale or has no source
 phn check                      # type-check the roots, minus "exclude"
@@ -117,9 +117,19 @@ with its parameters widened to the implemented method's types, so `@param T $agg
 bound. For that, migrate reads the project's other files and its vendor code through Composer.
 Prose survives without its type: `@param T $x prose` becomes `@param $x - prose` (the dash, as in
 JSDoc, tells an IDE that expects a type that none follows) and a property's `@var T prose` becomes
-its docblock `/** prose */`; the emitter puts the types back and drops the dash. It also runs on
-`.phn` files, so a project migrated earlier can be lifted later; a declaration already written in
-Phaenon keeps its type then.
+its docblock `/** prose */`; the emitter puts the types back and drops the dash. A `@throws X`
+without a description becomes `throws X` after the return type, several of them one union
+(`throws A|B`); a `@throws` with prose stays. It also runs on `.phn` files, so a project migrated
+earlier can be lifted later; a declaration already written in Phaenon keeps its type then.
+
+Then it lays the code out in the canonical style (`design/functions.md` §5): the opening brace of a
+class, interface, trait, enum, function, method or closure moves up to the declaration's line, a
+docblock with one line of content becomes one line, and a body that is exactly one `return expr;`
+— or one expression statement under `void` or `never` — becomes `=> expr;`, wrapped after the
+arrow when the line would pass 120 columns. A body with a comment inside stays a block, as do
+constructors, destructors and generators. These are the only edits that change a file's line count
+(beside docblock lines whose tags were lifted); `--keep-layout` skips them. Re-running migrate on
+its own output changes nothing.
 
 The generated file keeps **every line number**: line N of `Foo.php` is line N of `Foo.phn`. Stack
 traces, `__LINE__`, coverage and PHPStan findings point at the Phaenon source without source maps.
@@ -132,12 +142,46 @@ The price is paid on line 1, which carries the open tag, a marker and `declare(s
 
 php-cs-fixer runs on the outputs with the PSR-12 rules about that line off
 (`blank_line_after_opening_tag`, `blank_lines_before_namespace`, `linebreak_after_opening_tag`,
-`no_multiple_statements_per_line`); everything else it checks is the source's own text.
+`no_multiple_statements_per_line`), and, for sources in the canonical layout, the two rules about
+where a brace stands: `braces_position` (functions, methods, closures) and `class_definition`
+(class-likes), since the output keeps the brace on the declaration's line and an expression body
+compiles to a one-line block. An output that gets a compiler import (roadmap D11) needs
+`single_line_after_imports` off too. Everything else it checks is the source's own text.
 
 A library ships its `.phn` sources and no compiled PHP (`roadmap.md` D13): with `phn` and the
 library pinned, the output is reproducible byte for byte. The Composer plugin that builds every
 installed package on `composer install` is M6 work; until then a consumer runs `phn build` in
 `vendor/<package>`.
+
+## Declarations
+
+```php
+final class Account {
+    private int $balance = 0;
+
+    fun balance(): int => $this->balance;
+
+    /** Takes money out, never below zero. */
+    fun withdraw(int $amount): void throws InsufficientFunds {
+        if ($amount > $this->balance) {
+            throw new InsufficientFunds($amount);
+        }
+        $this->balance -= $amount;
+    }
+
+    static fun open(): self => new self();
+}
+```
+
+`fun` declares a named function or method, `public` unless a visibility is written; `function`
+stays valid. A named function may have **one expression** for its body, `=> expr;`: returned, or
+only evaluated under `void` and `never`; not on constructors, destructors or generators (`P1004`).
+It compiles to `{ return expr; }` on the same lines. **`throws A|B`** after the return type names
+the exceptions the function lets escape; each must be a `Throwable` (`P2319`), and callers are not
+held to it (no checked exceptions). It compiles to a `@throws` tag in the declaration's docblock,
+or to `/** @throws A|B */` at the start of its first line, without adding a line. A docblock that
+shares the declaration's line gains one, the one exception besides generic docblocks. Design:
+`design/functions.md`.
 
 ## Generics
 
@@ -208,7 +252,7 @@ crossing it, a spawn body mutating an outer variable, and `sleep()`/`usleep()` i
 ```sh
 phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] # type-check and compile .phn → .php; no paths: phaenon.json
 phn check [--json] [--no-deprecations] [--exclude PATH]... path...              # type-check .phn (and .php) files
-phn migrate [--keep-docblocks] [--keep-public] [--php X.Y] path... # rewrite .php as .phn; --php writes the target
+phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Seq, Map, Str, Bytes), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
 phn stdlib --plugin-stubs DIR  # the PhpStorm plugin's editor-only pseudo-classes (ListMethods.php, …) from the same sources
