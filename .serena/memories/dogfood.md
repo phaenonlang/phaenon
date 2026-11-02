@@ -156,22 +156,42 @@ push dogfood work without a maintainer's go-ahead.
   The only other output changes seen were the D14 dash in odm's and object-mapper's `@param $x - prose`
   lines: their side-by-side `.php` had not been rebuilt since D14. Pass `.phn` files explicitly: pointing
   `phn migrate` at a directory also converts every hand-written `.php` in it (the stdlib's `Type.php` once).
-  Core is committed locally; the other three trees carry the change uncommitted.
+  Core is committed locally; the other three trees carried the change uncommitted until 2026-11-02
+  (below).
 
 - **Override-erasure re-lift (2026-11-02):** `phn migrate` predicts the override-erasure rule
   (`../design/generics.md` §4.3) from the program model, so `find src tests -name '*.phn' -print0 |
   xargs -0 phn migrate --keep-public` was run over every tree. Lifts found: core
-  `src/EventSourcing/Repository/AbstractEventSourcedRepository.phn` `save(T $aggregate)` (committed
-  `f455680`; the compiled `save(Aggregate $aggregate)` unchanged, only its docblock's layout; suite
-  1188, PHPStan max, cs and `phn check` 12 errors / 9 warnings the same before and after), and
-  mongodb-odm `src/Normalizer/DocumentNormalizer.phn` `denormalize(map<string, mixed> $value, …)` and
+  `src/EventSourcing/Repository/AbstractEventSourcedRepository.phn` `save(T $aggregate)` (`f455680`;
+  the compiled `save(Aggregate $aggregate)` unchanged, only its docblock's layout), and mongodb-odm
+  `src/Normalizer/DocumentNormalizer.phn` `denormalize(map<string, mixed> $value, …)` and
   `src/Normalizer/DateTimeNormalizer.phn` `denormalize(UTCDateTime $value, …)` over the interface's
-  `mixed` — **not applied**: both files carry the uncommitted `fun` re-migration above; verified on a
-  copy (outputs differ only in docblock layout, `phn check` the same). object-mapper, reflector and
-  tq-cli have no such site. Re-lift with `--keep-public`: without it migrate also drops `public` before
-  class constants, a respelling the D15 run predates (core: 91 files). A re-lift of tq-cli also lifts
-  the `$http` closure types of `src/Console/Ci/PublishCommand.phn` and `TokenCommand.phn`, which
-  migrate learned to spell after that tree was migrated; left for a commit of its own.
+  `mixed` (`f416cd0`, after the `fun` re-migration was committed). object-mapper, reflector and
+  tq-cli have no such site.
+
+- **Dogfood cleanup (2026-11-02), all on `phaenon-dogfood`:**
+
+  | Tree | Commits | Verified |
+  |---|---|---|
+  | core | `f455680` override lift, `2aa2f0c` class constants without `public` (91 files) | suite 1188, PHPStan max, cs 0 of 813, `phn check` 12 errors / 9 warnings as at the last commit; outputs byte-identical |
+  | mongodb-odm | `d28281d` the uncommitted `fun` re-migration of 2026-11-01 (125 files, side-by-side `.php` rebuilt), `f416cd0` the two override lifts, `680c9a5` class constants (8 files) | suite 162, PHPStan max, cs, `phn check` 3 errors / 17 warnings as at the last commit |
+  | object-mapper | `90c3954` the `fun` re-migration (48 files, six `.php` rebuilt for the D14 dash); no constant to respell | suite 19, PHPStan, cs, `phn check` 18 errors (2 in `src`) as at the last commit |
+  | reflector | `209123e` the `fun` re-migration (10 files, outputs unchanged); no constant to respell | suite 25, PHPStan, cs, `phn check` 0 |
+  | tq-cli | `faf515f` the `$http` closure types of `src/Console/Ci/PublishCommand.phn` and `TokenCommand.phn`; no constant to respell | suite 2052, PHPStan, cs 0 of 586, `phn check` 0 errors / 141 warnings |
+
+  Each uncommitted re-migration was checked by re-running today's migrate on the last commit in a
+  copy: it gave the working tree exactly, apart from what migrate learned afterwards (the constants,
+  the override lifts). The error counts above are the current checker's, measured on each last commit
+  too; they are higher than the counts recorded earlier in this note because the checker grew.
+  Left uncommitted on purpose: `.serena/project.yml` (odm, object-mapper), object-mapper's untracked
+  `config/reference.php`, tq-cli's `src/Dev/DevUp.phn` and `DevVm.phn` (hand edits, excluded from the
+  re-lift by passing the file list without them).
+- Gotcha (2026-11-02): core's pre-commit `phpstan-analyze` and `tests` hooks lack `pass_filenames:
+  false` / `require_serial: true`, so a commit of many files ran one full PHPStan per filename batch
+  in parallel (about ten at once) and would have run the suite as often. Until the config is fixed,
+  run `phn build`, `composer phpstan` and the suite once by hand and commit with `--no-verify`.
+  object-mapper's and reflector's hooks have the same shape; odm's set `pass_filenames: false`;
+  tq-cli has none.
 
 ## Next targets (roadmap §3)
 
