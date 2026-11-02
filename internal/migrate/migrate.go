@@ -40,6 +40,13 @@ type Options struct {
 	// and keeps `public` before an asymmetric visibility; off, a sole
 	// `public` is dropped, since Phaenon implies it (design/functions.md).
 	KeepPublic bool
+	// Layout applies the canonical layout after the lift (Layout,
+	// design/functions.md §5.3): braces of declarations on their line,
+	// one-line docblocks, expression bodies. It removes lines, so it is
+	// off when KeepLines is wanted.
+	Layout bool
+	// Stats, when set, counts what the migration rewrote.
+	Stats *Stats
 	// Program, with File the file being lifted in it, is the program
 	// model read before the migration: the project's files and the
 	// vendor code behind them. With it the lift predicts the override-
@@ -67,6 +74,11 @@ func Convert(src []byte, opts Options) ([]byte, []Note, error) {
 	var notes []Note
 	if opts.Generics {
 		if out, notes, err = Lift(out, opts); err != nil {
+			return nil, nil, err
+		}
+	}
+	if opts.Layout {
+		if out, err = Layout(out, opts.Stats); err != nil {
 			return nil, nil, err
 		}
 	}
