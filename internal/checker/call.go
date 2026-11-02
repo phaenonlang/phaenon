@@ -1823,16 +1823,19 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		}
 		ret = x.evalConditional(ret, argByName)
 	}
+	// The parameters as the arguments resolved them; a type parameter
+	// nothing determined widens to its bound (closure types are not
+	// generic).
+	resolved := func(p *program.Param) types.Type {
+		t := types.Substitute(paramType(p), freshOnly(subst))
+		return finalizeParams(t, tps)
+	}
+	if x.pipeSig == sig && x.pipeParam != nil {
+		x.pipeParamType = resolved(x.pipeParam)
+	}
 	if partial {
-		// The closure's parameters as the bound arguments resolved them; a
-		// type parameter only a placeholder determines widens to its bound
-		// (closure types are not generic).
-		resolved := func(p *program.Param) types.Type {
-			t := types.Substitute(paramType(p), freshOnly(subst))
-			return finalizeParams(t, tps)
-		}
 		if sig.node != nil && shape.ok {
-			x.recordPartial(sig.node, args, sig, shape.slots, shape.rest, shape.named, false)
+			x.recordPartial(sig.node, args, sig, shape.slots, shape.rest, shape.named, false, resolved)
 		}
 		return partialClosure(shape, resolved, ret)
 	}
