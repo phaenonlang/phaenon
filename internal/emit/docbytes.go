@@ -15,7 +15,7 @@ import (
 // get the same treatment here. Left alone, the word reaches PHPStan as a
 // class name, and as Phaenon\Bytes when the file imports that class. Only
 // the type of a tag is rewritten, one word for another on the same line,
-// so prose that says "bytes" and the line count are untouched.
+// so prose that says "bytes" and the lines are untouched.
 
 // eraseWrittenBytes rewrites `bytes` to `string` in the types of every
 // docblock of a file compiled with type information (phn build). It runs
