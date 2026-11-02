@@ -9,6 +9,36 @@ import (
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
+// TestSuggestedStaysOutOfProjects: the Monolog and Sentry declarations the
+// runtime package's integrations are checked against load only on request
+// (LoadSuggested), never with LoadStubs. A project's program reads those
+// libraries from its vendor directory, and an embedded declaration of the
+// few members the integrations use would shadow the real classes.
+func TestSuggestedStaysOutOfProjects(t *testing.T) {
+	declared := []string{`Monolog\LogRecord`, `Monolog\Processor\ProcessorInterface`, `Sentry\Frame`, `Sentry\State\Scope`, `Sentry\Integration\IntegrationInterface`}
+	p := New()
+	if err := p.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range declared {
+		if p.Class(name) != nil {
+			t.Errorf("LoadStubs declares %s", name)
+		}
+	}
+	if p.Class(`Phaenon\Debug\LineMap`) == nil {
+		t.Error(`LoadStubs does not declare Phaenon\Debug\LineMap`)
+	}
+	q := New()
+	if err := q.LoadSuggested(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range declared {
+		if q.Class(name) == nil {
+			t.Errorf("LoadSuggested does not declare %s", name)
+		}
+	}
+}
+
 func TestStubs(t *testing.T) {
 	p := New()
 	if err := p.LoadStubs(); err != nil {

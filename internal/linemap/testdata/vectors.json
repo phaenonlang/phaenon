@@ -53,6 +53,12 @@
     "// phaenon-map v1 Foo.phn 3-1=1",
     "// phaenon-map v1 Foo.phn 1:1 x",
     "// phaenon-map v1 Foo.phn 1:1  5:5",
-    "// phaenon-map v1 Foo.phn 1:-1"
+    "// phaenon-map v1 Foo.phn 1:-1",
+    "// phaenon-map v1 Foo.phn 01:1",
+    "// phaenon-map v1 Foo.phn 1:01",
+    "// phaenon-map v1 Foo.phn 1-06=1 7:1",
+    "// phaenon-map v1 Foo%41.phn 1:1",
+    "// phaenon-map v1 Foo%2.phn 1:1",
+    "// phaenon-map v1 Foo%.phn 1:1"
   ]
 }

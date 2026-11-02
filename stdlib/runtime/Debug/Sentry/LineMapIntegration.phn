@@ -1,0 +1,157 @@
+namespace Phaenon\Debug\Sentry;
+
+use Phaenon\Debug\LineMap;
+use Sentry\Event;
+use Sentry\Frame;
+use Sentry\Integration\IntegrationInterface;
+use Sentry\Options;
+use Sentry\SentrySdk;
+use Sentry\Stacktrace;
+use Sentry\State\Scope;
+
+/**
+ * A Sentry SDK 4 integration that points an event's frames at their .phn
+ * source (design/line-map.md §4.3): every frame of every exception's stack
+ * trace and of the event's own stack trace whose file carries a line map
+ * gets the .phn path (absolute, and stripped of the `prefixes` option as
+ * Sentry strips the compiled path), the source line, and closure names in
+ * source lines. `in_app`, the function and the frame's variables stay as
+ * Sentry computed them from the compiled file.
+ *
+ * The SDK builds an event's frames from the throwable before any event
+ * processor runs, and a Frame's file and line have no setters, so the
+ * integration's event processor replaces each mapped frame with a new one
+ * and the stack trace with a new one. The context lines Sentry shows come
+ * from the .phn when it is deployed: where the frame had an excerpt of the
+ * compiled file (the FrameContextifierIntegration, a default integration,
+ * runs first), the same number of .phn lines around the source line replace
+ * it; without the .phn the compiled excerpt stays, the code that ran. A
+ * frame without an excerpt is left to the FrameContextifierIntegration,
+ * which, running later, reads the .phn path the frame now holds. A frame
+ * already in a .phn file — a throwable the Monolog processor rewrote — has
+ * no map and is left alone.
+ */
+final class LineMapIntegration implements IntegrationInterface
+{
+    /** The .phn files read for the event being processed, as lines; null for one not deployed. */
+    private map<string, ?list<string>> $sourceLines = [];
+
+    fun setupOnce(): void
+    {
+        Scope::addGlobalEventProcessor(static function (Event $event): Event {
+            $client = SentrySdk::getCurrentHub()->getClient();
+            $integration = $client?->getIntegration(self::class);
+            if ($client !== null && $integration !== null) {
+                $integration->translate($event, $client->getOptions());
+            }
+
+            return $event;
+        });
+    }
+
+    /** Never throws: Sentry drops an event whose processor throws, and no event is lost to the map. */
+    private fun translate(Event $event, Options $options): void
+    {
+        try {
+            foreach ($event->getExceptions() as $exception) {
+                $stacktrace = $exception->getStacktrace();
+                if ($stacktrace !== null) {
+                    $exception->setStacktrace($this->translateStacktrace($stacktrace, $options));
+                }
+            }
+            $stacktrace = $event->getStacktrace();
+            if ($stacktrace !== null) {
+                $event->setStacktrace($this->translateStacktrace($stacktrace, $options));
+            }
+        } catch (\Throwable) {
+            // the frames not translated yet stay as Sentry built them
+        } finally {
+            $this->sourceLines = [];
+        }
+    }
+
+    private fun translateStacktrace(Stacktrace $stacktrace, Options $options): Stacktrace
+    {
+        $frames = [];
+        $changed = false;
+        foreach ($stacktrace->getFrames() as $frame) {
+            $translated = $this->translateFrame($frame, $options);
+            $changed = $changed || $translated !== $frame;
+            $frames[] = $translated;
+        }
+
+        return $changed ? new Stacktrace($frames) : $stacktrace;
+    }
+
+    private fun translateFrame(Frame $frame, Options $options): Frame
+    {
+        $compiled = $frame->getAbsoluteFilePath();
+        if ($compiled === null || $frame->isInternal()) {
+            return $frame;
+        }
+        $map = LineMap::forFile($compiled);
+        if ($map === null) {
+            return $frame;
+        }
+        $source = $map->sourceFile();
+        $shown = self::stripPrefix($source, $options);
+        $line = $map->sourceLine($frame->getLine());
+        // Sentry's frame position is inside the function the frame names, so
+        // a closure named there was declared in this frame's file.
+        $function = $frame->getFunctionName();
+        $rawFunction = $frame->getRawFunctionName();
+        $translated = new Frame(
+            $function === null ? null : $map->closureName($function, $frame->getFile(), $shown),
+            $shown,
+            $line,
+            $rawFunction === null ? null : $map->closureName($rawFunction, $compiled, $source),
+            $source,
+            $frame->getVars(),
+            $frame->isInApp(),
+        );
+        if ($frame->getContextLine() !== null) {
+            $this->setContext($translated, $frame, $source, $line);
+        }
+
+        return $translated;
+    }
+
+    private fun setContext(Frame $translated, Frame $frame, string $source, int $line): void
+    {
+        $lines = $this->sourceLines($source);
+        if ($lines === null || $line < 1 || $line > count($lines)) {
+            $translated->setPreContext($frame->getPreContext());
+            $translated->setContextLine($frame->getContextLine());
+            $translated->setPostContext($frame->getPostContext());
+
+            return;
+        }
+        $radius = max(count($frame->getPreContext()), count($frame->getPostContext()));
+        $before = min($radius, $line - 1);
+        $translated->setPreContext(array_slice($lines, $line - 1 - $before, $before));
+        $translated->setContextLine($lines[$line - 1]);
+        $translated->setPostContext(array_slice($lines, $line, $radius));
+    }
+
+    private fun sourceLines(string $file): ?list<string>
+    {
+        if (!array_key_exists($file, $this->sourceLines)) {
+            $text = @is_file($file) ? @file_get_contents($file) : false;
+            $this->sourceLines[$file] = $text === false ? null : array_map(static fn (string $line): string => rtrim($line, "\r"), explode("\n", $text));
+        }
+
+        return $this->sourceLines[$file];
+    }
+
+    /** Strips the first of Sentry's `prefixes` the path starts with, as the SDK does for the compiled path. */
+    private static fun stripPrefix(string $path, Options $options): string
+    {
+        foreach ($options->getPrefixes() as $prefix) {
+            if (str_starts_with($path, $prefix)) {
+                return substr($path, strlen($prefix));
+            }
+        }
+
+        return $path;
+    }
+}

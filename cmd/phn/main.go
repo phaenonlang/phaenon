@@ -302,7 +302,7 @@ func materialise(what string, files map[string][]byte, dir string, check bool) {
 	sort.Strings(names)
 	written, stale := 0, 0
 	for _, name := range names {
-		dst := filepath.Join(dir, name)
+		dst := filepath.Join(dir, filepath.FromSlash(name))
 		cur, readErr := os.ReadFile(dst)
 		if readErr == nil && bytes.Equal(cur, files[name]) {
 			continue
@@ -312,7 +312,7 @@ func materialise(what string, files map[string][]byte, dir string, check bool) {
 			stale++
 			continue
 		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			fail("%v", err)
 		}
 		if err := os.WriteFile(dst, files[name], 0o644); err != nil {

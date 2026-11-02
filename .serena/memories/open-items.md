@@ -327,6 +327,24 @@ Built in the compiler (decisions: `../design/functions.md` §8). Left:
   by PHPStan; the emitter writes generated tags into a docblock of their own above the attributes
   (`4d6898d`). `phn migrate` could move such a docblock above the attributes.
 
+## D19 — the line map in production (2026-11-02)
+
+`phaenon/runtime`'s `Phaenon\Debug` (compiler `efdf21b`, runtime `6b0a83d`; design
+`../design/line-map.md` §4.3):
+- **Checker parity gap**: the checker keeps a narrowed static property across a static call
+  inside a loop, PHPStan drops the narrowing; `LineMap.phn`'s first version passed `phn check` and
+  failed PHPStan. The checker must forget a static property's narrowing at any call, as PHPStan
+  does (more lenient than PHPStan is a parity bug).
+- `Throwable::getTrace()` is plain `array` to the checker; `ThrowableRewriter.phn` carries an
+  `@var` with PHPStan's frame shape. Refining the overlay would change dogfood findings, so it waits
+  for a run over the five trees.
+- Not translated yet: positions inside exception messages (a `TypeError`'s "called in X.php on
+  line N"), Symfony's `SilencedErrorContext` (deprecation logs) and Monolog `ErrorHandler`'s plain
+  `context.file`/`context.line`, anonymous class names, Sentry profiling and span locations.
+- The per-process map cache does not notice a compiled file changing under a long-running worker;
+  acceptable for deployed code, not for a dev server that rebuilds under a running worker.
+- Windows paths are handled lexically but untested.
+
 ## Small things
 
 - `phn migrate` could rewrite `static function (…) { return …; }` in attribute arguments and constants back
