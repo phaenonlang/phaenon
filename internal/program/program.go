@@ -52,6 +52,8 @@ type Program struct {
 	ConstType func(c *Constant) types.Type
 	stubs     bool
 	target    phpversion.Version
+	// extensionsPHP is the version of the php LoadExtensions reflected.
+	extensionsPHP string
 }
 
 // Problem is a finding attached to a declaration site.
@@ -187,6 +189,23 @@ func (p *Program) CheckedFiles() []*File {
 
 // File returns a loaded file by path.
 func (p *Program) File(path string) *File { return p.files[path] }
+
+// IsStub reports a file of the embedded standard library: the php-src
+// stubs, the overlay, the runtime packages' declarations.
+func (f *File) IsStub() bool { return f != nil && strings.HasPrefix(f.Path, "<stub>/") }
+
+// ClassPolyfilled reports whether a loader (Composer's maps: a polyfill
+// package, the project) knows a file for a class the stubs declare, so the
+// class exists on PHP versions older than the one that added it.
+func (p *Program) ClassPolyfilled(name string) bool {
+	lower := strings.ToLower(strings.TrimPrefix(name, "\\"))
+	for _, l := range p.loaders {
+		if _, ok := l.FindClass(lower); ok {
+			return true
+		}
+	}
+	return false
+}
 
 // ------------------------------------------------------------------ lookup
 

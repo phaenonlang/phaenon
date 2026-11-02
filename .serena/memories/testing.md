@@ -27,6 +27,8 @@ suites, and the tools they shell out to. Without its variable a suite **skips**,
 | `PHAENON_UPDATE` | `TestGenerics` (emit) | Rewrites the expected `.php` goldens from the current output | `1` |
 | `PHAENON_GOLDEN` | `TestGolden` (checker) | Only golden files whose name contains this substring | e.g. `generics` |
 | `PHAENON_COMPOSER_PROJECT` | `internal/program` | A Composer project to exercise the vendor reader | e.g. `/Users/petr/labs/tequila/object-mapper` |
+| `PHAENON_PHP86` | `TestPHPStanParity` (checker) | A php 8.6: PHPStan runs on it for the goldens whose header says `// target: 8.6` (they skip without it, unless `PHAENON_PHP` is an 8.6) | `/opt/homebrew/opt/php@8.6/bin/php` |
+| `PHAENON_PHP_SRC` | `TestFresh` (`stdlib/gen`) too | Compares the committed stubs and version table with the clone's release branches | as above |
 
 `../design/checker.md` §8 item 5 still says `PHAENON_PHPSTAN=1`; the code executes the value as a
 binary, so it must be a path (listed in [[open-items]]).
@@ -97,6 +99,35 @@ recorded results were established with it.
 
 The PHPStan behaviour the emitter is built around — one docblock tag per line — was verified
 against 2.2 ([[gotcha-phpstan-one-tag-per-line]]).
+
+## The php-src stubs and the version table (2026-11-02)
+
+`stdlib/php-src` was a copy of php-src master (2026-10-28) until the PHP 8.6 milestone; it now
+holds the stubs of the newest supported release branch, and `stdlib/versions_gen.go` the release
+each library symbol appeared in. Both are generated, never edited:
+
+1. The clone is read-only, so the release branches are whatever it holds; `stdlib/gen` reads them
+   with `git archive` only and records each branch's commit in `versions_gen.go`.
+2. `PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go generate ./stdlib` writes every `*.stub.php` and
+   `LICENSE` of `origin/PHP-8.6` (removing stubs the branch no longer has) and diffs the stubs of
+   `origin/PHP-8.5` and `origin/PHP-8.6` into the table. It prints the counts (43 classes, 57
+   functions, 27 methods, 66 constants, 4 class constants, 7 parameters, 44 deprecations on
+   2026-11-02) and any symbol a release removed.
+3. `go run ./stdlib/gen -php /opt/homebrew/opt/php@8.6/bin/php` also rewrites `stdlib/constants.php`
+   (every constant of the embedded extensions, `true`/`false`/`null` and resources aside); run with
+   the 8.5.3 php it reproduced the committed file, which is how the procedure was validated. The
+   values come from 8.6.0-dev today: regenerate once 8.6.0 is installed.
+4. `go test ./internal/program -run TestOverlayMatchesStubs` fails when an overlay function or
+   method is missing from the new stubs or declares other parameters; fix the overlay.
+5. A new release line: add it to `releases` in `stdlib/gen/main.go` and to `internal/phpversion`
+   (`Floor`/`Newest` must match the list).
+
+`TestFresh` (`stdlib/gen`, with `PHAENON_PHP_SRC`) fails when the committed files are stale.
+
+The PHPStan parity run uses PHPStan 2.2, which predates 8.6: it refuses readonly defaults,
+`#[\Override]` on constants and `__debugInfo()` on enums, and does not know the members 8.6 added to
+existing classes. Those findings are ignored per file in `internal/checker/phpstan_test.go`
+(`allowIn`), each with its reason; `skipParity` lists the files PHPStan cannot judge at all.
 
 ## The stdlib written in Phaenon
 

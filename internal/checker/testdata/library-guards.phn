@@ -1,0 +1,72 @@
+// target: 8.5
+// Version guards: code that tests for what it uses runs it only where it
+// exists, so a library symbol newer than the target is not P4011 inside the
+// guard (design/php-versions.md §9).
+namespace App\Guards;
+
+use Time\Duration;
+
+function existence(int $n): int
+{
+    if (\function_exists('clamp')) {
+        return clamp($n, 1, 10);
+    }
+    return max(1, min(10, $n));
+}
+
+function earlyExit(int $n): int
+{
+    if (!\function_exists('clamp')) {
+        return max(1, min(10, $n));
+    }
+    return clamp($n, 1, 10);
+}
+
+function version(int $seconds): string
+{
+    if (\PHP_VERSION_ID >= 80600) {
+        return \get_class(Duration::fromSeconds($seconds));
+    }
+    return 'seconds';
+}
+
+function versionEarlyExit(int $seconds): string
+{
+    if (\PHP_VERSION_ID < 80600) {
+        return 'seconds';
+    }
+    return \get_class(Duration::fromSeconds($seconds));
+}
+
+function classGuard(int $seconds): ?Duration // want P4011
+{
+    if (!\class_exists(Duration::class)) {
+        return null;
+    }
+    return Duration::fromSeconds($seconds);
+}
+
+function methodGuard(\ReflectionProperty $property): bool
+{
+    if (\method_exists($property, 'isReadable')) {
+        return $property->isReadable(null);
+    }
+    return $property->isPublic();
+}
+
+function wrongBranch(int $n): int
+{
+    if (\function_exists('clamp')) {
+        return $n;
+    } else {
+        return clamp($n, 1, 10); // want P4011
+    }
+}
+
+function tooOld(int $n): int
+{
+    if (\PHP_VERSION_ID >= 80500) {
+        return clamp($n, 1, 10); // want P4011
+    }
+    return $n;
+}

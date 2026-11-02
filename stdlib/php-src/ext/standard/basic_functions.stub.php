@@ -2039,11 +2039,11 @@ function get_include_path(): string|false {}
 /** @refcount 1 */
 function print_r(mixed $value, bool $return = false): string|true {}
 
-function connection_aborted(): bool {}
+function connection_aborted(): int {}
 
 function connection_status(): int {}
 
-function ignore_user_abort(?bool $enable = null): bool {}
+function ignore_user_abort(?bool $enable = null): int {}
 
 #ifdef HAVE_GETSERVBYNAME
 function getservbyname(string $service, string $protocol): int|false {}
@@ -2194,10 +2194,7 @@ function hrtime(bool $as_number = false): array|int|float|false {}
 
 /* md5.c */
 
-/**
- * @refcount 1
- * @compile-time-eval
- */
+/** @refcount 1 */
 function md5(string $string, bool $binary = false): string {}
 
 /** @refcount 1 */
@@ -2217,10 +2214,7 @@ function getlastmod(): int|false {}
 
 /* sha1.c */
 
-/**
- * @refcount 1
- * @compile-time-eval
- */
+/** @refcount 1 */
 function sha1(string $string, bool $binary = false): string {}
 
 /** @refcount 1 */
@@ -2273,12 +2267,14 @@ function headers_list(): array {}
 
 /* {{{ html.c */
 
+/** @refcount 1 */
 function htmlspecialchars(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, ?string $encoding = null, bool $double_encode = true): string {}
 
 function htmlspecialchars_decode(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401): string {}
 
 function html_entity_decode(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, ?string $encoding = null): string {}
 
+/** @refcount 1 */
 function htmlentities(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, ?string $encoding = null, bool $double_encode = true): string {}
 
 /**
@@ -2392,10 +2388,8 @@ function strtoupper(string $string): string {}
  */
 function strtolower(string $string): string {}
 
-/** @compile-time-eval */
 function str_increment(string $string): string {}
 
-/** @compile-time-eval */
 function str_decrement(string $string): string {}
 
 /** @refcount 1 */

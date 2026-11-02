@@ -7,6 +7,7 @@ import (
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
@@ -519,6 +520,10 @@ func (x *fnCtx) constFetch(e *ast.ConstFetch) types.Type {
 	ns, global := x.res.Scope().ResolveConst(e.Name)
 	for _, name := range []string{ns, global} {
 		if k := x.p().Constant(name); k != nil {
+			x.c.libraryConstant(e.S, k)
+			if k.Deprecated && x.c.opts.Deprecations {
+				x.report(e.S, P4006, "constant %s is deprecated%s", k.Name, k.DeprecatedNote)
+			}
 			t := x.p().ConstantType(k)
 			if dynamicConstants[strings.ToLower(name)] {
 				// PHP_OS is a string, not this machine's 'Darwin'; a tag
@@ -582,7 +587,13 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 				return types.TMixed
 			}
 		} else {
+			// X::class is a string the compiler writes: PHP never loads X.
+			saved := x.nameOnly
+			if id, ok := e.Name.(*ast.Ident); ok && strings.EqualFold(id.Name, "class") {
+				x.nameOnly = true
+			}
 			t, cl := x.classRefType(n, n.S)
+			x.nameOnly = saved
 			recv = t
 			if cl != nil {
 				classes = []*program.Class{cl}
@@ -614,6 +625,10 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 	var out []types.Type
 	for _, cl := range classes {
 		if cs := cl.FindCase(name); cs != nil {
+			x.c.libraryClassConstant(e.Name.Span(), cs.Class, cs.Name)
+			if cs.Deprecated && x.c.opts.Deprecations {
+				x.report(e.Name.Span(), P4006, "enum case %s::%s is deprecated%s", cs.Class.Name, cs.Name, cs.DeprecatedNote)
+			}
 			out = append(out, types.EnumCase{Class: cl.Name, Case: cs.Name})
 			continue
 		}
@@ -624,6 +639,10 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 		}
 		if !x.canAccess(k.Vis, k.Class) {
 			x.report(e.Name.Span(), P2108, "constant %s::%s is %s", k.Class.Name, name, k.Vis)
+		}
+		x.c.libraryClassConstant(e.Name.Span(), k.Class, k.Name)
+		if k.Deprecated && x.c.opts.Deprecations {
+			x.report(e.Name.Span(), P4006, "constant %s::%s is deprecated%s", k.Class.Name, k.Name, k.DeprecatedNote)
 		}
 		out = append(out, x.bindReceiver(x.p().ConstantType(k), recv, k.Class))
 	}
@@ -1549,8 +1568,10 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 	case token.T_IS_IDENTICAL, token.T_IS_NOT_IDENTICAL:
 		return types.TBool // binary() reports the impossible comparisons
 	case token.T_IS_EQUAL, token.T_IS_NOT_EQUAL:
+		x.objectNumberComparison(op, l, r, span)
 		return types.TBool
 	case token.Kind('<'), token.Kind('>'), token.T_IS_SMALLER_OR_EQUAL, token.T_IS_GREATER_OR_EQUAL:
+		x.objectNumberComparison(op, l, r, span)
 		if li, ok := l.(types.Int); ok {
 			if ri, ok := r.(types.Int); ok {
 				if always, value := orderingOutcome(op, li, ri); always && x.certainOperands {
@@ -1562,11 +1583,80 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		}
 		return types.TBool
 	case token.T_SPACESHIP:
+		x.objectNumberComparison(op, l, r, span)
 		return types.Int{Lo: -1, Hi: 1}
 	case token.T_INSTANCEOF:
 		return types.TBool
 	}
 	return types.TMixed
+}
+
+// numberComparable are the classes whose comparison handler takes a number:
+// GMP and BcMath\Number compare by value with int and float operands.
+var numberComparable = []string{"GMP", "BcMath\\Number"}
+
+// objectNumberComparison reports a comparison of an object with a number.
+// PHP compares objects with each other through the class's handler (two
+// Time\Duration by length, two DateTimeInterface by instant, other objects
+// property by property), but against an int or a float it converts the
+// object to a number: a Notice and a meaningless result (PHPStan's
+// smaller.invalid, equal.invalid, spaceship.invalid).
+func (x *fnCtx) objectNumberComparison(op token.Kind, l, r types.Type, span ast.Span) {
+	obj, num := l, r
+	if !x.plainObject(obj) || !hasNumber(num) {
+		obj, num = r, l
+		if !x.plainObject(obj) || !hasNumber(num) {
+			return
+		}
+	}
+	x.report(span, P2301, "comparison %s between %s and %s: PHP converts the object to a number", opText(op), x.typeName(l), x.typeName(r))
+}
+
+// plainObject reports a type whose every member is an object that does not
+// compare with numbers.
+func (x *fnCtx) plainObject(t types.Type) bool {
+	if types.IsMixed(t) || !types.IsObjectLike(t) {
+		return false
+	}
+	for _, m := range types.Members(t) {
+		if _, unknown := m.(types.Unknown); unknown {
+			return false // reported already, or a class nothing declares
+		}
+	}
+	for _, name := range types.ClassNames(t) {
+		for _, nc := range numberComparable {
+			if strings.EqualFold(name, nc) || x.p().IsSubclassOf(name, nc) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func hasNumber(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Int, types.Float, types.FloatLit:
+			return true
+		}
+	}
+	return false
+}
+
+func opText(op token.Kind) string {
+	switch op {
+	case token.T_IS_EQUAL:
+		return "=="
+	case token.T_IS_NOT_EQUAL:
+		return "!="
+	case token.T_IS_SMALLER_OR_EQUAL:
+		return "<="
+	case token.T_IS_GREATER_OR_EQUAL:
+		return ">="
+	case token.T_SPACESHIP:
+		return "<=>"
+	}
+	return string(rune(op))
 }
 
 // orderingOutcome decides `l op r` for integer ranges when every pair of
@@ -2001,6 +2091,10 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 			// class's constructor (or __clone); PHP rejects everything else.
 			if !x.inClassScope(pr.Class) || !x.inInitialiser() {
 				x.report(t.Name.Span(), P2206, "readonly property %s::$%s can only be assigned in the constructor of %s", pr.Class.Name, name, pr.Class.Name)
+			} else if pr.HasDefault && strings.EqualFold(x.method.Name, "__construct") && x.c.target().AtLeast(phpversion.PHP86) {
+				// PHP 8.6: the default initialised it before the constructor
+				// ran; only __clone may reinitialise it.
+				x.report(t.Name.Span(), P2206, "readonly property %s::$%s is initialised by its default: the constructor cannot assign it", pr.Class.Name, name)
 			}
 		case !x.canAccess(pr.SetVis, pr.Class):
 			if pr.SetVis != pr.Vis {

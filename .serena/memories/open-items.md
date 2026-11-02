@@ -271,6 +271,26 @@ Decisions are in `../design/php-versions.md` §9; these are what the first build
   and is caught only by PHPStan's `method.childParameterType`. Loading each output with `php` (where
   it declares only classes) would catch it without PHPStan.
 
+## PHP 8.6 — library and checker (2026-11-02)
+
+Decisions are in `../design/php-versions.md` §9; what was left:
+
+- **`stdlib/constants.php` comes from PHP 8.6.0-dev**: regenerate with the 8.6.0 release
+  (`go run ./stdlib/gen -php …`, [[testing]]).
+- **P2515 (uninitialised readonly property) is declared but never reported**: no analysis checks
+  that a readonly property is assigned before the constructor returns. When it is written, a
+  default (PHP 8.6) counts as the initialisation.
+- **`#[\Override]` on properties** (PHP 8.5) is not checked; methods and, since 8.6, constants are.
+- **Version guards** are read in `if`/`elseif`/`else` and early exits only, not in `?:`, `&&`
+  operands or `match (true)`; a guard in those positions still leaves P4011.
+- **PHPStan 2.2 lags PHP 8.6** (refuses readonly defaults, `#[\Override]` on constants,
+  `__debugInfo()` on enums; misses members 8.6 added): the per-file allowances in
+  `phpstan_test.go` go once the parity PHPStan supports 8.6.
+- **Library deprecations need the stubs' attribute**: runtime-only ones (`SessionHandlerInterface`
+  without `validateId()`, objects passed to `array_walk()`, `http_build_query()`,
+  `mb_convert_variables()`, `ReflectionProperty::setValue()` with a foreign object, 16+
+  `php://filter` filters) are not reported.
+
 ## Small things
 
 - `phn migrate` could rewrite `static function (…) { return …; }` in attribute arguments and constants back

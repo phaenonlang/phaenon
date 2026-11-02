@@ -1,0 +1,48 @@
+// target: 8.6
+// Readonly properties with a default (PHP 8.6, RFC readonly_property_defaults):
+// the default initialises the property, so no later assignment may write it,
+// the constructor's included; __clone may reinitialise it, as for any
+// readonly property.
+namespace App\ReadonlyDefaults;
+
+final class Settings
+{
+    public readonly int $retries = 3;
+
+    /** @var list<string> */
+    public readonly array $tags = [];
+
+    public readonly string $name;
+
+    public function __construct(bool $verbose = false)
+    {
+        $this->name = 'settings';
+        if ($verbose) {
+            $this->retries = 5; // want P2206 "readonly property App\ReadonlyDefaults\Settings::$retries is initialised by its default"
+        }
+    }
+
+    public function __clone()
+    {
+        $this->tags = ['copy'];
+    }
+
+    public function later(): void
+    {
+        $this->tags = []; // want P2206
+    }
+}
+
+final readonly class Point
+{
+    public int $x = 0;
+
+    public function __construct(public int $y = 0)
+    {
+    }
+}
+
+function read(Settings $s, Point $p): int
+{
+    return $s->retries + \count($s->tags) + $p->x + $p->y;
+}

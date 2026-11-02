@@ -81,8 +81,12 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 		return types.TError
 	}
 	fn.Signature()
+	x.c.libraryFunction(n.S, fn)
+	if fn.File.IsStub() {
+		x.deprecatedCall(strings.ToLower(fn.Name), e, env)
+	}
 	if fn.Deprecated && x.c.opts.Deprecations {
-		x.report(n.S, P4006, "function %s() is deprecated", fn.Name)
+		x.report(n.S, P4006, "function %s() is deprecated%s", fn.Name, fn.DeprecatedNote)
 	}
 	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File), node: e}
 	sig.explicit = x.explicitArgs(e.TypeArgs, fn.TypeParams, fn.Name+"()", e.S)
@@ -1016,8 +1020,9 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 			if !x.canAccess(meth.Vis, meth.Class) {
 				x.report(e.Name.Span(), P2108, "method %s::%s() is %s", meth.Class.Name, name, meth.Vis)
 			}
+			x.c.libraryMethod(e.Name.Span(), meth)
 			if meth.Deprecated && x.c.opts.Deprecations {
-				x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated", meth.Class.Name, name)
+				x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", meth.Class.Name, name, meth.DeprecatedNote)
 			}
 			sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File),
 				typeParams: meth.TypeParams, recv: m, decl: meth.Class, node: e}
@@ -1165,8 +1170,9 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 		if !x.canAccess(meth.Vis, meth.Class) {
 			x.report(e.Name.Span(), P2108, "method %s::%s() is %s", meth.Class.Name, name, meth.Vis)
 		}
+		x.c.libraryMethod(e.Name.Span(), meth)
 		if meth.Deprecated && x.c.opts.Deprecations {
-			x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated", meth.Class.Name, name)
+			x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", meth.Class.Name, name, meth.DeprecatedNote)
 		}
 		sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File),
 			typeParams: meth.TypeParams, recv: recv, decl: meth.Class, node: e}
@@ -1545,6 +1551,11 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 				continue
 			}
 			bindings = append(bindings, bound{a, p, i})
+		}
+	}
+	if sig.stub {
+		for _, b := range bindings {
+			x.c.libraryParam(b.arg.S, sig.name, b.param.Name)
 		}
 	}
 	// Required parameters present?

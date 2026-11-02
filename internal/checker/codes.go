@@ -34,6 +34,10 @@ var (
 	// (design/php-versions.md §5.1); the grammar admits it.
 	P1003 = Code{"P1003", Error, "placeholder where PHP forbids one"}
 
+	// P11xx — constructs PHP deprecates, reported whatever the target
+	// unless --no-deprecations (design/php-versions.md §4).
+	P1101 = Code{"P1101", Warning, "construct deprecated by PHP"}
+
 	// P2 — names
 	P2001 = Code{"P2001", Error, "unknown class"}
 	P2002 = Code{"P2002", Error, "unknown function"}
@@ -110,7 +114,7 @@ var (
 	// P2 — classes
 	P2501 = Code{"P2501", Error, "abstract method not implemented"}
 	P2502 = Code{"P2502", Error, "incompatible override"}
-	P2503 = Code{"P2503", Error, "#[Override] on a method that overrides nothing"}
+	P2503 = Code{"P2503", Error, "#[Override] on a member that overrides nothing"}
 	P2504 = Code{"P2504", Error, "abstract method in a concrete class"}
 	P2505 = Code{"P2505", Error, "final method overridden"}
 	P2506 = Code{"P2506", Error, "trait method conflict"}
@@ -161,4 +165,10 @@ var (
 	P4008 = Code{"P4008", Warning, "target above the PHP composer.json admits"}
 	P4009 = Code{"P4009", Error, "PHP target phn does not support"}
 	P4010 = Code{"P4010", Warning, "no PHP target stated"}
+	// P4011: "clamp() needs PHP 8.6 (target 8.5)", a library symbol newer
+	// than the target (design/php-versions.md §6).
+	P4011 = Code{"P4011", Error, "library symbol needs a newer PHP than the target"}
+	// P4012: the php whose extensions are reflected is older than the
+	// target, so their newer signatures are unknown (php-versions.md §6).
+	P4012 = Code{"P4012", Warning, "local php older than the target"}
 )

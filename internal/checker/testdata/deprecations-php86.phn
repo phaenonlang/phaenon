@@ -1,0 +1,138 @@
+// deprecations: on
+// What PHP 8.6 deprecates in the language (design/php-versions.md §4):
+// P1101 whatever the target, unless --no-deprecations. `is` cannot be
+// written as a name in Phaenon, where it is the type test; it still
+// reaches PHP through define() and class_alias().
+namespace App\Names {
+    use ArrayObject as let; // want P1101 "`let` as the name of an imported class"
+    use ArrayObject as _; // want P1101 "`_` as the name of an imported class"
+    use function strlen as let; // want P1101 "imported function"
+    use function strtoupper as _;
+    use const PHP_EOL as _; // want P1101 "imported constant"
+    use const PHP_INT_MAX as LET; // want P1101
+}
+
+namespace App\Declared {
+    const let = 1; // want P1101 "`let` as a constant name is deprecated since PHP 8.6"
+    const _ = 2; // want P1101
+    const lettuce = 3;
+
+    function readonly(): void // want P1101 "a function named readonly is deprecated"
+    {
+    }
+
+    function Let(): void // want P1101 "`let` as a function name"
+    {
+    }
+
+    interface let // want P1101 "`let` as an interface name"
+    {
+    }
+
+    final class Names
+    {
+        public const string namespace = 'ns'; // want P1101 "a class constant named namespace"
+        public const string NS = 'ns';
+
+        public static function declare(): void
+        {
+            define('is', 1); // want P1101 "`is` as a constant name"
+            define('_', 2); // want P1101
+            define('ANSWER', 42);
+            class_alias(Names::class, 'App\Names\is'); // want P1101 "`is` as a class alias"
+            class_alias(Names::class, 'Alias');
+        }
+    }
+}
+
+namespace App\Structors {
+    final class Returns
+    {
+        public function __construct(private int $n = 0)
+        {
+            if ($this->n > 0) {
+                return;
+            }
+            return 5; // want P1101 "returning a value from a constructor is deprecated since PHP 8.6"
+        }
+
+        public function __destruct()
+        {
+            return null; // want P1101 "returning a value from a destructor"
+        }
+
+        public function other(): int
+        {
+            $f = function (): int {
+                return 1;
+            };
+            return $f();
+        }
+    }
+
+    final class Generates
+    {
+        public function __construct()
+        {
+            yield 1; // want P1101 "yield makes the constructor a generator"
+        }
+    }
+
+    final class Debugged
+    {
+        /**
+         * @return ?array<string, int>
+         */
+        public function __debugInfo(): ?array // want P1101 "a nullable return type for __debugInfo()"
+        {
+            return null;
+        }
+    }
+
+    final class DebuggedWell
+    {
+        /**
+         * @return array<string, int>
+         */
+        public function __debugInfo(): array
+        {
+            return [];
+        }
+    }
+}
+
+namespace App\Flow {
+    function finallyReturns(): int
+    {
+        try {
+            echo 'work';
+        } finally {
+            return 2; // want P1101 "return inside a finally block is deprecated since PHP 8.6"
+        }
+    }
+
+    function finallyCleans(): int
+    {
+        try {
+            echo 'work';
+        } finally {
+            $cleanup = function (): int {
+                return 0;
+            };
+            echo $cleanup();
+        }
+        return 1;
+    }
+
+    function calls(object $o, string $class): void
+    {
+        define('WITH_CASE', 1, false); // want P1101 "define()'s third argument is deprecated since PHP 8.6"
+        echo is_a($class, \Countable::class) ? 'y' : 'n'; // want P1101 "is_a() with a class name and $allow_string false"
+        echo is_a($class, \Countable::class, false) ? 'y' : 'n'; // want P1101
+        echo is_subclass_of($class, \Countable::class, false) ? 'y' : 'n'; // want P1101 "is_subclass_of()"
+        echo is_a($class, \Countable::class, true) ? 'y' : 'n';
+        echo is_subclass_of($class, \Countable::class) ? 'y' : 'n';
+        echo is_a($o, \Countable::class) ? 'y' : 'n';
+        echo is_a($class, \Countable::class, allow_string: true) ? 'y' : 'n';
+    }
+}

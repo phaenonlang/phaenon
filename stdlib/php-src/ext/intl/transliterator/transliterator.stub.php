@@ -32,9 +32,6 @@ class Transliterator
      */
     public function createInverse(): ?Transliterator {}
 
-    /** @alias transliterator_to_rules */
-    public function toRules(bool $escapeUnprintable = false): string|false {}
-
     /**
      * @return array<int, string>|false
      * @tentative-return-type

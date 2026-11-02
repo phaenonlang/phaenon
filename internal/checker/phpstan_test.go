@@ -6,6 +6,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/token"
 	"os"
 	"os/exec"
@@ -45,6 +46,35 @@ func TestPHPStanParity(t *testing.T) {
 		"return.unusedType":         true, // unused-type analysis is tooling (M6)
 		"parameterByRef.unusedType": true,
 	}
+	// PHPStan findings ignored in one file only.
+	allowIn := map[string]map[string]bool{
+		// instanceof, catch and ::class of a class PHP 8.6 added fail nothing
+		// on PHP 8.5 and guard code meant for 8.6 (php-versions.md §9);
+		// PHPStan on 8.5 cannot tell them from a misspelt name.
+		"library-target85.phn": {"class.notFound": true},
+		// PHPStan reads PHP's own functions and classes from its maps, which
+		// predate PHP 8.6 (2.2 and 2.3 alike): run on 8.6 it knows the new
+		// functions and classes through reflection, not the methods,
+		// constants and parameters 8.6 added to existing ones, and types the
+		// unknown constant as mixed.
+		"library-target86.phn": {"method.notFound": true, "classConstant.notFound": true, "argument.unknown": true,
+			"arguments.count": true, "echo.nonString": true},
+		// The same maps leave PHPStan with reflection alone for 8.6's new
+		// functions and classes: clamp() returns mixed and
+		// Io\Poll\Context::wait() an array of mixed, where the overlay and
+		// the stub's docblock say T and list<Watcher>.
+		"library-php86-types.phn": {"argument.type": true, "method.nonObject": true},
+		// PHPStan 2.2 predates readonly property defaults (PHP 8.6) and
+		// refuses them on every PHP version.
+		"readonly-defaults.phn": {"property.readOnlyDefaultValue": true},
+		// PHPStan 2.2 knows #[\Override] as PHP 8.5 declares it, for methods
+		// and properties; PHP 8.6 allows it on constants, and compiled for
+		// 8.5 the emitter drops it there.
+		"override-constants.phn": {"attribute.target": true},
+		// PHPStan 2.2 predates __debugInfo() on enums (PHP 8.6) and refuses
+		// it on every version.
+		"enum-magic.phn": {"enum.magicMethod": true},
+	}
 	files, _ := filepath.Glob(filepath.Join("testdata", "*.phn"))
 	vendorSrc, err := os.ReadFile(filepath.Join("testdata", "vendor", "Acme", "Repo.php"))
 	if err != nil {
@@ -67,6 +97,9 @@ func TestPHPStanParity(t *testing.T) {
 				// those files (compiled output through PHPStan level max).
 				t.Skip("Phaenon-only syntax; covered by the emit golden")
 			}
+			if why, ok := skipParity[name]; ok {
+				t.Skip(why)
+			}
 			phpName := strings.TrimSuffix(name, ".phn") + ".php"
 			if err := os.WriteFile(filepath.Join(dir, phpName), append([]byte("<?php "), src...), 0o644); err != nil {
 				t.Fatal(err)
@@ -79,10 +112,34 @@ func TestPHPStanParity(t *testing.T) {
 			// certain, so a check against what PHP may still hand over is not
 			// reported as impossible by either side.
 			neon := "parameters:\n    treatPhpDocTypesAsCertain: false\n"
+			// A file compiled for a newer PHP than the floor is analysed by
+			// PHPStan running on that PHP, which reads the new library from
+			// its own reflection. (phpVersion stays unset: the parity
+			// binary, PHPStan 2.2, accepts no version above 8.5.)
+			argv := []string{phpstan}
+			if target, _ := goldenSetup(t, src); target != phpversion.Floor {
+				// PHAENON_PHP86 names a php 8.6; PHAENON_PHP, the
+				// conformance oracle, serves when it is one.
+				variable := "PHAENON_PHP" + strings.ReplaceAll(target.String(), ".", "")
+				php := os.Getenv(variable)
+				if php == "" {
+					if oracle := os.Getenv("PHAENON_PHP"); oracle != "" {
+						out, err := exec.Command(oracle, "-r", `echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;`).Output()
+						if err == nil && string(out) == target.String() {
+							php = oracle
+						}
+					}
+				}
+				if php == "" {
+					t.Skipf("target %s: neither %s nor PHAENON_PHP names a php %s", target, variable, target)
+				}
+				argv = []string{php, phpstan}
+			}
 			if err := os.WriteFile(filepath.Join(dir, "phpstan.neon"), []byte(neon), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command(phpstan, "analyse", "-c", filepath.Join(dir, "phpstan.neon"), "--level", "max", "--no-progress", "--error-format", "json", "--no-ansi", dir)
+			argv = append(argv, "analyse", "-c", filepath.Join(dir, "phpstan.neon"), "--level", "max", "--no-progress", "--error-format", "json", "--no-ansi", dir)
+			cmd := exec.Command(argv[0], argv[1:]...)
 			cmd.Dir = dir
 			out, _ := cmd.Output() // exit status 1 means findings, which is expected
 			var report struct {
@@ -108,7 +165,7 @@ func TestPHPStanParity(t *testing.T) {
 					continue
 				}
 				for _, m := range f.Messages {
-					if allow[m.Identifier] {
+					if allow[m.Identifier] || allowIn[name][m.Identifier] {
 						continue
 					}
 					flagged[m.Line] = true
@@ -128,6 +185,12 @@ func TestPHPStanParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+// skipParity are the golden files PHPStan cannot judge, with the reason.
+var skipParity = map[string]string{
+	"library-guards.phn": "PHPStan runs on one PHP: on 8.5 the 8.6 side of each version guard does not exist " +
+		"(unknown symbols, PHP_VERSION_ID < 80600 always true), on 8.6 the 8.5 side is dead code",
 }
 
 // usesPhaenonSyntax reports whether a corpus file has constructs PHPStan
