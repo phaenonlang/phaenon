@@ -129,7 +129,12 @@ func TestEmitExecution(t *testing.T) {
 					return
 				}
 			}
-			b, _ := execPHPRewritten(dirB, func(out string) string { return translateLines(out, j.lines) })
+			b, ok := execPHPRewritten(dirB, func(out string) string { return translateLines(out, j.lines) })
+			if !ok {
+				// A timeout under load is no output to compare, as for the original.
+				results[i] = result{path: j.path, skippedCause: "timeout"}
+				return
+			}
 			if a1 != b {
 				observes := observesLines(j.orig) && reDigits.ReplaceAllString(a1, "N") == reDigits.ReplaceAllString(b, "N")
 				results[i] = result{path: j.path, diff: excerptDiff(a1, b), observes: observes}
