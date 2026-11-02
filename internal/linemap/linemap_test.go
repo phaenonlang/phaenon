@@ -179,4 +179,11 @@ func TestFind(t *testing.T) {
 	if _, err := Find([]byte("<?php\n// phaenon-map v2 Foo.phn 1:1\n")); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("v2: got %v, want ErrUnsupported", err)
 	}
+	// One trailing carriage return is stripped before parsing (§3.1).
+	if _, err := Parse(m + "\r"); err != nil {
+		t.Errorf("a trailing \\r: %v", err)
+	}
+	if _, err := Parse(m + "\r\r"); err == nil {
+		t.Error("two trailing \\r were accepted")
+	}
 }

@@ -140,13 +140,15 @@ func IsMapLine(line string) bool {
 	return strings.HasPrefix(line, prefix) || strings.HasPrefix(line, htmlPrefix)
 }
 
-// Parse reads one map line (without its line break). It returns
-// ErrUnsupported for a version other than v1 and an error for a line that
-// breaks the format's rules (§3.1): tokens separated by single spaces, a
-// path, at least one entry, the first entry at output line 1, entries in
+// Parse reads one map line (without its line break; one trailing carriage
+// return is stripped). It returns ErrUnsupported for a version other than
+// v1 and an error for a line that breaks the format's rules (§3.1): tokens
+// separated by single spaces, a path whose only escapes are %20 and %25,
+// at least one entry, the first entry at output line 1, entries in
 // ascending order without overlap, the entry after a hold O-P=S at P+1,
-// every number at least 1.
+// every number at least 1 and without a leading zero.
 func Parse(line string) (*Map, error) {
+	line = strings.TrimSuffix(line, "\r")
 	var rest string
 	switch {
 	case strings.HasPrefix(line, prefix):
@@ -218,10 +220,11 @@ func parseEntry(f string) (Entry, error) {
 	return Entry{Out: o, End: p, Src: s, Hold: true}, nil
 }
 
-// number reads a line number: decimal digits only, at least 1.
+// number reads a line number: decimal digits without a leading zero, at
+// least 1.
 func number(s string) (int, error) {
-	if s == "" {
-		return 0, errors.New("empty")
+	if s == "" || s[0] == '0' {
+		return 0, errors.New("empty, zero or a leading zero")
 	}
 	for i := 0; i < len(s); i++ {
 		if s[i] < '0' || s[i] > '9' {
