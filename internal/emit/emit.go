@@ -184,7 +184,7 @@ type emitter struct {
 	// lowering wrote into the docblock it generated (addDocWith).
 	throwsWritten map[ast.Node]bool
 	// toks is the source's token stream, read when an edit needs a
-	// position the tree does not keep (codeEndBefore).
+	// position the tree does not keep (layout.go).
 	toks []token.Token
 }
 

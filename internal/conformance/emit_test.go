@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -14,17 +16,21 @@ import (
 	"github.com/phaenonlang/phaenon/internal/conformance/phpt"
 	"github.com/phaenonlang/phaenon/internal/emit"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/linemap"
 	"github.com/phaenonlang/phaenon/internal/migrate"
 	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 )
 
-// TestEmitExecution proves line-preserving emission end to end: each corpus
-// file is migrated to Phaenon (tag stripped), emitted back to PHP, and both
-// are run through `php`. Outputs must match byte for byte — line numbers in
-// warnings, backtraces, __LINE__ and closure names included. Nothing is
-// normalised. Enabled with PHAENON_EXEC=1 like TestPrinterExecution.
+// TestEmitExecution proves emission and its line map end to end: each
+// corpus file is migrated to Phaenon (tag stripped, every line kept), emitted
+// back to PHP, and both are run through `php`. Outputs must match byte for
+// byte once the line numbers the compiled file reports — in warnings,
+// backtraces, closure names, dumped frames — are translated through its line
+// map (translateLines), which makes the corpus a large test of the map;
+// __LINE__ compiles to the source line and needs no translation. Enabled
+// with PHAENON_EXEC=1 like TestPrinterExecution.
 func TestEmitExecution(t *testing.T) {
 	if os.Getenv("PHAENON_EXEC") == "" {
 		t.Skip("set PHAENON_EXEC=1 to run the php execution comparison")
@@ -40,10 +46,11 @@ func TestEmitExecution(t *testing.T) {
 	prog.SetTarget(oracleVersion(t))
 
 	type job struct {
-		idx  int
-		path string
-		orig []byte
-		out  []byte
+		idx   int
+		path  string
+		orig  []byte
+		out   []byte
+		lines *linemap.Map
 	}
 	var jobs []job
 	notPlain, emitErrors, newer := 0, 0, 0
@@ -71,9 +78,9 @@ func TestEmitExecution(t *testing.T) {
 			continue
 		}
 		// A test that opted into strict types keeps them; the others must
-		// not have strictness imposed, the comparison is about lines.
+		// not have strictness imposed, the comparison is about behaviour.
 		strict := reStrict.Match(tt.File)
-		out, err := emit.File(phn, emit.Options{SourceName: "t.phn", StrictTypes: strict, Program: prog})
+		out, err := emit.File(phn, emit.Options{SourceName: "t.phn", MapSource: "t.phn", StrictTypes: strict, Program: prog})
 		if err != nil {
 			if rel, rerr := filepath.Rel(src, p); rerr == nil && reservedInPhaenon[rel] {
 				continue
@@ -84,11 +91,17 @@ func TestEmitExecution(t *testing.T) {
 			}
 			continue
 		}
-		jobs = append(jobs, job{idx: i, path: p, orig: tt.File, out: out})
+		m, err := linemap.Find(out)
+		if err != nil || m == nil {
+			t.Errorf("%s: compiled without a line map (%v)", p, err)
+			continue
+		}
+		jobs = append(jobs, job{idx: i, path: p, orig: tt.File, out: out, lines: m})
 	}
 
 	type result struct {
 		path, diff, skippedCause string
+		observes                 bool
 	}
 	results := make([]result, len(jobs))
 	var wg sync.WaitGroup
@@ -116,9 +129,10 @@ func TestEmitExecution(t *testing.T) {
 					return
 				}
 			}
-			b, _ := execPHP(dirB)
+			b, _ := execPHPRewritten(dirB, func(out string) string { return translateLines(out, j.lines) })
 			if a1 != b {
-				results[i] = result{path: j.path, diff: excerptDiff(a1, b)}
+				observes := observesLines(j.orig) && reDigits.ReplaceAllString(a1, "N") == reDigits.ReplaceAllString(b, "N")
+				results[i] = result{path: j.path, diff: excerptDiff(a1, b), observes: observes}
 				return
 			}
 			results[i] = result{path: j.path}
@@ -126,7 +140,7 @@ func TestEmitExecution(t *testing.T) {
 	}
 	wg.Wait()
 
-	var same, differ, skipped int
+	var same, differ, skipped, observing int
 	shown := 0
 	for _, r := range results {
 		switch {
@@ -135,6 +149,15 @@ func TestEmitExecution(t *testing.T) {
 		case r.diff != "":
 			if rel, err := filepath.Rel(src, r.path); err == nil && emitDeviations[rel] {
 				same++
+				continue
+			}
+			if r.observes {
+				// The test reads a line number as a value (an error
+				// handler's $errline, getLine()): the compiled file reports
+				// its own line, which code compares through the map
+				// (line-map.md §5), and the harness cannot tell that number
+				// from any other in the output.
+				observing++
 				continue
 			}
 			differ++
@@ -146,8 +169,150 @@ func TestEmitExecution(t *testing.T) {
 			same++
 		}
 	}
-	t.Logf("emit execution: %d/%d files behave identically, lines included (%.2f%%); %d skipped (timeout / nondeterministic), %d not plain code (templates), %d newer than the oracle, %d emit errors",
-		same, same+differ, 100*float64(same)/float64(same+differ), skipped, notPlain, newer, emitErrors)
+	t.Logf("emit execution: %d/%d files behave identically, lines included through the map (%.2f%%); %d read compiled lines as values, %d skipped (timeout / nondeterministic), %d not plain code (templates), %d newer than the oracle, %d emit errors",
+		same, same+differ, 100*float64(same)/float64(same+differ), observing, skipped, notPlain, newer, emitErrors)
+}
+
+// The positions a run of the compiled t.php reports. Every pattern names
+// the file, except the line of a dumped backtrace frame (`["line"]=>
+// int(N)`, print_r's `[line] => N`, var_export's `'line' => N`), a
+// closure's name (`{closure:foo():N}`), an uncaught exception whose file
+// was unset (` in :N`, `thrown in Unknown on line N`) and an unterminated comment,
+// which the corpus's tests show only for t.php.
+var (
+	reOnLine    = regexp.MustCompile(`t\.php on line (\d+)`)
+	reColon     = regexp.MustCompile(`t\.php:(\d+)`)
+	reParen     = regexp.MustCompile(`t\.php\((\d+)\)`)
+	reRange     = regexp.MustCompile(`t\.php (\d+)( ?- ?)(\d+)`) // a reflected function's lines
+	reUnset     = regexp.MustCompile(` in :(\d+)`)
+	reUnknown   = regexp.MustCompile(`thrown in Unknown on line (\d+)`)          // an uncaught exception whose file was unset
+	reComment   = regexp.MustCompile(`Unterminated comment starting line (\d+)`) // a parse error of t.php
+	reDumpLine  = regexp.MustCompile(`(\["line"\]=>\s*int\()(\d+)(\))`)
+	rePrintLine = regexp.MustCompile(`(\[line\] => )(\d+)()`)
+	reExportLn  = regexp.MustCompile(`('line' => )(\d+)()`)
+	reString    = regexp.MustCompile(`string\((\d+)\) "`)
+	reDigits    = regexp.MustCompile(`\d+`)
+)
+
+// translateLines rewrites the compiled file's line numbers in a run's raw
+// output into the source's, through the map. A var_dump'ed string that
+// holds a position keeps a true length: its content is translated on its
+// own and the length adjusted by what that changed.
+func translateLines(out string, m *linemap.Map) string {
+	var b strings.Builder
+	rest := out
+	for {
+		loc := reString.FindStringSubmatchIndex(rest)
+		if loc == nil {
+			b.WriteString(translatePositions(rest, m))
+			return b.String()
+		}
+		n, _ := strconv.Atoi(rest[loc[2]:loc[3]])
+		end := loc[1] + n
+		if end > len(rest) {
+			b.WriteString(translatePositions(rest, m))
+			return b.String()
+		}
+		b.WriteString(translatePositions(rest[:loc[0]], m))
+		content := translatePositions(rest[loc[1]:end], m)
+		fmt.Fprintf(&b, "string(%d) \"%s", len(content), content)
+		rest = rest[end:]
+	}
+}
+
+func translatePositions(s string, m *linemap.Map) string {
+	forward := func(digits string) string {
+		n, err := strconv.Atoi(digits)
+		if err != nil {
+			return digits
+		}
+		if src, ok := m.Forward(n); ok {
+			return strconv.Itoa(src)
+		}
+		return digits
+	}
+	s = translateClosureNames(s, forward)
+	for _, p := range []struct {
+		re            *regexp.Regexp
+		before, after string
+	}{{reOnLine, "t.php on line ", ""}, {reColon, "t.php:", ""}, {reParen, "t.php(", ")"}, {reUnset, " in :", ""},
+		{reUnknown, "thrown in Unknown on line ", ""}, {reComment, "Unterminated comment starting line ", ""}} {
+		s = p.re.ReplaceAllStringFunc(s, func(match string) string {
+			return p.before + forward(p.re.FindStringSubmatch(match)[1]) + p.after
+		})
+	}
+	s = reRange.ReplaceAllStringFunc(s, func(match string) string {
+		g := reRange.FindStringSubmatch(match)
+		return "t.php " + forward(g[1]) + g[2] + forward(g[3])
+	})
+	for _, re := range []*regexp.Regexp{reDumpLine, rePrintLine, reExportLn} {
+		s = re.ReplaceAllStringFunc(s, func(match string) string {
+			g := re.FindStringSubmatch(match)
+			return g[1] + forward(g[2]) + g[3]
+		})
+	}
+	return s
+}
+
+// translateClosureNames rewrites the line a closure's name ends with,
+// `{closure:foo():N}`, nested names included. A name whose scope is a file
+// (`{closure:/path/t.php:N}`) is left to the t.php patterns.
+func translateClosureNames(s string, forward func(string) string) string {
+	const open = "{closure:"
+	var b strings.Builder
+	for {
+		i := strings.Index(s, open)
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		depth, j := 0, i
+		for ; j < len(s); j++ {
+			if s[j] == '{' {
+				depth++
+			} else if s[j] == '}' {
+				if depth--; depth == 0 {
+					break
+				}
+			}
+		}
+		if j == len(s) {
+			b.WriteString(s)
+			return b.String()
+		}
+		b.WriteString(s[:i])
+		inner := s[i+len(open) : j]
+		if k := strings.LastIndexByte(inner, ':'); k >= 0 && isDigits(inner[k+1:]) && !strings.HasSuffix(inner[:k], ".php") {
+			inner = translateClosureNames(inner[:k], forward) + ":" + forward(inner[k+1:])
+		} else {
+			inner = translateClosureNames(inner, forward)
+		}
+		b.WriteString(open + inner + "}")
+		s = s[j+1:]
+	}
+}
+
+func isDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
+// observesLines reports whether a test reads line numbers as values, which
+// the compiled file reports as its own: an error handler's $errline, a
+// throwable's or a reflection's line, a backtrace taken as data, an
+// assertion callback's $line.
+func observesLines(src []byte) bool {
+	lower := bytes.ToLower(src)
+	for _, needle := range []string{"set_error_handler(", "getline(", "getstartline(", "getendline(", "getexecutingline(", "debug_backtrace(", "assert_options("} {
+		if bytes.Contains(lower, []byte(needle)) {
+			return true
+		}
+	}
+	return false
 }
 
 // hasPlaceholders reports whether a migrated test holds partial

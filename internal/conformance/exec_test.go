@@ -194,6 +194,13 @@ func runPHP(dir string) (out string, ok bool) {
 // execPHP executes dir/t.php and returns its combined output plus exit
 // code, with the directory name replaced by <dir>. ok is false on timeout.
 func execPHP(dir string) (out string, ok bool) {
+	return execPHPRewritten(dir, nil)
+}
+
+// execPHPRewritten is execPHP with rewrite applied to the raw output, before
+// the directory name is replaced (so that a dumped string's length still
+// counts its bytes).
+func execPHPRewritten(dir string, rewrite func(string) string) (out string, ok bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, oraclePHP(), "-n",
@@ -212,7 +219,11 @@ func execPHP(dir string) (out string, ok bool) {
 	if ee, isExit := err.(*exec.ExitError); isExit {
 		code = ee.ExitCode()
 	}
-	s := strings.ReplaceAll(buf.String(), dir, "<dir>")
+	raw := buf.String()
+	if rewrite != nil {
+		raw = rewrite(raw)
+	}
+	s := strings.ReplaceAll(raw, dir, "<dir>")
 	return fmt.Sprintf("%s\n[exit %d]", s, code), true
 }
 
