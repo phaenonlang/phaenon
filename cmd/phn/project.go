@@ -17,7 +17,8 @@ import (
 const ProjectFile = "phaenon.json"
 
 // project is phaenon.json: the source roots with the directory each compiles
-// into, and the paths the checker leaves alone.
+// into, the paths the checker leaves alone, and the PHP version the code is
+// compiled for (target.go).
 //
 // An output directory is a sibling of its root (src → .src), never a
 // subdirectory or a deeper mirror, so that a compiled file's __DIR__ sits at
@@ -29,6 +30,8 @@ const ProjectFile = "phaenon.json"
 type project struct {
 	Roots   map[string]string `json:"roots"`
 	Exclude []string          `json:"exclude"`
+	PHP     string            `json:"php"`
+	data    []byte            // the file as read, to place diagnostics
 }
 
 // loadProject reads phaenon.json from the working directory; nil when there is none.
@@ -40,14 +43,11 @@ func loadProject() *project {
 	if err != nil {
 		fail("%v", err)
 	}
-	var p project
+	p := project{data: data}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
 		fail("%s: %v", ProjectFile, err)
-	}
-	if len(p.Roots) == 0 {
-		fail(`%s: "roots" must map at least one source directory to its output directory, as in {"roots": {"src": ".src"}}`, ProjectFile)
 	}
 	roots := make(map[string]string, len(p.Roots))
 	for src, out := range p.Roots {
@@ -68,6 +68,18 @@ func loadProject() *project {
 		p.Exclude[i] = filepath.Clean(e)
 	}
 	return &p
+}
+
+// requireRoots fails unless the project file names roots: build and check
+// without paths compile them. A project file may state only the target
+// (`phn migrate --php` creates one that does).
+func (p *project) requireRoots(cmd string) {
+	if p == nil {
+		fail("phn %s: give paths, or a %s naming the roots", cmd, ProjectFile)
+	}
+	if len(p.Roots) == 0 {
+		fail(`phn %s: give paths, or name the roots in %s: "roots" maps each source directory to its output directory, as in {"roots": {"src": ".src"}}`, cmd, ProjectFile)
+	}
 }
 
 // roots lists the source roots in a stable order.

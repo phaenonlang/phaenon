@@ -75,11 +75,14 @@ go build -o bin/phn ./cmd/phn      # bin/ is gitignored; or `go run ./cmd/phn <c
 go test ./...                      # unit and golden tests; suites below skip without their variable
 
 PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go test ./internal/conformance/
+PHAENON_PHP_SRC=$HOME/labs/phaenon/.cache/php-src-8.6 PHAENON_PHP=/opt/homebrew/opt/php@8.6/bin/php \
+  go test ./internal/conformance/                                      # PHP-8.6 corpus under PHP 8.6 (vault testing)
 PHAENON_EXEC=1 PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src \
   go test ./internal/conformance/ -run Execution -timeout 30m          # ≈2.5 min per suite
 PHAENON_PHPSTAN=$HOME/labs/tequila/object-mapper/tools/phpstan/vendor/bin/phpstan \
   go test ./internal/checker ./internal/emit                           # PHPStan level max on goldens
 PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite emitter goldens
+PHAENON_PHP86=/opt/homebrew/opt/php@8.6/bin/php go test ./internal/emit  # goldens compiled for 8.6: php -l, behaviour
 ```
 
 `phn` itself: `phn build|check|migrate|stdlib|lex|print` — run `phn` without arguments for usage; the

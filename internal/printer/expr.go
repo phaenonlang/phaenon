@@ -444,7 +444,9 @@ func (p *Printer) argList(a *ast.ArgList) {
 			p.w(": ")
 		}
 		switch {
-		case arg.Placeholder:
+		case arg.Placeholder != nil && arg.Placeholder.Variadic:
+			p.w("...")
+		case arg.Placeholder != nil:
 			p.w("?")
 		case arg.Unpack:
 			p.w("...")

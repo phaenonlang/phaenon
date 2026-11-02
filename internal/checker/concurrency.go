@@ -98,7 +98,7 @@ func (x *fnCtx) concurrentlyOptions(opts *ast.ArgList, env *state) {
 		return
 	}
 	for _, a := range opts.Args {
-		if a.Name == nil || a.Unpack || a.Placeholder || a.Value == nil {
+		if a.Name == nil || a.Unpack || a.Placeholder != nil || a.Value == nil {
 			x.report(a.S, P2606, "concurrently takes named options only: timeout and cancellation")
 			if a.Value != nil {
 				x.expr(a.Value, env, nil)

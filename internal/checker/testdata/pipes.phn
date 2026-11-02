@@ -1,0 +1,47 @@
+// Pipes (design/php-versions.md §5.4): each stage is typed as the call PHP
+// makes, and what PHP reports at run time is reported here. Partial
+// applications in pipes are in partial-pipes.phn.
+
+function needsTwo(int $a, int $b): int { return $a + $b; }
+function log1(string $s): void { echo $s; }
+function up(string $s): string { return strtoupper($s); }
+function wantsInt(int $x): void {}
+function addAll(array &$xs, int $n = 0): void { $xs[] = $n; }
+
+final class Style {
+    public static function line(string $s): string { return "| $s"; }
+}
+
+final class Out {
+    public function writeln(string $s): void { echo $s, "\n"; }
+}
+
+/** @param list<string> $names */
+function stages(array $names, Out $out): void {
+    // A generic function infers from the left side.
+    $firstName = $names |> array_values(...) |> current(...);
+    wantsInt($firstName); // want P2103 "false|string"
+
+    // Methods and static methods as first-class callables.
+    'ns'
+        |> up(...)
+        |> Style::line(...)
+        |> $out->writeln(...);
+
+    // The left side must fit the stage's parameter.
+    $y = 3 |> up(...); // want P2103
+    $z = 'a' |> (fn (int $i): int => $i); // want P2103
+}
+
+function mistakes(): void {
+    $xs = [3, 1, 2];
+    // A by-reference parameter cannot take the piped value: PHP throws.
+    $xs |> sort(...); // want P2114
+    $xs |> addAll(...); // want P2114
+    // A stage that needs more than one argument.
+    $sum = 1 |> needsTwo(...); // want P2101
+    // A right side that is not callable.
+    $bad = 1 |> 5; // want P2109
+    // A void stage feeding another: the next one receives null.
+    'a' |> log1(...) |> var_dump(...); // want P2205 "var_dump() receives null"
+}

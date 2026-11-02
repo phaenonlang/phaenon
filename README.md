@@ -71,6 +71,29 @@ phn check                      # type-check the roots, minus "exclude"
 Without a project file, `phn build src tests` writes `Foo.php` next to `Foo.phn` — the adoption
 case, a `.phn` at a time in a PHP tree — or under `--out DIR`.
 
+### The PHP target
+
+A project compiles for a **target**, the oldest PHP the output must run on: PHP 8.5 or 8.6. Phaenon
+follows PHP (`design/php-versions.md`), so every 8.6 construct parses whatever the target; the
+target decides what the output may contain.
+
+```json
+{"roots": {"src": ".src", "tests": ".tests"}, "php": "8.6"}
+```
+
+- `"php"` in `phaenon.json` states it; `phn migrate --php 8.6 [path...]` writes it there (creating
+  the file when there is none, which may then state only the target).
+- Without it, the target is the lowest version composer.json's `require.php` admits: `>=8.5`,
+  `^8.5`, `~8.5.0`, `8.5.*` and `^8.5 || ^9.0` all mean 8.5.
+- Neither: PHP 8.5, with a warning (`P4010`).
+
+A target above what composer.json admits is a warning (`P4008`): an install on the older PHP would
+load code it cannot run, so raise `require.php` (`phn` never edits composer.json). A target `phn`
+does not compile for — older than 8.5, newer than 8.6 — is an error (`P4009`), and `phn build`
+writes nothing then. For an 8.5 target, what PHP 8.6 added is lowered to 8.5 code where the
+lowering is exact (partial application in most forms, `#[\Override]` on constants) and reported
+otherwise, as "… needs PHP 8.6 (target 8.5)" (`P1002`).
+
 `phn migrate` strips `<?php`, `declare(strict_types=1)` and a trailing `?>`, then lifts what
 PHPStan code says in comments into the signature: `@template T of Foo` → `<T of Foo>`, `@extends
 Base<T>` → `extends Base<T>`, `@param list<T> $xs` → `list<T> $xs`, `@return T` → `: T`, a
@@ -177,7 +200,7 @@ crossing it, a spawn body mutating an outer variable, and `sleep()`/`usleep()` i
 ```sh
 phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] # type-check and compile .phn → .php; no paths: phaenon.json
 phn check [--json] [--no-deprecations] [--exclude PATH]... path...              # type-check .phn (and .php) files
-phn migrate [--keep-docblocks] [--keep-public] path... # rewrite .php as .phn
+phn migrate [--keep-docblocks] [--keep-public] [--php X.Y] path... # rewrite .php as .phn; --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Seq, Map, Str, Bytes), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
 phn stdlib --plugin-stubs DIR  # the PhpStorm plugin's editor-only pseudo-classes (ListMethods.php, …) from the same sources
@@ -193,6 +216,7 @@ phn print [--php] file                    # parse and pretty-print
 go test ./...                                   # unit tests
 PHAENON_PHP_SRC=/abs/path/to/php-src go test ./internal/conformance/   # lexer, parser, printer round trip
 PHAENON_EXEC=1 PHAENON_PHP_SRC=/abs/path/to/php-src go test ./internal/conformance/ -run Execution -timeout 30m
+PHAENON_PHP_SRC=/abs/path/to/php-src-8.6 PHAENON_PHP=/path/to/php8.6 go test ./internal/conformance/   # a release's corpus under its php
 ```
 
 The execution tests run every `Zend/tests` file through `php` twice — once as written and once
