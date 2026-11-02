@@ -13,6 +13,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/conformance/phpt"
 	"github.com/phaenonlang/phaenon/internal/emit"
 	"github.com/phaenonlang/phaenon/internal/migrate"
+	"github.com/phaenonlang/phaenon/internal/program"
 )
 
 // TestEmitExecution proves line-preserving emission end to end: each corpus
@@ -29,6 +30,10 @@ func TestEmitExecution(t *testing.T) {
 		t.Setenv("PHAENON_PHPT_FILTER", "Zend/tests")
 	}
 	tmp := t.TempDir()
+	// The corpus is compiled for the oracle's release: what it tests is
+	// what that PHP runs, partial applications written as such on 8.6.
+	prog := program.New()
+	prog.SetTarget(oracleVersion(t))
 
 	type job struct {
 		idx  int
@@ -57,7 +62,7 @@ func TestEmitExecution(t *testing.T) {
 		// A test that opted into strict types keeps them; the others must
 		// not have strictness imposed, the comparison is about lines.
 		strict := reStrict.Match(tt.File)
-		out, err := emit.File(phn, emit.Options{SourceName: "t.phn", StrictTypes: strict})
+		out, err := emit.File(phn, emit.Options{SourceName: "t.phn", StrictTypes: strict, Program: prog})
 		if err != nil {
 			if rel, rerr := filepath.Rel(src, p); rerr == nil && reservedInPhaenon[rel] {
 				continue
@@ -164,6 +169,10 @@ var emitDeviations = map[string]bool{
 	// Engine use-after-free: the output flips between runs on the stock
 	// binary, with or without the emitter.
 	"Zend/tests/magic_methods/gh21603.phpt": true,
+	// A closure in a constant expression is written static by the emitter
+	// (design/functions.md); PHP's compile error for a non-static one is
+	// the checker's P2531, which the harness does not run.
+	"Zend/tests/closures/closure_const_expr/disallows_non_static.phpt": true,
 }
 
 // hasRunSections reports whether the test needs stdin, arguments, ini

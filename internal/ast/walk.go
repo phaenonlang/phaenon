@@ -19,7 +19,7 @@ func Inspect(n Node, f func(Node) bool) {
 
 	// ------------------------------------------------------------ names and small nodes
 	case *Name, *Ident, *Variable, *IntLit, *FloatLit, *StringLit, *StringPart,
-		*MagicConst, *InlineHTML, *OpenTag, *CloseTag, *Nop, *HaltCompiler:
+		*MagicConst, *InlineHTML, *OpenTag, *CloseTag, *Nop, *HaltCompiler, *Placeholder:
 		// leaves
 
 	// ------------------------------------------------------------ expressions
@@ -73,6 +73,7 @@ func Inspect(n Node, f func(Node) bool) {
 	case *Arg:
 		Inspect(n.Name, f)
 		Inspect(n.Value, f)
+		Inspect(n.Placeholder, f)
 	case *New:
 		Inspect(n.Class, f)
 		types(n.TypeArgs, f)

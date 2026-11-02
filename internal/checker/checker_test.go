@@ -24,34 +24,39 @@ import (
 var reWant = regexp.MustCompile(`//\s*want\s+(.*)$`)
 var reWantItem = regexp.MustCompile(`(P\d{4})(?:\s+"([^"]*)")?`)
 
-// A golden file's first line may set how it is checked:
+// The comment lines that open a golden file may set how it is checked:
 //
-//	// golden: target=8.6 deprecations
+//	// target: 8.6
+//	// deprecations: on
 //
-// target is the PHP version the file compiles for (the floor without it);
-// deprecations reports deprecated constructs and library symbols, as phn
-// check does unless --no-deprecations.
-var reGolden = regexp.MustCompile(`\A//\s*golden:(.*)`)
+// target is the PHP version the file compiles for, the floor (PHP 8.5)
+// without one; deprecations: on reports deprecated constructs and library
+// symbols, as phn check does unless --no-deprecations.
+var reHeader = regexp.MustCompile(`^//\s*(target|deprecations):\s*(\d+\.\d+|on)\s*$`)
 
 func goldenSetup(t *testing.T, src []byte) (phpversion.Version, Options) {
 	t.Helper()
 	target, opts := phpversion.Floor, Options{}
-	m := reGolden.FindSubmatch(src)
-	if m == nil {
-		return target, opts
-	}
-	for _, f := range strings.Fields(string(m[1])) {
-		switch {
-		case f == "deprecations":
-			opts.Deprecations = true
-		case strings.HasPrefix(f, "target="):
-			v, err := phpversion.Parse(strings.TrimPrefix(f, "target="))
+	for _, line := range strings.Split(string(src), "\n") {
+		if !strings.HasPrefix(line, "//") {
+			break
+		}
+		m := reHeader.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		switch m[1] {
+		case "target":
+			v, err := phpversion.Parse(m[2])
 			if err != nil || !v.Supported() {
-				t.Fatalf("golden: bad target %q", f)
+				t.Fatalf("golden: bad target %q", m[2])
 			}
 			target = v
-		default:
-			t.Fatalf("golden: unknown option %q", f)
+		case "deprecations":
+			if m[2] != "on" {
+				t.Fatalf("golden: deprecations: %q, expected on", m[2])
+			}
+			opts.Deprecations = true
 		}
 	}
 	return target, opts

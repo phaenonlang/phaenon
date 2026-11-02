@@ -43,6 +43,9 @@ type signature struct {
 	// read-write unless the overlay says @param-out (PHPStan's functionMap
 	// makes the same distinction), where user code's are writes.
 	stub bool
+	// node is the call being checked: a partial application of it is
+	// recorded for the emitter under its arguments.
+	node ast.Expr
 }
 
 func isStubFile(f *program.File) bool {
@@ -85,7 +88,7 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	if fn.Deprecated && x.c.opts.Deprecations {
 		x.report(n.S, P4006, "function %s() is deprecated%s", fn.Name, fn.DeprecatedNote)
 	}
-	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File)}
+	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File), node: e}
 	sig.explicit = x.explicitArgs(e.TypeArgs, fn.TypeParams, fn.Name+"()", e.S)
 	if e.Args != nil && e.Args.FirstClassCallable {
 		return x.callableOf(sig)
@@ -689,7 +692,7 @@ func minMaxType(isMax bool, ts []types.Type) types.Type {
 // ImplodeFunctionReturnTypeExtension).
 func (x *fnCtx) implodeType(args *ast.ArgList, argType func(int) types.Type, ret types.Type) types.Type {
 	for _, a := range args.Args {
-		if a.Name != nil || a.Unpack || a.Placeholder {
+		if a.Name != nil || a.Unpack || a.Placeholder != nil {
 			return ret
 		}
 	}
@@ -807,7 +810,9 @@ func (x *fnCtx) dynamicCall(e *ast.Call, env *state, expected types.Type) types.
 		switch m := m.(type) {
 		case types.Callable:
 			if m.HasSig {
-				out = append(out, x.checkCall(x.sigOfCallable(m), e.Args, env, e.S, expected))
+				sig := x.sigOfCallable(m)
+				sig.node = e
+				out = append(out, x.checkCall(sig, e.Args, env, e.S, expected))
 			} else {
 				x.argsOnly(e.Args, env)
 				out = append(out, types.TMixed)
@@ -816,7 +821,7 @@ func (x *fnCtx) dynamicCall(e *ast.Call, env *state, expected types.Type) types.
 			handled := false
 			for _, cl := range x.classesOf(m, e.Callee.Span()) {
 				if inv := cl.FindMethod("__invoke"); inv != nil {
-					sig := &signature{name: cl.Name + "::__invoke()", params: inv.Params, ret: inv.Return, typeParams: inv.TypeParams, recv: m, decl: inv.Class}
+					sig := &signature{name: cl.Name + "::__invoke()", params: inv.Params, ret: inv.Return, typeParams: inv.TypeParams, recv: m, decl: inv.Class, node: e}
 					out = append(out, x.checkCall(sig, e.Args, env, e.S, expected))
 					handled = true
 				} else if strings.EqualFold(cl.Name, "Closure") {
@@ -1008,7 +1013,7 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 				x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", meth.Class.Name, name, meth.DeprecatedNote)
 			}
 			sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File),
-				typeParams: meth.TypeParams, recv: m, decl: meth.Class}
+				typeParams: meth.TypeParams, recv: m, decl: meth.Class, node: e}
 			sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 			if e.Args != nil && e.Args.FirstClassCallable {
 				sig.subst = x.memberSubst(m, meth.Class)
@@ -1157,7 +1162,7 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 			x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", meth.Class.Name, name, meth.DeprecatedNote)
 		}
 		sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File),
-			typeParams: meth.TypeParams, recv: recv, decl: meth.Class}
+			typeParams: meth.TypeParams, recv: recv, decl: meth.Class, node: e}
 		sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 		if e.Args != nil && e.Args.FirstClassCallable {
 			sig.subst = x.memberSubst(recv, meth.Class)
@@ -1371,6 +1376,19 @@ func namesClass(t types.Type, name string) bool {
 // checkCall matches arguments to parameters, infers template arguments,
 // checks types and returns the (substituted) return type.
 func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span ast.Span, expected types.Type) types.Type {
+	// A partial application binds its arguments now and leaves the
+	// placeholders' parameters to the closure it creates.
+	partial := args.Partial()
+	var shape *pfaShape
+	if partial {
+		shape = x.partialShape(sig, args, span)
+	}
+	known := func(e ast.Expr) types.Type {
+		if t, ok := sig.known[e]; ok {
+			return t
+		}
+		return x.argKnown[e]
+	}
 	subst := sig.subst
 	if subst == nil {
 		subst = map[string]types.Type{}
@@ -1465,7 +1483,7 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	placeholder := false
 	if args != nil {
 		for i, a := range args.Args {
-			if a.Placeholder {
+			if a.Placeholder != nil {
 				placeholder = true
 				continue
 			}
@@ -1513,7 +1531,7 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 				p = sig.params[len(sig.params)-1]
 			}
 			if p == nil {
-				if !unpacked {
+				if !unpacked && !partial {
 					x.report(a.S, P2102, "%s expects %d argument%s, %d given", sig.name, len(sig.params), plural(len(sig.params)), len(args.Args))
 				}
 				x.expr(a.Value, env, nil)
@@ -1580,15 +1598,21 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		}
 		pt := paramType(b.param)
 		var at types.Type
+		if b.arg.Value != nil && b.arg.Value == x.pipeOperand {
+			x.pipeParam, x.pipeSig = b.param, sig
+		}
 		if b.param.ByRef {
-			if at = sig.known[b.arg.Value]; at == nil {
+			if at = known(b.arg.Value); at == nil {
 				at = x.exprLenient(b.arg.Value, env)
 			}
-			if !isWritable(b.arg.Value) {
+			switch {
+			case b.arg.Value == x.pipeOperand:
+				x.report(b.arg.S, P2114, "parameter $%s of %s is by reference, and |> passes its left side by value: PHP throws an Error", b.param.Name, sig.name)
+			case !isWritable(b.arg.Value):
 				x.report(b.arg.S, P2112, "argument %d of %s is by reference and needs a variable", b.idx+1, sig.name)
 			}
 		} else {
-			if at = sig.known[b.arg.Value]; at == nil {
+			if at = known(b.arg.Value); at == nil {
 				at = x.expr(b.arg.Value, env, pt)
 			}
 			if lit, ok := at.(types.StringLit); ok && expectsCallable(pt) {
@@ -1647,8 +1671,8 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			continue
 		}
 		pt := paramType(b.param)
-		at, isKnown := sig.known[b.arg.Value]
-		if !isKnown {
+		at := known(b.arg.Value)
+		if at == nil {
 			at = x.expr(b.arg.Value, env, pt)
 		}
 		argTypes[i] = at
@@ -1703,7 +1727,11 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			at = v
 		}
 		if _, isVoid := at.(types.Void); isVoid {
-			x.report(b.arg.S, P2205, "result of a void function is used")
+			if b.arg.Value == x.pipeOperand {
+				x.report(b.arg.S, P2205, "the stage before |> returns void: %s receives null", sig.name)
+			} else {
+				x.report(b.arg.S, P2205, "result of a void function is used")
+			}
 			continue
 		}
 		if !types.IsAcceptable(at, pt, x.p()) {
@@ -1757,8 +1785,8 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	}
 	// By-reference parameters define or retype their arguments.
 	for i, b := range bindings {
-		if !b.param.ByRef {
-			continue
+		if !b.param.ByRef || b.arg.Value == x.pipeOperand {
+			continue // a piped value is a temporary (P2114): nothing is written back
 		}
 		out := b.param.Out
 		if out != nil {
@@ -1793,21 +1821,33 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	}
 	// Property narrowings survive calls, as in PHPStan: `$this->x`
 	// stays non-null across `$this->log()`.
-	if placeholder {
-		return x.callableOf(&signature{name: sig.name, params: sig.params, ret: sig.ret, subst: subst, recv: sig.recv})
-	}
 	ret := sig.ret
 	if ret == nil {
-		return types.TMixed
+		ret = types.TMixed
+	} else {
+		ret = types.Substitute(types.Substitute(ret, rename), subst)
+		ret = renameForeign(ret)
+		ret = types.Substitute(ret, freshOnly(subst))
+		ret = finalizeParams(ret, tps)
+		if sig.recv != nil {
+			ret = replaceStatic(ret, sig.recv)
+		}
+		ret = x.evalConditional(ret, argByName)
 	}
-	ret = types.Substitute(types.Substitute(ret, rename), subst)
-	ret = renameForeign(ret)
-	ret = types.Substitute(ret, freshOnly(subst))
-	ret = finalizeParams(ret, tps)
-	if sig.recv != nil {
-		ret = replaceStatic(ret, sig.recv)
+	if partial {
+		// The closure's parameters as the bound arguments resolved them; a
+		// type parameter only a placeholder determines widens to its bound
+		// (closure types are not generic).
+		resolved := func(p *program.Param) types.Type {
+			t := types.Substitute(paramType(p), freshOnly(subst))
+			return finalizeParams(t, tps)
+		}
+		if sig.node != nil && shape.ok {
+			x.recordPartial(sig.node, args, sig, shape.slots, shape.rest, shape.named, false)
+		}
+		return partialClosure(shape, resolved, ret)
 	}
-	return x.evalConditional(ret, argByName)
+	return ret
 }
 
 // evalConditional resolves conditional return types (`$x is Foo ? A : B`,
@@ -2199,33 +2239,39 @@ func kindMatches(param, arg types.Type) bool {
 	return false
 }
 
-// pipe types `left |> callee`: callee(left).
+// pipe types `left |> stage` stage by stage, as PHP runs it
+// (design/php-versions.md §5.4): a first-class callable or a partial
+// application with one placeholder is the call PHP turns it into —
+// `A |> f(B, ?, C)` is checked exactly as f(B, A, C), generic inference,
+// closures in bound arguments and by-reference parameters included — and
+// any other right side is called with the left side, ($stage)(A). The left
+// side is typed once, before the stage.
 func (x *fnCtx) pipe(e *ast.Binary, left types.Type, env *state) types.Type {
-	if fcc, ok := e.Right.(*ast.Call); ok && fcc.Args != nil && fcc.Args.FirstClassCallable {
-		if n, ok := fcc.Callee.(*ast.Name); ok {
-			if fn := x.lookupFunction(n); fn != nil {
-				// `$xs |> array_values(...)` is array_values($xs): a generic
-				// function infers its parameters from the operand.
-				fn.Signature()
-				sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File),
-					known: map[ast.Expr]types.Type{e.Left: left}}
-				args := &ast.ArgList{S: e.S, Args: []*ast.Arg{{S: e.Left.Span(), Value: e.Left}}}
-				call := &ast.Call{S: e.S, Callee: fcc.Callee, Args: args}
-				ret := x.checkCall(sig, args, env, e.S, nil)
-				return x.specialReturn(strings.ToLower(n.Parts[len(n.Parts)-1]), call, ret, env)
+	savedOperand, savedParam, savedSig := x.pipeOperand, x.pipeParam, x.pipeSig
+	x.pipeOperand, x.pipeParam, x.pipeSig = e.Left, nil, nil
+	if x.argKnown == nil {
+		x.argKnown = map[ast.Expr]types.Type{}
+	}
+	x.argKnown[e.Left] = left
+	defer func() {
+		delete(x.argKnown, e.Left)
+		x.pipeOperand, x.pipeParam, x.pipeSig = savedOperand, savedParam, savedSig
+	}()
+	if call, args := pipeCall(e); call != nil {
+		t := x.expr(call, env, nil)
+		if mc, ok := call.(*ast.MethodCall); ok {
+			// Method syntax on a list or string is recorded for the emitter
+			// under the call it reads: the stage as written.
+			if target, ok := x.c.file.MethodTargets[mc]; ok {
+				x.c.file.MethodTargets[e.Right.(*ast.MethodCall)] = target
+				delete(x.c.file.MethodTargets, mc)
 			}
 		}
-	}
-	ct := x.expr(e.Right, env, nil)
-	for _, m := range types.Members(ct) {
-		if c, ok := m.(types.Callable); ok && c.HasSig {
-			if len(c.Params) > 0 && c.Params[0].Type != nil && !types.IsAcceptable(left, c.Params[0].Type, x.p()) {
-				x.report(e.Left.Span(), P2103, "pipe operand expects %s, %s given", x.typeName(c.Params[0].Type), x.typeName(left))
-			}
-			if c.Return != nil {
-				return c.Return
-			}
+		if args.Partial() && x.pipeParam != nil && x.pipeSig != nil {
+			x.recordPipePartial(e.Right, args, x.pipeSig, x.pipeParam)
 		}
+		return t
 	}
-	return types.TMixed
+	operand := &ast.Arg{S: e.Left.Span(), Value: e.Left}
+	return x.dynamicCall(&ast.Call{S: e.S, Callee: e.Right, Args: &ast.ArgList{S: e.Left.Span(), Args: []*ast.Arg{operand}}}, env, nil)
 }

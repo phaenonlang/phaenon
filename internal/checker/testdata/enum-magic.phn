@@ -1,4 +1,4 @@
-// golden: target=8.6
+// target: 8.6
 // Magic methods on enums: PHP refuses all but __call, __callStatic and
 // __invoke, and since PHP 8.6 (RFC debugable-enums) __debugInfo.
 namespace App\EnumMagic;

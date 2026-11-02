@@ -151,7 +151,7 @@ func (x *fnCtx) deprecatedCall(lower string, e *ast.Call, env *state) {
 	// by name.
 	argTypes := func(i int, name string) (ast.Expr, bool) {
 		for j, a := range e.Args.Args {
-			if a.Unpack || a.Placeholder || a.Value == nil {
+			if a.Unpack || a.Placeholder != nil || a.Value == nil {
 				continue
 			}
 			if (a.Name == nil && j == i) || (a.Name != nil && a.Name.Name == name) {

@@ -1,8 +1,8 @@
 // #[\Override] on class constants and enum cases (PHP 8.6, RFC
 // override_constants): a parent class or an interface must declare the
-// constant, a parent's private one not counting. The check holds on every
-// target: compiled for 8.5, the emitter drops the attribute, which is all
-// it does.
+// constant, a parent's private one not counting. The check holds whatever
+// the target; compiled for 8.5, the emitter drops the attribute, which is
+// all it does.
 namespace App\OverrideConstants;
 
 interface HasLimit

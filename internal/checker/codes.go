@@ -30,6 +30,9 @@ var (
 	// P1002: "… needs PHP 8.6 (target 8.5)" for a construct newer than the
 	// target that is not lowered (design/php-versions.md §3).
 	P1002 = Code{"P1002", Error, "construct needs a newer PHP than the target"}
+	// P1003: what PHP 8.6's compiler rejects where placeholders stand
+	// (design/php-versions.md §5.1); the grammar admits it.
+	P1003 = Code{"P1003", Error, "placeholder where PHP forbids one"}
 
 	// P11xx — constructs PHP deprecates, reported whatever the target
 	// unless --no-deprecations (design/php-versions.md §4).
@@ -64,6 +67,10 @@ var (
 	P2111 = Code{"P2111", Error, "instance call of a static member"}
 	P2112 = Code{"P2112", Error, "by-reference argument is not a variable"}
 	P2113 = Code{"P2113", Error, "argument is mixed where a type is required"}
+	// P2114: `$xs |> sort(...)` — PHP passes the piped value as a
+	// temporary, so a by-reference parameter is an Error at run time
+	// (design/php-versions.md §5.4).
+	P2114 = Code{"P2114", Error, "piped value passed by reference"}
 
 	// P2 — assignments and declared types
 	P2201 = Code{"P2201", Error, "assigned value does not match the property type"}

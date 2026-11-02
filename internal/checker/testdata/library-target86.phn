@@ -1,4 +1,4 @@
-// golden: target=8.6
+// target: 8.6
 // The uses of library-target85.phn compiled for PHP 8.6: nothing to report.
 namespace App\Library;
 

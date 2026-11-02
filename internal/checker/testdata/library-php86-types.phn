@@ -1,4 +1,4 @@
-// golden: target=8.6
+// target: 8.6
 // The overlay's types for PHP 8.6's library (design/php-versions.md §6).
 namespace App\Php86;
 
