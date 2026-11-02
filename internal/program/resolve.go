@@ -873,9 +873,13 @@ func (fn *Function) ensure() {
 	fn.Params = r.buildParams(fn.Decl.Params, fn.Doc)
 	fn.Return = r.buildReturn(fn.Decl.ReturnType, fn.Doc)
 	if fn.Doc != nil {
-		fn.Deprecated = fn.Doc.Deprecated
 		fn.Asserts = fn.Doc.Asserts
 	}
+	var stubAttrs []*ast.AttrGroup
+	if fn.replaced != nil {
+		stubAttrs = fn.replaced.Attrs
+	}
+	fn.Deprecated, fn.DeprecatedNote = deprecation(fn.Scope, fn.Doc, fn.Decl.Attrs, stubAttrs)
 	fn.ensured = 2
 }
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 )
 
@@ -22,6 +23,39 @@ import (
 
 var reWant = regexp.MustCompile(`//\s*want\s+(.*)$`)
 var reWantItem = regexp.MustCompile(`(P\d{4})(?:\s+"([^"]*)")?`)
+
+// A golden file's first line may set how it is checked:
+//
+//	// golden: target=8.6 deprecations
+//
+// target is the PHP version the file compiles for (the floor without it);
+// deprecations reports deprecated constructs and library symbols, as phn
+// check does unless --no-deprecations.
+var reGolden = regexp.MustCompile(`\A//\s*golden:(.*)`)
+
+func goldenSetup(t *testing.T, src []byte) (phpversion.Version, Options) {
+	t.Helper()
+	target, opts := phpversion.Floor, Options{}
+	m := reGolden.FindSubmatch(src)
+	if m == nil {
+		return target, opts
+	}
+	for _, f := range strings.Fields(string(m[1])) {
+		switch {
+		case f == "deprecations":
+			opts.Deprecations = true
+		case strings.HasPrefix(f, "target="):
+			v, err := phpversion.Parse(strings.TrimPrefix(f, "target="))
+			if err != nil || !v.Supported() {
+				t.Fatalf("golden: bad target %q", f)
+			}
+			target = v
+		default:
+			t.Fatalf("golden: unknown option %q", f)
+		}
+	}
+	return target, opts
+}
 
 type want struct {
 	line int
@@ -74,10 +108,12 @@ func TestGolden(t *testing.T) {
 				t.Fatal(err)
 			}
 			p := newProgram(t)
+			target, opts := goldenSetup(t, src)
+			p.SetTarget(target)
 			if _, err := p.AddFile(path, src, lexer.ModePhaenon, true); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			diags := New(p, Options{}).Check()
+			diags := New(p, opts).Check()
 			wants := parseWants(string(src))
 			type key struct {
 				line int

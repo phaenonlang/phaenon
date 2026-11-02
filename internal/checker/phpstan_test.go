@@ -6,6 +6,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/token"
 	"os"
 	"os/exec"
@@ -45,6 +46,20 @@ func TestPHPStanParity(t *testing.T) {
 		"return.unusedType":         true, // unused-type analysis is tooling (M6)
 		"parameterByRef.unusedType": true,
 	}
+	// PHPStan findings ignored in one file only.
+	allowIn := map[string]map[string]bool{
+		// instanceof, catch and ::class of a class PHP 8.6 added fail nothing
+		// on PHP 8.5 and guard code meant for 8.6 (php-versions.md §9);
+		// PHPStan on 8.5 cannot tell them from a misspelt name.
+		"library-target85.phn": {"class.notFound": true},
+		// PHPStan reads PHP's own functions and classes from its maps, which
+		// predate PHP 8.6 (2.2 and 2.3 alike): run on 8.6 it knows the new
+		// functions and classes through reflection, not the methods,
+		// constants and parameters 8.6 added to existing ones, and types the
+		// unknown constant as mixed.
+		"library-target86.phn": {"method.notFound": true, "classConstant.notFound": true, "argument.unknown": true,
+			"arguments.count": true, "echo.nonString": true},
+	}
 	files, _ := filepath.Glob(filepath.Join("testdata", "*.phn"))
 	vendorSrc, err := os.ReadFile(filepath.Join("testdata", "vendor", "Acme", "Repo.php"))
 	if err != nil {
@@ -79,10 +94,24 @@ func TestPHPStanParity(t *testing.T) {
 			// certain, so a check against what PHP may still hand over is not
 			// reported as impossible by either side.
 			neon := "parameters:\n    treatPhpDocTypesAsCertain: false\n"
+			// A file compiled for a newer PHP than the floor is analysed by
+			// PHPStan running on that PHP, which reads the new library from
+			// its own reflection. (phpVersion stays unset: the parity
+			// binary, PHPStan 2.2, accepts no version above 8.5.)
+			argv := []string{phpstan}
+			if target, _ := goldenSetup(t, src); target != phpversion.Floor {
+				variable := "PHAENON_PHP" + strings.ReplaceAll(target.String(), ".", "")
+				php := os.Getenv(variable)
+				if php == "" {
+					t.Skipf("target %s: %s (a php %s) not set", target, variable, target)
+				}
+				argv = []string{php, phpstan}
+			}
 			if err := os.WriteFile(filepath.Join(dir, "phpstan.neon"), []byte(neon), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command(phpstan, "analyse", "-c", filepath.Join(dir, "phpstan.neon"), "--level", "max", "--no-progress", "--error-format", "json", "--no-ansi", dir)
+			argv = append(argv, "analyse", "-c", filepath.Join(dir, "phpstan.neon"), "--level", "max", "--no-progress", "--error-format", "json", "--no-ansi", dir)
+			cmd := exec.Command(argv[0], argv[1:]...)
 			cmd.Dir = dir
 			out, _ := cmd.Output() // exit status 1 means findings, which is expected
 			var report struct {
@@ -108,7 +137,7 @@ func TestPHPStanParity(t *testing.T) {
 					continue
 				}
 				for _, m := range f.Messages {
-					if allow[m.Identifier] {
+					if allow[m.Identifier] || allowIn[name][m.Identifier] {
 						continue
 					}
 					flagged[m.Line] = true

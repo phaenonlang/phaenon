@@ -1,0 +1,59 @@
+// golden: deprecations
+// Library deprecations, read from #[\Deprecated] in the stubs and in code
+// (PHP 8.4), and from @deprecated: P4006 with PHP's own wording.
+namespace App\Deprecations;
+
+function stubs(mixed $f, object $o, \SplFileObject $file, \ArrayIterator $it): void
+{
+    echo is_double($f) ? 'f' : '-'; // want P4006 "function is_double() is deprecated since 8.6, use is_float() instead"
+    echo spl_object_hash($o); // want P4006 "since 8.6, consider using spl_object_id() instead"
+    echo \gettype($file->fgetcsv(escape: '')); // want P4006 "method SplFileObject::fgetcsv() is deprecated since 8.6"
+    echo $it->getFlags(); // want P4006 "method ArrayIterator::getFlags() is deprecated since 8.6"
+    echo SORT_LOCALE_STRING; // want P4006 "constant SORT_LOCALE_STRING is deprecated since 8.6"
+    echo is_float($f) ? 'f' : '-';
+}
+
+#[\Deprecated(message: 'use fresh() instead', since: '2.0')]
+function stale(): int
+{
+    return 1;
+}
+
+/**
+ * @deprecated
+ */
+function old(): int
+{
+    return 2;
+}
+
+final class Api
+{
+    #[\Deprecated('use NEW instead')]
+    public const int OLD = 1;
+
+    public const int NEW = 2;
+
+    #[\Deprecated]
+    public static function legacy(): int
+    {
+        return self::OLD; // want P4006 "constant App\Deprecations\Api::OLD is deprecated, use NEW instead"
+    }
+}
+
+enum Mode
+{
+    case Fast;
+
+    #[\Deprecated(since: '1.5')]
+    case Slow;
+}
+
+function code(): void
+{
+    echo stale(); // want P4006 "function App\Deprecations\stale() is deprecated since 2.0, use fresh() instead"
+    echo old(); // want P4006 "function App\Deprecations\old() is deprecated"
+    echo Api::legacy(); // want P4006 "method App\Deprecations\Api::legacy() is deprecated"
+    echo \gettype(Mode::Slow); // want P4006 "enum case App\Deprecations\Mode::Slow is deprecated since 1.5"
+    echo \gettype(Mode::Fast);
+}
