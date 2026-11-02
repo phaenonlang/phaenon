@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -130,6 +131,10 @@ type emitter struct {
 	// ownImports are the compiler-introduced classes the file already
 	// imports itself: used by their alias, not added to the use list.
 	ownImports map[string]bool
+	// qualifiedHeads are the first segments of the qualified names the file
+	// writes, lower-cased: names an import of the same short name would
+	// re-resolve (qualifiedHead).
+	qualifiedHeads map[string]bool
 }
 
 func (e *emitter) replace(s ast.Span, text string) {
@@ -409,7 +414,7 @@ func (e *emitter) importShort(fqcn string, res *program.Resolver) string {
 			taken = true
 		}
 	}
-	if e.opts.Program.Class(res.Scope().Prefix()+short) != nil {
+	if e.opts.Program.Class(res.Scope().Prefix()+short) != nil || e.qualifiedHead(short) {
 		taken = true
 	}
 	if taken {
@@ -419,6 +424,46 @@ func (e *emitter) importShort(fqcn string, res *program.Resolver) string {
 	e.imports[fqcn] = short
 	return short
 }
+
+// qualifiedHead reports whether a qualified name the file writes, in code or
+// in a docblock, begins with the segment short. An import of that short
+// name would take the name over: PHP and PHPStan resolve the first segment
+// of a qualified name through the file's imports, so after `use
+// Phaenon\Seq;` the `Seq\Helper` the programmer meant as a class of the
+// current namespace becomes Phaenon\Seq\Helper. Only whole segments count
+// (`SeqHelper\X` does not begin with `Seq`); fully qualified and
+// `namespace\` names and the names of use statements never go through an
+// import. An unqualified name needs no check here: it names a class of the
+// namespace, which importShort already looks up.
+func (e *emitter) qualifiedHead(short string) bool {
+	if e.qualifiedHeads == nil {
+		e.qualifiedHeads = map[string]bool{}
+		ast.Inspect(e.opts.File.AST, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.Use:
+				return false
+			case *ast.Name:
+				if n.Kind == ast.NameQualified && len(n.Parts) > 1 {
+					e.qualifiedHeads[strings.ToLower(n.Parts[0])] = true
+				}
+			}
+			return true
+		})
+		for _, doc := range docComment.FindAll(e.src, -1) {
+			for _, m := range docQualifiedName.FindAllSubmatch(doc, -1) {
+				e.qualifiedHeads[strings.ToLower(string(m[1]))] = true
+			}
+		}
+	}
+	return e.qualifiedHeads[strings.ToLower(short)]
+}
+
+var (
+	docComment = regexp.MustCompile(`(?s)/\*\*.*?\*/`)
+	// A relative qualified class name in a docblock: a segment not preceded
+	// by a backslash, a name character or `$`, followed by a backslash.
+	docQualifiedName = regexp.MustCompile(`(?:^|[^\\\w$])([A-Za-z_][A-Za-z0-9_]*)\\[A-Za-z_]`)
+)
 
 // importAlias is the name a file's own use statement gives fqcn, as
 // written (the scope keeps it lower-cased), or "" when the file does not
