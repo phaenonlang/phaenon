@@ -1040,7 +1040,8 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 				// A void method is called for what it does to its object:
 				// what was known of the members under the receiver may be
 				// gone (PHPStan forgets them as well); the receiver stands.
-				if base, ok := pathKey(e.Object); ok {
+				// On $this, the class's static members may have changed too.
+				if base, ok := pathKey(e.Object); ok && !(base == "$this" && x.forgetOwnScope(env, meth.Class)) {
 					env.invalidateUnder(base)
 				}
 			}
@@ -1183,12 +1184,70 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 			continue
 		}
 		out = append(out, x.checkCall(sig, e.Args, env, e.S, expected))
+		// A side-effecting method of the class's own hierarchy, called
+		// statically (`self::flush()`, `parent::__construct()`), may change
+		// the object and the class's static members.
+		if _, isVoid := meth.Return.(types.Void); isVoid || (!meth.Static && strings.EqualFold(meth.Name, "__construct")) {
+			x.forgetOwnScope(env, meth.Class)
+		}
 	}
 	t := types.MakeUnion(out...)
 	if _, isNever := t.(types.Never); isNever {
 		env.dead = true
 	}
 	return t
+}
+
+// forgetOwnScope drops what was narrowed about $this and the static members
+// of the current class's hierarchy after a side-effecting call to a method
+// declared in decl, when the current class is decl or inherits from it, and
+// reports whether it applied. As PHPStan does, it keeps a readonly
+// property of $this and a private property declared in another class than
+// decl, which the method cannot reach.
+func (x *fnCtx) forgetOwnScope(env *state, decl *program.Class) bool {
+	if x.class == nil || decl == nil || !x.class.IsSubclassOf(decl.Name) {
+		return false
+	}
+	own := func(class string) bool {
+		switch class {
+		case "self", "static", "parent":
+			return true
+		}
+		// A path spells the class as written, lowercased, without a
+		// leading `\`: either reading may be the one meant.
+		parts := strings.Split(class, "\\")
+		kind := ast.NameQualified
+		if len(parts) == 1 {
+			kind = ast.NameUnqualified
+		}
+		for _, k := range []ast.NameKind{kind, ast.NameFullyQualified} {
+			if name := x.res.ClassName(&ast.Name{Kind: k, Parts: parts}); name != "" && x.class.IsSubclassOf(name) {
+				return true
+			}
+		}
+		return false
+	}
+	keep := func(key string) bool {
+		var name string
+		instance := strings.HasPrefix(key, "$this->")
+		if instance {
+			name = key[len("$this->"):]
+		} else if i := strings.Index(key, "::$"); i > 0 {
+			name = key[i+len("::$"):]
+		} else {
+			return false
+		}
+		if strings.ContainsAny(name, "-[(:") {
+			return false // a path under the member: dropped with it
+		}
+		pr := x.class.FindProperty(name)
+		if pr == nil || pr.Static == instance {
+			return false
+		}
+		return (instance && pr.Readonly) || (pr.Vis == program.Private && !strings.EqualFold(pr.Class.Name, decl.Name))
+	}
+	env.invalidateOwnScope(own, keep)
+	return true
 }
 
 // traitUserMethod finds a method a trait body calls on $this/self/static
