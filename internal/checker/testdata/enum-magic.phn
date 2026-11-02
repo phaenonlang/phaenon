@@ -1,0 +1,28 @@
+// golden: target=8.6
+// Magic methods on enums: PHP refuses all but __call, __callStatic and
+// __invoke, and since PHP 8.6 (RFC debugable-enums) __debugInfo.
+namespace App\EnumMagic;
+
+enum Level: int
+{
+    case Low = 1;
+    case High = 2;
+
+    /**
+     * @return array<string, int>
+     */
+    public function __debugInfo(): array
+    {
+        return ['level' => $this->value];
+    }
+
+    public function __invoke(): int
+    {
+        return $this->value;
+    }
+
+    public function __toString(): string // want P2514 "enum App\EnumMagic\Level cannot include magic method __toString()"
+    {
+        return (string) $this->value;
+    }
+}

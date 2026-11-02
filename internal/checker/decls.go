@@ -334,6 +334,15 @@ func (c *Checker) resolvedByInsteadof(cl *program.Class, method string) bool {
 	return false
 }
 
+// enumForbiddenMagic are the magic methods PHP refuses on an enum
+// (zend_verify_enum_magic_methods); __call, __callStatic and __invoke are
+// allowed, and __debugInfo since PHP 8.6.
+var enumForbiddenMagic = map[string]bool{
+	"__construct": true, "__destruct": true, "__clone": true, "__get": true, "__set": true, "__unset": true,
+	"__isset": true, "__tostring": true, "__serialize": true, "__unserialize": true, "__sleep": true,
+	"__wakeup": true, "__set_state": true,
+}
+
 func (c *Checker) checkEnum(cl *program.Class) {
 	seen := map[string]bool{}
 	ctx := c.newCtx(cl.File, cl.Scope, cl, true)
@@ -360,6 +369,24 @@ func (c *Checker) checkEnum(cl *program.Class) {
 	for _, pr := range cl.Props {
 		if pr.Class == cl && !pr.Magic {
 			c.report(pr.Span, P2514, "enum %s cannot declare property $%s", cl.Name, pr.Name)
+		}
+	}
+	for _, m := range cl.Methods {
+		if m.Magic || m.Decl == nil {
+			continue
+		}
+		span := declSpan(m)
+		if m.FromTrait != nil && cl.Decl.Name != nil {
+			span = cl.Decl.Name.S // the trait is elsewhere; PHP names the enum
+		}
+		lower := strings.ToLower(m.Name)
+		switch {
+		case enumForbiddenMagic[lower]:
+			c.report(span, P2514, "enum %s cannot include magic method %s()", cl.Name, m.Name)
+		case lower == "__debuginfo":
+			// PHP 8.6 lets an enum describe itself to var_dump()
+			// (RFC debugable-enums); 8.5 refuses the method at compile time.
+			c.needsPHP(span, phpversion.PHP86, fmt.Sprintf("__debugInfo() on enum %s", cl.Name), "")
 		}
 	}
 	if cl.BackingType != nil {
