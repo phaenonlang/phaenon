@@ -10,9 +10,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/conformance/phpt"
 	"github.com/phaenonlang/phaenon/internal/emit"
+	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/migrate"
+	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 )
 
@@ -42,7 +46,7 @@ func TestEmitExecution(t *testing.T) {
 		out  []byte
 	}
 	var jobs []job
-	notPlain, emitErrors := 0, 0
+	notPlain, emitErrors, newer := 0, 0, 0
 	for i, p := range collectPhpt(t, src) {
 		tt, err := phpt.Parse(p)
 		if err != nil {
@@ -57,6 +61,13 @@ func TestEmitExecution(t *testing.T) {
 		phn, err := migrate.File(tt.File, migrate.Options{KeepLines: true})
 		if err != nil {
 			notPlain++
+			continue
+		}
+		if !prog.Target().AtLeast(phpversion.PHP86) && hasPlaceholders(phn) {
+			// A test of PHP 8.6 in a newer corpus than the oracle: its
+			// partial applications would need the checker to be lowered,
+			// and the oracle cannot run the original.
+			newer++
 			continue
 		}
 		// A test that opted into strict types keeps them; the others must
@@ -135,8 +146,25 @@ func TestEmitExecution(t *testing.T) {
 			same++
 		}
 	}
-	t.Logf("emit execution: %d/%d files behave identically, lines included (%.2f%%); %d skipped (timeout / nondeterministic), %d not plain code (templates), %d emit errors",
-		same, same+differ, 100*float64(same)/float64(same+differ), skipped, notPlain, emitErrors)
+	t.Logf("emit execution: %d/%d files behave identically, lines included (%.2f%%); %d skipped (timeout / nondeterministic), %d not plain code (templates), %d newer than the oracle, %d emit errors",
+		same, same+differ, 100*float64(same)/float64(same+differ), skipped, notPlain, newer, emitErrors)
+}
+
+// hasPlaceholders reports whether a migrated test holds partial
+// applications (PHP 8.6).
+func hasPlaceholders(phn []byte) bool {
+	f, err := parser.Parse(phn, lexer.ModePhaenon)
+	if err != nil {
+		return false
+	}
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		if _, ok := n.(*ast.Placeholder); ok {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // skipEmit reports whether a test observes something emission does not
