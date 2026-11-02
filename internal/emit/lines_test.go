@@ -46,7 +46,9 @@ func TestLineMapProperty(t *testing.T) {
 	compiled := 0
 	for _, in := range inputs {
 		p := program.New()
-		if err := p.LoadStubs(); err != nil {
+		// The stdlib is compiled against the libraries it suggests, as
+		// phn stdlib compiles it.
+		if err := p.LoadSuggested(); err != nil {
 			t.Fatal(err)
 		}
 		var f *program.File
