@@ -1,0 +1,48 @@
+namespace Throwing;
+
+use Countable;
+use InvalidArgumentException;
+use RuntimeException as Failure;
+
+// `throws A|B` (design/functions.md §4) names the exceptions a function
+// lets escape: each member is a Throwable, or a type parameter bounded by
+// one. It is not a checked-exception rule: a caller need not catch or
+// redeclare, and a body may throw what the clause does not name.
+
+interface Refusal extends \Throwable
+{
+}
+
+final class NotFound extends \RuntimeException
+{
+}
+
+interface Handler
+{
+    fun handle(int $id): int throws Refusal|NotFound;
+}
+
+final class Store implements Handler
+{
+    fun handle(int $id): int throws NotFound => $id > 0 ? $id : throw new NotFound();
+
+    fun load(int $id): string throws NotFound {
+        return $id > 0 ? 'x' : throw new NotFound();
+    }
+
+    fun save(string $v): void throws Failure|InvalidArgumentException => print $v;
+
+    fun undeclared(): void => throw new \LogicException('no clause needed');
+
+    fun notThrowable(): void throws Store {} // want P2319
+
+    fun countable(): void throws Countable {} // want P2319
+
+    fun missing(): void throws Missing {} // want P2001
+
+    fun refuse(): void throws Refusal {}
+}
+
+fun top(): int throws \LogicException|\DomainException => 1;
+
+fun caller(Store $s): int => $s->handle(1) + top() + \strlen($s->load(2));

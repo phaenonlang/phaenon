@@ -33,6 +33,10 @@ var (
 	// P1003: what PHP 8.6's compiler rejects where placeholders stand
 	// (design/php-versions.md §5.1); the grammar admits it.
 	P1003 = Code{"P1003", Error, "placeholder where PHP forbids one"}
+	// P1004: an expression body on a constructor or a destructor, or one
+	// that yields (design/functions.md §3.1); the grammar admits it. An
+	// abstract or interface method with one has a body, P2504 / P2514.
+	P1004 = Code{"P1004", Error, "expression body where Phaenon forbids one"}
 
 	// P11xx — constructs PHP deprecates, reported whatever the target
 	// unless --no-deprecations (design/php-versions.md §4).
@@ -105,6 +109,9 @@ var (
 	P2316 = Code{"P2316", Error, "unknown offset type"}
 	P2317 = Code{"P2317", Error, "throwing a non-Throwable"}
 	P2318 = Code{"P2318", Error, "catching a non-Throwable"}
+	// P2319: a `throws` clause names a class, an interface or a type
+	// parameter that is not a Throwable (design/functions.md §4).
+	P2319 = Code{"P2319", Error, "throws names a non-Throwable"}
 
 	// P2 — flow
 	P2401 = Code{"P2401", Warning, "unreachable code"}

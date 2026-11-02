@@ -56,9 +56,10 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 		ctx.inScope[tp.Name] = true
 	}
 	ctx.checkSignatureTypes(fn.Decl.TypeParams, fn.Decl.Params, fn.Decl.ReturnType)
+	ctx.throwsClause(fn.Decl.Throws)
 	c.declaredName(fn.Decl.Name.S, "function", fn.Decl.Name.Name)
 	c.checkUntyped(f, fn.Decl.Params, fn.Params, fn.Decl.ReturnType, fn.Return, fn.Decl.Name.Name, fn.Decl.S)
-	ctx.body(fn.Params, fn.Decl.Params, fn.Decl.Body, fn.Decl.Name.S)
+	ctx.body(fn.Params, fn.Decl.Params, ctx.exprBody(fn.Decl.Name.Name, fn.Decl.Arrow, fn.Decl.Body), fn.Decl.Name.S)
 }
 
 // declSpan is where method-level diagnostics point: the method name.
@@ -482,6 +483,7 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	sctx := c.newCtx(cl.File, cl.Scope, cl, m.Static)
 	sctx.res = sctx.res.WithParams(m.TypeParams)
 	sctx.checkSignatureTypes(d.TypeParams, d.Params, d.ReturnType)
+	sctx.throwsClause(d.Throws)
 	if !d.HasBody {
 		return
 	}
@@ -501,7 +503,7 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 		scopeParams(ctx, p.Type)
 	}
 	scopeParams(ctx, m.Return)
-	ctx.body(m.Params, d.Params, d.Body, d.Name.S)
+	ctx.body(m.Params, d.Params, ctx.exprBody(m.Name, d.Arrow, d.Body), d.Name.S)
 }
 
 // hasOverride reports an #[\Override] attribute among a declaration's.
