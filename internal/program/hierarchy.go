@@ -159,7 +159,8 @@ func (c *Class) ensureMembers() {
 			}
 			for _, item := range m.Consts {
 				k := &Constant{Name: item.Name.Name, Class: c, Vis: visibilityOf(m.Modifiers), Final: m.Modifiers&ast.ModFinal != 0,
-					Value: item.Value, File: c.File, Scope: c.Scope, Span: item.S}
+					Value: item.Value, File: c.File, Scope: c.Scope, Span: item.S, Attrs: m.Attrs}
+				k.Deprecated, k.DeprecatedNote = deprecation(c.Scope, doc, m.Attrs)
 				k.Type = r.effective(r.native(m.Type), docT, "constant "+k.Name)
 				c.addConst(k)
 			}
@@ -204,9 +205,16 @@ func (c *Class) ensureMembers() {
 				c.addProp(prop)
 			}
 		case *ast.MethodDecl:
-			c.addMethod(r.buildMethod(c, c.patchedMethod(m)))
+			meth := r.buildMethod(c, c.patchedMethod(m))
+			if meth.Decl != m && !meth.Deprecated {
+				// The overlay retypes a stub method; the stub's
+				// #[\Deprecated] still holds.
+				meth.Deprecated, meth.DeprecatedNote = deprecation(c.Scope, nil, m.Attrs)
+			}
+			c.addMethod(meth)
 		case *ast.EnumCase:
-			cs := &EnumCase{Name: m.Name.Name, Class: c, Value: m.Value, Span: m.S}
+			cs := &EnumCase{Name: m.Name.Name, Class: c, Value: m.Value, Span: m.S, Attrs: m.Attrs}
+			cs.Deprecated, cs.DeprecatedNote = deprecation(c.Scope, parseDoc(m.Doc), m.Attrs)
 			c.Cases = append(c.Cases, cs)
 			c.cases[cs.Name] = cs
 		}
@@ -481,8 +489,8 @@ func (r *resolver) buildMethod(c *Class, d *ast.MethodDecl) *Method {
 	m.Params = rr.buildParams(d.Params, m.Doc)
 	m.NativeReturn = rr.native(d.ReturnType)
 	m.Return = rr.buildReturn(d.ReturnType, m.Doc)
+	m.Deprecated, m.DeprecatedNote = deprecation(c.Scope, m.Doc, d.Attrs)
 	if m.Doc != nil {
-		m.Deprecated = m.Doc.Deprecated
 		m.Asserts = m.Doc.Asserts
 		if m.Doc.SelfOut != nil {
 			m.SelfOut = rr.docType(m.Doc.SelfOut)

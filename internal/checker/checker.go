@@ -278,6 +278,7 @@ type fnCtx struct {
 	static          bool // no $this
 	inConst         bool // checking a constant expression: an attribute argument, a constant, a default
 	constClosure    bool // a closure inside a constant expression: static, capturing nothing (P2531)
+	nameOnly        bool // resolving a class name PHP does not load: X::class, instanceof X, catch (X)
 	returnType      types.Type
 	hasReturn       bool // a declared return type exists
 	name            string
@@ -403,9 +404,13 @@ func (x *fnCtx) resolveClassName(n *ast.Name, span ast.Span) (string, bool) {
 		x.report(span, P2011, "class %s has no parent", x.class.Name)
 		return "", false
 	}
-	if x.p().Class(name) == nil {
+	cl := x.p().Class(name)
+	if cl == nil {
 		x.report(span, P2001, "unknown class %s", name)
 		return name, false
+	}
+	if !x.nameOnly {
+		x.c.libraryClass(span, cl)
 	}
 	return name, true
 }

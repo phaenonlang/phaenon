@@ -513,6 +513,10 @@ func (x *fnCtx) constFetch(e *ast.ConstFetch) types.Type {
 	ns, global := x.res.Scope().ResolveConst(e.Name)
 	for _, name := range []string{ns, global} {
 		if k := x.p().Constant(name); k != nil {
+			x.c.libraryConstant(e.S, k)
+			if k.Deprecated && x.c.opts.Deprecations {
+				x.report(e.S, P4006, "constant %s is deprecated%s", k.Name, k.DeprecatedNote)
+			}
 			t := x.p().ConstantType(k)
 			if dynamicConstants[strings.ToLower(name)] {
 				// PHP_OS is a string, not this machine's 'Darwin'; a tag
@@ -576,7 +580,13 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 				return types.TMixed
 			}
 		} else {
+			// X::class is a string the compiler writes: PHP never loads X.
+			saved := x.nameOnly
+			if id, ok := e.Name.(*ast.Ident); ok && strings.EqualFold(id.Name, "class") {
+				x.nameOnly = true
+			}
 			t, cl := x.classRefType(n, n.S)
+			x.nameOnly = saved
 			recv = t
 			if cl != nil {
 				classes = []*program.Class{cl}
@@ -605,6 +615,10 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 	var out []types.Type
 	for _, cl := range classes {
 		if cs := cl.FindCase(name); cs != nil {
+			x.c.libraryClassConstant(e.Name.Span(), cs.Class, cs.Name)
+			if cs.Deprecated && x.c.opts.Deprecations {
+				x.report(e.Name.Span(), P4006, "enum case %s::%s is deprecated%s", cs.Class.Name, cs.Name, cs.DeprecatedNote)
+			}
 			out = append(out, types.EnumCase{Class: cl.Name, Case: cs.Name})
 			continue
 		}
@@ -615,6 +629,10 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 		}
 		if !x.canAccess(k.Vis, k.Class) {
 			x.report(e.Name.Span(), P2108, "constant %s::%s is %s", k.Class.Name, name, k.Vis)
+		}
+		x.c.libraryClassConstant(e.Name.Span(), k.Class, k.Name)
+		if k.Deprecated && x.c.opts.Deprecations {
+			x.report(e.Name.Span(), P4006, "constant %s::%s is deprecated%s", k.Class.Name, k.Name, k.DeprecatedNote)
 		}
 		out = append(out, x.bindReceiver(x.p().ConstantType(k), recv, k.Class))
 	}

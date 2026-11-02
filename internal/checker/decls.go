@@ -122,6 +122,16 @@ func (c *Checker) checkClass(cl *program.Class) {
 	defer func() { c.file = savedFile }()
 	d := cl.Decl
 	c.checkHeader(cl)
+	// Declared types name classes PHP resolves when it checks a value.
+	tctx := c.newCtx(cl.File, cl.Scope, cl, false)
+	for _, m := range d.Members {
+		switch m := m.(type) {
+		case *ast.PropertyDecl:
+			tctx.libraryTypes(m.Type)
+		case *ast.ClassConstDecl:
+			tctx.libraryTypes(m.Type)
+		}
+	}
 	phaenon := cl.File.Mode == lexer.ModePhaenon
 	if d.Modifiers&ast.ModVar != 0 && phaenon {
 		c.report(d.S, P1001, "`var` is not available in Phaenon; use public")
@@ -203,10 +213,12 @@ func (c *Checker) checkAttrs(cl *program.Class, g *ast.AttrGroup) {
 	ctx.inConst = true
 	for _, a := range g.Attrs {
 		name := ctx.res.ClassName(a.Name)
-		if c.p.Class(name) == nil {
+		ac := c.p.Class(name)
+		if ac == nil {
 			c.report(a.Name.S, P2001, "unknown attribute class %s", name)
 			continue
 		}
+		c.libraryClass(a.Name.S, ac)
 		if a.Args != nil {
 			for _, arg := range a.Args.Args {
 				if arg.Value != nil {
@@ -228,6 +240,7 @@ func (c *Checker) checkHeader(cl *program.Class) {
 			c.report(n.S, P2001, "unknown class %s", name)
 			continue
 		}
+		c.libraryClass(n.Name.S, super)
 		if cl.Kind == ast.KindInterface {
 			if super.Kind != ast.KindInterface {
 				c.report(n.S, P2510, "interface %s cannot extend %s, which is not an interface", cl.Name, super.Name)
@@ -251,6 +264,7 @@ func (c *Checker) checkHeader(cl *program.Class) {
 			c.report(n.S, P2001, "unknown interface %s", name)
 			continue
 		}
+		c.libraryClass(n.Name.S, iface)
 		if iface.Kind != ast.KindInterface {
 			c.report(n.S, P2510, "%s cannot implement %s, which is not an interface", cl.Name, iface.Name)
 		}

@@ -672,7 +672,10 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		cEnv := thrown.clone()
 		var ts []types.Type
 		for _, n := range c.Types {
+			saved := x.nameOnly
+			x.nameOnly = true // a catch of a class PHP lacks never matches, and fails nothing
 			name, ok := x.resolveClassName(n, n.S)
+			x.nameOnly = saved
 			if !ok {
 				ts = append(ts, types.TObject)
 				continue

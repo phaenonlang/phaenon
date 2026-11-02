@@ -154,4 +154,7 @@ var (
 	P4008 = Code{"P4008", Warning, "target above the PHP composer.json admits"}
 	P4009 = Code{"P4009", Error, "PHP target phn does not support"}
 	P4010 = Code{"P4010", Warning, "no PHP target stated"}
+	// P4011: "clamp() needs PHP 8.6 (target 8.5)", a library symbol newer
+	// than the target (design/php-versions.md §6).
+	P4011 = Code{"P4011", Error, "library symbol needs a newer PHP than the target"}
 )

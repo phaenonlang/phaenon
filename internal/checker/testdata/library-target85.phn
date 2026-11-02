@@ -1,0 +1,66 @@
+// golden: target=8.5
+// What PHP 8.6 added to the library, used by code compiled for PHP 8.5
+// (design/php-versions.md §6): each use is P4011 where PHP 8.5 would fail.
+namespace App\Library;
+
+use Io\Poll\Handle;
+use Time\Duration;
+
+function functions(int $n): int
+{
+    $limited = clamp($n, 1, 10); // want P4011 "clamp() needs PHP 8.6 (target 8.5)"
+    echo \gettype($limited);
+    $callable = clamp(...); // want P4011
+    echo \gettype($callable);
+    return max(1, min(10, $n));
+}
+
+function classes(): void
+{
+    echo \gettype(Duration::fromSeconds(5)); // want P4011 "class Time\Duration needs PHP 8.6 (target 8.5)"
+    echo \gettype(\SortDirection::Ascending); // want P4011 "enum SortDirection"
+}
+
+// Names PHP never loads: a string, a test that is false, a catch that
+// never matches. They fail nothing on PHP 8.5, and guard the uses above.
+function namesOnly(object $value): bool
+{
+    echo Duration::class;
+    try {
+        echo \get_class($value);
+    } catch (\Time\TimeException $e) {
+        echo $e->getMessage();
+    }
+    return $value instanceof Duration;
+}
+
+function declaredType(Duration $length): void // want P4011
+{
+}
+
+final class Watched implements Handle // want P4011 "interface Io\Poll\Handle"
+{
+    public function getFileDescriptor(): int
+    {
+        return 0;
+    }
+}
+
+function methodsAndConstants(\ReflectionProperty $property, \SplFileObject $file): void
+{
+    echo $property->isReadable(null) ? 'r' : '-'; // want P4011 "method ReflectionProperty::isReadable() needs PHP 8.6"
+    echo $property->isPublic() ? 'p' : '-';
+    echo ARRAY_FILTER_USE_VALUE; // want P4011 "constant ARRAY_FILTER_USE_VALUE"
+    echo ARRAY_FILTER_USE_KEY;
+    echo \Spoofchecker::LTR; // want P4011 "constant Spoofchecker::LTR"
+    echo \Spoofchecker::SINGLE_SCRIPT;
+    echo $file->getFilename();
+}
+
+function parameters(\OpenSSLAsymmetricKey $key): void
+{
+    $signature = '';
+    openssl_sign('data', $signature, $key);
+    openssl_sign('data', $signature, $key, OPENSSL_ALGO_SHA256, salt_length: 32); // want P4011 "parameter $salt_length of openssl_sign() needs PHP 8.6"
+    openssl_sign('data', $signature, $key, OPENSSL_ALGO_SHA256, 1, 32); // want P4011
+}

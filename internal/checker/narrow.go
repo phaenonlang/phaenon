@@ -681,7 +681,12 @@ func (x *fnCtx) instanceofTarget(e *ast.Instanceof, env *state) types.Type {
 				return types.Class{Name: pc.Name}
 			}
 		}
+		// instanceof with a class the running PHP lacks is false, not an
+		// error: no library check.
+		saved := x.nameOnly
+		x.nameOnly = true
 		t, _ := x.classRefType(c, c.S)
+		x.nameOnly = saved
 		return types.StripNull(t)
 	default:
 		ct := x.expr(e.Class, env, nil)

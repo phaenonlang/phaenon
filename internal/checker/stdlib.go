@@ -184,7 +184,7 @@ func (x *fnCtx) stdlibMethod(e *ast.MethodCall, class, name string, obj types.Ty
 	sig := &signature{name: short + "::" + m.Name + "()", params: m.Params, ret: m.Return, typeParams: m.TypeParams, decl: m.Class,
 		known: map[ast.Expr]types.Type{e.Object: types.StripNull(obj)}}
 	if m.Deprecated && x.c.opts.Deprecations {
-		x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated", short, name)
+		x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", short, name, m.DeprecatedNote)
 	}
 	if x.c.file != nil {
 		if x.c.file.MethodTargets == nil {
