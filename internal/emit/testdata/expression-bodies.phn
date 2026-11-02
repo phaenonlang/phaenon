@@ -1,0 +1,67 @@
+namespace App;
+
+use LogicException;
+
+// An expression body compiles to the block it stands for, on the lines it
+// stands on: `=> expr;` is `{ return expr; }`, or `{ expr; }` under void and
+// never; a body wrapped after the arrow keeps its brace at the declaration's
+// indentation (design/functions.md §3).
+
+interface Named
+{
+    fun name(): string;
+}
+
+final class User implements Named, \Stringable {
+    private int $calls = 0;
+
+    fun __construct(private string $name) {}
+
+    fun name(): string => $this->name;
+
+    fun log(string $message): void => $this->record($message);
+
+    private fun record(string $message): void {
+        $this->calls += \strlen($message);
+    }
+
+    fun fail(string $why): never => throw new LogicException($why);
+
+    fun calls(): int => $this->calls;
+
+    static fun of(string $name): self
+        => new self(\trim($name));
+
+    fun greeting(string $salutation, string $punctuation, bool $shout = false): string
+        => $shout ? \strtoupper($salutation . ', ' . $this->name . $punctuation) : $salutation . ', ' . $this->name . $punctuation;
+
+    fun counter(): \Closure => fn (): int => $this->calls;
+
+    #[\Override]
+    fun __toString(): string => $this->name;
+
+    /** @return list<string> the parts of the name */
+    fun parts(): array => \explode(' ', $this->name);
+
+    /** @return array{name: string, calls: int} */
+    fun tags(): array => [
+        'name' => $this->name,
+        'calls' => $this->calls,
+    ];
+
+    fun &reference(): int => $this->calls;
+}
+
+fun double(int $x): int => $x * 2;
+
+fun untouched(int $x): int
+{
+    return $x;
+}
+
+function plain(): string => 'plain';
+
+/** @return list<int> */
+fun ids(int ...$ids): array => \array_values($ids);
+
+fun show(): void => print User::of(' Ada ')->greeting('Hello', '!') . double(2) . plain() . untouched(1) . \count(ids(1, 2));
