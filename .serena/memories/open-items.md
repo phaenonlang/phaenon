@@ -1,7 +1,7 @@
 ---
 type: backlog
 tags: [phaenon, backlog]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Open and deferred items
@@ -31,11 +31,15 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   checker.
 - ~~**Existential templates**~~ — decided 2026-10-29 (`generics.md` §11.2): a constructor's type
   parameter may type a promoted property; migrate lifts them natively, no new spelling.
-- **Erasure that follows the overridden signature**: `DateTimeNormalizer::denormalize(mixed
+- ~~**Erasure that follows the overridden signature**: `DateTimeNormalizer::denormalize(mixed
   $value)` with `@param UTCDateTime $value` must stay `mixed` natively because the interface's
   parameter is a type parameter erased to `mixed`. Phaenon could let the override declare
   `UTCDateTime $value` and erase it to the parent's erased type with a generated `@param`. Design
-  question for `generics.md`.
+  question for `generics.md`.~~ — done 2026-11-02: the override-erasure rule (`generics.md` §4.3
+  and the §11 row) already compiles it that way; `phn migrate` now predicts the rule and lifts such
+  tags (`74ce488`), the checker holds the widened parameter to what PHP checks (`3490338`), and the
+  emitter applies the rule down a chain of Phaenon classes (`c39ae1c`). odm's two normalizers wait
+  for the tree's uncommitted re-migration ([[dogfood]]).
 - Trait **properties** used on `$this` in a trait body are not yet looked up in the using classes
   (methods are, since 2026-10-29).
 
@@ -206,6 +210,11 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - **Line drift** below generic declarations ([[gotcha-phpstan-one-tag-per-line]]) — a `phn` line-map
   subcommand or plugin support could map `.php` stack-trace lines back to `.phn` if it bites.
 - **Monomorphisation** (§7) — open question.
+- **Emitter goldens are only `php -l`-ed** (2026-11-02): a signature PHP rejects when it links the
+  classes — an override that narrows a parameter, as the emitter compiled a grandchild of a generic
+  class until the override-erasure rule followed the parent's compiled signature — passes `php -l`
+  and is caught only by PHPStan's `method.childParameterType`. Loading each output with `php` (where
+  it declares only classes) would catch it without PHPStan.
 
 ## Small things
 
