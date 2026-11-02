@@ -6,6 +6,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/emit"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/linemap"
 	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/token"
@@ -18,9 +19,9 @@ import (
 
 // PHPStan parity (opt-in): PHAENON_PHPSTAN=/path/to/phpstan runs PHPStan at
 // level max, with treatPhpDocTypesAsCertain off, over every golden file
-// (written as .php with the open tag on line 1, so line numbers match) and
-// demands that every line PHPStan flags is one the golden file expects a
-// diagnostic on. The checker may be
+// (written as .php with the open tag on line 1, so line numbers match, or
+// compiled, its lines translated through the line map) and demands that
+// every line PHPStan flags is one the golden file expects a diagnostic on. The checker may be
 // stricter than PHPStan; it may not be more lenient. Lines PHPStan does
 // not flag but the corpus expects are listed for information. Files are
 // analysed one at a time: PHPStan can crash on deliberately invalid code,
@@ -105,11 +106,20 @@ func TestPHPStanParity(t *testing.T) {
 			}
 			phpName := strings.TrimSuffix(name, ".phn") + ".php"
 			php := append([]byte("<?php "), src...)
+			sourceLine := func(n int) int { return n }
 			if usesFunctionSyntax(src) {
-				// `fun`, expression bodies and `throws` lower line for line
-				// (design/functions.md): PHPStan judges the compiled file,
-				// whose line N is the golden's line N.
+				// `fun`, expression bodies and `throws` need no type
+				// information (design/functions.md): PHPStan judges the
+				// compiled file, its lines read through the line map.
 				php = compileForParity(t, path, src)
+				m, err := linemap.Find(php)
+				if err != nil || m == nil {
+					t.Fatalf("compiled without a line map (%v):\n%s", err, php)
+				}
+				sourceLine = func(n int) int {
+					s, _ := m.Forward(n)
+					return s
+				}
 			}
 			if err := os.WriteFile(filepath.Join(dir, phpName), php, 0o644); err != nil {
 				t.Fatal(err)
@@ -178,9 +188,10 @@ func TestPHPStanParity(t *testing.T) {
 					if allow[m.Identifier] || allowIn[name][m.Identifier] {
 						continue
 					}
-					flagged[m.Line] = true
-					if !wants[m.Line] {
-						t.Errorf("line %d: PHPStan reports %q (%s); the corpus expects nothing there", m.Line, m.Message, m.Identifier)
+					line := sourceLine(m.Line)
+					flagged[line] = true
+					if !wants[line] {
+						t.Errorf("line %d: PHPStan reports %q (%s); the corpus expects nothing there", line, m.Message, m.Identifier)
 					}
 				}
 			}
@@ -205,7 +216,7 @@ var skipParity = map[string]string{
 
 // usesFunctionSyntax reports whether a corpus file declares with the
 // syntax of design/functions.md — `fun`, an expression body, `throws` —
-// which the emitter lowers without type information and line for line.
+// which the emitter lowers without type information.
 func usesFunctionSyntax(src []byte) bool {
 	f, err := parser.Parse(src, lexer.ModePhaenon)
 	if err != nil {
@@ -241,14 +252,11 @@ func compileForParity(t *testing.T, path string, src []byte) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.Count(string(out), "\n"), strings.Count(string(src), "\n"); got != want {
-		t.Fatalf("compiled with %d lines for the golden's %d: the line map PHPStan's findings need is gone", got, want)
-	}
 	return out
 }
 
 // usesPhaenonSyntax reports whether a corpus file has constructs PHPStan
-// cannot parse and the emitter does not lower line for line: type
+// cannot parse and the parity run does not compile (the emit goldens do): type
 // parameters and arguments, is / as, type aliases, Closure signatures,
 // hyphenated type names, PHP 8.6 placeholders, concurrency blocks.
 func usesPhaenonSyntax(src []byte) bool {
