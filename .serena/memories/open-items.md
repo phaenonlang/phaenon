@@ -1,7 +1,7 @@
 ---
 type: backlog
 tags: [phaenon, backlog]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Open and deferred items
@@ -167,6 +167,32 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   the block (`sort($rows)`) is not seen as assigned and is captured by value; a variable assigned
   in the block and conditionally assigned after it before being read is not captured. The
   checker's flow analysis knows both; a hint from it would make the clause exact.
+
+## PHP 8.6 — partial application (2026-11-02)
+
+Decisions are in `../design/php-versions.md` §9; these are what the first build left.
+
+- A closure lowered for 8.5 with two or more parameters whose types PHP cannot declare carries one
+  inline `@var` each on one line, and PHPStan reads the first tag of a line only
+  ([[gotcha-phpstan-one-tag-per-line]]): the second goes unread. Needs a way to say it without a
+  line, or a recorded exception.
+- In a pipe, a bound argument that writes through a by-reference parameter of a call nested in it
+  (`$x |> f(g($m), ?)` with `g(&$m)`) writes the lowered closure's copy; only direct assignments,
+  `++`/`--` and `yield` are refused.
+- Method syntax on lists and strings with placeholders (`$names->map(?)`) is not lowered to the
+  `Seq`/`Str` call; in a pipe the stage's method target is kept, outside a pipe nothing is done.
+- PHP's "named parameter overwrites previous argument" is reported for partial applications
+  (`P2010`) but not for ordinary calls.
+- An internal function's `= UNKNOWN` default that `...` or a named argument would need (PHP:
+  "must be passed explicitly, because the default value is not known") is not reported; the
+  lowering falls back to `mixed ...$args`.
+- A callee returning by reference: PHP 8.6's closure returns by reference, the lowered one by value.
+- Once the parity PHPStan parses PHP 8.6, run it on the 8.6 emitter output and on the checker
+  goldens with placeholders (both skipped now).
+- `../design/php-versions.md` §5.4 still says a `void` stage feeding another warns; §9 made it
+  `P2205`. Align the draft text when the milestone closes.
+- tq-cli on PHP 8.6 meets one 8.6 deprecation, the class constant `StatusCommand::NAMESPACE`
+  (`namespace` is case-insensitive); the deprecation checks belong to the library branch.
 
 ## M6 — tooling, analysis rules
 

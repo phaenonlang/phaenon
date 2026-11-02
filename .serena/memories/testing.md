@@ -1,7 +1,7 @@
 ---
 type: reference
 tags: [phaenon, testing]
-updated: 2026-10-29
+updated: 2026-11-02
 ---
 
 # Test environment
@@ -15,7 +15,9 @@ suites, and the tools they shell out to. Without its variable a suite **skips**,
 
 | Variable | Read by | Effect | Value behind the recorded results |
 |---|---|---|---|
-| `PHAENON_PHP_SRC` | `internal/conformance` (all suites) | Absolute path of the php-src checkout whose `.phpt` files are the corpus | `/Users/petr/labs/phaenon/php-src` |
+| `PHAENON_PHP_SRC` | `internal/conformance` (all suites) | Absolute path of the php-src tree whose `.phpt` files are the corpus: the checkout, or a release branch extracted into the cache (§ Conformance) | `/Users/petr/labs/phaenon/php-src`; `~/labs/phaenon/.cache/php-src-8.6` |
+| `PHAENON_PHP` | `internal/conformance` (all suites) | The php binary taken as the oracle; default `php` on `PATH`. The emit execution suite compiles the corpus for this php's release line | unset (8.5.3); `/opt/homebrew/opt/php@8.6/bin/php` for the 8.6 corpus |
+| `PHAENON_PHP86` | `TestGenerics` (emit) | A PHP 8.6 binary: `php -l` of the goldens compiled for 8.6, and the behaviour check of a golden compiled for both targets (§ Targets in goldens) | `/opt/homebrew/opt/php@8.6/bin/php` |
 | `PHAENON_EXEC` | `TestPrinterExecution`, `TestEmitExecution` | Any non-empty value runs the execution comparisons (≈2.5 min each; pass `-timeout 30m`) | `1` |
 | `PHAENON_PHPT_FILTER` | `internal/conformance` | Only `.phpt` paths containing this substring | e.g. `Zend/tests`, `ext/standard/tests` |
 | `PHAENON_SHOW_DIFFS` | printer round trip, execution suites | How many differences to print (default 25) | e.g. `100` |
@@ -34,9 +36,53 @@ binary, so it must be a path (listed in [[open-items]]).
 - **Corpus:** `../php-src` is `php/php-src` `master` (at `9d94059ce88`, 2026-10-28), i.e. newer than
   the oracle. Files the oracle rejects are not counted as "PHP-accepted"; the parser suite reports
   them separately.
-- **Oracle:** the `php` on `PATH`, run with `-n` (no php.ini) — Homebrew PHP 8.5.3 here. The M0
-  numbers in [[milestones]] were measured against it; a different `php` changes them.
-- `../php-src` is a read-only reference clone: never edit, build or `git` anything in it.
+- **Oracle:** the `php` on `PATH`, run with `-n` (no php.ini) — Homebrew PHP 8.5.3 here — or the one
+  `PHAENON_PHP` names. The M0 numbers in [[milestones]] were measured against 8.5.3 and the master
+  corpus; a different `php` changes them.
+- `../php-src` is a read-only reference clone: never edit, build or `git` anything in it, beyond
+  reading (`git show`, `git diff`, `git archive`).
+
+### A release branch's corpus (2026-11-02)
+
+Each PHP release is tested with its own branch's `.phpt` files under that release's `php`
+(`../design/php-versions.md` §7). The branches are extracted with `git archive`, never checked out,
+into `~/labs/phaenon/.cache/php-src-<version>` (outside the clone, not in any repository):
+
+```sh
+git -C ~/labs/phaenon/php-src archive -o ~/labs/phaenon/.cache/php-src-8.6.tar origin/PHP-8.6 -- ':(glob)**/*.phpt' ':(glob)**/*.inc'
+mkdir -p ~/labs/phaenon/.cache/php-src-8.6
+tar -x -f ~/labs/phaenon/.cache/php-src-8.6.tar -C ~/labs/phaenon/.cache/php-src-8.6
+rm ~/labs/phaenon/.cache/php-src-8.6.tar
+# the same with PHP-8.5 → php-src-8.5
+PHAENON_PHP_SRC=$HOME/labs/phaenon/.cache/php-src-8.6 PHAENON_PHP=/opt/homebrew/opt/php@8.6/bin/php \
+  go test ./internal/conformance/
+```
+
+The branches as extracted: `PHP-8.6` at `0761161562c`, `PHP-8.5` at `a1a9f70cb2d` (both
+2026-10-28; the clone is not fetched). PHP 8.6 is `/opt/homebrew/opt/php@8.6/bin/php`
+(8.6.0-dev).
+
+| Corpus, oracle (2026-11-02) | Lexer | Parser (PHP-accepted) | Printer round trip | Printer execution | Emit execution |
+|---|---|---|---|---|---|
+| `PHP-8.6`, PHP 8.6.0-dev | 23,445/23,445 | 23,285/23,285 (84 of 160 rejected files accepted) | 23,369/23,369 | 4,584/4,584 | 4,891/4,891 |
+| `PHP-8.5`, PHP 8.5.3 | 22,233/22,233 | 22,075/22,075 (84 of 158) | 22,159/22,159 | 4,361/4,361 | 4,644/4,644 |
+| master checkout, PHP 8.5.3 | 23,536/23,536 | 23,226/23,226 (234 of 310: the 8.6 placeholder tests) | 23,460/23,460 | — | — |
+
+The parse oracle is `TOKEN_PARSE`, the grammar alone: PHP's compile errors (a misplaced
+placeholder, say) are accepted by it, so the parser accepts them too and the checker reports them.
+The emit execution suite skips a test with placeholders when the oracle is older than 8.6 ("newer
+than the oracle").
+
+## Targets in goldens (2026-11-02)
+
+- Checker goldens are checked for PHP 8.5 unless the first line says `// target: 8.6`
+  (`partial.phn`).
+- Emitter goldens are compiled for the targets the first line names, `// targets: 8.5, 8.6`: the
+  first one's output is `X.php`, another's `X.8.6.php` (`partial.phn`). With `PHAENON_PHP86` set,
+  each output passes `php -l` under its target's php, and both outputs print the same under PHP 8.6
+  and the 8.5 one the same under PHP 8.5. PHPStan runs on the 8.5 output only when the source has
+  placeholders: the parity PHPStan 2.2 does not parse PHP 8.6.
+- The checker's PHPStan parity skips goldens with placeholders for the same reason.
 
 ## PHPStan
 
