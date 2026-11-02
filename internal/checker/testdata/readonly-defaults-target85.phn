@@ -1,0 +1,33 @@
+// golden: target=8.5
+// Readonly property defaults compiled for PHP 8.5, which refuses them at
+// compile time: P1002, not lowered (design/php-versions.md §4).
+namespace App\ReadonlyDefaults;
+
+final class Settings
+{
+    public readonly int $retries = 3; // want P1002 "a default for readonly property App\ReadonlyDefaults\Settings::$retries needs PHP 8.6 (target 8.5)"
+
+    public readonly string $name;
+
+    public function __construct(bool $verbose = false)
+    {
+        $this->name = 'settings';
+        if ($verbose) {
+            $this->retries = 5;
+        }
+    }
+}
+
+final readonly class Point
+{
+    public int $x = 0; // want P1002
+
+    public function __construct(public int $y = 0)
+    {
+    }
+}
+
+function read(Settings $s, Point $p): int
+{
+    return $s->retries + $p->x + $p->y;
+}

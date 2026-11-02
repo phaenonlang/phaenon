@@ -7,6 +7,7 @@ import (
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
@@ -1960,6 +1961,10 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 			// class's constructor (or __clone); PHP rejects everything else.
 			if !x.inClassScope(pr.Class) || !x.inInitialiser() {
 				x.report(t.Name.Span(), P2206, "readonly property %s::$%s can only be assigned in the constructor of %s", pr.Class.Name, name, pr.Class.Name)
+			} else if pr.HasDefault && strings.EqualFold(x.method.Name, "__construct") && x.c.target().AtLeast(phpversion.PHP86) {
+				// PHP 8.6: the default initialised it before the constructor
+				// ran; only __clone may reinitialise it.
+				x.report(t.Name.Span(), P2206, "readonly property %s::$%s is initialised by its default: the constructor cannot assign it", pr.Class.Name, name)
 			}
 		case !x.canAccess(pr.SetVis, pr.Class):
 			if pr.SetVis != pr.Vis {
