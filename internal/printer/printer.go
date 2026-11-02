@@ -307,6 +307,27 @@ func (p *Printer) returnType(t ast.TypeExpr) {
 	}
 }
 
+// throws writes a declaration's `throws A|B` clause (Phaenon).
+func (p *Printer) throws(t *ast.Throws) {
+	if t == nil {
+		return
+	}
+	p.w(" throws ")
+	for i, ty := range t.Types {
+		if i > 0 {
+			p.w("|")
+		}
+		p.typ(ty)
+	}
+}
+
+// exprBody writes a declaration's expression body, ` => expr;` (Phaenon).
+func (p *Printer) exprBody(b *ast.ExprBody) {
+	p.w(" => ")
+	p.expr(b.Expr)
+	p.w(";")
+}
+
 // ------------------------------------------------------------------ parameters and hooks
 
 func (p *Printer) params(params []*ast.Param) {

@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"strings"
+
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/token"
@@ -826,9 +828,63 @@ func (p *Parser) functionDecl(attrs []*ast.AttrGroup) ast.Stmt {
 	if p.accept(token.Kind(':')) {
 		f.ReturnType = p.typeExpr()
 	}
-	f.Body = p.block()
+	f.Throws = p.throwsClause()
+	if f.Arrow = p.exprBody(); f.Arrow != nil {
+		f.Body = []ast.Stmt{bodyStmt(f.Arrow, f.ReturnType)}
+	} else {
+		f.Body = p.block()
+	}
 	f.S = p.span(start)
 	return f
+}
+
+// throwsClause parses Phaenon's `throws A|B` after a signature
+// (design/functions.md §4). `throws` is contextual: it is a keyword only
+// here, after the parameter list or the return type, where PHP's grammar
+// admits nothing but `{` or `;`, so the lexer leaves it a T_STRING and
+// every name `throws` PHP code declares keeps parsing.
+func (p *Parser) throwsClause() *ast.Throws {
+	if p.mode != lexer.ModePhaenon || !p.at(token.T_STRING) || !strings.EqualFold(p.text(), "throws") {
+		return nil
+	}
+	kw := p.next()
+	t := &ast.Throws{Kw: ast.Span{Start: kw.Start, End: kw.End}}
+	for {
+		start := p.tok().Start
+		t.Types = append(t.Types, &ast.NamedType{Name: p.name(), S: p.span(start)})
+		if !p.accept(token.Kind('|')) {
+			break
+		}
+	}
+	t.S = p.span(kw.Start)
+	return t
+}
+
+// exprBody parses Phaenon's expression body `=> expr;` in place of a
+// named function's block (design/functions.md §3). PHP's grammar has no
+// `=>` after a named function's signature, so plain PHP never reaches it.
+func (p *Parser) exprBody() *ast.ExprBody {
+	if p.mode != lexer.ModePhaenon || !p.at(token.T_DOUBLE_ARROW) {
+		return nil
+	}
+	arrow := p.next()
+	b := &ast.ExprBody{Arrow: ast.Span{Start: arrow.Start, End: arrow.End}, Expr: p.expr()}
+	semi := p.expect(token.Kind(';'))
+	b.Semi = ast.Span{Start: semi.Start, End: semi.End}
+	b.S = ast.Span{Start: arrow.Start, End: semi.End}
+	return b
+}
+
+// bodyStmt is the statement an expression body stands for: the
+// expression returned, or only evaluated when the return type is void or
+// never.
+func bodyStmt(b *ast.ExprBody, ret ast.TypeExpr) ast.Stmt {
+	if nt, ok := ret.(*ast.NamedType); ok && len(nt.TypeArgs) == 0 && len(nt.Name.Parts) == 1 && nt.Name.Kind == ast.NameUnqualified {
+		if w := strings.ToLower(nt.Name.Parts[0]); w == "void" || w == "never" {
+			return &ast.ExprStmt{S: b.S, Expr: b.Expr}
+		}
+	}
+	return &ast.Return{S: b.S, Expr: b.Expr}
 }
 
 // classDecl parses class / interface / trait / enum declarations.
@@ -974,11 +1030,17 @@ func (p *Parser) classMember() ast.ClassMember {
 		if p.accept(token.Kind(':')) {
 			m.ReturnType = p.typeExpr()
 		}
-		if p.accept(token.Kind(';')) {
+		m.Throws = p.throwsClause()
+		switch {
+		case p.accept(token.Kind(';')):
 			m.HasBody = false
-		} else {
+		default:
 			m.HasBody = true
-			m.Body = p.block()
+			if m.Arrow = p.exprBody(); m.Arrow != nil {
+				m.Body = []ast.Stmt{bodyStmt(m.Arrow, m.ReturnType)}
+			} else {
+				m.Body = p.block()
+			}
 		}
 		m.S = p.span(start)
 		return m

@@ -746,11 +746,39 @@ type FunctionDecl struct {
 	TypeParams []*TypeParam
 	Params     []*Param
 	ReturnType TypeExpr
+	Throws     *Throws // `throws A|B` (Phaenon), nil when not written
 	Body       []Stmt
+	Arrow      *ExprBody // `=> expr;` (Phaenon); Body holds the statement it stands for
 }
 
 func (n *FunctionDecl) Span() Span { return n.S }
 func (*FunctionDecl) stmtNode()    {}
+
+// Throws is the clause `throws A|B` after a signature: the exceptions a
+// named function or method lets escape (design/functions.md §4). It
+// compiles to a @throws tag.
+type Throws struct {
+	S     Span // from the keyword to the last type
+	Kw    Span // the keyword
+	Types []*NamedType
+}
+
+func (n *Throws) Span() Span { return n.S }
+
+// ExprBody is the expression body of a named function or method, `=>
+// expr;` (design/functions.md §3). The declaration's Body holds the
+// statement it means — a Return, or an ExprStmt when the return type is
+// void or never — so every pass that reads bodies reads it as a block of
+// one statement; the printer and the emitter read this node to write or
+// lower the arrow. Inspect does not visit it (the statement carries Expr).
+type ExprBody struct {
+	S     Span // from the arrow to the semicolon
+	Arrow Span
+	Expr  Expr
+	Semi  Span
+}
+
+func (n *ExprBody) Span() Span { return n.S }
 
 type (
 	// MethodDecl is a method; Body == nil means abstract / interface method.
@@ -766,8 +794,10 @@ type (
 		TypeParams []*TypeParam
 		Params     []*Param
 		ReturnType TypeExpr
+		Throws     *Throws // `throws A|B` (Phaenon), nil when not written
 		Body       []Stmt
 		HasBody    bool
+		Arrow      *ExprBody // `=> expr;` (Phaenon); Body holds the statement it stands for
 	}
 	// PropertyDecl is `modifiers type $a = 1, $b;` or a hooked property.
 	PropertyDecl struct {
