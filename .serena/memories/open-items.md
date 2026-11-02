@@ -296,14 +296,26 @@ Decisions are in `../design/php-versions.md` §9; what was left:
 
 Built in the compiler (decisions: `../design/functions.md` §8). Left:
 
-- **Re-lift of the dogfood trees** (phase 2): waits for the PhpStorm plugin to read `=>` bodies and
-  `throws`, since the plugin's real-tree tests read the trees. Measured on scratch copies first
-  (core: 849 arrows, 3,159 braces, 253 docblocks, 64 `@throws`, 61,947 → 55,850 `.phn` lines;
-  tq-cli: 1,295 / 5,048 / 318 / 24, 116,998 → 107,837); suites, PHPStan and cs green, every
-  compiled file token-identical to the old output once comments are set aside. Core's
-  `tests/PHPStan/Data` fixtures are re-lifted with `--keep-layout`: the rule tests assert the line
-  of each finding in them (seven fail when the fixtures are laid out). The dogfood configs need
-  `braces_position` and `class_definition` off in php-cs-fixer.
+- ~~**Re-lift of the dogfood trees** (phase 2)~~ — done 2026-11-02, once the PhpStorm plugin read
+  `=>` bodies and `throws`: reflector `d4f21d2`, object-mapper `725aaea`, mongodb-odm `24c0b66`,
+  core `148c08ec`, tq-cli `29bdcf3`, each followed by a `.git-blame-ignore-revs` commit; counts,
+  checks and the token comparison in [[dogfood]]. Core's and tq-cli's php-cs-fixer configs turn
+  `braces_position` and `class_definition` off; the in-place libraries' cs skips generated files.
+  Core's `tests/PHPStan/Data` fixtures had nothing to lift under `--keep-layout` and were left out
+  (the rule tests assert the line of each finding in them).
+- **core: two sources not re-lifted** — `src/EventSourcing/Repository/AbstractEventSourcedRepository.phn`
+  and `src/Infrastructure/CQRS/Command/MetadataFactory/AttributeBasedCommandMetadataFactory.phn`
+  carried uncommitted edits during the re-lift and keep the old layout. Once those edits are
+  committed, `phn migrate` the two files and commit the result (measured on the last commit's
+  versions: 2 bodies as `=>`, 8 braces, 1 `@throws`, 119 → 103 lines), and add its hash to
+  `.git-blame-ignore-revs`.
+- **core: `single_line_after_imports` on a compiler import** — the uncommitted edit to
+  `AbstractEventSourcedRepository.phn` drops `use Tequila\Core\Domain\Aggregate\Aggregate`, which
+  the source no longer names but the compiled `save(Aggregate $aggregate)` does (the erasure of
+  `T`). The emitter then writes it as a compiler import on the line of the first `use` (D11), and
+  `composer cs:check` fails on that output with `single_line_after_imports`. Before that edit is
+  committed, either keep the import or turn the rule off, as the README says for outputs with a
+  compiler import.
 - **Prefix expressions' spans end at their operator** — `throw $e`, `print $x`, `clone $o`, `!$x`,
   casts, `include`, `yield from`, `$$x` (and a `->` property fetch's name): the struct literals in
   `internal/parser/expr.go` compute `S` before parsing the operand. Found while building D18;
