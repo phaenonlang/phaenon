@@ -313,7 +313,7 @@ func (p *Parser) startsExpr() bool {
 func (p *Parser) cloneArgs() (*ast.ArgList, bool) {
 	save := p.i
 	args := p.argList()
-	if len(args.Args) == 1 && args.Args[0].Name == nil && !args.Args[0].Unpack && !args.Args[0].Placeholder &&
+	if len(args.Args) == 1 && args.Args[0].Name == nil && !args.Args[0].Unpack && args.Args[0].Placeholder == nil &&
 		!args.FirstClassCallable && p.toks[p.i-1].Kind != token.Kind(',') && !p.trailingComma(args) {
 		p.i = save
 		p.docComment = ""
@@ -591,35 +591,37 @@ func (p *Parser) looksLikeTypeArgs() bool {
 	return ok
 }
 
-// argList parses `( args )`, including f(...) and PFA placeholders.
+// argList parses `( args )`, including PHP 8.6's partial application
+// placeholders (argument_no_expr): `?`, `name: ?` and `...` standing alone,
+// which is an unpacking when an expression follows. A list of `...` alone
+// is the first-class callable f(...). Where placeholders may stand, and with
+// what, is compile-time PHP, reported by the checker: the grammar admits
+// `f(..., 1)` and `new Foo(?)`.
 func (p *Parser) argList() *ast.ArgList {
 	start := p.tok().Start
 	p.expect(token.Kind('('))
 	al := &ast.ArgList{}
-	if p.at(token.T_ELLIPSIS) && p.peekKind(1) == token.Kind(')') {
-		p.next()
-		p.next()
-		al.FirstClassCallable = true
-		al.S = p.span(start)
-		return al
-	}
+	endsArg := func(k token.Kind) bool { return k == token.Kind(',') || k == token.Kind(')') }
 	for !p.at(token.Kind(')')) {
 		astart := p.tok().Start
 		a := &ast.Arg{}
 		switch {
+		case p.at(token.T_ELLIPSIS) && endsArg(p.peekKind(1)):
+			t := p.next()
+			a.Placeholder = &ast.Placeholder{S: ast.Span{Start: t.Start, End: t.End}, Variadic: true}
 		case p.at(token.T_ELLIPSIS):
 			p.next()
 			a.Unpack = true
 			a.Value = p.expr()
-		case p.at(token.Kind('?')) && (p.peekKind(1) == token.Kind(',') || p.peekKind(1) == token.Kind(')')):
-			p.next()
-			a.Placeholder = true
+		case p.at(token.Kind('?')) && endsArg(p.peekKind(1)):
+			t := p.next()
+			a.Placeholder = &ast.Placeholder{S: ast.Span{Start: t.Start, End: t.End}}
 		case (p.at(token.T_STRING) || isSemiReserved(p.kind())) && p.peekKind(1) == token.Kind(':') && p.peekKind(2) != token.Kind(':'):
 			a.Name = p.identifier()
 			p.expect(token.Kind(':'))
-			if p.at(token.Kind('?')) && (p.peekKind(1) == token.Kind(',') || p.peekKind(1) == token.Kind(')')) {
-				p.next()
-				a.Placeholder = true
+			if p.at(token.Kind('?')) && endsArg(p.peekKind(1)) {
+				t := p.next()
+				a.Placeholder = &ast.Placeholder{S: ast.Span{Start: t.Start, End: t.End}}
 			} else {
 				a.Value = p.expr()
 			}
@@ -634,6 +636,11 @@ func (p *Parser) argList() *ast.ArgList {
 	}
 	p.expect(token.Kind(')'))
 	al.S = p.span(start)
+	if len(al.Args) == 1 && al.Args[0].Placeholder != nil && al.Args[0].Placeholder.Variadic && al.Args[0].Name == nil {
+		// f(...) and f(...,): the first-class callable.
+		al.Args = nil
+		al.FirstClassCallable = true
+	}
 	return al
 }
 
