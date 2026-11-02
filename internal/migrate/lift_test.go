@@ -83,3 +83,20 @@ func TestLiftKeepsAWrittenType(t *testing.T) {
 		t.Errorf("unexpected notes: %v", notes)
 	}
 }
+
+// A prose-only @param whose description starts on the next line keeps it:
+// only a tag with no prose at all goes.
+func TestLiftKeepsParamProseOnLaterLines(t *testing.T) {
+	src := "final class Api\n{\n    /**\n     * @param $transport -\n     *                   [status, body] — test seam\n     * @param $other\n     *               the other seam\n     * @param $none\n     */\n    fun __construct(?Closure $transport = null, ?Closure $other = null, int $none = 0)\n    {\n    }\n}\n"
+	want := "final class Api\n{\n    /**\n     * @param $transport -\n     *                   [status, body] — test seam\n     * @param $other -\n     *               the other seam\n     */\n    fun __construct(?Closure $transport = null, ?Closure $other = null, int $none = 0)\n    {\n    }\n}\n"
+	got, notes, err := Lift([]byte(src), Options{Generics: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	if len(notes) != 0 {
+		t.Errorf("unexpected notes: %v", notes)
+	}
+}

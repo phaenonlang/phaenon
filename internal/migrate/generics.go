@@ -655,9 +655,10 @@ func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc sco
 			}
 			pt := g.parsed.Params[0]
 			if pt.Type == nil {
-				// Prose only already; it gets the dash, or goes when there is none.
+				// Prose only already; it gets the dash, or goes when there is
+				// none, on the tag's line or on the lines continuing it.
 				switch rest := paramProse(d.lines[g.first][strings.Index(d.lines[g.first], g.tag)+len(g.tag):], pt.Name); {
-				case rest == "":
+				case rest == "" && paramProse(g.text, pt.Name) == "":
 					d.remove(g)
 				case !strings.Contains(d.lines[g.first], "$"+pt.Name+" -"):
 					d.keepProse(g, pt.Name)
