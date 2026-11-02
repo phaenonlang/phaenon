@@ -45,7 +45,7 @@ type function struct {
 // layoutFunction places the body of a named function or method and takes
 // its `throws` clause out of the signature.
 func (e *emitter) layoutFunction(fn function) {
-	declIndent := e.lineIndent(fn.kwAt)
+	declIndent := e.outIndent(fn.kwAt)
 	closeParen := e.paramsClose(fn.name, fn.tps)
 	if closeParen < 0 {
 		if fn.throws != nil {
@@ -65,7 +65,7 @@ func (e *emitter) layoutFunction(fn function) {
 	next := e.nextCode(e.tokenAt(tail))
 	switch {
 	case fn.arrow != nil:
-		e.exprBody(fn, sigEnd, declIndent)
+		e.exprBody(fn, sigEnd, closeParen, declIndent)
 	case !fn.hasBody:
 		e.abstractTail(fn, sigEnd, tail, next, declIndent)
 	default:
@@ -88,7 +88,7 @@ func (e *emitter) blockBrace(fn function, sigEnd, closeParen, open int, declInde
 	switch {
 	case e.startsLine(toks[closeParen].Start):
 		// After a multi-line parameter list: `) {` (or `): T {`) on one line.
-		braceIndent = e.lineIndent(toks[closeParen].Start)
+		braceIndent = e.outIndent(toks[closeParen].Start)
 		switch {
 		case string(gap) == " ":
 		case !bytes.ContainsRune(gap, '\n'):
@@ -101,7 +101,7 @@ func (e *emitter) blockBrace(fn function, sigEnd, closeParen, open int, declInde
 	case !bytes.ContainsRune(gap, '\n') || fn.throws != nil:
 		e.replaceFree(ast.Span{Start: sigEnd, End: brace.Start}, "\n"+declIndent)
 	default:
-		braceIndent = e.lineIndent(brace.Start) // on a line of its own already
+		braceIndent = e.outIndent(brace.Start) // on a line of its own already
 	}
 	e.oneLineBody(open, fn.end, braceIndent)
 }
@@ -132,14 +132,14 @@ func (e *emitter) abstractTail(fn function, sigEnd, tail, semi int, declIndent s
 //	    return $this->name;
 //	}
 //
-// `return` is left out under void and never. The arrow's line — the
-// signature's, or a continuation line of its own — ends up as the
+// `return` is left out under void and never; after a multi-line parameter
+// list the brace shares the `)` line, as a block's does. The arrow's line —
+// the signature's, or a continuation line of its own — ends up as the
 // statement's; a multi-line expression keeps its line breaks, and its
 // continuation lines move one level in when the expression started on the
-// signature's line (they stood one level in from the declaration, and now
-// stand one level in from the statement). A comment between the signature
-// and the expression keeps the old in-place form, `{ return expr; }`.
-func (e *emitter) exprBody(fn function, sigEnd int, declIndent string) {
+// signature's line (planIndents). A comment between the signature and the
+// expression keeps the old in-place form, `{ return expr; }`.
+func (e *emitter) exprBody(fn function, sigEnd, closeParen int, declIndent string) {
 	b := fn.arrow
 	ret := false
 	if len(fn.body) == 1 {
@@ -169,14 +169,78 @@ func (e *emitter) exprBody(fn function, sigEnd int, declIndent string) {
 	if ret {
 		kw = "return "
 	}
-	e.replaceFree(ast.Span{Start: sigEnd, End: exprStart}, "\n"+declIndent+"{\n"+bodyIndent+kw)
+	open := "\n" + declIndent + "{"
+	if e.startsLine(toks[closeParen].Start) {
+		open = " {" // `): T {` after a multi-line parameter list
+	}
+	e.replaceFree(ast.Span{Start: sigEnd, End: exprStart}, open+"\n"+bodyIndent+kw)
 	e.replaceFree(b.Semi, ";\n"+declIndent+"}")
-	if e.lineOf(exprStart) == e.lineOf(b.Semi.Start) || e.multiLineToken(exprStart, b.Semi.Start) {
-		return
+}
+
+// planIndents registers, before any lowering writes text, the indentation
+// the continuation lines of expression bodies gain, so that what the
+// lowerings lay out inside them (a nested method's braces, a docblock)
+// lands where those lines do (outIndent). A body's request depends on its
+// source alone: the expression's continuation lines move in by what the
+// block's statement stands in from the line the expression starts on.
+func (e *emitter) planIndents(f *ast.File) {
+	ast.Inspect(f, func(n ast.Node) bool {
+		var fn function
+		switch n := n.(type) {
+		case *ast.FunctionDecl:
+			fn = function{kwAt: n.Head.Start, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, arrow: n.Arrow}
+		case *ast.MethodDecl:
+			fn = function{kwAt: n.Head.End - 1, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, arrow: n.Arrow}
+		default:
+			return true
+		}
+		if fn.arrow == nil {
+			return true
+		}
+		closeParen := e.paramsClose(fn.name, fn.tps)
+		if closeParen < 0 {
+			return true
+		}
+		toks := e.tokens()
+		sigEnd := toks[closeParen].End
+		if fn.ret != nil {
+			sigEnd = fn.ret.Span().End
+		}
+		first := e.nextCode(e.tokenAt(fn.arrow.Arrow.End))
+		if first >= len(toks) || e.hasComment(sigEnd, toks[first].Start) {
+			return true
+		}
+		exprStart, semi := toks[first].Start, fn.arrow.Semi.Start
+		if e.lineOf(exprStart) == e.lineOf(semi) || e.multiLineToken(exprStart, semi) {
+			return true
+		}
+		declIndent := e.lineIndent(fn.kwAt)
+		level := "    "
+		if strings.Contains(declIndent, "\t") {
+			level = "\t"
+		}
+		bodyIndent := declIndent + level
+		if exprIndent := e.lineIndent(exprStart); len(bodyIndent) > len(exprIndent) && strings.HasPrefix(bodyIndent, exprIndent) {
+			e.indents = append(e.indents, indentReq{Span: ast.Span{Start: exprStart, End: semi}, Text: bodyIndent[len(exprIndent):]})
+		}
+		return true
+	})
+}
+
+// outIndent is the indentation the line holding off has in the output: its
+// own, and what the expression bodies around it move it in by.
+func (e *emitter) outIndent(off int) string {
+	indent := e.lineIndent(off)
+	start := bytes.LastIndexByte(e.src[:off], '\n')
+	if start < 0 {
+		return indent
 	}
-	if exprIndent := e.lineIndent(exprStart); len(bodyIndent) > len(exprIndent) && strings.HasPrefix(bodyIndent, exprIndent) {
-		e.indents = append(e.indents, indentReq{Span: ast.Span{Start: exprStart, End: b.Semi.Start}, Text: bodyIndent[len(exprIndent):]})
+	for _, r := range e.indents {
+		if r.Start <= start && start < r.End {
+			indent += r.Text
+		}
 	}
+	return indent
 }
 
 // classBrace puts the opening brace of a class, interface, trait or enum
@@ -200,8 +264,8 @@ func (e *emitter) classBrace(d *ast.ClassDecl) {
 	if open >= len(toks) || toks[open].Kind != token.Kind('{') || e.hasComment(headerEnd, toks[open].Start) {
 		return
 	}
-	indent := e.lineIndent(d.Name.S.Start)
-	braceIndent := e.lineIndent(toks[open].Start)
+	indent := e.outIndent(d.Name.S.Start)
+	braceIndent := e.outIndent(toks[open].Start)
 	if !bytes.ContainsRune(e.src[headerEnd:toks[open].Start], '\n') {
 		e.replaceFree(ast.Span{Start: headerEnd, End: toks[open].Start}, "\n"+indent)
 		braceIndent = indent

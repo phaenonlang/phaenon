@@ -128,12 +128,13 @@ func (w *lineWriter) indentAfter(i int) string {
 // indentFor is the indentation an indent request adds after the line break
 // at source offset i.
 func (w *lineWriter) indentFor(i int) string {
+	add := ""
 	for _, r := range w.indents {
 		if r.Start <= i && i < r.End {
-			return r.Text
+			add += r.Text // an expression body inside another moves in twice
 		}
 	}
-	return ""
+	return add
 }
 
 // inPlace writes the text of an in-place edit of span s: its line breaks,
