@@ -476,28 +476,9 @@ func (l *targetLowering) dropOverride(groups []*ast.AttrGroup) {
 	}
 }
 
-// removeGroup deletes an attribute group; alone on its line, the line's
-// indentation and the group go, leaving the line empty.
+// removeGroup deletes an attribute group (dropLines).
 func (l *targetLowering) removeGroup(s ast.Span) {
-	src := l.e.src
-	start := s.Start
-	for start > 0 && (src[start-1] == ' ' || src[start-1] == '\t') {
-		start--
-	}
-	end := s.End
-	if start == 0 || src[start-1] == '\n' {
-		if end < len(src) && src[end] == '\n' {
-			// The group's own line: empty it.
-			l.e.replace(ast.Span{Start: start, End: end}, "")
-			return
-		}
-		// Code follows on the line: keep the indentation, drop the space.
-		start = s.Start
-	}
-	for end < len(src) && (src[end] == ' ' || src[end] == '\t') {
-		end++
-	}
-	l.e.replace(ast.Span{Start: start, End: end}, strings.Repeat("\n", bytes.Count(src[start:end], []byte("\n"))))
+	l.e.drop = append(l.e.drop, s)
 }
 
 func (l *targetLowering) isOverride(a *ast.Attribute) bool {

@@ -1,9 +1,9 @@
 namespace App\Report;
 
 /**
- * A file without imports: the one the compiler adds opens the line where the
- * first statement after the namespace begins, here this docblock, so the
- * namespace keeps its blank line and every line its number (roadmap D11).
+ * A file without imports: the one the compiler adds opens a use block of its
+ * own after the namespace, a blank line before and after it (roadmap D11,
+ * D19).
  */
 final class Slug
 {

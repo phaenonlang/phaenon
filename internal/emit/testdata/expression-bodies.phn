@@ -2,10 +2,11 @@ namespace App;
 
 use LogicException;
 
-// An expression body compiles to the block it stands for, on the lines it
-// stands on: `=> expr;` is `{ return expr; }`, or `{ expr; }` under void and
-// never; a body wrapped after the arrow hands its brace to the signature's
-// line, and the arrow becomes `return` (design/functions.md §3).
+// An expression body compiles to the PSR-12 block it stands for: `=> expr;`
+// is `{`, `return expr;` and `}` on lines of their own, without `return`
+// under void and never; a body wrapped after the arrow keeps its line as the
+// statement's, and a multi-line expression moves in with the block
+// (design/functions.md §3, line-map.md §2).
 
 interface Named
 {

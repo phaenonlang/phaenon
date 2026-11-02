@@ -2,11 +2,10 @@ namespace App;
 
 use RuntimeException as Failure;
 
-// `throws A|B` compiles to a @throws tag (design/functions.md §4.2): a
-// docblock of its own at the start of the declaration's first line, or a
-// line of the docblock the declaration has, without adding a line — except
-// beside a docblock on the declaration's own line, and in the docblock the
-// generics lowering writes, which adds lines already.
+// `throws A|B` compiles to a @throws tag (design/functions.md §4.2), on a
+// line of its own: in a new docblock above the declaration and its
+// attributes, or in the docblock the declaration has, a one-line one
+// becoming a multi-line block (line-map.md §2).
 
 final class NotFound extends \RuntimeException
 {

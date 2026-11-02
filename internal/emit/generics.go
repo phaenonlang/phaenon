@@ -146,9 +146,9 @@ func (l *lowering) stmt(s ast.Stmt) error {
 	return l.walk(s, l.topScope(s.Span().Start))
 }
 
-// blank removes a statement, keeping its line breaks.
+// blank removes a statement (dropLines).
 func (l *lowering) blank(s ast.Span) {
-	l.e.replace(s, strings.Repeat("\n", bytes.Count(l.e.src[s.Start:s.End], []byte("\n"))))
+	l.e.drop = append(l.e.drop, s)
 }
 
 // ------------------------------------------------------------------ text helpers
@@ -507,11 +507,13 @@ func (l *lowering) addDoc(declStart int, doc string, tags []string) {
 	l.addDocWith(declStart, doc, tags, "")
 }
 
-// addDocWith is addDoc with one more tag, extra, that joins the generated
-// ones only when they add lines to the docblock anyway (the recorded
-// exception to the line rule): a declaration's `@throws`, which on its own
-// is merged without adding a line (lowerFunctions). It reports whether
-// extra was written.
+// addDocWith is addDoc with one more tag, extra: a declaration's
+// `@throws`, which joins the generated tags whenever there are any (a
+// declaration without them gets it from lowerFunctions). It reports
+// whether extra was written. The docblock is laid out as a person writes
+// one (design/line-map.md §2): a new one on lines of its own before the
+// declaration, a one-line one rewritten as a multi-line block, tags added
+// to a multi-line one on lines of their own.
 func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra string) (wroteExtra bool) {
 	if len(tags) == 0 {
 		return false
@@ -532,82 +534,61 @@ func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra st
 		if extra != "" {
 			tags = append(tags, extra)
 		}
-		if len(tags) == 1 {
-			l.e.insertLines(declStart, "/** "+tags[0]+" */\n"+indent)
+		if len(tags) == 1 && !l.e.startsLine(declStart) {
+			// A closure in an expression keeps its line: `$f = /** @return T
+			// */ function () {…}`, as a person writes the one tag there.
+			l.e.insert(declStart, "/** "+tags[0]+" */ ")
 			return extra != ""
 		}
-		var b strings.Builder
-		b.WriteString("/**\n")
-		for _, t := range tags {
-			b.WriteString(indent + " * " + t + "\n")
-		}
-		b.WriteString(indent + " */\n" + indent)
-		l.e.insertLines(declStart, b.String())
+		l.e.insertFree(declStart, docBlock(indent, "", tags)+"\n"+indent)
 		return extra != ""
 	}
 	oneLine := !strings.Contains(doc, "\n")
 	filled := doc // a one-line docblock with the types of its own tags filled in
+	var inDoc *emitter
 	if oneLine {
-		// A one-line docblock that becomes several lines is rewritten as a
-		// whole, so the types its tags get (`/** @param $x - prose */`) are
-		// filled into its text rather than in place.
+		// A one-line docblock that gains tags is rewritten as a whole, so
+		// the types its tags get (`/** @param $x - prose */`) are filled
+		// into its text rather than in place.
 		saved := l.e
 		l.e = &emitter{src: []byte(doc), opts: saved.opts}
 		tags = l.fillTypes(doc, 0, tags)
 		tags = l.replaceVar(doc, 0, tags)
-		inDoc := l.e
+		inDoc = l.e
 		l.e = saved
-		tags = missingTags(doc, tags)
-		if len(tags) == 0 {
-			for _, ed := range inDoc.edits {
-				l.e.replace(ast.Span{Start: idx + ed.Start, End: idx + ed.End}, ed.Text)
-			}
-			return false
-		}
-		filled = string(inDoc.apply())
+		filled = string(inDoc.spliced())
 	} else {
 		tags = l.fillTypes(doc, idx, tags)
 		tags = l.replaceVar(doc, idx, tags)
-		tags = missingTags(doc, tags)
-		if len(tags) == 0 {
-			return false
-		}
 	}
+	tags = missingTags(doc, tags)
 	if extra != "" && len(missingTags(doc, []string{extra})) > 0 {
 		tags = append(tags, extra)
 		wroteExtra = true
 	}
-	span := ast.Span{Start: idx, End: idx + len(doc)}
-	indent = l.indentAt(idx)
+	if len(tags) == 0 {
+		if oneLine {
+			for _, ed := range inDoc.edits {
+				l.e.replace(ast.Span{Start: idx + ed.Start, End: idx + ed.End}, ed.Text)
+			}
+		}
+		return false
+	}
 	if oneLine {
 		// The content moves into a new docblock: its written types erase
 		// as eraseWrittenBytes would have erased them in place.
-		content := eraseBytesInDoc(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(filled, "/**"), "*/")))
-		if len(tags) == 1 && strings.HasPrefix(tags[0], "@var ") {
-			// A property's one-line `/** what it holds */` keeps its line:
-			// `/** @var list<string> what it holds */` is the PHP it came from.
-			text := "/** " + tags[0]
-			if content != "" {
-				text += " " + content
-			}
-			l.e.replace(span, text+" */")
-			return false
+		content := eraseBytesInDoc(oneLineContent(filled))
+		if len(tags) == 1 && strings.HasPrefix(tags[0], "@var ") && content != "" {
+			// A property's `/** what it holds */` gets its type back on the
+			// tag's line: `@var list<string> what it holds`, the PHP it
+			// came from (roadmap D14).
+			tags, content = []string{tags[0] + " " + content}, ""
 		}
-		// `/** Summary. */` becomes a multi-line block.
-		var b strings.Builder
-		b.WriteString("/**\n")
-		if content != "" {
-			b.WriteString(indent + " * " + content + "\n")
-		}
-		for _, t := range tags {
-			b.WriteString(indent + " * " + t + "\n")
-		}
-		b.WriteString(indent + " */")
-		l.e.replaceLines(span, b.String())
+		l.e.rewriteDoc(idx, doc, content, tags)
 		return wroteExtra
 	}
 	lastNL := strings.LastIndexByte(doc, '\n')
-	closeIndent := indent
+	closeIndent := l.indentAt(idx)
 	if ws := strings.TrimRight(doc[lastNL+1:], "*/ "); ws != "" {
 		closeIndent = ws
 	}
@@ -627,7 +608,7 @@ func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra st
 	for _, t := range tags {
 		b.WriteString(closeIndent + " * " + t + "\n")
 	}
-	l.e.insertLines(at, b.String())
+	l.e.insertFree(at, b.String())
 	return wroteExtra
 }
 
