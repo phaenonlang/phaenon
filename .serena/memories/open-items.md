@@ -127,15 +127,26 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   output: 29 reads of a `json_decode()` result, 50 reads and writes down `map<string, mixed>`
   fixtures, 2 `foreach` over decoded values, 4 variadics used as a `list<string>`. Their fixes
   in the tree are pending.
-- **Parity gaps of the same family still open** (found 2026-11-02 while probing PHPStan 2.2.5
+- ~~**Parity gaps of the same family still open** (found 2026-11-02 while probing PHPStan 2.2.5
   at level max): method calls and property access on `mixed` (`method.nonObject`,
   `property.nonObject`; 8 property reads in tq-cli's compiled tests); spreading `mixed`
   (`arrayUnpacking.nonIterable`, `argument.unpackNonIterable`); destructuring `int`, `string`,
   `null`, `?array` or `iterable` (`offsetAccess.nonArray`); an offset read on an interface or
   abstract class that is not `ArrayAccess` (exempted on 2026-10-30, `32e5ded`, on the belief
   that PHPStan is silent; 2.2.5 reports it); `static $cache = []` typed from its initialiser
-  where PHPStan says `mixed`. Deliberately not matched: PHPStan reports `$r = [];
-  $r['a']['b'] = 1` as an offset on `mixed`, which PHP runs without complaint.
+  where PHPStan says `mixed`.~~ — done 2026-11-02, `d9123cb` (`../design/checker.md` §9): also
+  members of `object` (P2006/P2005 unless `method_exists()`/`property_exists()` proved them),
+  `unset()` on what has no offsets, class offsets under `isset()`/`??`; a static variable is
+  its `@var`, `mixed` without one. Dogfood: only object-mapper's tests gain findings (14 for 8
+  mixed arguments). The 8 property reads in tq-cli's compiled tests are PHPStan not reading the
+  `@param list<SourceSpec>` the emitter writes on a closure (the item below), not a gap.
+  Deliberately not matched: PHPStan reports `$r = []; $r['a']['b'] = 1` as an offset on
+  `mixed`, which PHP runs without complaint.
+- **Still more lenient than PHPStan at level max** (2026-11-02): operators on `mixed` —
+  `$n++`, `$a + 1`, `.=` (`postInc.type`, `binaryOp.invalid`, `assignOp.invalid`; 6 binary
+  operations in tq-cli's compiled tests); an undefined property of a final class under
+  `isset()` / `??` (`property.notFound`); `method_exists()` on `mixed`, which PHPStan narrows
+  to `class-string|object` and still reports a call on.
 - **PHPStan ignores `@param` / `@return` docblocks on closures and arrow functions** (2.2.5,
   any placement): the docblock the emitter writes before a closure with a `map<…>` or tuple
   parameter is invisible to PHPStan, which sees the erased `array`.
