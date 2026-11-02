@@ -1,0 +1,21 @@
+namespace ThrowingGenerics;
+
+// A `throws` member may be a type parameter bounded by Throwable
+// (design/functions.md §4.1), of the function or of its class.
+
+final class Rethrower
+{
+    fun rethrow<E of \Throwable>(E $e): never throws E => throw $e;
+
+    fun loose<T>(T $t): void throws T {} // want P2319
+}
+
+/** A failure carried until someone throws it. */
+final class Pending<E of \RuntimeException>
+{
+    fun __construct(private E $failure) {}
+
+    fun raise(): never throws E => throw $this->failure;
+}
+
+fun raised(Pending<\LogicException> $p): never => $p->raise(); // want P3002
