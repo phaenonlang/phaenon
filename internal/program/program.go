@@ -17,6 +17,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/types"
 	"github.com/phaenonlang/phaenon/stdlib"
 )
@@ -50,6 +51,7 @@ type Program struct {
 	// installs it (the program package cannot type expressions itself).
 	ConstType func(c *Constant) types.Type
 	stubs     bool
+	target    phpversion.Version
 }
 
 // Problem is a finding attached to a declaration site.
@@ -83,6 +85,21 @@ func New() *Program {
 		patches:      map[string]*ast.ClassDecl{},
 	}
 }
+
+// Target is the PHP version the program compiles for: the oldest PHP the
+// emitted code must run on (design/php-versions.md §2). The checker and the
+// emitter ask it whether a construct or a library symbol needs lowering or a
+// diagnostic; it is phpversion.Floor until SetTarget says otherwise.
+func (p *Program) Target() phpversion.Version {
+	if p == nil || p.target.IsZero() {
+		return phpversion.Floor
+	}
+	return p.target
+}
+
+// SetTarget sets the version Target reports. phn resolves it from
+// phaenon.json and composer.json; tests set it directly.
+func (p *Program) SetTarget(v phpversion.Version) { p.target = v }
 
 // AddLoader appends a loader; loaders are consulted in order.
 func (p *Program) AddLoader(l Loader) {
@@ -408,6 +425,53 @@ type MethodTarget struct {
 	Guard bool
 }
 
+// Partial is the checker's account of a partial application (PHP 8.6,
+// design/php-versions.md §5), which the emitter needs to lower it for an
+// 8.5 target: the parameters of the closure it creates, in PHP's order,
+// each named and typed after the callee's parameter it stands for.
+type Partial struct {
+	Params []PartialParam
+	// Refused says why the form has no exact 8.5 lowering; the checker
+	// reports it (P1002) when the target is 8.5. Empty when it lowers.
+	Refused string
+	// Pipe marks the right side of a pipe that PHP turns into a call
+	// (`A |> f(B, ?, C)` is f(B, A, C)); Params then holds the one
+	// parameter the left side goes to. Direct says every bound argument is
+	// a literal or a constant, so the call may be written as such.
+	Pipe, Direct bool
+	// Rest marks a `...` placeholder; Named a named argument before it.
+	Rest, Named bool
+	// Void says the callee returns void: a closure body calls it without
+	// returning its result.
+	Void bool
+}
+
+// PartialParam is one parameter of the closure a partial application
+// creates.
+type PartialParam struct {
+	// Name is the callee's parameter name; a placeholder that binds into a
+	// variadic parameter is named after it with its offset ($args0, …), as
+	// PHP names it.
+	Name string
+	// Native is the callee parameter's declared type as PHP code, class
+	// names fully qualified; "" when it declares none.
+	Native string
+	// Doc is its type for a docblock when the type says more than PHP can
+	// declare (list<int>, a literal, a generic class); "" otherwise.
+	Doc string
+	// Default is an optional parameter's default as PHP code that means
+	// the same in any file; "" when required or when it cannot be written
+	// so (Unwritable).
+	Default    string
+	Unwritable bool
+	Optional   bool
+	Variadic   bool
+	ByRef      bool
+	// Arg is the placeholder that creates the parameter (`?` or `name: ?`);
+	// nil for the parameters `...` stands for.
+	Arg *ast.Arg
+}
+
 type File struct {
 	Path    string
 	Src     []byte
@@ -419,6 +483,9 @@ type File struct {
 	// class the emitter rewrites the call to, and whether the receiver may
 	// be null (`?->`, or a short-circuited chain) so the call is guarded.
 	MethodTargets map[*ast.MethodCall]MethodTarget
+	// Partials records each checked partial application by its argument
+	// list (see Partial).
+	Partials map[*ast.ArgList]*Partial
 	// Scopes maps statement ranges to the namespace scope in force there.
 	Scopes  []ScopedRange
 	lines   []int

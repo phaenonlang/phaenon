@@ -12,20 +12,58 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/phaenonlang/phaenon/internal/conformance/phpt"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/token"
 )
 
-// phpSrc returns the php-src checkout to test against, or skips.
+// phpSrc returns the php-src tree whose .phpt files are the corpus, or
+// skips: a checkout, or a release branch extracted with git archive (the
+// vault's testing note).
 func phpSrc(t *testing.T) string {
 	dir := os.Getenv("PHAENON_PHP_SRC")
 	if dir == "" {
 		t.Skip("PHAENON_PHP_SRC not set")
 	}
 	return dir
+}
+
+// oraclePHP is the php binary the suites take as the oracle: PHAENON_PHP,
+// or the php on PATH. It should be the release the corpus comes from — the
+// PHP-8.6 corpus under PHP 8.6 — since a test of a newer release fails to
+// parse or run under an older php.
+func oraclePHP() string {
+	if php := os.Getenv("PHAENON_PHP"); php != "" {
+		return php
+	}
+	return "php"
+}
+
+var (
+	oracleOnce sync.Once
+	oracleVer  phpversion.Version
+	oracleErr  error
+)
+
+// oracleVersion is the oracle's release line, which the emitter targets
+// when it compiles the corpus.
+func oracleVersion(t *testing.T) phpversion.Version {
+	oracleOnce.Do(func() {
+		out, err := exec.Command(oraclePHP(), "-n", "-r", `echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;`).Output()
+		if err != nil {
+			oracleErr = err
+			return
+		}
+		oracleVer, oracleErr = phpversion.Parse(string(out))
+	})
+	if oracleErr != nil {
+		t.Fatalf("php oracle %s: %v", oraclePHP(), oracleErr)
+	}
+	return oracleVer
 }
 
 // collectPhpt lists every .phpt under dir (optionally restricted by PHAENON_PHPT_FILTER).
@@ -60,7 +98,7 @@ type oracleLine struct {
 func runOracle(t *testing.T, files []string) map[string][][2]string {
 	_, self, _, _ := runtimeCaller()
 	oracle := filepath.Join(filepath.Dir(self), "oracle.php")
-	cmd := exec.Command("php", "-n", "-d", "memory_limit=-1", "-d", "display_errors=0", oracle)
+	cmd := exec.Command(oraclePHP(), "-n", "-d", "memory_limit=-1", "-d", "display_errors=0", oracle)
 	cmd.Stdin = strings.NewReader(strings.Join(files, "\n") + "\n")
 	cmd.Stderr = os.Stderr
 	out, err := cmd.StdoutPipe()

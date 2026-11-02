@@ -10,9 +10,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/conformance/phpt"
 	"github.com/phaenonlang/phaenon/internal/emit"
+	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/migrate"
+	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
+	"github.com/phaenonlang/phaenon/internal/program"
 )
 
 // TestEmitExecution proves line-preserving emission end to end: each corpus
@@ -29,6 +34,10 @@ func TestEmitExecution(t *testing.T) {
 		t.Setenv("PHAENON_PHPT_FILTER", "Zend/tests")
 	}
 	tmp := t.TempDir()
+	// The corpus is compiled for the oracle's release: what it tests is
+	// what that PHP runs, partial applications written as such on 8.6.
+	prog := program.New()
+	prog.SetTarget(oracleVersion(t))
 
 	type job struct {
 		idx  int
@@ -37,7 +46,7 @@ func TestEmitExecution(t *testing.T) {
 		out  []byte
 	}
 	var jobs []job
-	notPlain, emitErrors := 0, 0
+	notPlain, emitErrors, newer := 0, 0, 0
 	for i, p := range collectPhpt(t, src) {
 		tt, err := phpt.Parse(p)
 		if err != nil {
@@ -54,10 +63,17 @@ func TestEmitExecution(t *testing.T) {
 			notPlain++
 			continue
 		}
+		if !prog.Target().AtLeast(phpversion.PHP86) && hasPlaceholders(phn) {
+			// A test of PHP 8.6 in a newer corpus than the oracle: its
+			// partial applications would need the checker to be lowered,
+			// and the oracle cannot run the original.
+			newer++
+			continue
+		}
 		// A test that opted into strict types keeps them; the others must
 		// not have strictness imposed, the comparison is about lines.
 		strict := reStrict.Match(tt.File)
-		out, err := emit.File(phn, emit.Options{SourceName: "t.phn", StrictTypes: strict})
+		out, err := emit.File(phn, emit.Options{SourceName: "t.phn", StrictTypes: strict, Program: prog})
 		if err != nil {
 			if rel, rerr := filepath.Rel(src, p); rerr == nil && reservedInPhaenon[rel] {
 				continue
@@ -130,8 +146,25 @@ func TestEmitExecution(t *testing.T) {
 			same++
 		}
 	}
-	t.Logf("emit execution: %d/%d files behave identically, lines included (%.2f%%); %d skipped (timeout / nondeterministic), %d not plain code (templates), %d emit errors",
-		same, same+differ, 100*float64(same)/float64(same+differ), skipped, notPlain, emitErrors)
+	t.Logf("emit execution: %d/%d files behave identically, lines included (%.2f%%); %d skipped (timeout / nondeterministic), %d not plain code (templates), %d newer than the oracle, %d emit errors",
+		same, same+differ, 100*float64(same)/float64(same+differ), skipped, notPlain, newer, emitErrors)
+}
+
+// hasPlaceholders reports whether a migrated test holds partial
+// applications (PHP 8.6).
+func hasPlaceholders(phn []byte) bool {
+	f, err := parser.Parse(phn, lexer.ModePhaenon)
+	if err != nil {
+		return false
+	}
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		if _, ok := n.(*ast.Placeholder); ok {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // skipEmit reports whether a test observes something emission does not
@@ -150,13 +183,19 @@ func skipEmit(src []byte) bool {
 var reStrict = regexp.MustCompile(`strict_types\s*=\s*1`)
 
 // reservedInPhaenon lists tests that declare something named `is`, which
-// PHP 8.5 deprecates and Phaenon reserves as the type-test operator.
+// PHP 8.6 deprecates and Phaenon reserves as the type-test operator.
 var reservedInPhaenon = map[string]bool{
 	"Zend/tests/deprecated_identifiers/is/class_as_name.phpt":        true,
 	"Zend/tests/deprecated_identifiers/is/class_as_name_use.phpt":    true,
 	"Zend/tests/deprecated_identifiers/is/constant_as_name_use.phpt": true,
 	"Zend/tests/deprecated_identifiers/is/function_as_name.phpt":     true,
 	"Zend/tests/deprecated_identifiers/is/function_as_name_use.phpt": true,
+	// The PHP-8.5 branch's versions of these declare a function is(); the
+	// newer branches renamed it once PHP 8.6 deprecated the name.
+	"Zend/tests/asymmetric_visibility/variation.phpt":        true,
+	"Zend/tests/asymmetric_visibility/variation_nested.phpt": true,
+	"Zend/tests/readonly_props/variation.phpt":               true,
+	"Zend/tests/readonly_props/variation_nested.phpt":        true,
 }
 
 // emitDeviations are corpus files whose comparison is void.
@@ -164,6 +203,10 @@ var emitDeviations = map[string]bool{
 	// Engine use-after-free: the output flips between runs on the stock
 	// binary, with or without the emitter.
 	"Zend/tests/magic_methods/gh21603.phpt": true,
+	// A closure in a constant expression is written static by the emitter
+	// (design/functions.md); PHP's compile error for a non-static one is
+	// the checker's P2531, which the harness does not run.
+	"Zend/tests/closures/closure_const_expr/disallows_non_static.phpt": true,
 }
 
 // hasRunSections reports whether the test needs stdin, arguments, ini

@@ -1,7 +1,7 @@
 ---
 type: status
 tags: [phaenon, roadmap, history]
-updated: 2026-10-29
+updated: 2026-11-02
 ---
 
 # Milestones — history and state
@@ -36,6 +36,12 @@ The roadmap puts the editor plugins in M6.
 | **M5** first slice (2026-11-01) | `concurrently (opts) { … }` and `spawn` (contextual `T_CONCURRENTLY`/`T_SPAWN`, `ast.Concurrently`/`ast.Spawn`, printer), checker `P2601`–`P2606` (`internal/checker/concurrency.go`), emitter `lowerConcurrency` (`Scope::run(function () use (…) { … }, opts)`, `Scope::spawn(fn () => …)`, computed `use` clause), the runtime `stdlib/concurrent/Scope.phn` written in Phaenon with the amp/Revolt declarations beside it, `phn stdlib --concurrent-out`, the local package `../concurrent` (14 PHPUnit tests against the real amp, PHPStan max) | Checker golden `concurrency.phn`, emit golden `concurrency.phn` → `.php` under PHPStan max; the FrankenPHP worker-mode check (400 requests, loop persisting between requests) recorded in `concurrency.md` §9.2 | `df7d449` + the follow-up · design `concurrency.md` (C1–C10), roadmap D6 revised, D16 |
 | **M5** tq-cli dogfood (2026-11-01) | `tq-cli` compiled from 859 `.phn` on a local `phaenon-dogfood` worktree; the fifteen `Api::concurrently` fan-outs rewritten as `concurrently` blocks, the helper removed; `?(A, B)` parse fix; emitter capture rule refined (defined before or read first after, arrow parameters shadow) | PHPUnit **2045 tests green** on the compiled output, PHPStan level 10 no errors, cs 0 of 586; `phn check` 378 (none `P26xx`) | compiler `074979a` + the capture commit · tq-cli `c58cb76` (local) · [[dogfood]] |
 | **M5** closed (2026-11-01) | tq-cli's `phn check` to 0 over `src` and `tests` (three checker merges, the overlay, real fixes in tq-cli: the unchecked `curl_init()`, dead type checks, binary data as `bytes`, numeric YAML keys rejected at the boundary); closure types with `T...`/`T=`; numeric string keys are int keys; `.` joins two `bytes`; written docblock tags erase `bytes`; the runtime import joins the `use` block; `tequila/nats`'s `RevoltTransport` + pump lease + reader task merged (tequila/nats#13, ADR tequila/platform#255); the plugin re-indexes `.phn` on upgrade, resolves a bare `Closure(…)` as `\Closure`, keeps erased-only imports | tq-cli: 2052 tests, PHPStan 10, cs clean, `phn check` 0; nats: 175 tests against the server; core, mongodb-odm, object-mapper unchanged | compiler `0e1321a`…`3ea29fc` · design `d74fc84`, `ba20982`…`4f8dfdb`, §16 of `concurrency.md` · plugin `9f3225c`…`f630655` · [[dogfood]] |
+
+## In progress
+
+| | Built so far | Numbers | Commits |
+|---|---|---|---|
+| **PHP 8.6** in progress (2026-11-02) | Track milestone (`../design/php-versions.md`, roadmap D17). Built: the target (`phaenon.json` `"php"`, composer.json's floor, `phn migrate --php`, `Program.Target()`, `P4008`–`P4010`, `P1002`); the 8.6 grammar (`ast.Placeholder`); conformance against the `PHP-8.6` corpus under PHP 8.6 (`PHAENON_PHP`); partial application typed in the checker (`P1003`) and pipes checked stage by stage (`P2114`); the 8.5 lowering and the dropped `#[\Override]` on constants in the emitter. The library side (stubs, symbol versions, deprecations, readonly defaults, `#[\Override]` checks, enum `__debugInfo()`) is a parallel branch | 8.6 corpus: lexer 23,445/23,445, parser 23,285/23,285, printer 23,369/23,369, printer execution 4,584/4,584, emit execution 4,891/4,891; core and tq-cli `phn check` / `build --check` unchanged on target 8.5; tq-cli built with `"php": "8.6"` in a scratch copy: 2052 tests on PHP 8.6, one 8.6 deprecation (a class constant named `NAMESPACE`) | compiler branch `php86-target` and after · design `1e09ef2` (§9) |
 
 ## Next — a maintainer's choice
 

@@ -92,6 +92,9 @@ func Tree(src []byte, f *ast.File, opts Options) ([]byte, error) {
 	if opts.File != nil {
 		e.eraseWrittenBytes()
 	}
+	if err := e.lowerTarget(f); err != nil {
+		return nil, err
+	}
 	e.prologue(f)
 	return e.apply(), nil
 }

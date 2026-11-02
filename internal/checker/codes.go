@@ -25,8 +25,14 @@ type Code struct {
 }
 
 var (
-	// P1 — removed constructs
+	// P1 — removed constructs, and constructs the target PHP lacks
 	P1001 = Code{"P1001", Error, "construct removed from Phaenon"}
+	// P1002: "… needs PHP 8.6 (target 8.5)" for a construct newer than the
+	// target that is not lowered (design/php-versions.md §3).
+	P1002 = Code{"P1002", Error, "construct needs a newer PHP than the target"}
+	// P1003: what PHP 8.6's compiler rejects where placeholders stand
+	// (design/php-versions.md §5.1); the grammar admits it.
+	P1003 = Code{"P1003", Error, "placeholder where PHP forbids one"}
 
 	// P2 — names
 	P2001 = Code{"P2001", Error, "unknown class"}
@@ -57,6 +63,10 @@ var (
 	P2111 = Code{"P2111", Error, "instance call of a static member"}
 	P2112 = Code{"P2112", Error, "by-reference argument is not a variable"}
 	P2113 = Code{"P2113", Error, "argument is mixed where a type is required"}
+	// P2114: `$xs |> sort(...)` — PHP passes the piped value as a
+	// temporary, so a by-reference parameter is an Error at run time
+	// (design/php-versions.md §5.4).
+	P2114 = Code{"P2114", Error, "piped value passed by reference"}
 
 	// P2 — assignments and declared types
 	P2201 = Code{"P2201", Error, "assigned value does not match the property type"}
@@ -146,4 +156,9 @@ var (
 	P4005 = Code{"P4005", Warning, "Composer autoload maps not found"}
 	P4006 = Code{"P4006", Warning, "deprecated"}
 	P4007 = Code{"P4007", Warning, "PHP extensions could not be read"}
+	// P4008–P4010 are about the target (design/php-versions.md §2), reported
+	// on phaenon.json or composer.json.
+	P4008 = Code{"P4008", Warning, "target above the PHP composer.json admits"}
+	P4009 = Code{"P4009", Error, "PHP target phn does not support"}
+	P4010 = Code{"P4010", Warning, "no PHP target stated"}
 )

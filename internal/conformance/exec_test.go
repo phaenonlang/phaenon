@@ -196,7 +196,7 @@ func runPHP(dir string) (out string, ok bool) {
 func execPHP(dir string) (out string, ok bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "php", "-n",
+	cmd := exec.CommandContext(ctx, oraclePHP(), "-n",
 		"-d", "display_errors=1", "-d", "error_reporting=-1", "-d", "html_errors=0",
 		"-d", "memory_limit=256M", "-d", "max_execution_time=5", "-d", "zend.assertions=1",
 		"t.php")

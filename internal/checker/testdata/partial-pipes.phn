@@ -1,0 +1,50 @@
+// Partial applications in pipes (design/php-versions.md §5.2, §5.4):
+// `A |> f(B, ?, C)` is checked exactly as f(B, A, C).
+
+fun needsTwo(int $a, int $b): int { return $a + $b; }
+fun up(string $s): string { return strtoupper($s); }
+fun wantsInt(int $x): void {}
+fun addAll(array &$xs, int $n): void { $xs[] = $n; }
+
+final class User {
+    public function __construct(public bool $active, public string $name) {}
+}
+
+final class Style {
+    static fun line(string $s): string { return "| $s"; }
+}
+
+final class Out {
+    fun writeln(string $s): void { echo $s, "\n"; }
+}
+
+/** @param list<User> $users */
+fun stages(array $users, Out $out): void {
+    // A closure in a bound argument takes its types from the call: `$u` is a User.
+    $active = $users |> array_filter(?, fn ($u) => $u->active);
+    wantsInt($active); // want P2103 "array<int, User>"
+    $names = $users |> array_map(fn (User $u): string => $u->name, ?);
+    wantsInt($names); // want P2103 "list<string>"
+
+    // The pipeline of the design (§5.4).
+    'ns'
+        |> sprintf('namespace %s', ?)
+        |> Style::line(...)
+        |> $out->writeln(...);
+
+    // The left side must fit the parameter its placeholder stands for.
+    $n = 5 |> sprintf('%s-%s', 'a', ?);
+    $x = 'a' |> str_repeat(?, 3) |> up(...);
+    $z = 3 |> str_replace('a', 'b', ?); // want P2103
+    $w = [3] |> str_repeat('a', ?); // want P2103
+    $named = 'x' |> str_pad(string: ?, length: 4);
+    wantsInt($named); // want P2103 "string"
+}
+
+fun mistakes(): void {
+    $xs = [3, 1, 2];
+    $xs |> sort(?); // want P2114
+    $xs |> addAll(?, 4); // want P2114
+    // Two placeholders: the closure needs two arguments, the pipe passes one.
+    $sum = 1 |> needsTwo(?, ?); // want P2101
+}
