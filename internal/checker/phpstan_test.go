@@ -97,6 +97,9 @@ func TestPHPStanParity(t *testing.T) {
 				// those files (compiled output through PHPStan level max).
 				t.Skip("Phaenon-only syntax; covered by the emit golden")
 			}
+			if why, ok := skipParity[name]; ok {
+				t.Skip(why)
+			}
 			phpName := strings.TrimSuffix(name, ".phn") + ".php"
 			if err := os.WriteFile(filepath.Join(dir, phpName), append([]byte("<?php "), src...), 0o644); err != nil {
 				t.Fatal(err)
@@ -172,6 +175,12 @@ func TestPHPStanParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+// skipParity are the golden files PHPStan cannot judge, with the reason.
+var skipParity = map[string]string{
+	"library-guards.phn": "PHPStan runs on one PHP: on 8.5 the 8.6 side of each version guard does not exist " +
+		"(unknown symbols, PHP_VERSION_ID < 80600 always true), on 8.6 the 8.5 side is dead code",
 }
 
 // usesPhaenonSyntax reports whether a corpus file has constructs PHPStan
