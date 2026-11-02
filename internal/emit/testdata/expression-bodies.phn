@@ -4,8 +4,8 @@ use LogicException;
 
 // An expression body compiles to the block it stands for, on the lines it
 // stands on: `=> expr;` is `{ return expr; }`, or `{ expr; }` under void and
-// never; a body wrapped after the arrow keeps its brace at the declaration's
-// indentation (design/functions.md §3).
+// never; a body wrapped after the arrow hands its brace to the signature's
+// line, and the arrow becomes `return` (design/functions.md §3).
 
 interface Named
 {
@@ -34,6 +34,17 @@ final class User implements Named, \Stringable {
 
     fun greeting(string $salutation, string $punctuation, bool $shout = false): string
         => $shout ? \strtoupper($salutation . ', ' . $this->name . $punctuation) : $salutation . ', ' . $this->name . $punctuation;
+
+    fun described(string $prefix, string $suffix): string
+        => \sprintf(
+            '%s %s %s',
+            $prefix,
+            $this->name,
+            $suffix,
+        );
+
+    fun logged(string $message, string $context): void
+        => $this->record($message . ' (' . $context . ')');
 
     fun counter(): \Closure => fn (): int => $this->calls;
 

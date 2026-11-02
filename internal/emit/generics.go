@@ -538,11 +538,33 @@ func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra st
 	if idx < 0 {
 		return false
 	}
-	tags = l.fillTypes(doc, idx, tags)
-	tags = l.replaceVar(doc, idx, tags)
-	tags = missingTags(doc, tags)
-	if len(tags) == 0 {
-		return false
+	oneLine := !strings.Contains(doc, "\n")
+	filled := doc // a one-line docblock with the types of its own tags filled in
+	if oneLine {
+		// A one-line docblock that becomes several lines is rewritten as a
+		// whole, so the types its tags get (`/** @param $x - prose */`) are
+		// filled into its text rather than in place.
+		saved := l.e
+		l.e = &emitter{src: []byte(doc), opts: saved.opts}
+		tags = l.fillTypes(doc, 0, tags)
+		tags = l.replaceVar(doc, 0, tags)
+		inDoc := l.e
+		l.e = saved
+		tags = missingTags(doc, tags)
+		if len(tags) == 0 {
+			for _, ed := range inDoc.edits {
+				l.e.replace(ast.Span{Start: idx + ed.Start, End: idx + ed.End}, ed.Text)
+			}
+			return false
+		}
+		filled = string(inDoc.apply())
+	} else {
+		tags = l.fillTypes(doc, idx, tags)
+		tags = l.replaceVar(doc, idx, tags)
+		tags = missingTags(doc, tags)
+		if len(tags) == 0 {
+			return false
+		}
 	}
 	if extra != "" && len(missingTags(doc, []string{extra})) > 0 {
 		tags = append(tags, extra)
@@ -550,10 +572,10 @@ func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra st
 	}
 	span := ast.Span{Start: idx, End: idx + len(doc)}
 	indent = l.indentAt(idx)
-	if !strings.Contains(doc, "\n") {
+	if oneLine {
 		// The content moves into a new docblock: its written types erase
 		// as eraseWrittenBytes would have erased them in place.
-		content := eraseBytesInDoc(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(doc, "/**"), "*/")))
+		content := eraseBytesInDoc(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(filled, "/**"), "*/")))
 		if len(tags) == 1 && strings.HasPrefix(tags[0], "@var ") {
 			// A property's one-line `/** what it holds */` keeps its line:
 			// `/** @var list<string> what it holds */` is the PHP it came from.

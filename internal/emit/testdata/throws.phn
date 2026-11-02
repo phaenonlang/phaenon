@@ -74,6 +74,7 @@ final class MemoryStore implements Store {
     /** @throws NotFound */
     fun stated(int $id): string throws NotFound => $this->get($id);
 
+    /** @param $items - the candidates, the first one returned */
     fun first<T of object>(class<T> $class, list<T> $items): T throws NotFound
         => $items[0] ?? throw new NotFound($class);
 

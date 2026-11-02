@@ -30,6 +30,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
 )
 
 // Marker is the comment that identifies generated output; it is always on
@@ -138,6 +139,9 @@ type emitter struct {
 	// throwsWritten are the declarations whose `throws` clause the generics
 	// lowering wrote into the docblock it generated (addDocWith).
 	throwsWritten map[ast.Node]bool
+	// toks is the source's token stream, read when an edit needs a
+	// position the tree does not keep (codeEndBefore).
+	toks []token.Token
 }
 
 func (e *emitter) replace(s ast.Span, text string) {
@@ -181,7 +185,7 @@ func (e *emitter) apply() []byte {
 	pos := 0
 	for _, ed := range e.edits {
 		if ed.Start < pos {
-			panic("emit: overlapping edits")
+			panic(fmt.Sprintf("emit: overlapping edits in %s at line %d: %q", e.opts.SourceName, e.lineOf(ed.Start), ed.Text))
 		}
 		out.Write(e.src[pos:ed.Start])
 		out.WriteString(ed.Text)
