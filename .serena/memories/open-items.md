@@ -327,10 +327,10 @@ Built in the compiler (decisions: `../design/functions.md` §8). Left:
 
 `phaenon/runtime`'s `Phaenon\Debug` (compiler `efdf21b`, runtime `6b0a83d`; design
 `../design/line-map.md` §4.3):
-- **Checker parity gap**: the checker keeps a narrowed static property across a static call
-  inside a loop, PHPStan drops the narrowing; `LineMap.phn`'s first version passed `phn check` and
-  failed PHPStan. The checker must forget a static property's narrowing at any call, as PHPStan
-  does (more lenient than PHPStan is a parity bug).
+- ~~**Checker parity gap**: the checker kept a narrowed static property across a static call~~ —
+  fixed 2026-11-02 (`testdata/call-invalidation.phn`): a void (or constructor) method of the class's
+  own hierarchy, called on `$this` or statically, forgets `$this->…` and the hierarchy's static
+  members, keeping readonly properties and another class's private ones, as PHPStan does.
 - `Throwable::getTrace()` is plain `array` to the checker; `ThrowableRewriter.phn` carries an
   `@var` with PHPStan's frame shape. Refining the overlay would change dogfood findings, so it waits
   for a run over the five trees.

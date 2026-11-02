@@ -267,6 +267,22 @@ func (e *state) invalidateUnder(prefix string) {
 	}
 }
 
+// invalidateOwnScope drops what was narrowed about the current object and
+// the static members of its class hierarchy — `$this->…`, and paths rooted
+// at `self::`, `static::`, `parent::` or a class name own accepts — unless
+// keep spares the path.
+func (e *state) invalidateOwnScope(own func(class string) bool, keep func(key string) bool) {
+	for k := range e.paths {
+		drop := strings.HasPrefix(k, "$this->") || strings.HasPrefix(k, "$this[")
+		if i := strings.Index(k, "::"); !drop && i > 0 && !strings.HasPrefix(k, "$") {
+			drop = own(k[:i])
+		}
+		if drop && !keep(k) {
+			delete(e.paths, k)
+		}
+	}
+}
+
 // invalidateCalls drops the narrowed method-call paths under a receiver:
 // `$dm->flush()` is no longer null once `$dm->add($x)` has run.
 func (e *state) invalidateCalls(receiver string) {

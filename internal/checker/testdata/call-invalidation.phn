@@ -1,0 +1,118 @@
+// A side-effecting call to a method of the class's own hierarchy — on $this,
+// or static: self::, static::, parent::, the class's name — forgets what was
+// narrowed about $this and the class's static members, as PHPStan does; a call
+// to another class, a method returning a value, and a private property of a
+// class other than the called method's keep it.
+namespace App;
+
+final class Other
+{
+    public static function touch(): void
+    {
+    }
+}
+
+class Base
+{
+    protected static ?string $shared = null;
+
+    public function __construct()
+    {
+    }
+
+    public static function reset(): void
+    {
+    }
+}
+
+final class Registry extends Base
+{
+    private static ?string $name = null;
+
+    public ?string $label = null;
+
+    public function __construct()
+    {
+        $this->label = 'a';
+        parent::__construct();
+        echo \strlen($this->label); // want P2103
+    }
+
+    public static function afterOwnStatic(): string
+    {
+        self::$name = 'a';
+        self::flush();
+        return self::$name; // want P2202
+    }
+
+    public static function inLoop(): void
+    {
+        self::$name = 'a';
+        foreach ([1, 2] as $_) {
+            echo \strlen(self::$name); // want P2103
+            self::flush();
+        }
+    }
+
+    public static function afterOtherClass(): string
+    {
+        self::$name = 'a';
+        Other::touch();
+        return self::$name;
+    }
+
+    public static function afterValueMethod(): string
+    {
+        self::$name = 'a';
+        $n = self::count();
+        return self::$name;
+    }
+
+    public static function spelledByName(): string
+    {
+        Registry::$name = 'a';
+        static::flush();
+        return Registry::$name; // want P2202
+    }
+
+    public static function parentCallKeepsPrivate(): string
+    {
+        self::$name = 'a';
+        parent::reset();
+        return self::$name;
+    }
+
+    public static function parentCallDropsInherited(): string
+    {
+        self::$shared = 'a';
+        parent::reset();
+        return self::$shared; // want P2202
+    }
+
+    public function afterOwnInstance(): string
+    {
+        self::$name = 'a';
+        $this->touchOwn();
+        return self::$name; // want P2202
+    }
+
+    public function propertyAfterStatic(): string
+    {
+        $this->label = 'a';
+        self::flush();
+        return $this->label; // want P2202
+    }
+
+    public function touchOwn(): void
+    {
+    }
+
+    public static function flush(): void
+    {
+    }
+
+    public static function count(): int
+    {
+        return 1;
+    }
+}
