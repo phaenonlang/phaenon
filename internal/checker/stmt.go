@@ -901,6 +901,13 @@ func bodyHasYield(stmts []ast.Stmt) bool {
 // and a missing return is reported.
 func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.Stmt, span ast.Span) *state {
 	env := newEnv()
+	// A method that overrides another compiles with the parameters the
+	// override-erasure rule widened (design/generics.md §4.3): a PHP caller
+	// may pass what the overridden method accepts.
+	var widened map[int]types.Type
+	if x.method != nil {
+		widened = x.method.ErasureOverrides()
+	}
 	for i, p := range params {
 		t := p.Type
 		if p.Variadic {
@@ -908,10 +915,14 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 		}
 		env.set(p.Name, t)
 		// What PHP holds the parameter to: the erasure of what was written
-		// (list<Foo> is an array to PHP, class<T> a string).
+		// (list<Foo> is an array to PHP, class<T> a string), or the type the
+		// rule widened it to.
 		native := types.TMixed
 		if p.NativeType != nil {
 			native = types.Erase(p.NativeType)
+		}
+		if w, ok := widened[i]; ok {
+			native = w
 		}
 		if p.Variadic {
 			native = types.Array{Key: types.TInt, Value: native, List: true}
