@@ -43,7 +43,9 @@ func compilePackage(stubs []stdlib.Stub, suggested bool) (map[string][]byte, err
 			continue
 		}
 		f := p.File("<stub>/" + s.Path)
-		php, err := Tree(s.Src, f.AST, Options{SourceName: filepath.Base(s.Path), StrictTypes: true, Program: p, File: f})
+		// No line map: the packages ship without their .phn sources, so
+		// their positions are meant as the PHP they are.
+		php, err := Tree(s.Src, f.AST, Options{SourceName: filepath.Base(s.Path), StrictTypes: true, NoMap: true, Program: p, File: f})
 		if err != nil {
 			return nil, err
 		}

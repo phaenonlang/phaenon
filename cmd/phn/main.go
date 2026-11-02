@@ -214,14 +214,14 @@ func build(args []string) {
 		if err != nil {
 			fail("%v", err)
 		}
-		opts := emit.Options{SourceName: in, StrictTypes: true, Program: loadedProgram, File: loadedProgram.File(in)}
+		dst := outputPath(in)
+		opts := emit.Options{SourceName: in, MapSource: mapSource(in, dst), StrictTypes: true, Program: loadedProgram, File: loadedProgram.File(in)}
 		php, err := emit.File(src, opts)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			failed++
 			continue
 		}
-		dst := outputPath(in)
 		cur, readErr := os.ReadFile(dst)
 		upToDate := readErr == nil && bytes.Equal(cur, php)
 		if upToDate {
@@ -255,6 +255,21 @@ func build(args []string) {
 	default:
 		fmt.Printf("%d files compiled, %d written\n", len(files), written)
 	}
+}
+
+// mapSource is the path a compiled file's line map names: the source
+// relative to the output's directory, with forward slashes
+// (design/line-map.md §3.1), so that it resolves wherever the two are
+// deployed together.
+func mapSource(src, dst string) string {
+	absSrc, err1 := filepath.Abs(src)
+	absDir, err2 := filepath.Abs(filepath.Dir(dst))
+	if err1 == nil && err2 == nil {
+		if rel, err := filepath.Rel(absDir, absSrc); err == nil {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.Base(src)
 }
 
 // ------------------------------------------------------------------ stdlib
