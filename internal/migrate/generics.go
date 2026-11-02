@@ -43,7 +43,7 @@ func Lift(src []byte, opts Options) ([]byte, []Note, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse: %w", err)
 	}
-	l := &lifter{src: src, keepPublic: opts.KeepPublic, prog: opts.Program, pfile: opts.File}
+	l := &lifter{src: src, keepPublic: opts.KeepPublic, prog: opts.Program, pfile: opts.File, stats: opts.Stats}
 	if l.prog == nil || l.pfile == nil {
 		l.prog, l.pfile = nil, nil
 	}
@@ -72,6 +72,10 @@ type lifter struct {
 	prog  *program.Program
 	pfile *program.File
 	class *program.Class
+	// toks is the token stream, read when a clause needs a position the
+	// tree does not keep (tokens); stats counts the lifted @throws tags.
+	toks  tokenIndex
+	stats *Stats
 }
 
 // overrideCtx is what the override-erasure rule needs to know about a
@@ -502,6 +506,7 @@ func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
 		lifted = l.signature(d, fn.Params, fn.ReturnType, sc, nil)
 	}
 	l.paramDocs(fn.Params, lifted, sc, nil)
+	l.liftThrows(d, fn.Name, fn.TypeParams, fn.ReturnType, fn.Throws, sc)
 	l.finish(d)
 	l.stmts(fn.Body, sc)
 }
@@ -525,8 +530,116 @@ func (l *lifter) methodDecl(m *ast.MethodDecl, outer scope) {
 		lifted = l.signature(d, m.Params, m.ReturnType, sc, ov)
 	}
 	l.paramDocs(m.Params, lifted, sc, ov)
+	l.liftThrows(d, m.Name, m.TypeParams, m.ReturnType, m.Throws, sc)
 	l.finish(d)
 	l.stmts(m.Body, sc)
+}
+
+// liftThrows moves the bare @throws tags of a function's docblock into its
+// `throws` clause (design/functions.md §4.3): the tags without a
+// description, several of them into one union, written after the return
+// type (or the parameter list), or added to the clause the declaration
+// has. A tag with a description stays in the docblock, as a typeless
+// @param keeps its prose (D14); so does one whose type is no class (`@throws
+// void`) or names a type parameter left in the docblock.
+func (l *lifter) liftThrows(d *doc, name *ast.Ident, tps []*ast.TypeParam, ret ast.TypeExpr, existing *ast.Throws, sc scope) {
+	if d == nil {
+		return
+	}
+	have := map[string]bool{}
+	if existing != nil {
+		for _, t := range existing.Types {
+			have[strings.ToLower(string(l.src[t.S.Start:t.S.End]))] = true
+		}
+	}
+	var names []string
+	for _, g := range d.groups {
+		if g.name != "@throws" {
+			continue
+		}
+		off := d.start + lineOffset(d, g.first)
+		t, rest, err := docblock.ParseTypePrefix(g.text)
+		if err != nil || t == nil {
+			l.note(off, "kept %s: its type cannot be read", g.tag)
+			continue
+		}
+		written := strings.TrimSpace(g.text[:len(g.text)-len(rest)])
+		if strings.TrimSpace(rest) != "" {
+			l.note(off, "kept %s %s: it has a description", g.tag, written)
+			continue
+		}
+		members, why := throwsMembers(t, sc)
+		if why != "" {
+			l.note(off, "kept %s %s: %s", g.tag, written, why)
+			continue
+		}
+		for _, m := range members {
+			if !have[strings.ToLower(m)] {
+				have[strings.ToLower(m)] = true
+				names = append(names, m)
+			}
+		}
+		d.remove(g)
+		if l.stats != nil {
+			l.stats.Throws++
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	if existing != nil {
+		l.insert(existing.S.End, "|"+strings.Join(names, "|"))
+		return
+	}
+	at := -1
+	if ret != nil {
+		at = ret.Span().End
+	} else {
+		from := name.S.End
+		if len(tps) > 0 {
+			from = tps[len(tps)-1].S.End
+			if i := l.tokens().nextCode(l.tokens().tokenAt(from)); i < len(l.tokens().toks) {
+				from = l.tokens().toks[i].End // past the `>`
+			}
+		}
+		at = l.tokens().parenList(from)
+	}
+	if at < 0 {
+		return
+	}
+	l.insert(at, " throws "+strings.Join(names, "|"))
+}
+
+// throwsMembers splits a @throws type into the class names a `throws`
+// clause can hold, or says why it cannot hold them.
+func throwsMembers(t *docblock.TypeNode, sc scope) ([]string, string) {
+	nodes := []*docblock.TypeNode{t}
+	if t.Kind == docblock.KindUnion {
+		nodes = t.Args
+	}
+	var names []string
+	for _, n := range nodes {
+		if n.Kind != docblock.KindNamed || len(n.Args) > 0 {
+			return nil, "no Phaenon spelling for it"
+		}
+		lower := strings.ToLower(n.Name)
+		if phpTypeKeywords[lower] && lower != "self" && lower != "static" && lower != "parent" {
+			return nil, "no Phaenon spelling for it"
+		}
+		if bound, ok := sc[n.Name]; ok && bound == nil {
+			return nil, "it names a template left in the docblock"
+		}
+		names = append(names, n.Name)
+	}
+	return names, ""
+}
+
+// tokens is the token stream of the source, read once.
+func (l *lifter) tokens() tokenIndex {
+	if l.toks.toks == nil {
+		l.toks = tokenIndex{lexer.Tokenize(l.src, lexer.ModePhaenon)}
+	}
+	return l.toks
 }
 
 func collectNames(t *docblock.TypeNode, into map[string]bool) {

@@ -52,9 +52,11 @@ usage:
                                                            type-check and compile .phn files to .php
   phn check [--json] [--no-deprecations] [--exclude PATH]... [<path>...]
                                                            type-check .phn files, write nothing
-  phn migrate [--keep-docblocks] [--keep-public] [--php X.Y] <path>...
-                                                           rewrite .php files as .phn; lift generic docblocks into syntax,
-                                                           function into fun; --php writes the target into phaenon.json
+  phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--php X.Y] <path>...
+                                                           rewrite .php files as .phn; lift generic docblocks and bare
+                                                           @throws into syntax, function into fun; lay the code out
+                                                           (braces up, one-line docblocks, => bodies) unless
+                                                           --keep-layout; --php writes the target into phaenon.json
   phn stdlib [--out DIR] [--concurrent-out DIR] [--plugin-stubs DIR] [--check]
                                                            write the compiled stdlib (Seq.php, …) into DIR, the compiled
                                                            phaenon/concurrent package into the second, or the PhpStorm
@@ -500,6 +502,7 @@ func migrateCmd(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	keepDoc := fs.Bool("keep-docblocks", false, "leave generic docblocks as they are")
 	keepPublic := fs.Bool("keep-public", false, "write `public fun` and keep `public` before private(set) (Phaenon implies it)")
+	keepLayout := fs.Bool("keep-layout", false, "keep braces, docblocks and bodies as they are (no canonical layout)")
 	phpTarget := fs.String("php", "", "write this target (X.Y) into phaenon.json, creating it if needed")
 	fs.Parse(args)
 	if fs.NArg() == 0 && *phpTarget == "" {
@@ -552,6 +555,8 @@ func migrateCmd(args []string) {
 		prog, _ = loadProgram(model, projectTarget(proj, fs.Args()).Version, false)
 	}
 	skipped, migrated, lifted, kept := 0, 0, 0, 0
+	var stats migrate.Stats
+	linesBefore, linesAfter := 0, 0
 	for _, in := range files {
 		src, err := os.ReadFile(in)
 		if err != nil {
@@ -559,20 +564,25 @@ func migrateCmd(args []string) {
 		}
 		var phn []byte
 		var notes []migrate.Note
+		opts := migrate.Options{Generics: !*keepDoc, KeepPublic: *keepPublic, Layout: !*keepLayout, Stats: &stats, Program: prog, File: modelFile(prog, in)}
 		if strings.HasSuffix(in, ".phn") {
-			if *keepDoc {
-				continue
+			phn = src
+			if !*keepDoc {
+				if phn, notes, err = migrate.Lift(src, opts); err != nil {
+					fail("%s: %v", in, err)
+				}
 			}
-			phn, notes, err = migrate.Lift(src, migrate.Options{KeepPublic: *keepPublic, Program: prog, File: modelFile(prog, in)})
-			if err != nil {
-				fail("%s: %v", in, err)
+			if !*keepLayout {
+				if phn, err = migrate.Layout(phn, &stats); err != nil {
+					fail("%s: %v", in, err)
+				}
 			}
 			if bytes.Equal(phn, src) {
 				continue
 			}
 			lifted++
 		} else {
-			phn, notes, err = migrate.Convert(src, migrate.Options{Generics: !*keepDoc, KeepPublic: *keepPublic, Program: prog, File: modelFile(prog, in)})
+			phn, notes, err = migrate.Convert(src, opts)
 			if err != nil {
 				if errors.Is(err, migrate.ErrNotPlainCode) || errors.Is(err, migrate.ErrGenerated) {
 					fmt.Fprintf(os.Stderr, "%s: skipped: %v\n", in, err)
@@ -587,6 +597,8 @@ func migrateCmd(args []string) {
 			fmt.Fprintf(os.Stderr, "%s:%d: %s\n", in, n.Line, n.Msg)
 			kept++
 		}
+		linesBefore += bytes.Count(src, []byte("\n"))
+		linesAfter += bytes.Count(phn, []byte("\n"))
 		dst := in
 		if strings.HasSuffix(in, ".php") {
 			dst = strings.TrimSuffix(in, ".php") + ".phn"
@@ -601,6 +613,10 @@ func migrateCmd(args []string) {
 		}
 	}
 	fmt.Printf("%d files migrated, %d skipped, %d .phn files updated, %d docblock tags kept\n", migrated, skipped, lifted, kept)
+	if stats != (migrate.Stats{}) {
+		fmt.Printf("%d @throws lifted, %d bodies written as =>, %d braces moved up, %d docblocks collapsed; %d lines became %d\n",
+			stats.Throws, stats.Arrows, stats.Braces, stats.Docblocks, linesBefore, linesAfter)
+	}
 }
 
 // modelFile returns the file at path in the program model, nil without one.

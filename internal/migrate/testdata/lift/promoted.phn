@@ -7,8 +7,7 @@ use Closure;
  * property's own `@var` is lifted; a closure in a union is spelled last.
  */
 #[\Attribute(\Attribute::TARGET_CLASS)]
-final readonly class Binding<T of object>
-{
+final readonly class Binding<T of object> {
     fun __construct(
         public class<T> $class,
         public T|Closure(): T $instance,
