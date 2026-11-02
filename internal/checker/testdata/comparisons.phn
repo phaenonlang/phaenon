@@ -1,0 +1,40 @@
+// Comparisons with an object operand. Objects compare with each other
+// through their class (DateTimeInterface by instant, others property by
+// property); against an int or a float PHP converts the object to a number,
+// a Notice and a meaningless answer (PHPStan: smaller.invalid and kin).
+namespace App\Comparisons;
+
+final class Money
+{
+    public function __construct(public int $cents = 0)
+    {
+    }
+}
+
+function objects(\DateTimeImmutable $a, \DateTimeImmutable $b, Money $m, Money $n, object $o): void
+{
+    echo $a < $b ? 'earlier' : 'later';
+    echo $a == $b ? 'same' : 'other';
+    echo $a <=> $b;
+    echo $m >= $n ? 'more' : 'less';
+    echo $m == $n ? 'equal' : 'different';
+}
+
+function withNumbers(\DateTimeImmutable $a, Money $m, object $o, int $i, float $f, ?int $maybe, int|string $key): void
+{
+    echo $m < 5 ? 'a' : 'b'; // want P2301 "comparison < between App\Comparisons\Money and 5"
+    echo $m == $i ? 'a' : 'b'; // want P2301
+    echo $a != 0 ? 'a' : 'b'; // want P2301
+    echo $m <=> $f; // want P2301
+    echo 10 > $o ? 'a' : 'b'; // want P2301
+    echo $m >= $maybe ? 'a' : 'b'; // want P2301
+    echo $m <= $key ? 'a' : 'b'; // want P2301
+    echo $m == 'cents' ? 'a' : 'b';
+}
+
+function overloaded(\GMP $g, int|Money $either): void
+{
+    echo $g < 5 ? 'small' : 'big';
+    echo $g == 0 ? 'zero' : 'nonzero';
+    echo $either < 5 ? 'a' : 'b';
+}
