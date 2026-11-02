@@ -80,12 +80,12 @@ func TestGenerics(t *testing.T) {
 			compiled[name] = src
 		}
 		for _, s := range append(stdlib.Runtime(), stdlib.Concurrent()...) {
-			name, src := filepath.Base(s.Path), s.Src
-			if strings.HasSuffix(name, ".phn") {
-				name = strings.TrimSuffix(name, ".phn") + ".php"
+			name, src := packagePath(s.Path), s.Src
+			if strings.HasSuffix(s.Path, ".phn") {
 				src = compiled[name]
 			}
-			path := filepath.Join(dir, name)
+			path := filepath.Join(dir, filepath.FromSlash(name))
+			os.MkdirAll(filepath.Dir(path), 0o755)
 			os.WriteFile(path, src, 0o644)
 			runtimeStubs = append(runtimeStubs, path)
 		}
