@@ -251,24 +251,28 @@ push dogfood work without a maintainer's go-ahead.
 - **D19 rebuild (2026-11-02):** compiled output is laid out as PSR-12 wants it and ends with a
   line map (`../design/line-map.md`). Each tree was re-lifted (class-like braces back on their own
   lines, `line-map.md` §7), rebuilt and verified with `phn` from compiler `6f97507`, then re-lifted
-  again for empty bodies written `{}` (`../design/functions.md` §5.1) with `phn` from `a7dcf05`;
-  every re-lift commit is in the tree's `.git-blame-ignore-revs`, in a `chore:` commit after it.
+  again for empty bodies written `{}` (`../design/functions.md` §5.1) with `phn` from `a7dcf05`,
+  and a third time for empty class-likes written `{}` on the header's line (same section) with
+  `phn` from `dec3b48`; every re-lift commit is in the tree's `.git-blame-ignore-revs`, in a
+  `chore:` commit after it.
 
-  | Tree | Commits | Class braces down | Empty bodies `{}` | `.phn` lines | Verified (after the last commit) |
-  |---|---|---|---|---|---|
-  | reflector | `a80057b` + `2ba2e7d`, `e21cf42` outputs + cs, `75333d8` + `78c779a` | 17 | 8 | 622 → 639 → 631 | suite 25, PHPStan 10, cs 0 of 19, `phn check` 0 errors / 1 warning |
-  | object-mapper | `91522de` + `f8d31e2`, `88461df` outputs + cs, `1175a6e` + `7df643d` | 51 | 27 | 1,327 → 1,378 → 1,351 | suite 19, PHPStan 10, cs 0 of 52, `phn check` 2 errors / 5 warnings |
-  | mongodb-odm | `c5b65df` + `51b975f`, `dc9ffeb` outputs + cs, `3c75b3d` + `f0d6054` | 125 | 53 | 9,838 → 9,963 → 9,910 | suite 162, PHPStan max, cs 0 of 126, `phn check` 3 errors / 22 warnings |
-  | core | `df24cb74` + `310db6ce`, `5b1cfa2f` rule fixtures, `407c6506` cs, `eb0647e5` + `27d06810` | 799 | 294 | 55,850 → 56,649 → 55,874 (800 files) | suite 1188, PHPStan max, cs 0 of 813, `phn check` 11 errors / 8 warnings |
-  | tq-cli | `bc3ee07` + `3ac27ec`, `94188dc` cs, `c1eb15b` + `f6da360` | 867 | 232 | 107,837 → 108,704 → 108,472 | suite 2052, PHPStan 10, cs 0 of 586, `phn check` 0 errors / 3 warnings |
+  | Tree | Commits | Class braces down | Empty bodies `{}` | Empty class-likes `{}` | `.phn` lines | Verified (after the last commit) |
+  |---|---|---|---|---|---|---|
+  | reflector | `a80057b` + `2ba2e7d`, `e21cf42` outputs + cs, `75333d8` + `78c779a`, `3aeb3ec` + `60fbe44` | 17 | 8 | 6 | 622 → 639 → 631 → 619 | suite 25, PHPStan 10, cs 0 of 19, `phn check` 0 errors / 1 warning |
+  | object-mapper | `91522de` + `f8d31e2`, `88461df` outputs + cs, `1175a6e` + `7df643d`, `a152965` + `8e0d455` | 51 | 27 | 1 | 1,327 → 1,378 → 1,351 → 1,349 | suite 19, PHPStan 10, cs 0 of 52, `phn check` 2 errors / 5 warnings |
+  | mongodb-odm | `c5b65df` + `51b975f`, `dc9ffeb` outputs + cs, `3c75b3d` + `f0d6054`, `a49ed72` + `4886010` | 125 | 53 | 7 | 9,838 → 9,963 → 9,910 → 9,896 | suite 162, PHPStan max, cs 0 of 126, `phn check` 3 errors / 22 warnings |
+  | core | `df24cb74` + `310db6ce`, `5b1cfa2f` rule fixtures, `407c6506` cs, `eb0647e5` + `27d06810`, `d874af6c` + `c18edc22` | 799 | 294 | 43 | 55,850 → 56,649 → 55,874 → 55,788 (800 files) | suite 1188, PHPStan max, cs 0 of 813, `phn check` 11 errors / 8 warnings |
+  | tq-cli | `bc3ee07` + `3ac27ec`, `94188dc` cs, `c1eb15b` + `f6da360`, `e8a4e3d` + `e6e3406` | 867 | 232 | 10 | 107,837 → 108,704 → 108,472 → 108,452 | suite 2052, PHPStan 10, cs 0 of 586, `phn check` 0 errors / 3 warnings |
 
   - Every hunk of each re-lift was checked mechanically: a class-like's `… {` split into the
-    declaration and `{`, or an empty body's `{` + `}` joined into `{}`; nothing else, and a second
-    `phn migrate` run is a no-op.
+    declaration and `{`, an empty body's `{` + `}` joined into `{}`, or an empty class-like's
+    header, `{` and `}` joined into `… {}`; nothing else, and a second `phn migrate` run is a no-op.
+    migrate's summary counts the empty class-likes under "empty bodies written as {}".
   - **Compiled code unchanged:** the in-place libraries' rebuilt `.php` have the token streams of
-    the line-rule outputs (whitespace and comments aside), all 194 files; the empty-body pass
-    changes only the line maps (core's and tq-cli's outputs compared with a build of the commit
-    before it by the same binary).
+    the line-rule outputs (whitespace and comments aside), all 194 files; the empty-body and
+    empty class-like passes change only the line maps (an empty class still compiles to PSR-12's
+    `{` and `}` lines; core's and tq-cli's outputs compared with a build of the commit before, or
+    with the outputs before the rebuild).
   - **php-cs-fixer without compiled-tree exceptions:** core drops seven rules (the four line-1
     rules, `braces_position`, `class_definition`, `single_line_after_imports`), tq-cli six (it never
     had the last), so both configurations are `main`'s apart from the finder reading `.src`/`.tests`.
@@ -283,6 +287,10 @@ push dogfood work without a maintainer's go-ahead.
     longer reports core's P2401 at `tests/Integration/UnitOfWorkTest.phn:201`, after
     `assertFalse(self::dm()->isTracked($loadedBefore))` follows an `assertTrue` of the same call
     with `self::bus()->dispatch()` between them.
+  - odm's `BuildInProgressTest::testASupersededIndexGoesOnlyOnceTheDeclaredOneIsBuilt` ("The
+    server builds on after the client gave up") failed once in a pre-commit hook right after the
+    MongoDB container was started, and passed on the retry: it races a real index build, so a
+    cold server can lose it. The commit had changed only line maps.
   - `vendor/bin/phpunit | phn trace` shows failures at `.phn` lines. Left alone as before:
     `.serena/project.yml` (odm, object-mapper), object-mapper's untracked `config/reference.php`.
 
