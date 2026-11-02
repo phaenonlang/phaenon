@@ -230,7 +230,9 @@ Decisions are in `../design/php-versions.md` §9; these are what the first build
 ## M6 — tooling, analysis rules
 
 - **Throw analysis** — dead `catch` blocks, `@throws` checking (PHPStan `catch.neverThrown`;
-  allow-listed in the parity test).
+  allow-listed in the parity test). Since D18 (2026-11-02) it should read the `throws` clause
+  (`../design/functions.md` §4.1), and match PHPStan 2's `throws.unusedType`, which level max
+  reports for a clause the body never throws (allow-listed beside `catch.neverThrown`).
 - **Purity / unused result** — PHPStan `function/method/expr.resultUnused`, `void.pure`,
   `@phpstan-pure`; allow-listed.
 - **Dead code / unused members** — `method/property/constant/classConstant.unused`; allow-listed.
@@ -290,6 +292,29 @@ Decisions are in `../design/php-versions.md` §9; what was left:
   without `validateId()`, objects passed to `array_walk()`, `http_build_query()`,
   `mb_convert_variables()`, `ReflectionProperty::setValue()` with a foreign object, 16+
   `php://filter` filters) are not reported.
+
+## D18 — expression bodies, `throws`, canonical layout (2026-11-02)
+
+Built in the compiler (decisions: `../design/functions.md` §8). Left:
+
+- **Re-lift of the dogfood trees** (phase 2): waits for the PhpStorm plugin to read `=>` bodies and
+  `throws`, since the plugin's real-tree tests read the trees. Measured on scratch copies first
+  (core: 849 arrows, 3,159 braces, 253 docblocks, 64 `@throws`, 61,947 → 55,850 `.phn` lines;
+  tq-cli: 1,295 / 5,048 / 318 / 24, 116,998 → 107,837); suites, PHPStan and cs green, every
+  compiled file token-identical to the old output once comments are set aside. Core's
+  `tests/PHPStan/Data` fixtures are re-lifted with `--keep-layout`: the rule tests assert the line
+  of each finding in them (seven fail when the fixtures are laid out). The dogfood configs need
+  `braces_position` and `class_definition` off in php-cs-fixer.
+- **Prefix expressions' spans end at their operator** — `throw $e`, `print $x`, `clone $o`, `!$x`,
+  casts, `include`, `yield from`, `$$x` (and a `->` property fetch's name): the struct literals in
+  `internal/parser/expr.go` compute `S` before parsing the operand. Found while building D18;
+  `internal/migrate/layout.go` measures an expression to the statement's `;` instead. Fixing the
+  parser needs a look at every pass that reads those spans' ends.
+- **An empty body keeps two lines** after the brace moves up (`fun __construct(private Foo $f) {`
+  / `}`); collapsing it to `{}` is `phn fmt`'s choice (PER-CS's `single_line_empty_body`).
+- **A docblock below the attributes** (`#[A] /** … */ fun f()`) is read by PHP's reflection but not
+  by PHPStan; the emitter writes generated tags into a docblock of their own above the attributes
+  (`4d6898d`). `phn migrate` could move such a docblock above the attributes.
 
 ## Small things
 
