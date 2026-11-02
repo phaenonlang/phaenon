@@ -84,7 +84,7 @@ func File(src []byte, opts Options) ([]byte, error) {
 
 // Tree compiles an already parsed file. src must be the text f was parsed from.
 func Tree(src []byte, f *ast.File, opts Options) ([]byte, error) {
-	e := &emitter{src: src, opts: opts}
+	e := &emitter{src: src, opts: opts, throwsWritten: map[ast.Node]bool{}}
 	if err := e.lowerGenerics(f); err != nil {
 		return nil, err
 	}
@@ -135,6 +135,9 @@ type emitter struct {
 	// writes, lower-cased: names an import of the same short name would
 	// re-resolve (qualifiedHead).
 	qualifiedHeads map[string]bool
+	// throwsWritten are the declarations whose `throws` clause the generics
+	// lowering wrote into the docblock it generated (addDocWith).
+	throwsWritten map[ast.Node]bool
 }
 
 func (e *emitter) replace(s ast.Span, text string) {
