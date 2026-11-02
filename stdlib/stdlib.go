@@ -28,6 +28,9 @@ var runtime embed.FS
 //go:embed all:concurrent
 var concurrent embed.FS
 
+//go:embed all:suggested
+var suggested embed.FS
+
 //go:embed constants.php
 var constants []byte
 
@@ -71,7 +74,9 @@ func EmbeddedExtensions() map[string]bool {
 }
 
 // Runtime returns the declarations of the phaenon/runtime package
-// (`\Phaenon\Type`), which compiled code may depend on.
+// (`\Phaenon\Type`, the stdlib written in Phaenon, the `Phaenon\Debug`
+// line-map support), which compiled code may depend on. A file's path below
+// runtime/ is its path below the package's src/.
 func Runtime() []Stub {
 	return append(walk(runtime, "runtime", ".php"), walk(runtime, "runtime", ".phn")...)
 }
@@ -81,6 +86,20 @@ func Runtime() []Stub {
 // Revolt API it is built on, which compiled `concurrently` blocks depend on.
 func Concurrent() []Stub {
 	return append(walk(concurrent, "concurrent", ".php"), walk(concurrent, "concurrent", ".phn")...)
+}
+
+// Suggested returns Phaenon's declarations of the libraries phaenon/runtime
+// suggests — Monolog 3 and the Sentry SDK 4 — limited to the API its
+// integrations in runtime/Debug are written against. Unlike Runtime and
+// Concurrent they never enter a project's program (program.LoadStubs): a
+// project that logs with Monolog has the real library in its vendor
+// directory, and an embedded declaration would shadow it, as the amp
+// declarations shadow amphp/amp. Only the programs that check and compile
+// the stdlib itself load them (program.LoadSuggested). The runtime
+// package's PHPStan run, against the real libraries, is what keeps them
+// honest.
+func Suggested() []Stub {
+	return walk(suggested, "suggested", ".php")
 }
 
 func walk(f embed.FS, root, suffix string) []Stub {

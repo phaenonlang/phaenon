@@ -17,7 +17,7 @@ The workspace is `~/labs/phaenon/`; the other repos are siblings, reached as `..
 |---|---|---|---|---|
 | **phaenon** | `.` | `phaenonlang/phaenon` | The compiler `phn`: lexer, parser, checker, emitter, migrate; embedded PHP signatures | [Build and test](#build-and-test) |
 | **design** | `../design` | `phaenonlang/design` | The language design and every decision: `language-overview.md` (scope), `generics.md` (decisions §11), `checker.md` (decisions §9, open §10), `roadmap.md` (decisions D1–D8, milestones M0–M7, working method §4) | Markdown only |
-| **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `\Phaenon\Type`, behind structural `is` / `as`; `Seq`, `Map`, `Str`, `Bytes` behind method syntax | `composer install`, `composer test`, `composer stan` |
+| **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `\Phaenon\Type`, behind structural `is` / `as`; `Seq`, `Map`, `Str`, `Bytes` behind method syntax; `Phaenon\Debug`: the line map reader (`LineMap`), a Monolog processor and a Sentry integration that point production errors at `.phn` positions (`../design/line-map.md` §4.3); `src/` except `Type.php` is compiled from `stdlib/runtime/**/*.phn` | `composer install`, `composer test`, `composer stan` |
 | **concurrent** | `../concurrent` | `phaenonlang/concurrent` | Composer package `phaenon/concurrent`: `\Phaenon\Concurrent\Scope` behind `concurrently { }` and `spawn`, on amp v3 / Revolt; `src/Scope.php` is compiled from `stdlib/concurrent/Scope.phn` here | `composer install`, `composer test`, `composer stan` |
 | **jetbrains** | `../jetbrains` | `phaenonlang/jetbrains` | PhpStorm plugin: `.phn` read as PHP code without the open tag (Kotlin, Gradle); no Phaenon-only syntax yet | `./gradlew test`, `./gradlew buildPlugin` |
 | **php-src** | `../php-src` | clone of `php/php-src` | **Read-only reference.** The scanner and grammar the lexer and parser port, the `.phpt` corpus of the conformance suite, the source of `stdlib/php-src` | Never modify, build or change its git state |
@@ -65,7 +65,8 @@ internal/checker      the type checker behind `phn check`
 internal/emit         patch-based, line-preserving emitter; generics erasure, is/as lowering
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
 internal/conformance  suites over the php-src corpus with `php` as the oracle
-stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime and phaenon/concurrent sources (.phn), the amp/Revolt declarations
+stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime and phaenon/concurrent sources (.phn), the amp/Revolt declarations;
+                      suggested/: the Monolog and Sentry API the runtime's Debug integrations are checked against, loaded only by the stdlib's own programs
 stdlib/gen            generator of stdlib/php-src (the newest release branch's stubs), versions_gen.go (the release each symbol came in) and constants.php
 ```
 
@@ -91,9 +92,12 @@ PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go generate ./stdlib        # refresh
 README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`. `phn stdlib` writes the
 runtime package (`--out ../runtime/src`), the concurrent package (`--concurrent-out
 ../concurrent/src`) and the PhpStorm plugin's pseudo-classes (`--plugin-stubs
-../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`) from `stdlib/runtime/*.phn` and
+../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`) from `stdlib/runtime/**/*.phn`
+(a subdirectory there is one in `src/`: `Debug/LineMap.phn` → `src/Debug/LineMap.php`) and
 `stdlib/concurrent/Scope.phn`; the tests `TestRuntimePackageFresh`, `TestConcurrentPackageFresh`
-and `TestPluginStubsFresh` fail when a checkout is stale.
+and `TestPluginStubsFresh` fail when a checkout is stale. They look for the checkouts beside the
+repository root (`../../../<repo>` from their package) and skip when there are none, as in a git
+worktree kept elsewhere: there, `phn stdlib … --check` with the sibling paths does the same check.
 
 ## How work is done
 

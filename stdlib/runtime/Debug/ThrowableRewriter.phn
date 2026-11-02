@@ -1,0 +1,114 @@
+namespace Phaenon\Debug;
+
+use Error;
+use Exception;
+use ReflectionProperty;
+use Throwable;
+use WeakMap;
+
+/**
+ * Points a throwable at its .phn source, in place: the file and line it was
+ * thrown at, the file and line of every frame of its trace and the lines in
+ * its closures' names (`{closure:…:12}`), and the same for every previous
+ * throwable, wherever a compiled file's LineMap says where they came from.
+ * Positions in files without a map stay as they are.
+ *
+ * PHP reports these positions only through Throwable's final getters, and
+ * every consumer reads them there — Monolog's formatters, Sentry's frames,
+ * Symfony's error page, PHP's own output for an uncaught exception — so the
+ * rewrite sets the properties behind the getters, as Symfony's ErrorHandler
+ * sets the trace of the errors it turns into exceptions. Everything that
+ * sees the throwable afterwards sees source positions. A throwable is
+ * rewritten once per process: rewriting it again does nothing, so no
+ * position is ever translated twice.
+ */
+final class ThrowableRewriter
+{
+    /**
+     * The rewritten throwables, each with the compiled position it was
+     * thrown at.
+     *
+     * @var WeakMap<Throwable, array{string, int}>|null
+     */
+    private static ?WeakMap $rewritten = null;
+
+    /** Exception's and Error's file, line and trace properties, by "Class::name". */
+    private static map<string, ReflectionProperty> $properties = [];
+
+    private fun __construct()
+    {
+    }
+
+    /** Rewrites $e and its previous chain, the throwables not rewritten before. */
+    static fun rewrite(Throwable $e): void
+    {
+        $rewritten = self::$rewritten ??= new WeakMap();
+        for ($t = $e; $t !== null && !isset($rewritten[$t]); $t = $t->getPrevious()) {
+            $rewritten[$t] = [$t->getFile(), $t->getLine()];
+            self::rewriteOne($t);
+        }
+    }
+
+    /**
+     * The compiled position $e was thrown at, when rewrite() moved it to the
+     * source; null for a throwable not rewritten, or thrown where no map
+     * applies.
+     */
+    static fun compiledPosition(Throwable $e): ?(string, int)
+    {
+        if (self::$rewritten === null || !isset(self::$rewritten[$e])) {
+            return null;
+        }
+        $position = self::$rewritten[$e];
+
+        return $position[0] === $e->getFile() && $position[1] === $e->getLine() ? null : $position;
+    }
+
+    private static fun rewriteOne(Throwable $t): void
+    {
+        $class = $t instanceof Exception ? Exception::class : Error::class;
+        $file = $t->getFile();
+        $map = LineMap::forFile($file);
+        if ($map !== null) {
+            self::property($class, 'file')->setValue($t, $map->sourceFile());
+            self::property($class, 'line')->setValue($t, $map->sourceLine($t->getLine()));
+        }
+        /** @var list<array{function: string, line?: int, file?: string, class?: class-string, type?: '::'|'->', args?: list<mixed>, object?: object}> $trace */
+        $trace = $t->getTrace();
+        $changed = false;
+        // A frame names the function called at its position; that function's
+        // code — a closure's body among it — runs at the position before:
+        // where the throwable was thrown, then the previous frame's call.
+        $inside = $file;
+        $insideMap = $map;
+        foreach ($trace as $i => $frame) {
+            if ($insideMap !== null) {
+                $function = $insideMap->closureName($frame['function'], $inside, $insideMap->sourceFile());
+                if ($function !== $frame['function']) {
+                    $trace[$i]['function'] = $function;
+                    $changed = true;
+                }
+            }
+            if (!isset($frame['file'], $frame['line'])) {
+                $insideMap = null; // the next function was called by the engine
+                continue;
+            }
+            $inside = $frame['file'];
+            $insideMap = LineMap::forFile($inside);
+            if ($insideMap !== null) {
+                $trace[$i]['file'] = $insideMap->sourceFile();
+                $trace[$i]['line'] = $insideMap->sourceLine($frame['line']);
+                $changed = true;
+            }
+        }
+        if ($changed) {
+            self::property($class, 'trace')->setValue($t, $trace);
+        }
+    }
+
+    /** @param class-string $class */
+    private static fun property(string $class, string $name): ReflectionProperty
+    {
+        return self::$properties[$class . '::' . $name] ??= new ReflectionProperty($class, $name);
+    }
+}
