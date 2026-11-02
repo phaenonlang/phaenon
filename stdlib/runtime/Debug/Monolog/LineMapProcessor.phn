@@ -1,0 +1,61 @@
+namespace Phaenon\Debug\Monolog;
+
+use Monolog\LogRecord;
+use Monolog\Processor\ProcessorInterface;
+use Phaenon\Debug\ThrowableRewriter;
+use Throwable;
+
+/**
+ * A Monolog 3 processor that points a record's exception at its .phn source
+ * (design/line-map.md §4.3): `context.exception`, its previous chain and
+ * every frame of their traces, rewritten in place by ThrowableRewriter, so
+ * that every formatter — line, JSON, Logstash, the console — and every
+ * handler, Sentry's among them, reads source positions. Where the record's
+ * message quotes an exception's compiled position, as Symfony's
+ * `Uncaught PHP Exception … at Foo.php line 57` and Monolog's own error
+ * handler do, the message quotes the source position instead.
+ *
+ * Formatters normalise the exception after the processors have run, from
+ * the throwable's final getters, so nothing a processor adds beside the
+ * throwable reaches the formatter's exception field: the throwable itself
+ * is rewritten. A record without an exception costs one array lookup.
+ */
+final class LineMapProcessor implements ProcessorInterface
+{
+    fun __invoke(LogRecord $record): LogRecord
+    {
+        $exception = $record->context['exception'] ?? null;
+        if (!$exception instanceof Throwable) {
+            return $record;
+        }
+        try {
+            ThrowableRewriter::rewrite($exception);
+            $message = $record->message;
+            for ($e = $exception; $e !== null; $e = $e->getPrevious()) {
+                $compiled = ThrowableRewriter::compiledPosition($e);
+                if ($compiled !== null) {
+                    $message = self::quoteSource($message, $compiled[0], $compiled[1], $e->getFile(), $e->getLine());
+                }
+            }
+        } catch (Throwable) {
+            return $record; // the positions stay compiled; the record is never lost to the map
+        }
+
+        return $message === $record->message ? $record : $record->with(message: $message);
+    }
+
+    /**
+     * $message with a compiled position quoted the ways PHP, Monolog and
+     * Symfony quote one — the path or its base name, then `:57`, ` line 57`,
+     * ` on line 57` or `(57)` — replaced by the source position.
+     */
+    private static fun quoteSource(string $message, string $compiledFile, int $compiledLine, string $sourceFile, int $sourceLine): string
+    {
+        foreach ([[$compiledFile, $sourceFile], [basename($compiledFile), basename($sourceFile)]] as [$from, $to]) {
+            $pattern = '~(?<![\w./\\\\-])' . preg_quote($from, '~') . '(:| on line | line |\()' . $compiledLine . '(?![0-9])~';
+            $message = preg_replace_callback($pattern, static fn (array $m): string => $to . $m[1] . $sourceLine, $message) ?? $message;
+        }
+
+        return $message;
+    }
+}

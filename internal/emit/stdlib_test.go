@@ -4,8 +4,41 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 )
+
+// TestStdlibPackagePaths: the compiled stdlib keeps the layout of its
+// sources below stdlib/runtime, which is the runtime package's src/ and its
+// PSR-4 namespace (Phaenon\Debug\Monolog\LineMapProcessor in
+// Debug/Monolog/LineMapProcessor.php).
+func TestStdlibPackagePaths(t *testing.T) {
+	compiled, err := Stdlib()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Bytes.php", "Debug/LineMap.php", "Debug/Monolog/LineMapProcessor.php", "Debug/Sentry/LineMapIntegration.php", "Debug/ThrowableRewriter.php", "Map.php", "Seq.php", "Str.php"}
+	var got []string
+	for name := range compiled {
+		got = append(got, name)
+	}
+	sort.Strings(got)
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("Stdlib() compiles\n%v\nwant\n%v", got, want)
+	}
+	for stub, want := range map[string]string{
+		"runtime/Seq.phn":           "Seq.php",
+		"runtime/Type.php":          "Type.php",
+		"runtime/Debug/LineMap.phn": "Debug/LineMap.php",
+		"concurrent/Scope.phn":      "Scope.php",
+		"concurrent/amp/Amp.php":    "amp/Amp.php",
+	} {
+		if got := packagePath(stub); got != want {
+			t.Errorf("packagePath(%q) = %q, want %q", stub, got, want)
+		}
+	}
+}
 
 // TestRuntimePackageFresh compares the compiled stdlib with what the
 // phaenon/runtime package ships in the sibling checkout (../runtime/src):

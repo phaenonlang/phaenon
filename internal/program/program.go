@@ -150,6 +150,23 @@ func (p *Program) LoadStubs() error {
 	return nil
 }
 
+// LoadSuggested declares the embedded Monolog and Sentry declarations
+// (stdlib.Suggested) that the runtime package's integrations are written
+// against, after LoadStubs. Only the programs that check or compile the
+// stdlib itself call it: in a project's program they would shadow the real
+// libraries its vendor directory holds.
+func (p *Program) LoadSuggested() error {
+	if err := p.LoadStubs(); err != nil {
+		return err
+	}
+	for _, s := range stdlib.Suggested() {
+		if _, err := p.AddFile("<stub>/"+s.Path, s.Src, lexer.ModePHP, false); err != nil {
+			return fmt.Errorf("%s: %w", s.Path, err)
+		}
+	}
+	return nil
+}
+
 // reStubKeywordFn matches the stub declarations of functions whose names are
 // keywords (`function clone(…)`, `exit`, `die`): valid for php-src's
 // generator, not for PHP. The checker types those forms as syntax.
