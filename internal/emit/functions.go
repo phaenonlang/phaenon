@@ -226,7 +226,10 @@ func (e *emitter) mergeThrows(declStart, nameStart int, doc, tag string) {
 		return
 	}
 	idx := bytes.LastIndex(e.src[:nameStart], []byte(doc))
-	if idx < 0 {
+	if idx < 0 || idx >= declStart {
+		// A docblock between the attributes and the declaration is not the
+		// one PHPStan reads (it reads the comment before the attributes):
+		// the tag gets a docblock of its own there.
 		e.insert(declStart, "/** "+tag+" */ ")
 		return
 	}

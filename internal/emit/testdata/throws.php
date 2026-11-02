@@ -56,6 +56,10 @@ final class MemoryStore implements Store {
     /** @throws NotFound */ #[\Deprecated]
     public function old(int $id): string { return $this->get($id); }
 
+    /** @throws NotFound */ #[\Deprecated]
+    /** Below its attribute, where PHPStan does not read a docblock. */
+    public function below(int $id): string { return $this->get($id); }
+
     /** Kept apart from its declaration.
      * @throws NotFound */
     public function apart(int $id): string { return $this->get($id); }
