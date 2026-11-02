@@ -94,6 +94,14 @@ writes nothing then. For an 8.5 target, what PHP 8.6 added is lowered to 8.5 cod
 lowering is exact (partial application in most forms, `#[\Override]` on constants) and reported
 otherwise, as "… needs PHP 8.6 (target 8.5)" (`P1002`).
 
+The library is PHP 8.6's whatever the target: a function, class, method, constant or parameter
+8.6 added is reported where an 8.5 target uses it, "clamp() needs PHP 8.6 (target 8.5)" (`P4011`),
+unless a polyfill declares it or a guard tests for it (`function_exists('clamp')`,
+`PHP_VERSION_ID >= 80600`). What PHP deprecates is reported whatever the target, since code compiled
+for 8.5 runs on 8.6 too: library symbols (`P4006`, from the stubs' `#[\Deprecated]`) and language
+constructs (`P1101`); `--no-deprecations` hides both. Extensions outside php-src are read from the
+local `php` (`PHN_PHP` names another), which should be as new as the target (`P4012` otherwise).
+
 `phn migrate` strips `<?php`, `declare(strict_types=1)` and a trailing `?>`, then lifts what
 PHPStan code says in comments into the signature: `@template T of Foo` → `<T of Foo>`, `@extends
 Base<T>` → `extends Base<T>`, `@param list<T> $xs` → `list<T> $xs`, `@return T` → `: T`, a
@@ -212,7 +220,13 @@ phn print [--php] file                    # parse and pretty-print
 go test ./...                                   # unit tests
 PHAENON_PHP_SRC=/abs/path/to/php-src go test ./internal/conformance/   # lexer, parser, printer round trip
 PHAENON_EXEC=1 PHAENON_PHP_SRC=/abs/path/to/php-src go test ./internal/conformance/ -run Execution -timeout 30m
+PHAENON_PHP_SRC=/abs/path/to/php-src go generate ./stdlib              # refresh the stubs and the version table
 ```
+
+`stdlib/php-src` holds the `*.stub.php` files of php-src's newest supported release branch, and
+`stdlib/versions_gen.go` the release each library symbol appeared in, both written by `stdlib/gen`
+from `git archive` of the release branches (the clone is never touched). `go run ./stdlib/gen -php
+/path/to/php8.6` also rewrites `stdlib/constants.php` from that php; `-check` verifies instead.
 
 The execution tests run every `Zend/tests` file through `php` twice — once as written and once
 after a transformation — and compare the output. `TestPrinterExecution` checks the pretty-printer
