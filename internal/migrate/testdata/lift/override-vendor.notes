@@ -1,0 +1,2 @@
+33: kept @return User|null: it erases to a different type than the declared ?object
+58: kept @param T: it erases to a different type than the declared object

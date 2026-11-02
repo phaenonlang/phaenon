@@ -8,6 +8,14 @@ package migrate
 // in place with a note, so a migration never changes what PHPStan or PHP
 // see: a tag is lifted only when its type is expressible in Phaenon syntax
 // and erases back to exactly the native type that was declared.
+//
+// "Erases" includes the override-erasure rule (design/generics.md §4.3):
+// a method that overrides or implements another compiles with its
+// parameters widened to the overridden method's types and its return
+// narrowed to it. With a program model (Options.Program) the lift
+// predicts that signature, and lifts `@param T $x` over `Aggregate $x`
+// when T's bound is narrower but the method it implements takes an
+// Aggregate: the compiled method declares Aggregate either way.
 
 import (
 	"bytes"
@@ -19,6 +27,8 @@ import (
 	"github.com/phaenonlang/phaenon/internal/docblock"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/types"
 )
 
 // Note records a docblock tag Lift left in place, and why.
@@ -33,7 +43,10 @@ func Lift(src []byte, opts Options) ([]byte, []Note, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse: %w", err)
 	}
-	l := &lifter{src: src, keepPublic: opts.KeepPublic}
+	l := &lifter{src: src, keepPublic: opts.KeepPublic, prog: opts.Program, pfile: opts.File}
+	if l.prog == nil || l.pfile == nil {
+		l.prog, l.pfile = nil, nil
+	}
 	l.stmts(f.Stmts, nil)
 	sort.SliceStable(l.notes, func(i, j int) bool { return l.notes[i].Line < l.notes[j].Line })
 	return l.apply(), l.notes, nil
@@ -53,6 +66,21 @@ type lifter struct {
 	// `\App\Model\Row` and a declared, imported `Row` are the same class.
 	ns   string
 	uses map[string]string
+	// prog and pfile are the program model and this file in it, read
+	// before the lift (nil without one); class is the declaration being
+	// lifted, as the model knows it.
+	prog  *program.Program
+	pfile *program.File
+	class *program.Class
+}
+
+// overrideCtx is what the override-erasure rule needs to know about a
+// method that overrides another: the method as the program model read it
+// before the lift, and the types PHP sees in the method it overrides.
+type overrideCtx struct {
+	method *program.Method
+	params []types.Type // nil entries: untyped
+	ret    types.Type
 }
 
 var phpTypeKeywords = map[string]bool{
@@ -385,6 +413,9 @@ func (l *lifter) finish(d *doc) {
 // ------------------------------------------------------------------ declarations
 
 func (l *lifter) classDecl(c *ast.ClassDecl, outer scope) {
+	saved := l.class
+	l.class = l.programClass(c)
+	defer func() { l.class = saved }()
 	sc := outer.child()
 	if c.Name != nil {
 		d := l.findDoc(c.Doc, c.S.Start)
@@ -418,6 +449,41 @@ func (l *lifter) classDecl(c *ast.ClassDecl, outer scope) {
 	}
 }
 
+// programClass finds the declaration in the program model, when the model
+// holds this file's.
+func (l *lifter) programClass(c *ast.ClassDecl) *program.Class {
+	if l.prog == nil || c.Name == nil {
+		return nil
+	}
+	name := c.Name.Name
+	if l.ns != "" {
+		name = l.ns + "\\" + name
+	}
+	cl := l.prog.Class(name)
+	if cl == nil || cl.File != l.pfile {
+		return nil
+	}
+	return cl
+}
+
+// overrides returns the override context of a method declaration, nil when
+// the method overrides nothing or the program model does not know it.
+func (l *lifter) overrides(m *ast.MethodDecl) *overrideCtx {
+	if l.class == nil {
+		return nil
+	}
+	pm := l.class.FindMethod(m.Name.Name)
+	if pm == nil || pm.Class != l.class || pm.FromTrait != nil || pm.Magic || len(pm.Params) != len(m.Params) {
+		return nil
+	}
+	parent := pm.Overridden()
+	if parent == nil {
+		return nil
+	}
+	params, ret := parent.PHPSignature()
+	return &overrideCtx{method: pm, params: params, ret: ret}
+}
+
 func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
 	if !fn.Fun {
 		l.replace(fn.Head, "fun")
@@ -433,9 +499,9 @@ func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
 	}
 	lifted := map[string]string{}
 	if d != nil {
-		lifted = l.signature(d, fn.Params, fn.ReturnType, sc)
+		lifted = l.signature(d, fn.Params, fn.ReturnType, sc, nil)
 	}
-	l.paramDocs(fn.Params, lifted, sc)
+	l.paramDocs(fn.Params, lifted, sc, nil)
 	l.finish(d)
 	l.stmts(fn.Body, sc)
 }
@@ -453,11 +519,12 @@ func (l *lifter) methodDecl(m *ast.MethodDecl, outer scope) {
 	for _, tp := range m.TypeParams {
 		sc[tp.Name.Name] = l.astAtoms(tp.Bound, sc)
 	}
+	ov := l.overrides(m)
 	lifted := map[string]string{}
 	if d != nil {
-		lifted = l.signature(d, m.Params, m.ReturnType, sc)
+		lifted = l.signature(d, m.Params, m.ReturnType, sc, ov)
 	}
-	l.paramDocs(m.Params, lifted, sc)
+	l.paramDocs(m.Params, lifted, sc, ov)
 	l.finish(d)
 	l.stmts(m.Body, sc)
 }
@@ -502,7 +569,7 @@ func (l *lifter) propertyDecl(p *ast.PropertyDecl, sc scope) {
 			l.note(off, "kept %s: names another property", g.tag)
 			continue
 		}
-		text, ok := l.liftable(off, g, v.Type, p.Type, sc, false)
+		text, ok := l.liftable(off, g, v.Type, p.Type, sc, false, nil, 0)
 		if !ok {
 			continue
 		}
@@ -642,8 +709,8 @@ func nameMatches(docName string, n *ast.Name) bool {
 }
 
 // signature lifts the @param and @return tags of a function-like
-// declaration.
-func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc scope) map[string]string {
+// declaration; ov is set for a method that overrides another.
+func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc scope, ov *overrideCtx) map[string]string {
 	lifted := map[string]string{}
 	for _, g := range d.groups {
 		off := d.start + lineOffset(d, g.first)
@@ -655,9 +722,10 @@ func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc sco
 			}
 			pt := g.parsed.Params[0]
 			if pt.Type == nil {
-				// Prose only already; it gets the dash, or goes when there is none.
+				// Prose only already; it gets the dash, or goes when there is
+				// none, on the tag's line or on the lines continuing it.
 				switch rest := paramProse(d.lines[g.first][strings.Index(d.lines[g.first], g.tag)+len(g.tag):], pt.Name); {
-				case rest == "":
+				case rest == "" && paramProse(g.text, pt.Name) == "":
 					d.remove(g)
 				case !strings.Contains(d.lines[g.first], "$"+pt.Name+" -"):
 					d.keepProse(g, pt.Name)
@@ -665,9 +733,10 @@ func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc sco
 				continue
 			}
 			var p *ast.Param
-			for _, cand := range params {
+			slot := 0
+			for i, cand := range params {
 				if cand.Var.Name == pt.Name {
-					p = cand
+					p, slot = cand, i
 				}
 			}
 			if p == nil {
@@ -682,7 +751,7 @@ func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc sco
 				}
 				continue
 			}
-			text, ok := l.liftable(off, g, pt.Type, p.Type, sc, p.Type == nil)
+			text, ok := l.liftable(off, g, pt.Type, p.Type, sc, p.Type == nil, ov, slot)
 			if !ok {
 				continue
 			}
@@ -707,7 +776,7 @@ func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc sco
 				l.note(off, "kept %s %s: the declaration has no return type to refine", g.tag, t)
 				continue
 			}
-			text, ok := l.liftable(off, g, t, ret, sc, false)
+			text, ok := l.liftable(off, g, t, ret, sc, false, ov, -1)
 			if !ok {
 				continue
 			}
@@ -724,8 +793,8 @@ func (l *lifter) signature(d *doc, params []*ast.Param, ret ast.TypeExpr, sc sco
 
 // paramDocs lifts the `/** @var T */` a promoted property carries on its
 // parameter, unless the method's own @param typed the parameter already.
-func (l *lifter) paramDocs(params []*ast.Param, lifted map[string]string, sc scope) {
-	for _, p := range params {
+func (l *lifter) paramDocs(params []*ast.Param, lifted map[string]string, sc scope, ov *overrideCtx) {
+	for slot, p := range params {
 		if p.Doc == "" {
 			continue
 		}
@@ -751,7 +820,7 @@ func (l *lifter) paramDocs(params []*ast.Param, lifted map[string]string, sc sco
 				l.note(off, "kept %s: names another variable", g.tag)
 				continue
 			}
-			text, ok := l.liftable(off, g, v.Type, p.Type, sc, p.Type == nil)
+			text, ok := l.liftable(off, g, v.Type, p.Type, sc, p.Type == nil, ov, slot)
 			if !ok {
 				continue
 			}
@@ -771,8 +840,11 @@ func (l *lifter) paramDocs(params []*ast.Param, lifted map[string]string, sc sco
 }
 
 // liftable decides whether a docblock type can replace the declared one
-// and returns its Phaenon spelling; a refusal is noted.
-func (l *lifter) liftable(off int, g *group, docT *docblock.TypeNode, native ast.TypeExpr, sc scope, untyped bool) (string, bool) {
+// and returns its Phaenon spelling; a refusal is noted. For a method that
+// overrides another (ov, with slot the parameter index or -1 for the
+// return) the decision is made on the signature the emitter compiles
+// under the override-erasure rule, when the rule changes it.
+func (l *lifter) liftable(off int, g *group, docT *docblock.TypeNode, native ast.TypeExpr, sc scope, untyped bool, ov *overrideCtx, slot int) (string, bool) {
 	if written := l.nativeText(native); native != nil && phaenonSpelled(written) {
 		// A declaration already written in Phaenon (a .phn lifted again) is
 		// the type; the tag is a leftover of an earlier edit and goes.
@@ -787,11 +859,85 @@ func (l *lifter) liftable(off int, g *group, docT *docblock.TypeNode, native ast
 		l.note(off, "kept %s %s: it mentions a type parameter that stayed in the docblock", g.tag, docT)
 		return "", false
 	}
-	if !l.compatible(docT, native, sc, untyped) {
+	same := l.compatible(docT, native, sc, untyped)
+	if compiled, declared, ok := l.overridden(ov, slot, docT); ok {
+		// The rule replaces the type's own erasure: what decides is
+		// whether the compiled type is the one PHP saw before.
+		if !l.samePHPType(compiled, declared) {
+			l.note(off, "kept %s %s: the override-erasure rule compiles it to %s, not the declared %s", g.tag, docT, nativeText(compiled), l.nativeText(native))
+			return "", false
+		}
+		same = true
+	}
+	if !same {
 		l.note(off, "kept %s %s: it erases to a different type than the declared %s", g.tag, docT, l.nativeText(native))
 		return "", false
 	}
 	return text, true
+}
+
+// overridden predicts the override-erasure rule for a lifted type at slot
+// of a method that overrides another: the type the emitter compiles there,
+// and the type PHP saw there before the lift. ok is false when the rule
+// leaves the type's own erasure in place, or the program model cannot
+// tell.
+func (l *lifter) overridden(ov *overrideCtx, slot int, docT *docblock.TypeNode) (compiled, declared types.Type, ok bool) {
+	if ov == nil || l.class == nil {
+		return nil, nil, false
+	}
+	r := l.prog.NewResolver(l.class.File, l.class.Scope, l.class, ov.method.Span).WithParams(ov.method.TypeParams)
+	t := r.Doc(docT)
+	if t == nil {
+		return nil, nil, false
+	}
+	own := types.Erase(t)
+	if slot < 0 {
+		// A return narrows to the overridden method's when its own erasure
+		// is wider; an undeclared return is never refined.
+		if ov.ret == nil || ov.method.NativeReturn == nil {
+			return nil, nil, false
+		}
+		parent := types.Erase(ov.ret)
+		if types.IsSubtype(own, parent, l.prog) {
+			return nil, nil, false
+		}
+		compiled, declared = parent, ov.method.NativeReturn
+	} else {
+		// A parameter widens to the overridden method's when its own
+		// erasure would not accept everything that one does.
+		if slot >= len(ov.params) || slot >= len(ov.method.Params) {
+			return nil, nil, false
+		}
+		parent := erasedOrMixed(ov.params[slot])
+		if types.IsSubtype(parent, own, l.prog) {
+			return nil, nil, false
+		}
+		compiled, declared = parent, ov.method.Params[slot].NativeType
+	}
+	if _, printable := types.Native(compiled); !printable {
+		return nil, nil, false // the emitter keeps the type's own erasure then
+	}
+	return compiled, declared, true
+}
+
+// samePHPType reports whether two native types are the same to PHP; an
+// absent type is mixed, as for an untyped parameter.
+func (l *lifter) samePHPType(a, b types.Type) bool {
+	a, b = erasedOrMixed(a), erasedOrMixed(b)
+	return types.IsSubtype(a, b, l.prog) && types.IsSubtype(b, a, l.prog)
+}
+
+func erasedOrMixed(t types.Type) types.Type {
+	if t == nil {
+		return types.TMixed
+	}
+	return types.Erase(t)
+}
+
+// nativeText prints a native type for a note.
+func nativeText(t types.Type) string {
+	s, _ := types.Native(t)
+	return s
 }
 
 // phaenonSpelled reports whether a declared type uses Phaenon syntax — type

@@ -17,6 +17,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/emit"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/program"
 )
 
 // ErrNotPlainCode marks a PHP file that has no .phn equivalent: it has
@@ -39,6 +40,14 @@ type Options struct {
 	// and keeps `public` before an asymmetric visibility; off, a sole
 	// `public` is dropped, since Phaenon implies it (design/functions.md).
 	KeepPublic bool
+	// Program, with File the file being lifted in it, is the program
+	// model read before the migration: the project's files and the
+	// vendor code behind them. With it the lift predicts the override-
+	// erasure rule, which needs the method a declaration overrides;
+	// without it a tag is lifted only when it erases to the declared type
+	// by itself.
+	Program *program.Program
+	File    *program.File
 }
 
 // File converts PHP source to Phaenon source.

@@ -1,0 +1,7 @@
+namespace Acme;
+
+// A project file already in Phaenon: put() compiles to put(Item $item).
+interface Store<T of Item>
+{
+    fun put(T $item): void;
+}

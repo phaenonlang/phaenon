@@ -80,6 +80,10 @@ function` → `final static fun`), drops a constant's `public` (`public const` �
 before an asymmetric visibility (`public private(set)` → `private(set)`); `--keep-public` keeps all three. A tag is lifted only when its type has a Phaenon
 spelling and erases to the type PHP already saw — the generated `.php` keeps the same signatures —
 and every tag left in place is reported with the reason (`--keep-docblocks` skips the lift).
+"Erases" includes the override-erasure rule: a method that implements a generic signature compiles
+with its parameters widened to the implemented method's types, so `@param T $aggregate` over
+`Aggregate $aggregate` is lifted when the interface's method takes an `Aggregate`, whatever T's
+bound. For that, migrate reads the project's other files and its vendor code through Composer.
 Prose survives without its type: `@param T $x prose` becomes `@param $x - prose` (the dash, as in
 JSDoc, tells an IDE that expects a type that none follows) and a property's `@var T prose` becomes
 its docblock `/** prose */`; the emitter puts the types back and drops the dash. It also runs on
@@ -198,7 +202,9 @@ numbers included. ≈2.5 min each. `PHAENON_PHPT_FILTER=ext/standard/tests` narr
 corpus subset; `PHAENON_SHOW_DIFFS=n` controls how many differences are listed.
 
 `internal/migrate/testdata/lift/*.php` are migrated and compared with the `.phn` and `.notes`
-next to them (`PHAENON_UPDATE=1` rewrites them); the output must parse and lift to itself.
+next to them (`PHAENON_UPDATE=1` rewrites them); the output must parse, lift to itself and compile
+to the signatures the input declared. `testdata/lift/vendor/` (PSR-4 `Acme\`) holds the parents
+declared in other files, vendor PHP and project `.phn`.
 
 `internal/emit/testdata/*.phn` are compiled through the checker and the emitter and compared
 with the `.php` next to them (`PHAENON_UPDATE=1` rewrites them); the output must pass `php -l`,

@@ -1,0 +1,10 @@
+namespace Acme;
+
+// put() compiles to put(Item $item), widened by the override-erasure rule
+// from the Box its own T erases to.
+abstract class BoxStore<T of Box> implements Store<T>
+{
+    fun put(T $item): void
+    {
+    }
+}

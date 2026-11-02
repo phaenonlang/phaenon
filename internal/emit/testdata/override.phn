@@ -1,0 +1,87 @@
+namespace App\Store;
+
+use ArrayObject;
+use Traversable;
+
+// The override-erasure rule (design/generics.md §4.3): a method that
+// implements or overrides a generic signature compiles with its parameters
+// widened to what the overridden method takes, named as the file knows the
+// class, and imported when it does not (roadmap D11).
+
+interface Item
+{
+}
+
+class Box implements Item
+{
+}
+
+final class SmallBox extends Box
+{
+}
+
+interface Store<T of Item>
+{
+    fun put(T $item): void;
+}
+
+// T's bound is narrower than the interface's: put() takes an Item in PHP,
+// so a PHP caller can still pass another Item.
+final class BoxStore<T of Box> implements Store<T>
+{
+    fun put(T $item): void
+    {
+    }
+}
+
+// A concrete argument widens the same way.
+final class OnlyBoxes implements Store<Box>
+{
+    fun put(Box $item): void
+    {
+    }
+}
+
+// Down a chain the rule holds against what the parent compiles to: Item,
+// not the Box its own T erases to.
+abstract class AbstractBoxStore<T of Box> implements Store<T>
+{
+    fun put(T $item): void
+    {
+    }
+}
+
+final class SmallBoxStore extends AbstractBoxStore<SmallBox>
+{
+    fun put(SmallBox $item): void
+    {
+    }
+}
+
+// A widened class the file does not import is imported (Countable); one it
+// imports is called by its name (Traversable).
+interface Sink<T of \Countable>
+{
+    fun drain(T $items): int;
+}
+
+final class ArraySink<T of ArrayObject> implements Sink<T>
+{
+    fun drain(T $items): int
+    {
+        return count($items);
+    }
+}
+
+interface Source<T of Traversable>
+{
+    fun read(T $items): int;
+}
+
+final class ArraySource<T of ArrayObject> implements Source<T>
+{
+    fun read(T $items): int
+    {
+        return iterator_count($items);
+    }
+}
