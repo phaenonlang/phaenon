@@ -251,11 +251,39 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 ## PhpStorm plugin (`../jetbrains`)
 
-- **Reformat Code does nothing to a `.phn`** (found 2026-11-01): indentation, spacing and braces
-  stay as written while the `.php` twin is formatted, probably because PhpStorm's PHP formatter
-  is a template formatter keyed to the `<?php` tags a Phaenon file has not. Symptom: an import
-  added by completion lands glued to the next line. The plugin's import optimiser lays out the
-  `use` block itself (`f630655`); formatter support for `.phn` is its own job.
+- ~~**Reformat Code does nothing to a `.phn`**~~ — fixed 2026-11-02 (`../jetbrains` branch
+  `fix/editing-actions`: formatter `ce18349`, docblock stub `b61b652`, overrides `e8f1469`, test IDE
+  `9d7e667`, pipe `532075f`, docs `88a2d3c`), with the editing actions that relied on it:
+  - Cause: PhpStorm's `PhpFormattingModelBuilder` is a template formatter that builds PHP blocks
+    only inside the HTML model of a template view provider; for the single-root `.phn` provider
+    its base class formatted the whole file as one read-only leaf. Reformat Code, the indent of a
+    new line, the ` * ` of a docblock and the reformatting after generated code (Implement Methods,
+    quick-fixes, imports added by completion) all went through that leaf.
+    `PhaenonFormattingModelBuilder` (a `CustomFormattingModelBuilder`, `.phn` only) hands the file
+    to the builder's public `createTemplateFormattingModel`; PHP formats exactly as in `.php`, and
+    wrapped blocks keep erased constructs against what they belong to and never change their text.
+    The import optimiser's own layout of the `use` block went: the PHP code style lays it out. The
+    real-tree test reformats all four dogfood trees (1,846 files) without changing a construct or
+    breaking a file.
+  - `/**` + Enter: PhpStorm's stub minus the `@param` / `@return` / `@var` a declared or erased
+    type makes redundant; an empty stub is one line with the caret.
+  - Implement / Override Methods and override completion write `fun` / `protected fun` with the
+    parent's declared types, the parent's type parameters replaced by the class's type arguments
+    along `extends` / `implements` (`fun get(UserId $id): ?User`), the classes they name imported.
+    The second `fun` in completion was PhpStorm's bundled PHP live template `fun`; it is left out in
+    `.phn` (Tab still expands it to `function`).
+  - The pipe quick-fix bug is PhpStorm's (2026.2, `.php` too): a one-argument call becomes its first
+    PSI child plus `(...)`, the qualifier of a method call. In `.phn` the plugin hides it and offers
+    its own conversion (`Style::line(...)`, `$this->output->writeln(...)`).
+  - `./gradlew test -PtestIdePath=/Applications/PhpStorm.app/Contents` runs the suite against the
+    installed PhpStorm; the pipe tests need one with PHP 8.5 (2026.2). Three tests fail there on `main` too
+    (the constant-expression closure finding, `map()` chain typing, the spell-checker inspection
+    not registered).
+  - Left: the text inside an erased construct is not formatted (`:?T` stays); a construct counts
+    towards the line length, so a long `implements I<A, B>` line wraps; PhpStorm's PSR-12 style
+    differs from the packages' php-cs-fixer config (concat and cast spacing, `fn (`, 120-column
+    wraps) — a project code style matching it would make Reformat agree with cs; the pipe fix
+    applied from Inspect Code results is PhpStorm's; report the pipe bug upstream.
 - **Batch Inspect Code** still reports imports used only by erased constructs as unused, and
   PhpStorm's hierarchy findings on overrides with an erased type (the filter covers editor
   highlighting only); an `InspectionSuppressor` would cover batch runs.
