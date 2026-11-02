@@ -65,3 +65,23 @@ function withParams(Closure(string, int=): void $f, Closure(int...): int $sum): 
     takesInt($sum(1, 2, 3));
     return static fn (string ...$xs): int => \count($xs);
 }
+
+/** @param list<string> $l */
+function takesList(array $l): void
+{
+}
+
+// A closure literal checked against `Closure(string...)` still holds its
+// variadic as array<int<0, max>|string, string>: named arguments reach it.
+function variadicBody(): Closure(string...): int
+{
+    takesInt(withParams(static function (string $s, int $level = 0): void {
+    }, static fn (int ...$ns): int => \array_sum(\array_values($ns)))('a', 'b'));
+
+    return static function (string ...$xs): int {
+        takesList(\array_values($xs));
+        takesList($xs); // want P2103
+
+        return \count($xs);
+    };
+}

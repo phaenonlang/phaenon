@@ -36,4 +36,13 @@ final class DevUp
         $f('a', $sum(1, 2, 3));
         return static fn (string ...$xs): int => \count($xs);
     }
+
+    // A variadic holds named arguments under their names, so it is a map
+    // inside the body; its values are the list.
+    public function command(string ...$args): string
+    {
+        $run = static fn (string ...$parts): string => \implode(' ', \array_values($parts));
+
+        return $run('kubectl', ...$args) . $args->values()->join(' ');
+    }
 }

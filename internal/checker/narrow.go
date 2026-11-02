@@ -905,6 +905,19 @@ func isTrueLit(e ast.Expr) bool {
 func withKey(t types.Type, key types.Type, present bool) types.Type {
 	key = normaliseKey(key)
 	return types.Map(t, func(m types.Type) types.Type {
+		if _, isMixed := m.(types.Mixed); isMixed && present {
+			// array_key_exists('k', $m) answers true only for an array
+			// that has the key.
+			switch k := key.(type) {
+			case types.StringLit:
+				return types.Shape{Entries: []types.ShapeEntry{{Key: k.V, Type: types.TMixed}}, Unsealed: true}
+			case types.Int:
+				if k.Lo == k.Hi {
+					return types.Shape{Entries: []types.ShapeEntry{{IsInt: true, IntKey: k.Lo, Type: types.TMixed}}, Unsealed: true}
+				}
+			}
+			return types.Array{Key: types.TArrayKey, Value: types.TMixed, NonEmpty: true}
+		}
 		s, ok := m.(types.Shape)
 		if !ok {
 			if a, ok := m.(types.Array); ok && present {
