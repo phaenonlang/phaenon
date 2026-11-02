@@ -65,5 +65,7 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
    release (2026-11-19). The debugger is to be tried in PhpStorm on a real tree by the end of the
    week of 2026-11-09 (procedure: `~/labs/phaenon/.cache/line-map/manual-procedure.md`); what it
    finds goes into [[open-items]] § the plugin's line map.
+5. 2026-11-02: the M6 design is drafted, `../design/tooling.md` (design `94f1864`), waiting for
+   its review: ten questions in its §13, the slices in §11. Nothing of M6 is built before it.
 
 ← [[Home]]
