@@ -292,6 +292,9 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 	lt := x.expr(e.Left, env, nil)
 	rt := x.expr(e.Right, env, nil)
 	x.condValueType = types.TBool
+	if !strict {
+		x.objectNumberComparison(e.Op, lt, rt, e.S)
+	}
 	if strict && !types.IsMixed(lt) && !types.IsMixed(rt) && !types.Overlaps(lt, rt, x.p()) {
 		word := "false"
 		x.condValueType = types.TFalse
@@ -482,6 +485,7 @@ func (x *fnCtx) ordering(e *ast.Binary, env *state) (then, els *state) {
 	lt := x.expr(e.Left, env, nil)
 	rt := x.expr(e.Right, env, nil)
 	x.condValueType = types.TBool
+	x.objectNumberComparison(e.Op, lt, rt, e.S)
 	then, els = env.clone(), env.clone()
 	// A range from a docblock (`@param positive-int`) is not certain: PHP
 	// may still pass what the check refuses (checker.md §9).

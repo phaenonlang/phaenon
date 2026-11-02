@@ -59,6 +59,11 @@ func TestPHPStanParity(t *testing.T) {
 		// unknown constant as mixed.
 		"library-target86.phn": {"method.notFound": true, "classConstant.notFound": true, "argument.unknown": true,
 			"arguments.count": true, "echo.nonString": true},
+		// The same maps leave PHPStan with reflection alone for 8.6's new
+		// functions and classes: clamp() returns mixed and
+		// Io\Poll\Context::wait() an array of mixed, where the overlay and
+		// the stub's docblock say T and list<Watcher>.
+		"library-php86-types.phn": {"argument.type": true, "method.nonObject": true},
 	}
 	files, _ := filepath.Glob(filepath.Join("testdata", "*.phn"))
 	vendorSrc, err := os.ReadFile(filepath.Join("testdata", "vendor", "Acme", "Repo.php"))

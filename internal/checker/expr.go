@@ -1443,8 +1443,10 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 	case token.T_IS_IDENTICAL, token.T_IS_NOT_IDENTICAL:
 		return types.TBool // binary() reports the impossible comparisons
 	case token.T_IS_EQUAL, token.T_IS_NOT_EQUAL:
+		x.objectNumberComparison(op, l, r, span)
 		return types.TBool
 	case token.Kind('<'), token.Kind('>'), token.T_IS_SMALLER_OR_EQUAL, token.T_IS_GREATER_OR_EQUAL:
+		x.objectNumberComparison(op, l, r, span)
 		if li, ok := l.(types.Int); ok {
 			if ri, ok := r.(types.Int); ok {
 				if always, value := orderingOutcome(op, li, ri); always && x.certainOperands {
@@ -1456,11 +1458,80 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		}
 		return types.TBool
 	case token.T_SPACESHIP:
+		x.objectNumberComparison(op, l, r, span)
 		return types.Int{Lo: -1, Hi: 1}
 	case token.T_INSTANCEOF:
 		return types.TBool
 	}
 	return types.TMixed
+}
+
+// numberComparable are the classes whose comparison handler takes a number:
+// GMP and BcMath\Number compare by value with int and float operands.
+var numberComparable = []string{"GMP", "BcMath\\Number"}
+
+// objectNumberComparison reports a comparison of an object with a number.
+// PHP compares objects with each other through the class's handler (two
+// Time\Duration by length, two DateTimeInterface by instant, other objects
+// property by property), but against an int or a float it converts the
+// object to a number: a Notice and a meaningless result (PHPStan's
+// smaller.invalid, equal.invalid, spaceship.invalid).
+func (x *fnCtx) objectNumberComparison(op token.Kind, l, r types.Type, span ast.Span) {
+	obj, num := l, r
+	if !x.plainObject(obj) || !hasNumber(num) {
+		obj, num = r, l
+		if !x.plainObject(obj) || !hasNumber(num) {
+			return
+		}
+	}
+	x.report(span, P2301, "comparison %s between %s and %s: PHP converts the object to a number", opText(op), x.typeName(l), x.typeName(r))
+}
+
+// plainObject reports a type whose every member is an object that does not
+// compare with numbers.
+func (x *fnCtx) plainObject(t types.Type) bool {
+	if types.IsMixed(t) || !types.IsObjectLike(t) {
+		return false
+	}
+	for _, m := range types.Members(t) {
+		if _, unknown := m.(types.Unknown); unknown {
+			return false // reported already, or a class nothing declares
+		}
+	}
+	for _, name := range types.ClassNames(t) {
+		for _, nc := range numberComparable {
+			if strings.EqualFold(name, nc) || x.p().IsSubclassOf(name, nc) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func hasNumber(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Int, types.Float, types.FloatLit:
+			return true
+		}
+	}
+	return false
+}
+
+func opText(op token.Kind) string {
+	switch op {
+	case token.T_IS_EQUAL:
+		return "=="
+	case token.T_IS_NOT_EQUAL:
+		return "!="
+	case token.T_IS_SMALLER_OR_EQUAL:
+		return "<="
+	case token.T_IS_GREATER_OR_EQUAL:
+		return ">="
+	case token.T_SPACESHIP:
+		return "<=>"
+	}
+	return string(rune(op))
 }
 
 // orderingOutcome decides `l op r` for integer ranges when every pair of
