@@ -1,0 +1,42 @@
+// For a PHP 8.5 target a partial application is lowered to an arrow
+// function where that is exact, and refused (P1002) where it is not
+// (design/php-versions.md §5.3).
+
+fun pair(string $a, string $b): string { return $a . $b; }
+fun refd(array &$xs, int $n): void { $xs[] = $n; }
+fun wantsString(string $s): void {}
+
+final class Box {
+    public string $label = 'box';
+    fun tag(string $t): string { return "$this->label:$t"; }
+    fun box(): Box { return $this; }
+}
+
+fun lowered(Box $box, string $sep): void {
+    // Literals, constants and variables are captured as PHP 8.6 binds them.
+    $a = pair('x', ?);
+    $b = pair($sep, ?);
+    $c = pair(PHP_EOL, ?);
+    $d = $box->tag(?);
+    $e = str_replace(' ', '-', ?);
+    $f = pair(b: ?, a: 'x');
+    $g = pair(?, ...);
+    // In a pipe, every bound argument runs after the left side, as on 8.6.
+    $h = 'a' |> pair(strtoupper($sep), ?);
+    $i = 'a' |> $box->box()->tag(?);
+}
+
+fun refused(Box $box, string $sep): void {
+    $a = pair(strtoupper($sep), ?); // want P1002 "assign it to a variable first"
+    $bb = pair($box->label, ?); // want P1002
+    $c = $box->box()->tag(?); // want P1002 "receiver"
+    $b = 'x';
+    $d = pair($b, ?); // want P1002 "rename the variable"
+    $xs = [];
+    $e = refd($xs, ?); // want P1002 "by reference"
+    $f = 'a' |> pair($sep = 'x', ?); // want P1002 "writes"
+}
+
+// Writing a property through a constant's object is PHP 8.6.
+const CONFIG = new stdClass();
+CONFIG->debug = true; // want P1002 "writing a property through a constant"

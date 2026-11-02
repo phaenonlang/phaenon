@@ -1,0 +1,84 @@
+// target: 8.6
+// Partial function application (PHP 8.6, design/php-versions.md §5.2).
+
+fun three(int $a, string $b, float $c): string { return "$a$b$c"; }
+fun opt(int $a, string $b = 'x', ?int $c = null): int { return $a; }
+fun vari(int $a, string ...$rest): int { return $a; }
+fun reff(array &$xs, int $n): void { $xs[] = $n; }
+fun wantsInt(int $x): void {}
+
+/**
+ * @template T
+ * @param list<T> $xs
+ * @return T
+ */
+fun first(array $xs, int $i): mixed { return $xs[$i]; }
+
+final class Greeter {
+    fun greet(string $name, string $greeting = 'Hello'): string { return "$greeting, $name"; }
+    static fun shout(string $s, int $times): string { return str_repeat($s, $times); }
+}
+
+// The closure's parameters: placeholders in PHP's order, with their types.
+$f = three(1, ?, ?);
+wantsInt($f); // want P2103 "Closure(string $b, float $c): string"
+$g = three(c: ?, a: ?, b: 'x');
+wantsInt($g); // want P2103 "Closure(float $c, int $a): string"
+$h = three(?, ...);
+wantsInt($h); // want P2103 "Closure(int $a, string $b, float $c): string"
+
+// `?` makes a parameter required; `...` keeps its optionality.
+$o = opt(?, ?);
+wantsInt($o); // want P2103 "Closure(int $a, string $b): int"
+$p = opt(?, ...);
+wantsInt($p); // want P2103 "Closure(int $a, string $b=, int|null $c=): int"
+$q = opt(c: ?); // want P2101 "argument #1 ($a)"
+$q2 = opt(1, c: ?);
+wantsInt($q2); // want P2103 "Closure(int|null $c): int"
+
+// A placeholder that binds into a variadic parameter; `...` keeps it variadic.
+$v = vari(1, ?, ...);
+wantsInt($v); // want P2103 "Closure(string $rest0, string... $rest=): int"
+
+// By reference stays by reference.
+$r = reff(?, 3);
+$xs = [1];
+$r($xs);
+
+// Methods and static methods.
+$greeter = new Greeter();
+$m = $greeter->greet(?, 'Hi');
+wantsInt($m); // want P2103 "Closure(string $name): string"
+$s = Greeter::shout('a', ?);
+wantsInt($s); // want P2103 "Closure(int $times): string"
+echo $s('x'); // want P2103
+
+// The bound arguments determine the type parameters; the result is not generic.
+$names = ['ada', 'bob'];
+$pick = first($names, ?);
+wantsInt($pick); // want P2103 "Closure(int $i): 'ada'|'bob'"
+
+// Bound arguments are checked when the closure is created.
+$bad = three('one', ?, 1.0); // want P2103
+
+// The placeholder count, as PHP checks it at creation.
+$few = three(?); // want P2101 "expects exactly 3 arguments, 1 given"
+$many = three(?, ?, ?, ?); // want P2102 "expects at most 3 arguments, 4 given"
+$fewOpt = opt(); // want P2101
+$out = three(1, c: ?); // want P2101 "argument #2 ($b)"
+$name = opt(?, d: ?); // want P2010
+$overwrite = opt(?, a: ?); // want P2010
+$ok = three(?, ...);
+$restFew = three(?, ?, ?, ?, ...); // want P2102
+
+// What PHP's compiler rejects.
+$twice = three(..., ...); // want P1003
+$notLast = three(..., 'x'); // want P1003
+$unpack = vari(...['x'], ...); // want P1003
+$named = three(a: 1, ?); // want P2110
+$new = new Greeter(...); // want P1003
+$nullsafe = $greeter?->greet(?); // want P1003, P2307
+
+// Constant expressions.
+const UPPER = strtoupper(?);
+fun withDefault(Closure $f = str_repeat('-', ?)): mixed { return $f(3); }
