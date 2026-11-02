@@ -1,4 +1,4 @@
-// golden: target=8.6
+// target: 8.6
 // Readonly properties with a default (PHP 8.6, RFC readonly_property_defaults):
 // the default initialises the property, so no later assignment may write it,
 // the constructor's included; __clone may reinitialise it, as for any

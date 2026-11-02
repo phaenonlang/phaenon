@@ -1,4 +1,4 @@
-// golden: target=8.5
+// target: 8.5
 // __debugInfo() on an enum compiled for PHP 8.5, which refuses it at compile
 // time: P1002 (design/php-versions.md §4).
 namespace App\EnumMagic;

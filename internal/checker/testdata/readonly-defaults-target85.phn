@@ -1,4 +1,4 @@
-// golden: target=8.5
+// target: 8.5
 // Readonly property defaults compiled for PHP 8.5, which refuses them at
 // compile time: P1002, not lowered (design/php-versions.md §4).
 namespace App\ReadonlyDefaults;

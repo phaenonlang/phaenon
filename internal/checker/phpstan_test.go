@@ -174,9 +174,9 @@ func TestPHPStanParity(t *testing.T) {
 	}
 }
 
-// usesPhaenonSyntax reports whether a corpus file has constructs PHP
+// usesPhaenonSyntax reports whether a corpus file has constructs PHPStan
 // cannot parse: type parameters and arguments, is / as, type aliases,
-// Closure signatures, hyphenated type names.
+// Closure signatures, hyphenated type names, PHP 8.6 placeholders.
 func usesPhaenonSyntax(src []byte) bool {
 	f, err := parser.Parse(src, lexer.ModePhaenon)
 	if err != nil {
@@ -188,6 +188,8 @@ func usesPhaenonSyntax(src []byte) bool {
 			switch n := n.(type) {
 			case *ast.TypeParam, *ast.IsExpr, *ast.AsExpr, *ast.TypeAlias, *ast.ClosureType, *ast.TupleType, *ast.Concurrently, *ast.Spawn:
 				found = true
+			case *ast.Placeholder:
+				found = true // PHP 8.6 syntax, which the parity PHPStan (2.2) does not parse
 			case *ast.FunctionDecl:
 				found = found || n.Fun
 			case *ast.MethodDecl:

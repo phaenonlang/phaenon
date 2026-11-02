@@ -1,4 +1,4 @@
-// golden: target=8.5
+// target: 8.5
 // What PHP 8.6 added to the library, used by code compiled for PHP 8.5
 // (design/php-versions.md §6): each use is P4011 where PHP 8.5 would fail.
 namespace App\Library;

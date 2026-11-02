@@ -1,4 +1,4 @@
-// golden: deprecations
+// deprecations: on
 // Library deprecations, read from #[\Deprecated] in the stubs and in code
 // (PHP 8.4), and from @deprecated: P4006 with PHP's own wording.
 namespace App\Deprecations;

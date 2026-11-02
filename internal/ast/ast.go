@@ -1,4 +1,4 @@
-// Package ast defines the syntax tree of Phaenon (a superset of PHP 8.5).
+// Package ast defines the syntax tree of Phaenon (a superset of PHP 8.6).
 //
 // Nodes are grouped into typed families — Expr, Stmt, TypeExpr, plus the
 // declaration-level helpers — so the checker and the emitter get static
@@ -216,19 +216,30 @@ type (
 		TypeArgs []TypeExpr
 		Args     *ArgList
 	}
-	// ArgList is a parenthesised argument list. FirstClassCallable is f(...).
+	// ArgList is a parenthesised argument list. FirstClassCallable is f(...)
+	// — `...` alone, which PHP 8.6 reads as the partial application with one
+	// variadic placeholder and compiles as the first-class callable it was;
+	// Args is empty then.
 	ArgList struct {
 		S                  Span
 		Args               []*Arg
 		FirstClassCallable bool
 	}
-	// Arg is one argument: positional, named, unpacked, or a PFA placeholder `?`.
+	// Arg is one argument: positional, named, unpacked, or a partial
+	// application placeholder (PHP 8.6): `?`, `name: ?`, or `...` after
+	// other arguments. A placeholder has no Value.
 	Arg struct {
 		S           Span
 		Name        *Ident // named argument
 		Value       Expr   // nil for a placeholder
 		Unpack      bool   // ...$x
-		Placeholder bool   // ? (partial function application, PHP 8.5)
+		Placeholder *Placeholder
+	}
+	// Placeholder stands for parameters of a partial application: `?` for
+	// one, Variadic `...` for all the remaining ones.
+	Placeholder struct {
+		S        Span
+		Variadic bool
 	}
 	// New is new Foo(..), new $x, new (expr)(..), new class(..) {..}.
 	New struct {
@@ -513,6 +524,7 @@ func (n *MethodCall) Span() Span          { return n.S }
 func (n *StaticCall) Span() Span          { return n.S }
 func (n *ArgList) Span() Span             { return n.S }
 func (n *Arg) Span() Span                 { return n.S }
+func (n *Placeholder) Span() Span         { return n.S }
 func (n *New) Span() Span                 { return n.S }
 func (n *Clone) Span() Span               { return n.S }
 func (n *Unary) Span() Span               { return n.S }
@@ -1113,3 +1125,22 @@ func (n *Use) Span() Span          { return n.S }
 func (n *UseItem) Span() Span      { return n.S }
 func (n *ConstDecl) Span() Span    { return n.S }
 func (n *TypeAlias) Span() Span    { return n.S }
+
+// Partial reports whether the list makes its call a partial application
+// (PHP 8.6): it holds a placeholder, so the call creates a closure instead
+// of calling. A first-class callable, f(...), is not counted.
+func (a *ArgList) Partial() bool {
+	if a == nil {
+		return false
+	}
+	for _, arg := range a.Args {
+		if arg.Placeholder != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// Closure reports whether the call creates a closure instead of calling:
+// a first-class callable or a partial application.
+func (a *ArgList) Closure() bool { return a != nil && (a.FirstClassCallable || a.Partial()) }

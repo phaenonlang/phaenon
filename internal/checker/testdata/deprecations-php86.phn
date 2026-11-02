@@ -1,4 +1,4 @@
-// golden: deprecations
+// deprecations: on
 // What PHP 8.6 deprecates in the language (design/php-versions.md §4):
 // P1101 whatever the target, unless --no-deprecations. `is` cannot be
 // written as a name in Phaenon, where it is the type test; it still
