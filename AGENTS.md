@@ -66,6 +66,7 @@ internal/emit         patch-based, line-preserving emitter; generics erasure, is
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
 internal/conformance  suites over the php-src corpus with `php` as the oracle
 stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime and phaenon/concurrent sources (.phn), the amp/Revolt declarations
+stdlib/gen            generator of stdlib/php-src (the newest release branch's stubs), versions_gen.go (the release each symbol came in) and constants.php
 ```
 
 ## Build and test
@@ -80,6 +81,7 @@ PHAENON_EXEC=1 PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src \
 PHAENON_PHPSTAN=$HOME/labs/tequila/object-mapper/tools/phpstan/vendor/bin/phpstan \
   go test ./internal/checker ./internal/emit                           # PHPStan level max on goldens
 PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite emitter goldens
+PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go generate ./stdlib        # refresh stubs + version table (vault `testing`)
 ```
 
 `phn` itself: `phn build|check|migrate|stdlib|lex|print` — run `phn` without arguments for usage; the
@@ -121,7 +123,8 @@ and `TestPluginStubsFresh` fail when a checkout is stale.
 - **Checker corpus** `internal/checker/testdata/*.phn`: one file per feature; expected diagnostics as
   `// want P2103` on the offending line (several codes comma-separated, optional `"message
   substring"`); the set of (line, code) pairs must match exactly. Vendor fixtures live under
-  `testdata/vendor/` (PSR-4 root `Acme\`).
+  `testdata/vendor/` (PSR-4 root `Acme\`). The file's opening comment lines may say `// target: 8.6`
+  (the floor, 8.5, otherwise) and `// deprecations: on`.
 - **PHPStan parity:** the checker may be stricter than PHPStan, never more lenient. A PHPStan rule
   Phaenon deliberately lacks goes into the allow-list in `internal/checker/phpstan_test.go` with its
   reason.
