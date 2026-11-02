@@ -168,4 +168,7 @@ var (
 	// P4011: "clamp() needs PHP 8.6 (target 8.5)", a library symbol newer
 	// than the target (design/php-versions.md §6).
 	P4011 = Code{"P4011", Error, "library symbol needs a newer PHP than the target"}
+	// P4012: the php whose extensions are reflected is older than the
+	// target, so their newer signatures are unknown (php-versions.md §6).
+	P4012 = Code{"P4012", Warning, "local php older than the target"}
 )

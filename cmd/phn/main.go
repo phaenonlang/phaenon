@@ -337,6 +337,16 @@ var (
 	projectSources map[string]string
 )
 
+// releaseLine cuts a PHP_VERSION ("8.5.3", "8.6.0-dev") to its release
+// line ("8.5").
+func releaseLine(version string) string {
+	parts := strings.SplitN(version, ".", 3)
+	if len(parts) < 2 {
+		return version
+	}
+	return parts[0] + "." + parts[1]
+}
+
 // typeCheck loads the stubs, the nearest Composer maps and the given files,
 // and returns the diagnostics of checking them for the target.
 func typeCheck(files []string, target phpversion.Version, opts checker.Options) []checker.Diagnostic {
@@ -361,6 +371,14 @@ func typeCheck(files []string, target phpversion.Version, opts checker.Options) 
 		if _, err := p.LoadExtensions(php, cacheDir, func(lower string) bool { return embedded[lower] }); err != nil {
 			diags = append(diags, checker.Diagnostic{File: files[0], Line: 1, Col: 1, Severity: checker.Warning, Code: "P4007",
 				Message: "PHP extensions could not be read (" + err.Error() + "); only php-src's extensions are known"})
+		}
+		// php-src's library is embedded for every target; the other
+		// extensions are read from php, which then must be as new as the
+		// target (design/php-versions.md §6).
+		if v, err := phpversion.Parse(releaseLine(p.ExtensionsPHP())); err == nil && v.Less(target) {
+			diags = append(diags, checker.Diagnostic{File: files[0], Line: 1, Col: 1, Severity: checker.Warning, Code: checker.P4012.ID,
+				Message: fmt.Sprintf("%s is PHP %s, older than the target %s: the extensions it loads are known as they are on PHP %s (PHN_PHP names another php)",
+					php, p.ExtensionsPHP(), target, v)})
 		}
 		if l, err := program.FindComposer(filepath.Dir(files[0])); err == nil {
 			l.Sources = projectSources
