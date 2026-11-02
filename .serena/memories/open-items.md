@@ -349,7 +349,8 @@ braces (§7). Left:
 - **Coverage** (§5): PHPUnit's Clover/Cobertura output and PhpStorm's coverage view report compiled
   lines. A follow-up translates them — a `phn trace`-like filter over the coverage XML, or the
   plugin reading the map for its view.
-- **Dogfood rebuild**: the five trees' compiled outputs change layout; rebuild them, drop the
+- ~~**Dogfood rebuild**~~ — done 2026-11-02 ([[dogfood]] § D19: re-lifted, empty bodies `{}`, no
+  compiled-tree cs exceptions, every pipeline green). Was: the five trees' compiled outputs change layout; rebuild them, drop the
   compiled-tree exceptions from core's and tq-cli's `.php-cs-fixer.dist.php` (the four line-1
   rules, `braces_position`, `class_definition`, `single_line_after_imports`), rerun each suite, and
   re-migrate the `.phn` so class-like braces go back down ([[dogfood]]). Measured beforehand on
@@ -375,6 +376,15 @@ braces (§7). Left:
   handler's `$errline`, `getLine()`, reflection's start line, `debug_backtrace()` taken as data, an
   assertion callback) with digits blinded, counted apart ([[testing]]); the map cannot reach those
   numbers.
+
+## Checker strictness noted with D19 (2026-11-02)
+
+- `self::assertNotNull(self::make()); self::make()->go();` — a static call path narrowed by an
+  assertion — is P2105 in `phn check` and accepted by PHPStan (it remembers a possibly impure
+  call's value until the next impure call). Stricter than PHPStan, so not a parity bug; predates
+  fef6091.
+- `../jetbrains/src/test/testData/reflector/*.phn` are older copies of the reflector sources; half
+  differ from the tree since D18/D19. Refresh them when the plugin's fixtures are next touched.
 
 ## Small things
 
