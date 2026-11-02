@@ -31,6 +31,10 @@ var (
 	// target that is not lowered (design/php-versions.md §3).
 	P1002 = Code{"P1002", Error, "construct needs a newer PHP than the target"}
 
+	// P11xx — constructs PHP deprecates, reported whatever the target
+	// unless --no-deprecations (design/php-versions.md §4).
+	P1101 = Code{"P1101", Warning, "construct deprecated by PHP"}
+
 	// P2 — names
 	P2001 = Code{"P2001", Error, "unknown class"}
 	P2002 = Code{"P2002", Error, "unknown function"}

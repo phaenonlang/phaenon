@@ -701,7 +701,9 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 	if s.HasFinally {
 		fEnv := joinAll(append(append([]*state{}, ends...), thrown)...)
 		fEnv.dead = false
+		x.inFinally++
 		x.stmts(s.Finally, fEnv)
+		x.inFinally--
 		after := joinAll(ends...)
 		// Assignments in finally apply on every path.
 		for k, v := range fEnv.vars {
@@ -719,6 +721,14 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 }
 
 func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
+	if x.inFinally > 0 {
+		// It discards the exception in flight, or the try block's own
+		// return value.
+		x.c.deprecated(s.S, "return inside a finally block is deprecated since PHP 8.6: it discards what the try block returned or threw")
+	}
+	if s.Expr != nil && x.structor() != "" {
+		x.c.deprecated(s.S, "returning a value from a %s is deprecated since PHP 8.6", x.structor())
+	}
 	defer func() {
 		if x.trackReturns {
 			x.returnEnvs = append(x.returnEnvs, env.clone())
@@ -839,6 +849,7 @@ func (x *fnCtx) yield(e *ast.Yield, env *state) types.Type {
 	if !x.generator {
 		x.report(e.S, P2315, "yield outside a generator")
 	}
+	x.structorYield(e.S)
 	k, v, send := x.generatorKV()
 	var kt, vt types.Type = types.TInt, types.TNull // `yield;` yields null under the next int key
 	if e.Key != nil {
@@ -862,6 +873,7 @@ func (x *fnCtx) yieldFrom(e *ast.YieldFrom, env *state) types.Type {
 	if !x.generator {
 		x.report(e.S, P2315, "yield outside a generator")
 	}
+	x.structorYield(e.S)
 	t := x.expr(e.Expr, env, nil)
 	if k, v, ok := types.IterableKV(t, x.p()); ok {
 		x.yieldKeys = append(x.yieldKeys, k) // yield from keeps the inner keys
