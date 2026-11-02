@@ -212,6 +212,7 @@ phn print [--php] file                    # parse and pretty-print
 go test ./...                                   # unit tests
 PHAENON_PHP_SRC=/abs/path/to/php-src go test ./internal/conformance/   # lexer, parser, printer round trip
 PHAENON_EXEC=1 PHAENON_PHP_SRC=/abs/path/to/php-src go test ./internal/conformance/ -run Execution -timeout 30m
+PHAENON_PHP_SRC=/abs/path/to/php-src-8.6 PHAENON_PHP=/path/to/php8.6 go test ./internal/conformance/   # a release's corpus under its php
 ```
 
 The execution tests run every `Zend/tests` file through `php` twice — once as written and once
