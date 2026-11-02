@@ -59,9 +59,7 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
     fun count(): int => 0;
 }
 
-abstract class Repo<T> extends Base<T>
-{
-}
+abstract class Repo<T> extends Base<T> {}
 
 fun firstOf<T of object>(list<T> $items): ?T => $items[0] ?? null;
 

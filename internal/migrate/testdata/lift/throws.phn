@@ -2,9 +2,7 @@ namespace App;
 
 use InvalidArgumentException;
 
-final class NotFound extends \RuntimeException
-{
-}
+final class NotFound extends \RuntimeException {}
 
 interface Store
 {

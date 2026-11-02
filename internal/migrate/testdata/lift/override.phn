@@ -6,25 +6,15 @@ namespace Lift\Override;
  * so `@param T $aggregate` over `Aggregate $aggregate` is lifted although
  * T's own bound is narrower — the compiled method still takes an Aggregate.
  */
-interface Aggregate
-{
-}
+interface Aggregate {}
 
-interface EventSourcedAggregate extends Aggregate
-{
-}
+interface EventSourcedAggregate extends Aggregate {}
 
-interface AggregateId
-{
-}
+interface AggregateId {}
 
-final class Order implements Aggregate
-{
-}
+final class Order implements Aggregate {}
 
-final class OrderId implements AggregateId
-{
-}
+final class OrderId implements AggregateId {}
 
 interface AggregateRepository<Id of AggregateId, T of Aggregate>
 {

@@ -182,8 +182,8 @@ func TestLiftKeepsAWrittenType(t *testing.T) {
 // on lines of their own (design/line-map.md §7); a function's and an
 // anonymous class's stay up, and a second run changes nothing.
 func TestLayoutMovesClassBracesDown(t *testing.T) {
-	src := "final class A implements \\Countable {\n    fun count(): int {\n        $n = 1;\n        return $n;\n    }\n\n    fun make(): object {\n        $o = new class {\n        };\n        return $o;\n    }\n}\n\ninterface I {\n}\n\n    enum E: string {\n        case X = 'x';\n    }\n"
-	want := "final class A implements \\Countable\n{\n    fun count(): int {\n        $n = 1;\n        return $n;\n    }\n\n    fun make(): object {\n        $o = new class {\n        };\n        return $o;\n    }\n}\n\ninterface I\n{\n}\n\n    enum E: string\n    {\n        case X = 'x';\n    }\n"
+	src := "final class A implements \\Countable {\n    fun count(): int {\n        $n = 1;\n        return $n;\n    }\n\n    fun make(): object {\n        $o = new class {\n        };\n        return $o;\n    }\n}\n\ninterface I {\n    fun f(): void;\n}\n\n    enum E: string {\n        case X = 'x';\n    }\n"
+	want := "final class A implements \\Countable\n{\n    fun count(): int {\n        $n = 1;\n        return $n;\n    }\n\n    fun make(): object {\n        $o = new class {\n        };\n        return $o;\n    }\n}\n\ninterface I\n{\n    fun f(): void;\n}\n\n    enum E: string\n    {\n        case X = 'x';\n    }\n"
 	var stats Stats
 	got, err := Layout([]byte(src), &stats)
 	if err != nil {
@@ -200,6 +200,27 @@ func TestLayoutMovesClassBracesDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(again) != string(got) {
+		t.Errorf("a second run changed the layout:\n%s", again)
+	}
+}
+
+// An empty class-like is `{}` on its header's line; one with a comment
+// inside keeps its lines.
+func TestLayoutWritesEmptyClassesAsBraces(t *testing.T) {
+	src := "final class NotFound extends \\RuntimeException\n{\n}\n\ninterface Marker {\n}\n\nclass Kept\n{\n    // reserved\n}\n"
+	want := "final class NotFound extends \\RuntimeException {}\n\ninterface Marker {}\n\nclass Kept\n{\n    // reserved\n}\n"
+	var stats Stats
+	got, err := Layout([]byte(src), &stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	if stats.Empty != 2 || stats.Down != 0 {
+		t.Errorf("stats %+v, want 2 empty bodies and no brace moved down", stats)
+	}
+	if again, _ := Layout(got, nil); string(again) != string(got) {
 		t.Errorf("a second run changed the layout:\n%s", again)
 	}
 }
