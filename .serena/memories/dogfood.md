@@ -1,7 +1,7 @@
 ---
 type: reference
 tags: [phaenon, dogfood, tequila]
-updated: 2026-10-29
+updated: 2026-11-02
 ---
 
 # Dogfood — the Tequila targets
@@ -157,6 +157,21 @@ push dogfood work without a maintainer's go-ahead.
   lines: their side-by-side `.php` had not been rebuilt since D14. Pass `.phn` files explicitly: pointing
   `phn migrate` at a directory also converts every hand-written `.php` in it (the stdlib's `Type.php` once).
   Core is committed locally; the other three trees carry the change uncommitted.
+
+- **Override-erasure re-lift (2026-11-02):** `phn migrate` predicts the override-erasure rule
+  (`../design/generics.md` §4.3) from the program model, so `find src tests -name '*.phn' -print0 |
+  xargs -0 phn migrate --keep-public` was run over every tree. Lifts found: core
+  `src/EventSourcing/Repository/AbstractEventSourcedRepository.phn` `save(T $aggregate)` (committed
+  `f455680`; the compiled `save(Aggregate $aggregate)` unchanged, only its docblock's layout; suite
+  1188, PHPStan max, cs and `phn check` 12 errors / 9 warnings the same before and after), and
+  mongodb-odm `src/Normalizer/DocumentNormalizer.phn` `denormalize(map<string, mixed> $value, …)` and
+  `src/Normalizer/DateTimeNormalizer.phn` `denormalize(UTCDateTime $value, …)` over the interface's
+  `mixed` — **not applied**: both files carry the uncommitted `fun` re-migration above; verified on a
+  copy (outputs differ only in docblock layout, `phn check` the same). object-mapper, reflector and
+  tq-cli have no such site. Re-lift with `--keep-public`: without it migrate also drops `public` before
+  class constants, a respelling the D15 run predates (core: 91 files). A re-lift of tq-cli also lifts
+  the `$http` closure types of `src/Console/Ci/PublishCommand.phn` and `TokenCommand.phn`, which
+  migrate learned to spell after that tree was migrated; left for a commit of its own.
 
 ## Next targets (roadmap §3)
 
