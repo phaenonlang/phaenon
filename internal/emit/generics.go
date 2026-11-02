@@ -517,7 +517,18 @@ func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra st
 		return false
 	}
 	indent := l.indentAt(declStart)
-	if doc == "" {
+	idx := -1
+	if doc != "" {
+		// A docblock between the attributes and the declaration
+		// (`#[A] /** … */ fun f()`) lies after declStart and is not the
+		// one PHPStan reads: it reads the comment before the attributes. The
+		// tags then go into a docblock of their own there.
+		idx = bytes.LastIndex(l.e.src[:declStart], []byte(doc))
+		if idx >= 0 && len(bytes.TrimSpace(l.e.src[idx+len(doc):declStart])) > 0 {
+			idx = -1 // the same text above an earlier declaration
+		}
+	}
+	if idx < 0 {
 		if extra != "" {
 			tags = append(tags, extra)
 		}
@@ -533,10 +544,6 @@ func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra st
 		b.WriteString(indent + " */\n" + indent)
 		l.e.insertLines(declStart, b.String())
 		return extra != ""
-	}
-	idx := bytes.LastIndex(l.e.src[:declStart], []byte(doc))
-	if idx < 0 {
-		return false
 	}
 	oneLine := !strings.Contains(doc, "\n")
 	filled := doc // a one-line docblock with the types of its own tags filled in
