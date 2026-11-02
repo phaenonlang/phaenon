@@ -330,6 +330,17 @@ var (
 // typeCheck loads the stubs, the nearest Composer maps and the given files,
 // and returns the diagnostics.
 func typeCheck(files []string, opts checker.Options) []checker.Diagnostic {
+	p, diags := loadProgram(files, true)
+	loadedProgram = p
+	loadedChecker = checker.New(p, opts)
+	return append(diags, loadedChecker.Check()...)
+}
+
+// loadProgram builds the program model of the given files: the stubs, the
+// local php's extensions, the nearest Composer maps (through the project
+// file's roots) and the files themselves, .php in PHP mode. A file that
+// does not parse is reported as P1000 and left out.
+func loadProgram(files []string, checked bool) (*program.Program, []checker.Diagnostic) {
 	p := program.New()
 	if err := p.LoadStubs(); err != nil {
 		fail("stdlib: %v", err)
@@ -368,7 +379,7 @@ func typeCheck(files []string, opts checker.Options) []checker.Diagnostic {
 		if filepath.Ext(in) == ".php" {
 			mode = lexer.ModePHP
 		}
-		if _, err := p.AddFile(in, src, mode, true); err != nil {
+		if _, err := p.AddFile(in, src, mode, checked); err != nil {
 			line := 1
 			if pe, ok := err.(*parser.Error); ok {
 				line = pe.Line
@@ -376,9 +387,7 @@ func typeCheck(files []string, opts checker.Options) []checker.Diagnostic {
 			diags = append(diags, checker.Diagnostic{File: in, Line: line, Col: 1, Severity: checker.Error, Code: "P1000", Message: err.Error()})
 		}
 	}
-	loadedProgram = p
-	loadedChecker = checker.New(p, opts)
-	return append(diags, loadedChecker.Check()...)
+	return p, diags
 }
 
 func checkCmd(args []string) {
@@ -468,6 +477,30 @@ func migrateCmd(args []string) {
 		usage()
 	}
 	files := collect(fs.Args(), excluded, ".php", ".phn")
+	// The lift predicts the override-erasure rule, which needs the method
+	// a declaration overrides: the program model of the files as they are
+	// before the migration, the project's other files and the vendor code
+	// found through Composer. Files phn generated stay out of it; their
+	// .phn declares the same classes.
+	var prog *program.Program
+	if !*keepDoc {
+		if proj := loadProject(); proj != nil {
+			projectSources = proj.sources()
+		}
+		var model []string
+		for _, in := range files {
+			if strings.HasSuffix(in, ".php") {
+				if _, err := os.Stat(strings.TrimSuffix(in, ".php") + ".phn"); err == nil {
+					continue
+				}
+				if src, err := os.ReadFile(in); err == nil && emit.IsGenerated(src) {
+					continue
+				}
+			}
+			model = append(model, in)
+		}
+		prog, _ = loadProgram(model, false)
+	}
 	skipped, migrated, lifted, kept := 0, 0, 0, 0
 	for _, in := range files {
 		src, err := os.ReadFile(in)
@@ -480,7 +513,7 @@ func migrateCmd(args []string) {
 			if *keepDoc {
 				continue
 			}
-			phn, notes, err = migrate.Lift(src, migrate.Options{KeepPublic: *keepPublic})
+			phn, notes, err = migrate.Lift(src, migrate.Options{KeepPublic: *keepPublic, Program: prog, File: modelFile(prog, in)})
 			if err != nil {
 				fail("%s: %v", in, err)
 			}
@@ -489,7 +522,7 @@ func migrateCmd(args []string) {
 			}
 			lifted++
 		} else {
-			phn, notes, err = migrate.Convert(src, migrate.Options{Generics: !*keepDoc, KeepPublic: *keepPublic})
+			phn, notes, err = migrate.Convert(src, migrate.Options{Generics: !*keepDoc, KeepPublic: *keepPublic, Program: prog, File: modelFile(prog, in)})
 			if err != nil {
 				if errors.Is(err, migrate.ErrNotPlainCode) || errors.Is(err, migrate.ErrGenerated) {
 					fmt.Fprintf(os.Stderr, "%s: skipped: %v\n", in, err)
@@ -518,6 +551,14 @@ func migrateCmd(args []string) {
 		}
 	}
 	fmt.Printf("%d files migrated, %d skipped, %d .phn files updated, %d docblock tags kept\n", migrated, skipped, lifted, kept)
+}
+
+// modelFile returns the file at path in the program model, nil without one.
+func modelFile(p *program.Program, path string) *program.File {
+	if p == nil {
+		return nil
+	}
+	return p.File(path)
 }
 
 // ------------------------------------------------------------------ lex / print

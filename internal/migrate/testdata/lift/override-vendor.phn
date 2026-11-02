@@ -1,0 +1,77 @@
+namespace Lift\Vendor;
+
+use Acme\Box;
+use Acme\BoxStore;
+use Acme\Factory;
+use Acme\Item;
+use Acme\Repository;
+use Acme\SmallBox;
+use Acme\Store;
+
+/**
+ * The override-erasure rule against parents in other files, found through
+ * the program model: vendor PHP (Acme\Repository, Acme\Factory) and project
+ * files already in Phaenon (Acme\Store, Acme\BoxStore).
+ */
+final class User
+{
+}
+
+/**
+ * Vendor PHP takes an object: save() is lifted, find() is not — User|null
+ * compiles to ?User, narrower than the ?object PHP saw.
+ */
+final class UserRepository implements Repository<User>
+{
+    /**
+     * @return User|null
+     */
+    fun find(int $id): ?object
+    {
+        return null;
+    }
+
+    fun save(User $entity): void
+    {
+    }
+}
+
+/**
+ * A return narrows to the overridden method's when its own erasure is
+ * wider: T compiles to object, as declared.
+ */
+final class PrototypeFactory<T> implements Factory<T>
+{
+    /**
+     * @param T $prototype
+     */
+    fun __construct(private object $prototype)
+    {
+    }
+
+    fun create(): T
+    {
+        return clone $this->prototype;
+    }
+}
+
+/**
+ * A parent in Phaenon compiles put(Item $item).
+ */
+final class Shelf implements Store<Box>
+{
+    fun put(Box $item): void
+    {
+    }
+}
+
+/**
+ * Down a chain the parent's compiled signature counts: BoxStore::put() takes
+ * an Item, although its own T erases to Box.
+ */
+final class SmallBoxStore extends BoxStore<SmallBox>
+{
+    fun put(SmallBox $item): void
+    {
+    }
+}
