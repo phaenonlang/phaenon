@@ -36,6 +36,8 @@ func main() {
 		migrateCmd(os.Args[2:])
 	case "stdlib":
 		stdlibCmd(os.Args[2:])
+	case "trace":
+		traceCmd(os.Args[2:])
 	case "lex":
 		lex(os.Args[2:])
 	case "print":
@@ -61,6 +63,9 @@ usage:
                                                            write the compiled stdlib (Seq.php, …) into DIR, the compiled
                                                            phaenon/concurrent package into the second, or the PhpStorm
                                                            plugin's pseudo-classes (ListMethods.php, …) into the third
+  phn trace [--root PREFIX=LOCAL]... [<text>...]           rewrite the positions in compiled files (stack traces,
+                                                           PHPUnit, PHPStan --error-format=raw) into .phn positions;
+                                                           reads the arguments, or stdin without them
   phn lex   [--php] <file>                                 dump the token stream
   phn print [--php] <file>                                 parse and pretty-print
 
@@ -79,6 +84,10 @@ missing, stale or orphaned.
 stdlib materialises the classes behind the method syntax, as the phaenon/runtime package ships them,
 and with --plugin-stubs the editor-only pseudo-classes the PhpStorm plugin bundles.
 check reads vendor code through the nearest vendor/composer autoload maps.
+Every compiled file ends with a line map (// phaenon-map v1 …) that trace reads: file.php:42,
+file.php(42) and "file.php on line 42" become the .phn's path and line; anything else, positions in
+files without a map included, passes through unchanged. --root /app=. reads a path under /app (a
+production deployment) from the local checkout, so a pasted trace maps too.
 --php reads the file as plain PHP (with <?php tags) instead of Phaenon.`))
 	os.Exit(2)
 }
