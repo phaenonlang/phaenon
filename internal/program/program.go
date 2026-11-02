@@ -17,6 +17,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/types"
 	"github.com/phaenonlang/phaenon/stdlib"
 )
@@ -50,6 +51,7 @@ type Program struct {
 	// installs it (the program package cannot type expressions itself).
 	ConstType func(c *Constant) types.Type
 	stubs     bool
+	target    phpversion.Version
 }
 
 // Problem is a finding attached to a declaration site.
@@ -83,6 +85,21 @@ func New() *Program {
 		patches:      map[string]*ast.ClassDecl{},
 	}
 }
+
+// Target is the PHP version the program compiles for: the oldest PHP the
+// emitted code must run on (design/php-versions.md §2). The checker and the
+// emitter ask it whether a construct or a library symbol needs lowering or a
+// diagnostic; it is phpversion.Floor until SetTarget says otherwise.
+func (p *Program) Target() phpversion.Version {
+	if p == nil || p.target.IsZero() {
+		return phpversion.Floor
+	}
+	return p.target
+}
+
+// SetTarget sets the version Target reports. phn resolves it from
+// phaenon.json and composer.json; tests set it directly.
+func (p *Program) SetTarget(v phpversion.Version) { p.target = v }
 
 // AddLoader appends a loader; loaders are consulted in order.
 func (p *Program) AddLoader(l Loader) {

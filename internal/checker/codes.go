@@ -25,8 +25,11 @@ type Code struct {
 }
 
 var (
-	// P1 — removed constructs
+	// P1 — removed constructs, and constructs the target PHP lacks
 	P1001 = Code{"P1001", Error, "construct removed from Phaenon"}
+	// P1002: "… needs PHP 8.6 (target 8.5)" for a construct newer than the
+	// target that is not lowered (design/php-versions.md §3).
+	P1002 = Code{"P1002", Error, "construct needs a newer PHP than the target"}
 
 	// P2 — names
 	P2001 = Code{"P2001", Error, "unknown class"}
@@ -146,4 +149,9 @@ var (
 	P4005 = Code{"P4005", Warning, "Composer autoload maps not found"}
 	P4006 = Code{"P4006", Warning, "deprecated"}
 	P4007 = Code{"P4007", Warning, "PHP extensions could not be read"}
+	// P4008–P4010 are about the target (design/php-versions.md §2), reported
+	// on phaenon.json or composer.json.
+	P4008 = Code{"P4008", Warning, "target above the PHP composer.json admits"}
+	P4009 = Code{"P4009", Error, "PHP target phn does not support"}
+	P4010 = Code{"P4010", Warning, "no PHP target stated"}
 )

@@ -17,6 +17,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/migrate"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/printer"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/stdlib"
@@ -51,7 +52,9 @@ usage:
                                                            type-check and compile .phn files to .php
   phn check [--json] [--no-deprecations] [--exclude PATH]... [<path>...]
                                                            type-check .phn files, write nothing
-  phn migrate [--keep-docblocks] [--keep-public] <path>... rewrite .php files as .phn; lift generic docblocks into syntax, function into fun
+  phn migrate [--keep-docblocks] [--keep-public] [--php X.Y] <path>...
+                                                           rewrite .php files as .phn; lift generic docblocks into syntax,
+                                                           function into fun; --php writes the target into phaenon.json
   phn stdlib [--out DIR] [--concurrent-out DIR] [--plugin-stubs DIR] [--check]
                                                            write the compiled stdlib (Seq.php, …) into DIR, the compiled
                                                            phaenon/concurrent package into the second, or the PhpStorm
@@ -60,11 +63,13 @@ usage:
   phn print [--php] <file>                                 parse and pretty-print
 
 Without paths, build and check read phaenon.json from the working directory:
-  {"roots": {"src": ".src", "tests": ".tests"}, "exclude": ["tests/Fixture"]}
+  {"roots": {"src": ".src", "tests": ".tests"}, "exclude": ["tests/Fixture"], "php": "8.6"}
 Each root compiles into its output directory, a sibling with the same structure, where every
 other file under the root is copied too (so __DIR__-relative paths resolve as in the source) and
 outputs with no source behind them are removed. "exclude" lists paths the checker leaves alone:
 check skips them, build compiles them without reporting their diagnostics (--exclude adds more).
+"php" is the target, the oldest PHP the output must run on (8.5 or 8.6); without it, the lowest
+version composer.json's require.php admits.
 Without a project file, build writes Foo.php next to Foo.phn, or under DIR (mirroring the path
 given) with --out. A file with type errors is not written unless --emit-on-error is given (the
 exit status still reports the errors). --check writes nothing and fails when any output is
@@ -156,10 +161,15 @@ func build(args []string) {
 	proj := loadProject()
 	roots := fs.Args()
 	if len(roots) == 0 {
-		if proj == nil {
-			fail("phn build: give paths, or a %s naming the roots", ProjectFile)
-		}
+		proj.requireRoots("build")
 		roots = proj.roots()
+	}
+	tgt := projectTarget(proj, roots)
+	if tgt.Unsupported {
+		for _, d := range tgt.Diags {
+			printDiag(d)
+		}
+		fail("phn build: nothing compiled: the target is not one phn compiles for")
 	}
 	// Excluded paths are compiled all the same: they are code the project runs,
 	// only analysed by another tool (PHPStan's rule fixtures, a Rector config).
@@ -180,7 +190,7 @@ func build(args []string) {
 	}
 	files := collect(roots, skip, ".phn")
 	failed, written, stale := 0, 0, 0
-	diags := typeCheck(files, checker.Options{})
+	diags := append(tgt.Diags, typeCheck(files, tgt.Version, checker.Options{})...)
 	broken := map[string]bool{}
 	for _, d := range diags {
 		if excluded(d.File) {
@@ -328,9 +338,10 @@ var (
 )
 
 // typeCheck loads the stubs, the nearest Composer maps and the given files,
-// and returns the diagnostics.
-func typeCheck(files []string, opts checker.Options) []checker.Diagnostic {
+// and returns the diagnostics of checking them for the target.
+func typeCheck(files []string, target phpversion.Version, opts checker.Options) []checker.Diagnostic {
 	p := program.New()
+	p.SetTarget(target)
 	if err := p.LoadStubs(); err != nil {
 		fail("stdlib: %v", err)
 	}
@@ -390,11 +401,10 @@ func checkCmd(args []string) {
 	proj := loadProject()
 	roots := fs.Args()
 	if len(roots) == 0 {
-		if proj == nil {
-			fail("phn check: give paths, or a %s naming the roots", ProjectFile)
-		}
+		proj.requireRoots("check")
 		roots = proj.roots()
 	}
+	tgt := projectTarget(proj, roots)
 	if proj != nil {
 		excludes = append(excludes, proj.Exclude...)
 		projectSources = proj.sources()
@@ -411,7 +421,7 @@ func checkCmd(args []string) {
 		}
 		files = append(files, f)
 	}
-	diags := typeCheck(files, checker.Options{Deprecations: !*noDeprecations})
+	diags := append(tgt.Diags, typeCheck(files, tgt.Version, checker.Options{Deprecations: !*noDeprecations})...)
 	errors, warnings := 0, 0
 	for _, d := range diags {
 		if *asJSON {
@@ -463,9 +473,30 @@ func migrateCmd(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	keepDoc := fs.Bool("keep-docblocks", false, "leave generic docblocks as they are")
 	keepPublic := fs.Bool("keep-public", false, "write `public fun` and keep `public` before private(set) (Phaenon implies it)")
+	phpTarget := fs.String("php", "", "write this target (X.Y) into phaenon.json, creating it if needed")
 	fs.Parse(args)
-	if fs.NArg() == 0 {
+	if fs.NArg() == 0 && *phpTarget == "" {
 		usage()
+	}
+	if *phpTarget != "" {
+		v, err := phpversion.Parse(*phpTarget)
+		if err != nil {
+			fail("phn migrate --php: %v", err)
+		}
+		if !v.Supported() {
+			fail("phn migrate --php: PHP %s is not a target phn compiles for: targets are %s to %s", v, phpversion.Floor, phpversion.Newest)
+		}
+		if err := setProjectTarget(v); err != nil {
+			fail("phn migrate --php: %v", err)
+		}
+		fmt.Printf("%s: target PHP %s\n", ProjectFile, v)
+		// What the new target means against composer.json.
+		for _, d := range projectTarget(loadProject(), nil).Diags {
+			fmt.Fprintln(os.Stderr, d.String())
+		}
+		if fs.NArg() == 0 {
+			return
+		}
 	}
 	files := collect(fs.Args(), excluded, ".php", ".phn")
 	skipped, migrated, lifted, kept := 0, 0, 0, 0
