@@ -70,6 +70,15 @@ The branches as extracted: `PHP-8.6` at `0761161562c`, `PHP-8.5` at `a1a9f70cb2d
 | `PHP-8.5`, PHP 8.5.3 | 22,233/22,233 | 22,075/22,075 (84 of 158) | 22,159/22,159 | 4,361/4,361 | 4,644/4,644 |
 | master checkout, PHP 8.5.3 | 23,536/23,536 | 23,226/23,226 (234 of 310: the 8.6 placeholder tests) | 23,460/23,460 | — | — |
 
+Since D19 (2026-11-02) the emit execution suite translates the compiled run's positions through
+its line map before comparing (`translateLines` in `internal/conformance/emit_test.go`). Re-run on
+both branches that day: emit execution **4,614/4,614** (`PHP-8.5`, PHP 8.5.3) and **4,862/4,862**
+(`PHP-8.6`, PHP 8.6.0-dev), plus **29** tests in each that read a line as a value (an error
+handler's `$errline`, `getLine()`, reflection's start line, `debug_backtrace()` as data, an
+assertion callback): the compiled file reports its own line there, so they must match with digits
+blinded and are counted apart. Lexer, parser, printer round trip and printer execution unchanged
+from the table.
+
 The parse oracle is `TOKEN_PARSE`, the grammar alone: PHP's compile errors (a misplaced
 placeholder, say) are accepted by it, so the parser accepts them too and the checker reports them.
 The emit execution suite skips a test with placeholders when the oracle is older than 8.6 ("newer
@@ -86,9 +95,28 @@ than the oracle").
   placeholders: the parity PHPStan 2.2 does not parse PHP 8.6.
 - The checker's PHPStan parity skips goldens with placeholders for the same reason.
 - A checker golden whose only Phaenon syntax is that of `../design/functions.md` (`fun`, `=>`
-  bodies, `throws`) is compiled by the emitter, which keeps every line, and PHPStan judges the
-  output (2026-11-02); goldens with other Phaenon syntax are still skipped, covered by the emit
-  goldens. `functions.phn`, `expression-bodies.phn` and `throws.phn` run that way.
+  bodies, `throws`) is compiled by the emitter and PHPStan judges the output (2026-11-02), each
+  finding's line read through the output's line map (since D19); goldens with other Phaenon syntax
+  are still skipped, covered by the emit goldens. `functions.phn`, `expression-bodies.phn` and
+  `throws.phn` run that way.
+
+## The line map (2026-11-02)
+
+- `internal/linemap` tests read `testdata/vectors.json`, the reference of the three readers;
+  `TestVectorCopiesFresh` compares it with the PhpStorm plugin's and `phaenon/runtime`'s copies
+  (`src/test/resources/linemap/vectors.json`, `tests/Debug/vectors.json`) and skips a missing one,
+  as it does in a git worktree, where the siblings are not three directories up.
+- `TestLineMapProperty` (`internal/emit`) is the emitter's line invariant over the emit goldens,
+  the stdlib's `.phn` and the checker corpus: every source byte that reaches the output unchanged
+  sits on a line whose forward lookup gives its line. `TestLineMapTree` runs it over a project:
+  `PHAENON_LINEMAP_TREE=~/labs/tequila/core/src` (`PHAENON_LINEMAP_OUT=DIR` writes the outputs).
+  On 2026-11-02 it held on all five dogfood trees (core 411 + 401, tq-cli 585 + 274, odm 76 + 49,
+  object-mapper 23, reflector 4 files), and the 812 core outputs passed `php -l`.
+- php-cs-fixer on compiled output, checked by hand: core's `tools/php-cs-fixer` with a copy of a
+  project's `.php-cs-fixer.dist.php` outside its checkout, the compiled-tree exceptions removed,
+  `->in()` pointed at `PHAENON_LINEMAP_OUT`. 2026-11-02: core's 812 and tq-cli's 585 compiled
+  sources, 0 findings. On the emit goldens what fires is the fixtures' own text, plus the two
+  limits in [[open-items]] § D19 — the compiled layout.
 
 ## PHPStan
 

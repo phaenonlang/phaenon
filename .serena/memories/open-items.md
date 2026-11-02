@@ -309,13 +309,9 @@ Built in the compiler (decisions: `../design/functions.md` §8). Left:
   committed, `phn migrate` the two files and commit the result (measured on the last commit's
   versions: 2 bodies as `=>`, 8 braces, 1 `@throws`, 119 → 103 lines), and add its hash to
   `.git-blame-ignore-revs`.
-- **core: `single_line_after_imports` on a compiler import** — the uncommitted edit to
-  `AbstractEventSourcedRepository.phn` drops `use Tequila\Core\Domain\Aggregate\Aggregate`, which
-  the source no longer names but the compiled `save(Aggregate $aggregate)` does (the erasure of
-  `T`). The emitter then writes it as a compiler import on the line of the first `use` (D11), and
-  `composer cs:check` fails on that output with `single_line_after_imports`. Before that edit is
-  committed, either keep the import or turn the rule off, as the README says for outputs with a
-  compiler import.
+- ~~**core: `single_line_after_imports` on a compiler import**~~ — gone with D19 (2026-11-02): a
+  compiler import takes a line of its own, so the uncommitted edit to
+  `AbstractEventSourcedRepository.phn` that drops `use …\Aggregate` no longer fails cs.
 - **Prefix expressions' spans end at their operator** — `throw $e`, `print $x`, `clone $o`, `!$x`,
   casts, `include`, `yield from`, `$$x` (and a `->` property fetch's name): the struct literals in
   `internal/parser/expr.go` compute `S` before parsing the operand. Found while building D18;
@@ -344,6 +340,41 @@ Built in the compiler (decisions: `../design/functions.md` §8). Left:
 - The per-process map cache does not notice a compiled file changing under a long-running worker;
   acceptable for deployed code, not for a dev server that rebuilds under a running worker.
 - Windows paths are handled lexically but untested.
+
+## D19 — the compiled layout and the line map in the compiler (2026-11-02)
+
+The emitter's side of `../design/line-map.md` (§2, §3, §4.1), `phn trace`, and migrate's class
+braces (§7). Left:
+
+- **Coverage** (§5): PHPUnit's Clover/Cobertura output and PhpStorm's coverage view report compiled
+  lines. A follow-up translates them — a `phn trace`-like filter over the coverage XML, or the
+  plugin reading the map for its view.
+- **Dogfood rebuild**: the five trees' compiled outputs change layout; rebuild them, drop the
+  compiled-tree exceptions from core's and tq-cli's `.php-cs-fixer.dist.php` (the four line-1
+  rules, `braces_position`, `class_definition`, `single_line_after_imports`), rerun each suite, and
+  re-migrate the `.phn` so class-like braces go back down ([[dogfood]]). Measured beforehand on
+  the trees as they are: core's 812 and tq-cli's 585 compiled sources pass their projects' rules
+  with no exception ([[testing]] § The line map). Core's rule tests assert the lines of
+  `tests/PHPStan/Data` fixtures, which go back to `.php` and are copied (§5).
+- **php-cs-fixer on compiled output, beyond layout** (measured on the emitter goldens with core's
+  rules, no exceptions): `use_arrow_functions` (`@PHP74Migration:risky`) turns a closure in a
+  constant expression into `static fn`, which PHP 8.5 refuses there — a project with such closures
+  needs the rule off; `void_return` fires on a `concurrently` block in statement position
+  (`Scope::run(function () use (…) {`). Neither is the layout's; core and tq-cli have neither.
+- **A one-line body with several statements** (`{ $a = 1; return $a; }`) gets its braces on lines
+  of their own, the statements stay on one line: `no_multiple_statements_per_line` then reports the
+  source's own layout. `phn fmt` (M6) territory.
+- **`__LINE__` inside text another lowering copies** (a pipe's left operand moved into a closure)
+  stays `__LINE__` and reports the output's line.
+- **`phn stdlib` writes no map**: the runtime and concurrent packages ship without their `.phn`, so
+  their positions are PHP positions. Revisit if the packages ever ship sources.
+- **The `<?php // phaenon-map` spelling is never written**: Phaenon source has no close tag, so a
+  compiled file always ends in PHP mode; the readers accept the spelling (vectors) for a future
+  writer.
+- **Conformance**: the emit execution suite compares tests that read a line as a value (an error
+  handler's `$errline`, `getLine()`, reflection's start line, `debug_backtrace()` taken as data, an
+  assertion callback) with digits blinded, counted apart ([[testing]]); the map cannot reach those
+  numbers.
 
 ## Small things
 

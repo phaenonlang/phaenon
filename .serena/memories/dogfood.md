@@ -246,6 +246,16 @@ push dogfood work without a maintainer's go-ahead.
   - Left alone: `.serena/project.yml` (odm, object-mapper), object-mapper's untracked
     `config/reference.php`.
 
+- **D19, the compiled layout (2026-11-02):** compiled output is laid out as PSR-12 wants it and
+  ends with a line map (`../design/line-map.md`); the trees were built with the line rule and are
+  not rebuilt yet. Per tree: re-migrate the `.phn` (class-like braces back on their own lines,
+  migrate's summary counts them), rebuild, drop core's and tq-cli's compiled-tree php-cs-fixer
+  exceptions, rerun the suite, PHPStan and cs ([[open-items]] § D19 — the compiled layout). Core's
+  rule tests assert the compiled line numbers of their `tests/PHPStan/Data` fixtures: those go back
+  to `.php` files, which `phn build` copies as written (line-map.md §5); any other test comparing a
+  compiled line with a `.phn` line goes through the map. `vendor/bin/phpunit | phn trace` shows
+  failures at `.phn` lines.
+
 ## Next targets (roadmap §3)
 
 | Milestone | Target |
