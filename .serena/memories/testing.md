@@ -178,6 +178,19 @@ the extension or PHP version changes; delete the directory to force it. `TestExt
 (`internal/program`) generates a stub for every loaded extension and parses it, so a php with an
 exotic extension is worth running the suite on. Without `php` the checker warns `P4007` once.
 
+## Xdebug for the plugin's debugger test (2026-11-02)
+
+`../jetbrains`' `PhaenonXdebugTest` drives a real Xdebug over DBGp when `PHAENON_XDEBUG` names the
+extension (`PHAENON_PHP` the php, default `php`). Xdebug 3.5.3 is built from the PECL source in
+`~/labs/phaenon/.cache/xdebug/src/xdebug-3.5.3` (`phpize && ./configure
+--with-php-config=/opt/homebrew/bin/php-config && make`) into
+`~/labs/phaenon/.cache/xdebug/xdebug-3.5.3-php8.5.so`, and loaded only by `php -n -d
+zend_extension=…`: no php.ini carries it. It does not build for 8.6-dev. Measured there: Xdebug
+resolves a breakpoint on a compiled signature line to the body's first statement, and a void
+expression body stops twice (statement, then the compiled `}`), which is why holds exist
+(`../design/line-map.md` §3.2). The plugin's `src/test/resources/linemap/vectors.json` is a verbatim
+copy of `internal/linemap/testdata/vectors.json`.
+
 ## Toolchain
 
 `go.mod` says `go 1.27`; the local toolchain is go1.27.2. The module has no third-party

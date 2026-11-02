@@ -560,6 +560,27 @@ braces (§7). Left:
 - The implied `declare(strict_types=1)` is not modelled.
 - Editor colouring relies on the internal extension point `com.jetbrains.php.baseLexerProvider`.
 
+## PhpStorm plugin — line map and debugging (D19, 2026-11-02)
+
+jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the plugin guide:
+- **Internal API**: debugging goes through `com.intellij.php.debug.templateLanguage`
+  (`PhpTemplateLanguagePathMapper`, `@ApiStatus.Internal`, as Twig and Blade use it); the compiled
+  file's editor wrapper forwards `TextEditor.isEditorLoaded()`, internal too. The Plugin Verifier
+  reports both; Marketplace publication may object.
+- **The breakpoint gate** depends on `PhpLineBreakpointHandler.registerBreakpoint` calling
+  `isTemplateFileType` right after `getInstance` asked `isGeneratedFile`; if PhpStorm changes that,
+  `.phn` breakpoints go unmapped (fails closed, plain PHP unaffected).
+- The Frames list labels compiled frames with the compiled name and line (`PhpStackFrame`'s
+  presentation is final); selecting one opens the `.phn` line.
+- A breakpoint set before its file is compiled stays invalid until toggled or a new session; a map is
+  as stale as the last build (the compiled file's banner warns).
+- Source-line stepping keys on the debugger's action ids; a step issued otherwise steps per
+  compiled line.
+- Not verified: pass/fail icons on `.phn` test methods (PhpStorm likely keys them on the compiled
+  location). Coverage reports compiled lines.
+- Xdebug 3.5's own path maps (`xdebug.path_mapping`) could serve other IDEs from the compiler side;
+  their format rejects a run and a hold on one source line, so it would need its own encoding.
+
 ## Before the repositories go public
 
 - `AGENTS.md`, `.mcp.json` and this vault name paths on the development machine (`~/labs/…`,
