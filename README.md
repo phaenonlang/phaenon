@@ -3,7 +3,7 @@
 A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for PHP".
 
 - `phn` — the compiler (this repository, Go)
-- `phaenon/runtime` — the PHP runtime package (`\Phaenon\Type`, stdlib)
+- `phaenon/runtime` — the PHP runtime package (`\Phaenon\Type`, stdlib, the line map for Monolog and Sentry)
 - `design/` — language design documents
 
 Status: pre-alpha. M0 done — lexer, parser and printer are conformance-tested against php-src's
@@ -253,7 +253,7 @@ crossing it, a spawn body mutating an outer variable, and `sleep()`/`usleep()` i
 phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] # type-check and compile .phn → .php; no paths: phaenon.json
 phn check [--json] [--no-deprecations] [--exclude PATH]... path...              # type-check .phn (and .php) files
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
-phn stdlib --out DIR [--check]                         # the compiled stdlib (Seq, Map, Str, Bytes), as phaenon/runtime ships it
+phn stdlib --out DIR [--check]                         # the compiled stdlib (Seq, Map, Str, Bytes, Debug/…), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
 phn stdlib --plugin-stubs DIR  # the PhpStorm plugin's editor-only pseudo-classes (ListMethods.php, …) from the same sources
 phn lex   [--php] file                    # token stream
