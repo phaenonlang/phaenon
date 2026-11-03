@@ -397,7 +397,8 @@ func (p *Parser) forExprs(until token.Kind) []ast.Expr {
 		if p.at(token.T_VOID_CAST) {
 			start := p.tok().Start
 			p.next()
-			list = append(list, &ast.Cast{S: p.span(start), Op: token.T_VOID_CAST, Raw: "(void)", Expr: p.expr()})
+			x := p.expr()
+			list = append(list, &ast.Cast{S: p.span(start), Op: token.T_VOID_CAST, Raw: "(void)", Expr: x})
 		} else {
 			list = append(list, p.expr())
 		}
