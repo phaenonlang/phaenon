@@ -1,0 +1,329 @@
+package main
+
+// Installed Composer packages written in Phaenon (design/tooling.md §3.3):
+// the packages of vendor/composer/installed.json that carry a phaenon.json.
+// A project's check and build read them from their sources, so that their
+// generic signatures are seen as written, and `phn build --vendor` compiles
+// each into its own output directories, for its own target, its findings
+// printed as warnings: the package's CI gave its verdict, and a newer phn
+// may be stricter than the one it was released with.
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/checker"
+	"github.com/phaenonlang/phaenon/internal/program"
+)
+
+// stampFile records, in each output directory of an installed package, what
+// the last build compiled: the compiler, the target, the installed set and
+// the sources. A build that would compile the same is skipped.
+const stampFile = ".phn-build"
+
+// installedPackage is one package of installed.json.
+type installedPackage struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	InstallPath string `json:"install-path"`
+	dir         string // where it is installed, relative to the working directory when under it
+}
+
+// vendorComposerDir is the vendor/composer directory of the project in the
+// working directory: composer.json's config.vendor-dir, or
+// COMPOSER_VENDOR_DIR, or vendor.
+func vendorComposerDir() string {
+	vendor := os.Getenv("COMPOSER_VENDOR_DIR")
+	if vendor == "" {
+		vendor = "vendor"
+		if data, err := os.ReadFile("composer.json"); err == nil {
+			var c struct {
+				Config struct {
+					VendorDir string `json:"vendor-dir"`
+				} `json:"config"`
+			}
+			if json.Unmarshal(data, &c) == nil && c.Config.VendorDir != "" {
+				vendor = c.Config.VendorDir
+			}
+		}
+	}
+	return filepath.Join(vendor, "composer")
+}
+
+// installedPackages reads composerDir/installed.json, Composer 2's object
+// or Composer 1's list, sorted by name; nil when there is none.
+func installedPackages(composerDir string) ([]installedPackage, error) {
+	path := filepath.Join(composerDir, "installed.json")
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Packages []installedPackage `json:"packages"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		if json.Unmarshal(data, &doc.Packages) != nil {
+			return nil, fmt.Errorf("%s: %v", path, err)
+		}
+	}
+	for i := range doc.Packages {
+		p := &doc.Packages[i]
+		ip := filepath.FromSlash(p.InstallPath)
+		if ip == "" {
+			ip = filepath.Join("..", filepath.FromSlash(p.Name)) // Composer 1: vendor/<name>
+		}
+		if !filepath.IsAbs(ip) {
+			ip = filepath.Join(composerDir, ip)
+		}
+		p.dir = relativePath(filepath.Clean(ip))
+	}
+	sort.Slice(doc.Packages, func(i, j int) bool { return doc.Packages[i].Name < doc.Packages[j].Name })
+	return doc.Packages, nil
+}
+
+// phaenonPackage is an installed package with a project file naming roots.
+type phaenonPackage struct {
+	installedPackage
+	proj *project // its roots and excludes relative to the working directory
+}
+
+// phaenonPackages lists the installed packages that carry a phaenon.json
+// naming roots. A project file that cannot be read is passed to warn and
+// its package left out.
+func phaenonPackages(composerDir string, warn func(error)) []phaenonPackage {
+	pkgs, err := installedPackages(composerDir)
+	if err != nil {
+		warn(err)
+		return nil
+	}
+	var out []phaenonPackage
+	for _, p := range pkgs {
+		proj, err := readProject(filepath.Join(p.dir, ProjectFile))
+		switch {
+		case err != nil:
+			warn(err)
+		case proj != nil && len(proj.Roots) > 0:
+			out = append(out, phaenonPackage{p, proj.rebased(p.dir)})
+		}
+	}
+	return out
+}
+
+// installedSources maps the output directories of the installed Phaenon
+// packages to their source roots, absolute, for the Composer loader: under
+// the path Composer installed a package at and, for a path repository's
+// symbolic link, the path it points to, since the autoload maps may name
+// either.
+func installedSources(composerDir string) map[string]string {
+	m := map[string]string{}
+	for _, p := range phaenonPackages(composerDir, func(error) {}) {
+		for out, src := range p.proj.sources() {
+			m[out] = src
+			if real, err := filepath.EvalSymlinks(filepath.Dir(out)); err == nil {
+				m[filepath.Join(real, filepath.Base(out))] = src
+			}
+		}
+	}
+	return m
+}
+
+// buildVendor is `phn build --vendor`: every installed Phaenon package is
+// compiled whose sources, compiler, target or installed set changed since
+// its last build. It fails only when an output cannot be written.
+func buildVendor() {
+	dir := vendorComposerDir()
+	installed := filepath.Join(dir, "installed.json")
+	installedData, err := os.ReadFile(installed)
+	if err != nil {
+		fail("phn build --vendor: %s cannot be read (%v): run composer install first", installed, err)
+	}
+	// Every package's program reads the vendor code through the root
+	// project's autoload maps, not through a vendor directory of the
+	// package's own (a path repository's checkout has one).
+	composerDir = dir
+	pkgs := phaenonPackages(dir, func(err error) { fmt.Fprintf(os.Stderr, "warning: %v\n", err) })
+	compiler := compilerStamp()
+	built, current, failed := 0, 0, 0
+	for _, p := range pkgs {
+		var roots []string
+		for _, r := range p.proj.roots() {
+			if st, err := os.Stat(r); err == nil && st.IsDir() {
+				roots = append(roots, r) // a dist archive may leave out tests/
+			}
+		}
+		if len(roots) == 0 {
+			continue
+		}
+		tgt := projectTarget(p.proj, roots)
+		stamps := map[string]string{}
+		fresh := true
+		for _, r := range roots {
+			stamps[r] = fmt.Sprintf("phn %s\ntarget %s\ninstalled %s\nsources %s\n", compiler, tgt.Version, digest(installedData), treeDigest(r))
+			cur, err := os.ReadFile(filepath.Join(p.proj.Roots[r], stampFile))
+			fresh = fresh && err == nil && string(cur) == stamps[r]
+		}
+		if fresh {
+			current++
+			continue
+		}
+		if tgt.Unsupported {
+			for _, d := range tgt.Diags {
+				printDiag(d)
+			}
+			fmt.Fprintf(os.Stderr, "%s: not compiled: its target is not one phn compiles for\n", p.Name)
+			failed++
+			continue
+		}
+		excludes = append([]string(nil), p.proj.Exclude...)
+		projectSources = p.proj.sources()
+		res := buildJob{proj: p.proj, roots: roots, target: tgt, mirror: true, dependency: true}.run()
+		if res.failed > 0 {
+			fmt.Fprintf(os.Stderr, "%s: %d of %d files could not be compiled\n", p.Name, res.failed, res.files)
+			failed++
+			continue
+		}
+		for _, r := range roots {
+			writeFile(filepath.Join(p.proj.Roots[r], stampFile), []byte(stamps[r]))
+		}
+		built++
+		fmt.Printf("%s: %d files compiled, %d written\n", p.Name, res.files, res.written)
+	}
+	fmt.Printf("%d installed packages built, %d up to date\n", built, current)
+	if failed > 0 {
+		fail("%d installed packages could not be built", failed)
+	}
+}
+
+// compilerStamp names the running compiler: its version and, since a
+// development build keeps one version across changes, the digest of its
+// executable.
+func compilerStamp() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return version
+	}
+	data, err := os.ReadFile(exe)
+	if err != nil {
+		return version
+	}
+	return version + " " + digest(data)
+}
+
+func digest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// treeDigest is the digest of the files under a source root, by path and
+// content, without nested vendor directories (which neither collect nor
+// mirror reads).
+func treeDigest(root string) string {
+	var paths []string
+	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && d.Name() == "vendor" && path != root {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	sort.Strings(paths)
+	h := sha256.New()
+	for _, p := range paths {
+		rel, _ := filepath.Rel(root, p)
+		io.WriteString(h, filepath.ToSlash(rel)+"\x00")
+		if f, err := os.Open(p); err == nil {
+			io.Copy(h, f)
+			f.Close()
+		}
+		io.WriteString(h, "\x00")
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// releaseMinor is the X.Y of a release version (0.4.2, v0.4.2), "" for a
+// development version (dev, dev-main, 0.4.x-dev).
+func releaseMinor(v string) string {
+	v = strings.TrimPrefix(v, "v")
+	parts := strings.Split(v, ".")
+	if len(parts) < 3 || strings.Contains(v, "dev") {
+		return ""
+	}
+	for _, p := range parts[:2] {
+		if p == "" || strings.Trim(p, "0123456789") != "" {
+			return ""
+		}
+	}
+	return parts[0] + "." + parts[1]
+}
+
+// installedDiags are the findings about the packages a project's compiled
+// code calls (design/tooling.md §3.4), from the installed.json of the
+// working directory's project; none without one.
+//   - P4013: `concurrently` and `spawn` compile to phaenon/concurrent's
+//     Scope, so a file that uses them needs the package installed.
+//   - P4014: a release of phn writes calls into the phaenon/runtime of its
+//     own minor version, lockstep until 1.0; a development build or a
+//     development runtime is not compared.
+func installedDiags(files []string, p *program.Program) []checker.Diagnostic {
+	dir := vendorComposerDir()
+	pkgs, err := installedPackages(dir)
+	if err != nil || pkgs == nil {
+		return nil
+	}
+	installed := map[string]string{}
+	for _, pkg := range pkgs {
+		installed[pkg.Name] = pkg.Version
+	}
+	var diags []checker.Diagnostic
+	if _, ok := installed["phaenon/concurrent"]; !ok {
+		for _, path := range files {
+			f := p.File(path)
+			if f == nil || f.AST == nil {
+				continue
+			}
+			ast.Inspect(f.AST, func(n ast.Node) bool {
+				var kw ast.Span
+				var what string
+				switch n := n.(type) {
+				case *ast.Concurrently:
+					kw, what = n.Kw, "concurrently"
+				case *ast.Spawn:
+					kw, what = n.Kw, "spawn"
+				default:
+					return true
+				}
+				line, col := f.Position(kw.Start)
+				diags = append(diags, checker.Diagnostic{File: path, Line: line, Col: col, EndLine: line, EndCol: col + len(what),
+					Severity: checker.P4013.Severity, Code: checker.P4013.ID,
+					Message: fmt.Sprintf("`%s` compiles to calls of phaenon/concurrent, which is not installed: composer require phaenon/concurrent", what)})
+				return true
+			})
+		}
+	}
+	if rt, ok := installed["phaenon/runtime"]; ok {
+		if want, got := releaseMinor(version), releaseMinor(rt); want != "" && got != "" && want != got {
+			diags = append(diags, checker.Diagnostic{File: filepath.Join(dir, "installed.json"), Line: 1, Col: 1, EndLine: 1, EndCol: 1,
+				Severity: checker.P4014.Severity, Code: checker.P4014.ID,
+				Message: fmt.Sprintf("phaenon/runtime %s is installed, but phn %s writes calls into the runtime of version %s.*: composer require phaenon/runtime:%s.*", rt, version, want, want)})
+		}
+	}
+	return diags
+}

@@ -180,4 +180,10 @@ var (
 	// P4012: the php whose extensions are reflected is older than the
 	// target, so their newer signatures are unknown (php-versions.md §6).
 	P4012 = Code{"P4012", Warning, "local php older than the target"}
+	// P4013 and P4014 are about the installed packages the compiled code
+	// calls (design/tooling.md §3.4), read from vendor/composer/installed.json:
+	// `concurrently` and `spawn` compile to phaenon/concurrent, and the
+	// runtime must be of phn's own minor version.
+	P4013 = Code{"P4013", Error, "phaenon/concurrent is not installed"}
+	P4014 = Code{"P4014", Error, "phaenon/runtime of another minor version"}
 )

@@ -21,7 +21,7 @@ func composerWith(t *testing.T, require string) *composerFile {
 
 func projectWith(php string) *project {
 	data := []byte("{\n    \"roots\": {\"src\": \".src\"},\n    \"php\": \"" + php + "\"\n}\n")
-	return &project{Roots: map[string]string{"src": ".src"}, PHP: php, data: data}
+	return &project{Roots: map[string]string{"src": ".src"}, PHP: php, data: data, path: ProjectFile}
 }
 
 func TestResolveTarget(t *testing.T) {

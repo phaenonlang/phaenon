@@ -32,22 +32,33 @@ type project struct {
 	Exclude []string          `json:"exclude"`
 	PHP     string            `json:"php"`
 	data    []byte            // the file as read, to place diagnostics
+	path    string            // the file's path, for diagnostics
 }
 
 // loadProject reads phaenon.json from the working directory; nil when there is none.
 func loadProject() *project {
-	data, err := os.ReadFile(ProjectFile)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
+	p, err := readProject(ProjectFile)
 	if err != nil {
 		fail("%v", err)
 	}
-	p := project{data: data}
+	return p
+}
+
+// readProject reads and validates a project file; nil, nil when there is
+// none. Its roots and excludes are relative to the file's directory.
+func readProject(path string) (*project, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	p := project{data: data, path: path}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
-		fail("%s: %v", ProjectFile, err)
+		return nil, fmt.Errorf("%s: %v", path, err)
 	}
 	roots := make(map[string]string, len(p.Roots))
 	for src, out := range p.Roots {
@@ -55,11 +66,11 @@ func loadProject() *project {
 		switch {
 		case src == "." || out == "." || filepath.IsAbs(src) || filepath.IsAbs(out) ||
 			src == ".." || out == ".." || strings.HasPrefix(src, "../") || strings.HasPrefix(out, "../"):
-			fail("%s: roots and their outputs are directories inside the project; %q → %q is not", ProjectFile, src, out)
+			return nil, fmt.Errorf("%s: roots and their outputs are directories inside the project; %q → %q is not", path, src, out)
 		case src == out:
-			fail("%s: the output of %q must be another directory", ProjectFile, src)
+			return nil, fmt.Errorf("%s: the output of %q must be another directory", path, src)
 		case filepath.Dir(src) != filepath.Dir(out):
-			fail("%s: the output of %q must be its sibling, a directory with the same parent, so that __DIR__ keeps its depth; %q is not", ProjectFile, src, out)
+			return nil, fmt.Errorf("%s: the output of %q must be its sibling, a directory with the same parent, so that __DIR__ keeps its depth; %q is not", path, src, out)
 		}
 		roots[src] = out
 	}
@@ -67,7 +78,22 @@ func loadProject() *project {
 	for i, e := range p.Exclude {
 		p.Exclude[i] = filepath.Clean(e)
 	}
-	return &p
+	return &p, nil
+}
+
+// rebased is the project with its roots and excludes made relative to the
+// working directory, for a project file in dir: an installed package's.
+func (p *project) rebased(dir string) *project {
+	q := *p
+	q.Roots = make(map[string]string, len(p.Roots))
+	for src, out := range p.Roots {
+		q.Roots[filepath.Join(dir, src)] = filepath.Join(dir, out)
+	}
+	q.Exclude = make([]string, len(p.Exclude))
+	for i, e := range p.Exclude {
+		q.Exclude[i] = filepath.Join(dir, e)
+	}
+	return &q
 }
 
 // requireRoots fails unless the project file names roots: build and check
@@ -193,6 +219,9 @@ func (p *project) mirror(src string, check bool) (copied, removed int) {
 			return nil
 		}
 		rel, _ := under(path, out)
+		if rel == stampFile {
+			return nil // the build's own record (vendor.go)
+		}
 		source := filepath.Join(src, rel)
 		if filepath.Ext(rel) == ".php" {
 			if _, err := os.Stat(strings.TrimSuffix(source, ".php") + ".phn"); err == nil {

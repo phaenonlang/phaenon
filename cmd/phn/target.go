@@ -100,23 +100,23 @@ func resolveTarget(proj *project, composer *composerFile, anchor string) target 
 		switch {
 		case err != nil:
 			t.Unsupported = true
-			diag(ProjectFile, proj.data, []string{"php"}, checker.P4009, "%v", err)
+			diag(proj.path, proj.data, []string{"php"}, checker.P4009, "%v", err)
 			return t
 		case !v.Supported():
 			t.Unsupported = true
 			t.Version = v.Clamp()
-			diag(ProjectFile, proj.data, []string{"php"}, checker.P4009,
+			diag(proj.path, proj.data, []string{"php"}, checker.P4009,
 				"PHP %s is not a target phn compiles for: targets are %s to %s", v, phpversion.Floor, phpversion.Newest)
 			return t
 		}
 		t.Version = v
 		switch {
 		case floorState == "set" && floor.Less(v):
-			diag(ProjectFile, proj.data, []string{"php"}, checker.P4008,
+			diag(proj.path, proj.data, []string{"php"}, checker.P4008,
 				"the target is PHP %s, but composer.json admits PHP %s (require.php %q): an install on %s would load code it cannot run; raise require.php to \">=%s\"",
 				v, floor, composer.Require.PHP, floor, v)
 		case floorState == "unbounded":
-			diag(ProjectFile, proj.data, []string{"php"}, checker.P4008,
+			diag(proj.path, proj.data, []string{"php"}, checker.P4008,
 				"the target is PHP %s, but composer.json admits every PHP (require.php %q); raise require.php to \">=%s\"",
 				v, composer.Require.PHP, v)
 		}
@@ -149,7 +149,7 @@ func resolveTarget(proj *project, composer *composerFile, anchor string) target 
 		msg := fmt.Sprintf("no PHP target: neither %s's \"php\" nor composer.json's require.php states one; compiling for PHP %s", ProjectFile, phpversion.Floor)
 		switch {
 		case proj != nil:
-			diag(ProjectFile, proj.data, nil, checker.P4010, "%s", msg)
+			diag(proj.path, proj.data, nil, checker.P4010, "%s", msg)
 		case composer != nil:
 			diag(composer.Path, composer.Data, nil, checker.P4010, "%s", msg)
 		case anchor != "":
@@ -166,7 +166,10 @@ func resolveTarget(proj *project, composer *composerFile, anchor string) target 
 func projectTarget(proj *project, paths []string) target {
 	dir := "."
 	anchor := ""
-	if proj == nil && len(paths) > 0 {
+	switch {
+	case proj != nil && proj.path != ProjectFile:
+		dir = filepath.Dir(proj.path) // an installed package's project file
+	case proj == nil && len(paths) > 0:
 		dir = paths[0]
 		anchor = paths[0]
 	}
