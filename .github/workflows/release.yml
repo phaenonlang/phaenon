@@ -1,0 +1,27 @@
+# A tag publishes the release (design/tooling.md §3.2): the binaries are
+# built again and published only when they match the checksums the release
+# PR committed, so what the plugin downloads is what anyone rebuilding the
+# tag gets.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build the binaries and compare them with the pinned checksums
+        run: go run ./tools/release -version "${GITHUB_REF_NAME#v}" -out dist -verify
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --generate-notes

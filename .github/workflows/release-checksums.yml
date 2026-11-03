@@ -1,0 +1,38 @@
+# The release PR pins the binaries (design/tooling.md §3.2): a pull request
+# from a release/vX.Y.Z branch builds the five binaries and commits their
+# SHA-256s into composer/checksums.json, so that the tag the PR leads to
+# carries them, and composer.lock, pinning the phaenon/phn package, pins
+# the binaries too.
+name: release checksums
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  checksums:
+    if: startsWith(github.head_ref, 'release/v') && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build the binaries and write their checksums
+        run: go run ./tools/release -version "${GITHUB_HEAD_REF#release/v}" -out dist
+      - name: Commit the checksums
+        run: |
+          if git diff --quiet -- composer/checksums.json; then
+            echo "composer/checksums.json is current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add composer/checksums.json
+          git commit -m "build: pin the ${GITHUB_HEAD_REF#release/} binaries"
+          git push
