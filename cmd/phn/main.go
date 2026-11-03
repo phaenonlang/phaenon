@@ -28,6 +28,8 @@ func main() {
 		usage()
 	}
 	switch os.Args[1] {
+	case "version", "--version":
+		fmt.Println("phn " + version)
 	case "build":
 		build(os.Args[2:])
 	case "check":
@@ -52,6 +54,9 @@ func usage() {
 usage:
   phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [<path>...]
                                                            type-check and compile .phn files to .php
+  phn build --vendor                                       compile the installed Composer packages that carry a
+                                                           phaenon.json, each for its own target, their findings as
+                                                           warnings; a package nothing changed in is skipped
   phn check [--json] [--no-deprecations] [--exclude PATH]... [<path>...]
                                                            type-check .phn files, write nothing
   phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] <path>...
@@ -72,6 +77,7 @@ usage:
                                                            reads the arguments, or stdin without them
   phn lex   [--php] <file>                                 dump the token stream
   phn print [--php] <file>                                 parse and pretty-print
+  phn version                                              print phn's version
 
 Without paths, build and check read phaenon.json from the working directory:
   {"roots": {"src": ".src", "tests": ".tests"}, "exclude": ["tests/Fixture"], "php": "8.6"}
@@ -87,7 +93,8 @@ exit status still reports the errors). --check writes nothing and fails when any
 missing, stale or orphaned.
 stdlib materialises the classes written in Phaenon (stdlib/runtime, stdlib/concurrent) as the
 phaenon/runtime and phaenon/concurrent packages ship them.
-check reads vendor code through the nearest vendor/composer autoload maps.
+check and build read vendor code through the nearest vendor/composer autoload maps, an installed
+package with a phaenon.json from its .phn sources.
 Every compiled file ends with a line map (// phaenon-map v1 …) that trace reads: file.php:42,
 file.php(42) and "file.php on line 42" become the .phn's path and line; anything else, positions in
 files without a map included, passes through unchanged. --root /app=. reads a path under /app (a
@@ -171,8 +178,16 @@ func build(args []string) {
 	out := fs.String("out", "", "write outputs under this directory instead of beside the sources")
 	check := fs.Bool("check", false, "verify outputs are up to date; write nothing")
 	emitOnError := fs.Bool("emit-on-error", false, "write files that have type errors too; the exit status still reports them")
+	vendor := fs.Bool("vendor", false, "compile the installed Composer packages that carry a phaenon.json")
 	excludeFlag(fs)
 	fs.Parse(args)
+	if *vendor {
+		if fs.NArg() > 0 || *out != "" || *check || *emitOnError || len(excludes) > 0 {
+			fail("phn build --vendor takes no paths and no other options")
+		}
+		buildVendor()
+		return
+	}
 	proj := loadProject()
 	roots := fs.Args()
 	if len(roots) == 0 {
@@ -192,24 +207,69 @@ func build(args []string) {
 		excludes = append(excludes, proj.Exclude...)
 		projectSources = proj.sources()
 	}
+	job := buildJob{proj: proj, roots: roots, target: tgt, out: *out, check: *check, emitOnError: *emitOnError,
+		mirror: proj != nil && *out == "" && fs.NArg() == 0}
+	res := job.run()
+	switch {
+	case res.failed > 0:
+		fail("%d of %d files failed to compile", res.failed, res.files)
+	case *check && res.stale+res.copied+res.removed > 0:
+		fail("%d outputs are stale, %d copies are stale, %d outputs have no source; run `phn build`", res.stale, res.copied, res.removed)
+	case *check:
+		fmt.Printf("%d files up to date\n", res.files)
+	case proj != nil:
+		fmt.Printf("%d files compiled, %d written, %d files copied, %d stale outputs removed\n", res.files, res.written, res.copied, res.removed)
+	default:
+		fmt.Printf("%d files compiled, %d written\n", res.files, res.written)
+	}
+}
+
+// buildJob is one compilation of a project's roots, or of the paths given.
+type buildJob struct {
+	proj        *project // nil without a project file
+	roots       []string
+	target      target
+	out         string // write under this directory instead (--out)
+	check       bool
+	emitOnError bool
+	// mirror brings the roots' output directories in step: the project's
+	// whole build, not one of some paths.
+	mirror bool
+	// dependency builds an installed package: its findings are printed as
+	// warnings and never withhold an output.
+	dependency bool
+}
+
+type buildResult struct {
+	files, failed, written, stale, copied, removed int
+}
+
+func (j buildJob) run() buildResult {
+	proj := j.proj
 	skip := func(path string) bool { return proj != nil && proj.isOutput(path) }
 	outputPath := func(in string) string {
 		dst := strings.TrimSuffix(in, ".phn") + ".php"
-		if *out != "" {
-			return filepath.Join(*out, dst)
+		if j.out != "" {
+			return filepath.Join(j.out, dst)
 		}
 		if proj != nil {
 			return proj.outputPath(in)
 		}
 		return dst
 	}
-	files := collect(roots, skip, ".phn")
-	failed, written, stale := 0, 0, 0
-	diags := append(tgt.Diags, typeCheck(files, tgt.Version, checker.Options{})...)
+	files := collect(j.roots, skip, ".phn")
+	res := buildResult{files: len(files)}
+	diags := append(j.target.Diags, typeCheck(files, j.target.Version, checker.Options{})...)
+	if !j.dependency {
+		diags = append(diags, installedDiags(files, loadedProgram)...)
+	}
 	broken := map[string]bool{}
 	for _, d := range diags {
 		if excluded(d.File) {
 			continue
+		}
+		if j.dependency {
+			d.Severity = checker.Warning
 		}
 		printDiag(d)
 		if d.Severity == checker.Error {
@@ -218,8 +278,8 @@ func build(args []string) {
 	}
 	for _, in := range files {
 		if broken[in] {
-			failed++
-			if !*emitOnError {
+			res.failed++
+			if !j.emitOnError {
 				continue
 			}
 		}
@@ -232,42 +292,29 @@ func build(args []string) {
 		php, err := emit.File(src, opts)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			failed++
+			res.failed++
 			continue
 		}
 		cur, readErr := os.ReadFile(dst)
-		upToDate := readErr == nil && bytes.Equal(cur, php)
-		if upToDate {
+		if readErr == nil && bytes.Equal(cur, php) {
 			continue
 		}
-		if *check {
+		if j.check {
 			fmt.Fprintf(os.Stderr, "%s: stale or missing\n", dst)
-			stale++
+			res.stale++
 			continue
 		}
 		writeFile(dst, php)
-		written++
+		res.written++
 	}
-	copied, removed := 0, 0
-	if proj != nil && *out == "" && fs.NArg() == 0 {
-		for _, src := range proj.roots() {
-			c, r := proj.mirror(src, *check)
-			copied += c
-			removed += r
+	if j.mirror {
+		for _, src := range j.roots {
+			c, r := proj.mirror(src, j.check)
+			res.copied += c
+			res.removed += r
 		}
 	}
-	switch {
-	case failed > 0:
-		fail("%d of %d files failed to compile", failed, len(files))
-	case *check && stale+copied+removed > 0:
-		fail("%d outputs are stale, %d copies are stale, %d outputs have no source; run `phn build`", stale, copied, removed)
-	case *check:
-		fmt.Printf("%d files up to date\n", len(files))
-	case proj != nil:
-		fmt.Printf("%d files compiled, %d written, %d files copied, %d stale outputs removed\n", len(files), written, copied, removed)
-	default:
-		fmt.Printf("%d files compiled, %d written\n", len(files), written)
-	}
+	return res
 }
 
 // mapSource is the path a compiled file's line map names: the source
@@ -357,6 +404,13 @@ var (
 	loadedChecker *checker.Checker
 	// projectSources is the project file's output → source root map, absolute.
 	projectSources map[string]string
+	// composerDir, when set, is the vendor/composer directory every program
+	// reads the vendor code through, instead of the nearest one above the
+	// files: an installed package's build reads the root project's.
+	composerDir string
+	// version is phn's release, set when a release is built
+	// (-ldflags "-X main.version=0.4.2").
+	version = "dev"
 )
 
 // releaseLine cuts a PHP_VERSION ("8.5.3", "8.6.0-dev") to its release
@@ -443,8 +497,22 @@ func newProgram(anchor string, target phpversion.Version) (*program.Program, []c
 				Message: fmt.Sprintf("%s is PHP %s, older than the target %s: the extensions it loads are known as they are on PHP %s (PHN_PHP names another php)",
 					php, p.ExtensionsPHP(), target, v)})
 		}
-		if l, err := program.FindComposer(filepath.Dir(anchor)); err == nil {
-			l.Sources = projectSources
+		var l *program.ComposerLoader
+		if composerDir != "" {
+			l, err = program.LoadComposer(composerDir)
+		} else {
+			l, err = program.FindComposer(filepath.Dir(anchor))
+		}
+		if err == nil {
+			// The project's own outputs map to its roots, an installed
+			// Phaenon package's to its sources.
+			l.Sources = map[string]string{}
+			for out, src := range installedSources(l.Dir) {
+				l.Sources[out] = src
+			}
+			for out, src := range projectSources {
+				l.Sources[out] = src
+			}
 			p.AddLoader(l)
 		} else {
 			diags = append(diags, checker.Diagnostic{File: anchor, Line: 1, Col: 1, Severity: checker.Warning, Code: "P4005",
@@ -484,6 +552,7 @@ func checkCmd(args []string) {
 		files = append(files, f)
 	}
 	diags := append(tgt.Diags, typeCheck(files, tgt.Version, checker.Options{Deprecations: !*noDeprecations})...)
+	diags = append(diags, installedDiags(files, loadedProgram)...)
 	errors, warnings := 0, 0
 	for _, d := range diags {
 		if *asJSON {
