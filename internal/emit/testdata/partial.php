@@ -100,10 +100,10 @@ echo (fn (string $string) => strlen($string))('four'), "\n";
 
 // In a pipe, literal bound arguments make the call itself; others run
 // after the left side, as PHP 8.6 runs them.
-echo sprintf('namespace %s', 'ns') |> strtoupper(...), "\n";
+echo strtoupper(sprintf('namespace %s', 'ns')), "\n";
 echo str_replace(' ', Paths::SEP, 'a b'), "\n";
 echo trace('left', 'L') |> (fn (string $b) => pair(trace('bound', 'B'), $b)), "\n";
-echo 'x' |> (fn (string $name) => $greeter->greet($name, '?')), "\n";
+echo $greeter->greet('x', '?'), "\n";
 
 // Constant expressions.
 const UPPER = static function (string $string) { return strtoupper($string); };

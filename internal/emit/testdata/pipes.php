@@ -40,10 +40,9 @@ function trace(string $label, string $value): string
  */
 function emails(array $users): array
 {
-    return $users
-        |> (function (array $array) { /** @var array<int, \User> $array */ return array_map(fn (User $u): ?string => $u->email, $array); })
-        |> (function (array $array) { /** @var array<int, string|null> $array */ return array_filter($array, fn (?string $e): bool => $e !== null); })
-        |> array_values(...);
+    return array_values(
+        array_filter(array_map(fn (User $u): ?string => $u->email, $users), fn (?string $e): bool => $e !== null),
+    );
 }
 
 // Literal bound arguments and first-class callables.
@@ -52,11 +51,7 @@ function emails(array $users): array
  */
 function encode(array $parts): string
 {
-    return 
-json_encode($parts, \JSON_THROW_ON_ERROR)
-        |> base64_encode(...)
-        |> (fn (string $string) => strtr($string, '+/', '-_'))
-        |> (fn (string $string) => rtrim($string, '='));
+    return rtrim(strtr(base64_encode(json_encode($parts, \JSON_THROW_ON_ERROR)), '+/', '-_'), '=');
 }
 
 // A variable bound after the piped value, a method stage.
@@ -65,16 +60,13 @@ json_encode($parts, \JSON_THROW_ON_ERROR)
  */
 function report(Log $log, array $rows, string $what): void
 {
-    $rows
-        |> count(...)
-        |> (fn (mixed $values) => sprintf('%d %s published.', $values, $what))
-        |> $log->line(...);
+    $log->line(sprintf('%d %s published.', count($rows), $what));
 }
 
 // The head is the innermost call: it runs first, as it did nested.
 function traced(): string
 {
-    return trace('head', ' x ') |> trim(...) |> strtoupper(...);
+    return strtoupper(trim(trace('head', ' x ')));
 }
 
 // An anonymous class bound in a stage whose closure needs a use clause: its
@@ -98,20 +90,74 @@ function weigh(array $xs, Weighted $w): int
  */
 function weighted(array $xs, int $factor): int
 {
-    return $xs
-        |> (function (array $xs) use ($factor) { /** @var list<int> $xs */ return weigh($xs, new class ($factor) implements Weighted {
-            public int $a = 1;
+    return weigh($xs, new class ($factor) implements Weighted {
+        public int $a = 1;
 
-            public function __construct(private int $factor)
-            {
-            }
+        public function __construct(private int $factor)
+        {
+        }
 
-            public function weight(): int
-            {
-                $xs = [$this->a, $this->factor];
-                return array_sum($xs);
-            }
-        }); });
+        public function weight(): int
+        {
+            $xs = [$this->a, $this->factor];
+            return array_sum($xs);
+        }
+    });
+}
+
+// A bound argument the left side writes keeps the pipe: PHP 8.6 reads $n
+// after bump() has run, the call would read it before.
+function bump(int &$n): string
+{
+    $n++;
+    return "b$n";
+}
+
+function counted(): string
+{
+    $n = 1;
+    return bump($n) |> (fn (mixed $values) => sprintf('%2$s/%1$d', $n, $values));
+}
+
+// A property is read after the left side: the stage stays a pipe's.
+final class Report
+{
+    public function __construct(private Log $log)
+    {
+    }
+
+    /**
+     * @param list<string> $rows
+     */
+    public function add(array $rows): void
+    {
+        implode(', ', $rows) |> $this->log->line(...);
+    }
+}
+
+// A comment between the stages stays where it is, and so does the pipe.
+function shout(string $s): string
+{
+    return $s
+        |> trim(...) // the blanks around it
+        |> strtoupper(...);
+}
+
+// A named placeholder, the head in parentheses.
+function padded(?string $s): string
+{
+    return str_pad(length: 8, string: trim($s ?? 'none'));
+}
+
+// A closure over lines moves with its stage.
+/**
+ * @param list<User> $users
+ */
+function names(array $users): string
+{
+    return implode(', ', array_map(function (User $u): string {
+        return $u->email ?? '-';
+    }, $users));
 }
 
 echo implode(',', emails([new User('a@x'), new User(null), new User('b@x')])), "\n";
@@ -121,4 +167,11 @@ report($log, ['x', 'y'], 'anchors');
 echo implode('|', $log->lines), "\n";
 echo traced(), "\n";
 echo weighted([1, 2], 3), "\n";
-// phaenon-map v1 pipes.phn 1-6=1 7:1 13-13=6 14:7 15-16=7 17:8 20-20=10 21:11 25-25=14 26:15 31-31=19 32:20 37-40=25 41:25 42-43=25 44:26 47-47=28 48:29 50-52=31 53:31 54-55=31 56:32 60-60=35 61:36 63-65=38 66:38 67-67=38 68:39 76-78=46 79:47 84-84=51 85:52 88-90=55 91:55 92-94=55 95:56 96-98=57 99:57 100-101=57 102:58 106-107=61 108:62 110-110=63 111:64 115-115=67 116:68
+echo counted(), "\n";
+$log = new Log();
+(new Report($log))->add(['p', 'q']);
+echo implode('|', $log->lines), "\n";
+echo shout(' up '), "\n";
+echo padded(null), '|', padded(' ab '), "\n";
+echo names([new User('a@x'), new User(null)]), "\n";
+// phaenon-map v1 pipes.phn 1-6=1 7:1 13-13=6 14:7 15-16=7 17:8 20-20=10 21:11 25-25=14 26:15 31-31=19 32:20 37-40=25 41:25 42-45=25 46-46=28 47:29 49-51=31 52:31 53-54=31 55-55=35 56:36 58-60=38 61:38 62-62=38 63:42 68-70=46 71:47 76-76=51 77:52 80-82=55 83:55 84-86=55 87:56 88-90=57 91:57 92-105=57 106-106=67 107:68 111-111=71 112:72 117-117=76 118:77 124-124=82 125:83 126-127=83 128:84 129-131=85 132:85 133-133=85 134:86 140-141=91 142:92 144-144=93 145:94 148-150=96 151:97 153-155=99 156:99 157-157=99 158:100 159-159=100 160:104

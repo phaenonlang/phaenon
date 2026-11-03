@@ -109,9 +109,7 @@ function keys(array $counts): string
 
 function slug(string $title): string
 {
-    return $title
-        |> trim(...)
-        |> strtolower(...)
+    return strtolower(trim($title))
         |> (fn (string $s) => str_replace(' ', '-', $s));
 }
 
@@ -188,4 +186,4 @@ function exported(object $value): array
 
     return [];
 }
-// phaenon-map v1 collections.phn 1-6=1 7:1 10-10=3 11:4 25-28=18 29:18 36-39=25 40:25 50-52=35 53:35 60-64=42 65:42 75-77=52 78:52 88-91=62 92:62 99-101=69 102:69 155-158=122 159:122 178-180=141 181:141
+// phaenon-map v1 collections.phn 1-6=1 7:1 10-10=3 11:4 25-28=18 29:18 36-39=25 40:25 50-52=35 53:35 60-64=42 65:42 75-77=52 78:52 88-91=62 92:62 99-101=69 102:69 113:82 153-156=122 157:122 176-178=141 179:141

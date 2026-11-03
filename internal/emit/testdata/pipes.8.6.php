@@ -114,6 +114,63 @@ function weighted(array $xs, int $factor): int
         });
 }
 
+// A bound argument the left side writes keeps the pipe: PHP 8.6 reads $n
+// after bump() has run, the call would read it before.
+function bump(int &$n): string
+{
+    $n++;
+    return "b$n";
+}
+
+function counted(): string
+{
+    $n = 1;
+    return bump($n) |> sprintf('%2$s/%1$d', $n, ?);
+}
+
+// A property is read after the left side: the stage stays a pipe's.
+final class Report
+{
+    public function __construct(private Log $log)
+    {
+    }
+
+    /**
+     * @param list<string> $rows
+     */
+    public function add(array $rows): void
+    {
+        $rows |> implode(', ', ?) |> $this->log->line(...);
+    }
+}
+
+// A comment between the stages stays where it is, and so does the pipe.
+function shout(string $s): string
+{
+    return $s
+        |> trim(...) // the blanks around it
+        |> strtoupper(...);
+}
+
+// A named placeholder, the head in parentheses.
+function padded(?string $s): string
+{
+    return ($s ?? 'none') |> trim(...) |> str_pad(length: 8, string: ?);
+}
+
+// A closure over lines moves with its stage.
+/**
+ * @param list<User> $users
+ */
+function names(array $users): string
+{
+    return $users
+        |> array_map(function (User $u): string {
+            return $u->email ?? '-';
+        }, ?)
+        |> implode(', ', ?);
+}
+
 echo implode(',', emails([new User('a@x'), new User(null), new User('b@x')])), "\n";
 echo encode(['a' => 1, 'b' => 2]), "\n";
 $log = new Log();
@@ -121,4 +178,11 @@ report($log, ['x', 'y'], 'anchors');
 echo implode('|', $log->lines), "\n";
 echo traced(), "\n";
 echo weighted([1, 2], 3), "\n";
-// phaenon-map v1 pipes.phn 1-6=1 7:1 13-13=6 14:7 15-16=7 17:8 20-20=10 21:11 25-25=14 26:15 31-31=19 32:20 37-40=25 41:25 42-43=25 44:26 47-47=28 48:29 50-52=31 53:31 54-55=31 56:32 60-60=35 61:36 63-65=38 66:38 67-67=38 68:39 76-78=46 79:47 84-84=51 85:52 88-90=55 91:55 92-94=55 95:56 96-98=57 99:57 100-101=57 102:58 106-107=61 108:62 110-110=63 111:64 115-115=67 116:68
+echo counted(), "\n";
+$log = new Log();
+(new Report($log))->add(['p', 'q']);
+echo implode('|', $log->lines), "\n";
+echo shout(' up '), "\n";
+echo padded(null), '|', padded(' ab '), "\n";
+echo names([new User('a@x'), new User(null)]), "\n";
+// phaenon-map v1 pipes.phn 1-6=1 7:1 13-13=6 14:7 15-16=7 17:8 20-20=10 21:11 25-25=14 26:15 31-31=19 32:20 37-40=25 41:25 42-43=25 44:26 47-47=28 48:29 50-52=31 53:31 54-55=31 56:32 60-60=35 61:36 63-65=38 66:38 67-67=38 68:39 76-78=46 79:47 84-84=51 85:52 88-90=55 91:55 92-94=55 95:56 96-98=57 99:57 100-101=57 102:58 106-107=61 108:62 110-110=63 111:64 115-115=67 116:68 120-120=71 121:72 126-126=76 127:77 133-133=82 134:83 135-136=83 137:84 138-140=85 141:85 142-142=85 143:86 149-150=91 151:92 153-153=93 154:94 157-159=96 160:97 162-164=99 165:99 166-166=99 167:100
