@@ -21,6 +21,14 @@ jobs:
           go-version-file: go.mod
       - name: Build the binaries and compare them with the pinned checksums
         run: go run ./tools/release -version "${GITHUB_REF_NAME#v}" -out dist -verify
+      - name: Archive the whole source tree
+        # .gitattributes keeps all but the plugin out of the Composer dist,
+        # and out of GitHub's own source archives with it; the release
+        # carries the tree.
+        run: |
+          echo '* -export-ignore' >> .git/info/attributes
+          v="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="phn-$v/" -o "dist/phn-$v-src.tar.gz" "$GITHUB_REF_NAME"
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
