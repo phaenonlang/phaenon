@@ -20,6 +20,15 @@ final readonly class ComposerDownloader implements Downloader
 
     public function download(string $url, string $path): void
     {
-        $this->http->copy($url, $path);
+        // copy() rethrows a failed download but leaves its promise's rejection unhandled, which
+        // Composer then prints with a stack trace; the rejection is handled here instead.
+        $failure = null;
+        $this->http->addCopy($url, $path)->then(null, static function (\Throwable $e) use (&$failure): void {
+            $failure = $e;
+        });
+        $this->http->wait();
+        if ($failure instanceof \Throwable) {
+            throw $failure;
+        }
     }
 }
