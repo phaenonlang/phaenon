@@ -106,8 +106,21 @@ final class Blocks
 
                 return 1;
             };
+            // An anonymous class's constructor arguments are the body's, its
+            // methods' variables its own.
+            $m = spawn {
+                $o = new class ($count++) { // want P2604
+                    fun __construct(public int $n)
+                    {
+                        $count = $n;
+                        $count++;
+                    }
+                };
 
-            return $count + $n->await();
+                return $o->n;
+            };
+
+            return $count + $n->await() + $m->await();
         };
     }
 

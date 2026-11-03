@@ -24,6 +24,13 @@ fun lowered(Box $box, string $sep): void {
     // In a pipe, every bound argument runs after the left side, as on 8.6.
     $h = 'a' |> pair(strtoupper($sep), ?);
     $i = 'a' |> $box->box()->tag(?);
+    // An anonymous class's members are its own: its method's assignment and
+    // its property named like the closure's parameter $a are not this scope's.
+    $j = 'a' |> pair(?, (new class ($sep) {
+        public string $a = 'p';
+        fun __construct(public string $s) {}
+        fun get(): string { $b = $this->a . $this->s; return $b; }
+    })->get());
 }
 
 fun refused(Box $box, string $sep): void {
@@ -35,6 +42,10 @@ fun refused(Box $box, string $sep): void {
     $xs = [];
     $e = refd($xs, ?); // want P1002 "by reference"
     $f = 'a' |> pair($sep = 'x', ?); // want P1002 "writes"
+    // Its constructor arguments are.
+    $g = 'a' |> pair(?, (new class ($sep = 'y') { fun __construct(public string $s) {} })->s); // want P1002 "writes"
+    $a = 'z';
+    $h = 'a' |> pair(?, (new class ($a) { fun __construct(public string $s) {} })->s); // want P1002 "rename the variable"
 }
 
 // Writing a property through a constant's object is PHP 8.6.
