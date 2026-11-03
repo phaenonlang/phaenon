@@ -77,10 +77,48 @@ function traced(): string
     return trace('head', ' x ') |> trim(...) |> strtoupper(...);
 }
 
+// An anonymous class bound in a stage whose closure needs a use clause: its
+// constructor argument is a variable of the function, its property and its
+// method's local, named like the closure's parameter, are not.
+interface Weighted
+{
+    public function weight(): int;
+}
+
+/**
+ * @param list<int> $xs
+ */
+function weigh(array $xs, Weighted $w): int
+{
+    return array_sum($xs) * $w->weight();
+}
+
+/**
+ * @param list<int> $xs
+ */
+function weighted(array $xs, int $factor): int
+{
+    return $xs
+        |> weigh(?, new class ($factor) implements Weighted {
+            public int $a = 1;
+
+            public function __construct(private int $factor)
+            {
+            }
+
+            public function weight(): int
+            {
+                $xs = [$this->a, $this->factor];
+                return array_sum($xs);
+            }
+        });
+}
+
 echo implode(',', emails([new User('a@x'), new User(null), new User('b@x')])), "\n";
 echo encode(['a' => 1, 'b' => 2]), "\n";
 $log = new Log();
 report($log, ['x', 'y'], 'anchors');
 echo implode('|', $log->lines), "\n";
 echo traced(), "\n";
-// phaenon-map v1 pipes.phn 1-6=1 7:1 13-13=6 14:7 15-16=7 17:8 20-20=10 21:11 25-25=14 26:15 31-31=19 32:20 37-40=25 41:25 42-43=25 44:26 47-47=28 48:29 50-52=31 53:31 54-55=31 56:32 60-60=35 61:36 63-65=38 66:38 67-67=38 68:39 76-78=46 79:47
+echo weighted([1, 2], 3), "\n";
+// phaenon-map v1 pipes.phn 1-6=1 7:1 13-13=6 14:7 15-16=7 17:8 20-20=10 21:11 25-25=14 26:15 31-31=19 32:20 37-40=25 41:25 42-43=25 44:26 47-47=28 48:29 50-52=31 53:31 54-55=31 56:32 60-60=35 61:36 63-65=38 66:38 67-67=38 68:39 76-78=46 79:47 84-84=51 85:52 88-90=55 91:55 92-94=55 95:56 96-98=57 99:57 100-101=57 102:58 106-107=61 108:62 110-110=63 111:64 115-115=67 116:68

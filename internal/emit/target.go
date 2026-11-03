@@ -352,7 +352,9 @@ func closureParts(rec *program.Partial, fb, constExpr bool, uses []string) (head
 // captured lists the variables a lowered closure must capture: those the
 // bound arguments, the receiver and a variable callee read, in order,
 // without $this (bound by itself) and the superglobals (which PHP forbids
-// in use()).
+// in use()). An anonymous class in a bound argument contributes its
+// constructor arguments only: its properties and method bodies are not
+// variables here (ast.InspectScope).
 func captured(call ast.Expr, args *ast.ArgList) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -365,7 +367,7 @@ func captured(call ast.Expr, args *ast.ArgList) []string {
 	}
 	var walk func(n ast.Node, shadowed map[string]bool)
 	walk = func(root ast.Node, shadowed map[string]bool) {
-		ast.Inspect(root, func(n ast.Node) bool {
+		ast.InspectScope(root, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.Variable:
 				if !shadowed[n.Name] {

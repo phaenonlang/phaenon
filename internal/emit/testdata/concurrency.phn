@@ -97,4 +97,29 @@ final class Profiles
     {
         return Scope::map($ids, fn (int $id) => $this->orders->count($id));
     }
+
+    // An anonymous class in a block: its constructor argument is captured,
+    // its property and its method's local are not.
+    fun weighted(int $id, int $factor): int
+    {
+        return concurrently {
+            $weight = new class ($factor) {
+                public int $a = 1;
+
+                fun __construct(private int $factor)
+                {
+                }
+
+                fun of(int $n): int
+                {
+                    $scaled = $n * $this->factor;
+
+                    return $scaled + $this->a;
+                }
+            };
+            $count = spawn $this->orders->count($id);
+
+            return $weight->of($count->await());
+        };
+    }
 }
