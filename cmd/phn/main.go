@@ -95,7 +95,8 @@ version composer.json's require.php admits.
 Without a project file, build writes Foo.php next to Foo.phn, or under DIR (mirroring the path
 given) with --out. A file with type errors is not written unless --emit-on-error is given (the
 exit status still reports the errors). --check writes nothing and fails when any output is
-missing, stale or orphaned.
+missing, stale or orphaned; with --emit-on-error, a file with errors passes when its output is
+what that build writes.
 stdlib materialises the classes written in Phaenon (stdlib/runtime, stdlib/concurrent) as the
 phaenon/runtime and phaenon/concurrent packages ship them.
 check and build read vendor code through the nearest vendor/composer autoload maps, an installed
@@ -223,6 +224,8 @@ func build(args []string) {
 		fail("%d of %d files failed to compile", res.failed, res.files)
 	case *check && res.stale+res.copied+res.removed > 0:
 		fail("%d outputs are stale, %d copies are stale, %d outputs have no source; run `phn build`", res.stale, res.copied, res.removed)
+	case *check && res.findings > 0:
+		fmt.Printf("%d files up to date, %d of them built with their errors (--emit-on-error)\n", res.files, res.findings)
 	case *check:
 		fmt.Printf("%d files up to date\n", res.files)
 	case proj != nil:
@@ -250,6 +253,8 @@ type buildJob struct {
 
 type buildResult struct {
 	files, failed, written, stale, copied, removed int
+	// findings counts the files --check --emit-on-error passed with errors.
+	findings int
 }
 
 func (j buildJob) run() buildResult {
@@ -286,9 +291,17 @@ func (j buildJob) run() buildResult {
 	}
 	for _, in := range files {
 		if broken[in] {
-			res.failed++
-			if !j.emitOnError {
+			switch {
+			case !j.emitOnError:
+				res.failed++
 				continue
+			case j.check:
+				// --check asks whether the outputs are what the build writes,
+				// and with --emit-on-error it writes this one too: current, it
+				// passes, its findings printed above.
+				res.findings++
+			default:
+				res.failed++ // written, and the exit status still reports it
 			}
 		}
 		src, err := os.ReadFile(in)
