@@ -1,7 +1,7 @@
 ---
 type: reference
 tags: [phaenon, testing]
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Test environment
@@ -191,6 +191,32 @@ resolves a breakpoint on a compiled signature line to the body's first statement
 expression body stops twice (statement, then the compiled `}`), which is why holds exist
 (`../design/line-map.md` §3.2). The plugin's `src/test/resources/linemap/vectors.json` is a verbatim
 copy of `internal/linemap/testdata/vectors.json`.
+
+## Coverage reports (2026-11-03)
+
+The local `php` has no coverage driver. Real Clover, Cobertura and JUnit reports came from a
+throwaway image, PHP 8.5 with PCOV:
+
+```sh
+printf 'FROM php:8.5-cli\nRUN pecl install pcov && docker-php-ext-enable pcov\n' > Dockerfile
+docker build -t phaenon-scratch/php-pcov:8.5 .
+docker run --rm -v ~/labs:$HOME/labs:ro -v "$OUT:$OUT" -w "$TREE" phaenon-scratch/php-pcov:8.5 \
+  php -d pcov.enabled=1 -d pcov.directory="$TREE/.src" vendor/bin/phpunit --cache-directory "$OUT/cache" \
+  --log-junit "$OUT/junit.xml" --coverage-clover "$OUT/clover.xml" --coverage-cobertura "$OUT/cobertura.xml"
+docker image rm phaenon-scratch/php-pcov:8.5   # when done
+```
+
+- The workspace is mounted read-only at its own path, so the reports name the host's paths and
+  `phn trace` reads the compiled files they name.
+- tq-cli's suite fits the plain image (`ext-ctype`, `iconv`, `phar`, `zlib`). It fails 174 tests
+  there for want of `git` and a writable tree, which leaves failure texts to trace. Core needs
+  `ext-redis`, `ext-mongodb` and `ext-apcu`.
+- The Xdebug built for the plugin's debugger test (below) collects coverage too, with `-d
+  xdebug.mode=coverage`.
+- `internal/trace/testdata/reports` holds such reports on its `project/`, the project path written
+  `@DIR@`. To refresh them, rebuild the project with `phn build --emit-on-error` (its test has no
+  vendor), rerun the reports, put `@DIR@` back, then run `PHAENON_UPDATE=1 go test ./internal/trace`
+  and read the diffs of the `*.want.*` files.
 
 ## Toolchain
 

@@ -245,8 +245,9 @@ Decisions are in `../design/php-versions.md` §9; these are what the first build
   on install/update (`config.allow-plugins` answers the trust question once), the binary pinned
   per platform. Until then the odm/object-mapper/reflector dogfood branches still commit
   side-by-side `.php` and a consumer builds `vendor/<pkg>` by hand; moving them to the sibling
-  layout is part of this item. `phn build --check` should also pass when the only "failures" are
-  `--emit-on-error` files whose output is current (core: 8 files, 11 deliberate findings).
+  layout is part of this item. ~~`phn build --check` should also pass when the only "failures" are
+  `--emit-on-error` files whose output is current~~ — done 2026-11-03 (slice 2): `--check
+  --emit-on-error` passes them, core's and tq-cli's `build:check` pass the flag.
 - **The `.phn` beside `.php` adoption case in the IDE**: without a project file both are indexed;
   the plugin prefers the source for navigation and the duplicate inspection, but find-usages and
   rename still see both. A `FileTypeOverrider` for a `.php` with a `.phn` sibling would hide it
@@ -349,9 +350,9 @@ Built in the compiler (decisions: `../design/functions.md` §8). Left:
 The emitter's side of `../design/line-map.md` (§2, §3, §4.1), `phn trace`, and migrate's class
 braces (§7). Left:
 
-- **Coverage** (§5): PHPUnit's Clover/Cobertura output and PhpStorm's coverage view report compiled
-  lines. A follow-up translates them — a `phn trace`-like filter over the coverage XML, or the
-  plugin reading the map for its view.
+- **Coverage** (§5): ~~PHPUnit's Clover/Cobertura output reports compiled lines~~ — done
+  2026-11-03, `phn trace` reads both (§ M6 — CI formats below). PhpStorm's coverage view
+  still reports compiled lines; the plugin reading the map for its view is left.
 - ~~**Dogfood rebuild**~~ — done 2026-11-02 ([[dogfood]] § D19: re-lifted, empty bodies `{}`, no
   compiled-tree cs exceptions, every pipeline green). Was: the five trees' compiled outputs change layout; rebuild them, drop the
   compiled-tree exceptions from core's and tq-cli's `.php-cs-fixer.dist.php` (the four line-1
@@ -671,5 +672,23 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
 - `AGENTS.md`, `.mcp.json` and this vault name paths on the development machine (`~/labs/…`,
   `~/.local/bin/serena`). Generalise or move them before publishing.
 - `tequila/reflection`'s `phaenon-dogfood` branch exists only locally.
+
+## M6 — CI formats (slice 2, 2026-11-03)
+
+`../design/tooling.md` §7.1 (the settlements under "Done in slice 2"). Left:
+- **The steps in Tequila's reusable workflows** (§7.2: `phn check --format=github`, PHPStan and
+  PHPUnit through `phn trace`) are not written; they are Tequila-side and come with the template
+  (slice 8).
+- **Annotation paths are relative to the working directory**, as PHPStan's are: a project in a
+  subdirectory of its repository gets paths GitHub cannot match. `GITHUB_WORKSPACE` could anchor
+  them when a project needs it.
+- **Clover's `loc` and `ncloc` stay the compiled file's**, and a class's metrics follow a merge only
+  in a file that declares one class (Clover does not say which class a line belongs to).
+- **php-code-coverage counts comment lines inside a multi-line method chain as statements**
+  (tq-cli `InitCommand.phn:39–41`, three comments between `->addOption()` calls). The compiled
+  report says so too; the trace carries it over faithfully.
+- A report is read from stdin only (`phn trace < clover.xml > clover.phn.xml`); there is no
+  in-place mode.
+- PhpStorm's coverage view: see § D19.
 
 ← [[Home]]

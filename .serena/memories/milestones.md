@@ -1,7 +1,7 @@
 ---
 type: status
 tags: [phaenon, roadmap, history]
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Milestones — history and state
@@ -74,7 +74,16 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
    release workflows, and the `phaenon/phn` Composer plugin (`composer/`, tested by
    `internal/distribution`). reflector, object-mapper and mongodb-odm moved to the sibling layout,
    and core takes them as path repositories built by the plugin (§3.5): suite, PHPStan max and cs
-   pass, `--classmap-authoritative` included. Not done until a first release: no tag yet, the
-   binaries are not on the registry's release-asset door ([[open-items]] § M6).
+   pass, `--classmap-authoritative` included. Released as v0.1.0 the same day (phaenonlang/phaenon#1,
+   five binaries); the binaries are not on the registry's release-asset door yet ([[open-items]] §
+   M6 — distribution).
+7. 2026-11-03: **M6 slice 2, CI formats**: `phn check --format=github|checkstyle` (`--json` stays
+   as `--format=json`), `phn build --check --emit-on-error` passing files with errors whose output
+   is current, and `phn trace` reading GitHub workflow commands and Checkstyle, JUnit, Clover and
+   Cobertura reports (`internal/trace`: `github.go`, `xml.go`, `report.go`; goldens from a real
+   PHPUnit/PCOV and PHPStan run in `internal/trace/testdata/reports`). Coverage counts holds,
+   against the draft (`../design/tooling.md` §7.1). Proved on tq-cli's suite under PCOV and on
+   core's findings; left in [[open-items]] § M6 — CI formats. Next: slice 3, `phn fix`, measured
+   first (§4).
 
 ← [[Home]]

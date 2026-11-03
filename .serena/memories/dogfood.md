@@ -26,6 +26,11 @@ push dogfood work without a maintainer's go-ahead.
   The plugin runs the checkout's `bin/phn` at every autoload dump: core's vendor libraries, all of
   tq-cli. Core's suite (1188), PHPStan max and cs pass, also on a `--classmap-authoritative` dump
   with the libraries' outputs deleted; tq-cli's (2052) on a tree the plugin built from scratch.
+- **CI formats (M6 slice 2, 2026-11-03):** core's and tq-cli's `build:check` pass `--emit-on-error`
+  like their `build` (core `73337fa8`, tq-cli `53d4e11`), so core's passes with its 9 files of
+  deliberate findings. `phn check --format=github` writes core's 19 findings as annotations.
+  tq-cli's reports under PCOV, traced, are the slice's proof ([[testing]] § Coverage reports,
+  `../design/tooling.md` §7.1).
 
 ## `tequila/reflection` — M1, M2
 

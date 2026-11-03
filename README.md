@@ -33,8 +33,11 @@ so that one connection serves concurrent tasks.
 ```sh
 phn check src tests            # diagnostics with codes, source lines and carets; exit 1 on errors
 phn check --json src           # one JSON object per diagnostic, for editors
+phn check --format=github      # workflow commands: the findings as annotations on the .phn lines
+phn check --format=checkstyle  # Checkstyle XML, for other CI systems
 phn build src                  # type-checks first; a file with errors is not written
 phn build --emit-on-error src  # …unless asked to: a codebase adopting the checker builds while it fixes
+phn build --check --emit-on-error  # in CI: the outputs are current; files with errors pass as that build writes them
 ```
 
 The checker reads the rest of the program without configuration: project files, vendor code
@@ -181,11 +184,19 @@ source's:
 ```sh
 vendor/bin/phpunit | phn trace                    # .tests/FooTest.php:42 → tests/FooTest.phn:37
 vendor/bin/phpstan analyse --error-format=raw | phn trace
+vendor/bin/phpstan analyse --error-format=github | phn trace   # annotations GitHub can show
+phn trace < clover.xml > clover.phn.xml           # coverage on the .phn lines
 phn trace --root /app=. < production-trace.txt    # /app/.src/Foo.php(18) → src/Foo.phn(9)
 ```
 
 It rewrites `file.php:42`, `file.php(42)` and `file.php on line 42` where the file carries a map,
-and leaves the rest of the text as it is. In production, `phaenon/runtime`'s Monolog processor and
+and leaves the rest of the text as it is. A GitHub workflow command (`::error file=…,line=…::`)
+gets the source's file and lines; its columns go, since the map holds lines. GitHub shows no
+annotation on a file the repository lacks, and the compiled outputs are gitignored, so PHPStan's
+annotations show only once traced. A report on stdin — Checkstyle, JUnit (PHPUnit's
+`--log-junit`, PHPStan's `junit`), Clover or Cobertura — is read whole and rewritten as that
+report, byte for byte where nothing points into a compiled file. In coverage, the compiled lines
+that come from one source line count as that line: covered when any of them is. In production, `phaenon/runtime`'s Monolog processor and
 Sentry integration do the same for logged exceptions, and the PhpStorm plugin reads the map for
 navigation and debugging (`design/line-map.md` §4).
 
@@ -309,11 +320,12 @@ crossing it, a spawn body mutating an outer variable, and `sleep()`/`usleep()` i
 
 ```sh
 phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] # type-check and compile .phn → .php; no paths: phaenon.json
-phn check [--json] [--no-deprecations] [--exclude PATH]... path...              # type-check .phn (and .php) files
+phn check [--format=text|json|github|checkstyle] [--no-deprecations] [--exclude PATH]... path... # type-check .phn (and .php) files
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Bytes, Debug/…), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
 phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them
+phn trace [--root PREFIX=LOCAL]... [text...]  # positions in compiled files → .phn: text, workflow commands, XML reports on stdin
 phn version                               # the version a release sets, dev otherwise
 phn lex   [--php] file                    # token stream
 phn print [--php] file                    # parse and pretty-print
