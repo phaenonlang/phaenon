@@ -236,14 +236,17 @@ func (p *Parser) prefix() ast.Expr {
 	switch k {
 	case token.Kind('!'):
 		p.next()
-		return &ast.Unary{S: p.span(start), Op: k, Expr: p.exprBP(bpNot)}
+		x := p.exprBP(bpNot)
+		return &ast.Unary{S: p.span(start), Op: k, Expr: x}
 	case token.Kind('~'), token.Kind('-'), token.Kind('+'), token.Kind('@'):
 		p.next()
-		return &ast.Unary{S: p.span(start), Op: k, Expr: p.exprBP(bpUnary)}
+		x := p.exprBP(bpUnary)
+		return &ast.Unary{S: p.span(start), Op: k, Expr: x}
 	case token.T_INT_CAST, token.T_DOUBLE_CAST, token.T_STRING_CAST, token.T_BYTES_CAST, token.T_ARRAY_CAST,
 		token.T_OBJECT_CAST, token.T_BOOL_CAST, token.T_UNSET_CAST:
 		t := p.next()
-		return &ast.Cast{S: p.span(start), Op: k, Raw: t.Text(p.src), Expr: p.exprBP(bpUnary)}
+		x := p.exprBP(bpUnary)
+		return &ast.Cast{S: p.span(start), Op: k, Raw: t.Text(p.src), Expr: x}
 	case token.T_INC, token.T_DEC:
 		p.next()
 		e := p.exprBP(bpUnary)
@@ -255,10 +258,12 @@ func (p *Parser) prefix() ast.Expr {
 				return &ast.Clone{S: p.span(start), Args: args}
 			}
 		}
-		return &ast.Clone{S: p.span(start), Expr: p.exprBP(bpClone)}
+		x := p.exprBP(bpClone)
+		return &ast.Clone{S: p.span(start), Expr: x}
 	case token.T_PRINT:
 		p.next()
-		return &ast.Print{S: p.span(start), Expr: p.exprBP(bpPrint)}
+		x := p.exprBP(bpPrint)
+		return &ast.Print{S: p.span(start), Expr: x}
 	case token.T_YIELD:
 		p.next()
 		y := &ast.Yield{}
@@ -273,13 +278,16 @@ func (p *Parser) prefix() ast.Expr {
 		return y
 	case token.T_YIELD_FROM:
 		p.next()
-		return &ast.YieldFrom{S: p.span(start), Expr: p.exprBP(bpYieldFrom)}
+		x := p.exprBP(bpYieldFrom)
+		return &ast.YieldFrom{S: p.span(start), Expr: x}
 	case token.T_THROW:
 		p.next()
-		return &ast.Throw{S: p.span(start), Expr: p.exprBP(bpThrow)}
+		x := p.exprBP(bpThrow)
+		return &ast.Throw{S: p.span(start), Expr: x}
 	case token.T_INCLUDE, token.T_INCLUDE_ONCE, token.T_REQUIRE, token.T_REQUIRE_ONCE:
 		p.next()
-		return &ast.Include{S: p.span(start), Kind: k, Expr: p.exprBP(bpInclude)}
+		x := p.exprBP(bpInclude)
+		return &ast.Include{S: p.span(start), Kind: k, Expr: x}
 	case token.T_NEW:
 		return p.postfix(p.newExpr())
 	}
@@ -438,10 +446,12 @@ func (p *Parser) simpleVariable() ast.Expr {
 		return &ast.VariableVariable{S: p.span(start), Expr: e, Braced: true}
 	}
 	if p.at(token.T_VARIABLE) {
-		return &ast.VariableVariable{S: p.span(start), Expr: p.variable()}
+		x := p.variable()
+		return &ast.VariableVariable{S: p.span(start), Expr: x}
 	}
 	if p.at(token.Kind('$')) {
-		return &ast.VariableVariable{S: p.span(start), Expr: p.simpleVariable()}
+		x := p.simpleVariable()
+		return &ast.VariableVariable{S: p.span(start), Expr: x}
 	}
 	p.errorf("syntax error, unexpected %s after '$'", p.describe())
 	return nil
