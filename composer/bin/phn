@@ -1,0 +1,21 @@
+#!/usr/bin/env php
+<?php
+
+// vendor/bin/phn: runs the phn binary (Phaenon\Composer\Launcher). It loads its own classes
+// rather than the project's autoloader, which may not be written yet and would run every
+// package's autoload files.
+
+declare(strict_types=1);
+
+spl_autoload_register(static function (string $class): void {
+    $prefix = 'Phaenon\\Composer\\';
+    if (str_starts_with($class, $prefix)) {
+        require __DIR__ . '/../src/' . str_replace('\\', '/', substr($class, \strlen($prefix))) . '.php';
+    }
+});
+
+$argv = $_SERVER['argv'] ?? [];
+$arguments = \is_array($argv) ? array_values(array_filter(array_slice($argv, 1), is_string(...))) : [];
+$autoloadPath = $GLOBALS['_composer_autoload_path'] ?? null;
+
+exit(Phaenon\Composer\Launcher::main($arguments, \is_string($autoloadPath) ? $autoloadPath : null));
