@@ -3,6 +3,7 @@ package migrate
 import (
 	"testing"
 
+	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 )
@@ -90,5 +91,52 @@ func TestPipesWithoutChains(t *testing.T) {
 	out, rep, err := Pipes([]PipeFile{{Path: "t.phn", Src: []byte(src)}}, PipeOptions{MinCalls: 3, Load: load})
 	if err != nil || called || string(out[0]) != src || rep.LeftCalls() != 0 {
 		t.Errorf("err %v, called %v, left %d, out %q", err, called, rep.LeftCalls(), out[0])
+	}
+}
+
+// An anonymous class in a body is numbered when the checker reaches it, in
+// an order the files checked and loaded around it can change between the
+// check of the calls and the check of the pipelines: the comparison names
+// a class by where it is declared, not by its number.
+func TestCompareChecksRenumberedAnonymousClass(t *testing.T) {
+	main := []byte("fun f(): object {\n    $o = new class {};\n    return $o;\n}\n")
+	srcs := map[string][]byte{"main.phn": main, "other.phn": []byte("fun g(): object => new class {};\n")}
+	watch := map[string]bool{"main.phn": true}
+	load := func(order ...string) func(map[string][]byte, map[string]bool) (*program.Program, error) {
+		return func(srcs map[string][]byte, watch map[string]bool) (*program.Program, error) {
+			p := program.New()
+			if err := p.LoadStubs(); err != nil {
+				return nil, err
+			}
+			for _, path := range order {
+				if _, err := p.AddFile(path, srcs[path], lexer.ModePhaenon, true); err != nil {
+					return nil, err
+				}
+			}
+			return p, nil
+		}
+	}
+	before, err := checkRecorded(srcs, watch, load("other.phn", "main.phn"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := checkRecorded(srcs, watch, load("main.phn", "other.phn"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := func(c *checked) string {
+		for _, cl := range c.prog.Classes() {
+			if cl.Anonymous && cl.File.Path == "main.phn" {
+				return cl.Name
+			}
+		}
+		return ""
+	}
+	if a, b := name(before), name(after); a == b || printType(a) == printType(b) {
+		t.Fatalf("the class should be numbered differently in the two checks: %s, %s", a, b)
+	}
+	res := &pipeResult{segs: []segment{{src: 0, end: len(main), out: 0}}}
+	if why := compareChecks("main.phn", before, after, res); why != "" {
+		t.Errorf("a renumbered anonymous class reads as a change: %s", why)
 	}
 }
