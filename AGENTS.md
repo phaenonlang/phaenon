@@ -28,10 +28,10 @@ squash merges).
 
 | Package | Repo | Role |
 |---|---|---|
-| `tequila/reflection` | `~/labs/tequila/reflector`, branch `phaenon-dogfood` (local only) | M1: built from `.phn`; its phpunit, PHPStan 10 and php-cs-fixer pass |
-| `tequila/object-mapper` | `~/labs/tequila/object-mapper`, branch `phaenon-dogfood` (local only) | M2: `phn check src` = 0 findings (2 errors since the checker grew: P2202 on `ObjectMapper::map()`, vault `dogfood`). M3: migrated with real generics (51 `.phn`), suite + PHPStan + cs pass. `tools/phpstan` is the parity PHPStan |
-| `tequila/mongodb-odm` | `~/labs/tequila/mongodb-odm`, branch `phaenon-dogfood` (local only) | M3: migrated (125 `.phn`), suite + PHPStan max + cs pass, `phn check` 0 errors at M3, 3 since the checker grew (vault `dogfood`) (`main` went to level max for it). Needs ext-mongodb in the local `php` |
-| `tequila/core` | `~/labs/tequila/core`, branch `phaenon-dogfood` (local only) | M4: migrated (800 `.phn`; the 12 PHPStan rule fixtures in `tests/PHPStan/Data` are plain `.php`, copied as written) on a `main` at PHPStan level max; `phaenon.json` builds `src`/`tests` into `.src`/`.tests` (gitignored), where Composer, PHPUnit, PHPStan and cs look; suite (1188 tests), PHPStan max and cs (no compiled-tree exceptions) pass on the output; `phn check` 11 findings, all PHPStan rules deliberately not matched (vault `dogfood`, `open-items`); `exclude` lists the analyser tooling and what `phpstan.neon` excludes. Run `composer update` after switching to the branch: `composer.lock` is ignored |
+| `tequila/reflection` | `~/labs/tequila/reflector`, branch `phaenon-dogfood` (local only) | M1: built from `.phn`; its phpunit, PHPStan 10 and php-cs-fixer pass. M6: sibling layout (`src`/`tests` → `.src`/`.tests`, no committed PHP), consumed by core as a path repository |
+| `tequila/object-mapper` | `~/labs/tequila/object-mapper`, branch `phaenon-dogfood` (local only) | M2: `phn check src` = 0 findings (2 errors since the checker grew: P2202 on `ObjectMapper::map()`, vault `dogfood`). M3: migrated with real generics (51 `.phn`), suite + PHPStan + cs pass. `tools/phpstan` is the parity PHPStan. M6: sibling layout, consumed by core as a path repository |
+| `tequila/mongodb-odm` | `~/labs/tequila/mongodb-odm`, branch `phaenon-dogfood` (local only) | M3: migrated (125 `.phn`), suite + PHPStan max + cs pass, `phn check` 0 errors at M3, 3 since the checker grew (vault `dogfood`) (`main` went to level max for it). Needs ext-mongodb in the local `php`. M6: sibling layout, consumed by core as a path repository |
+| `tequila/core` | `~/labs/tequila/core`, branch `phaenon-dogfood` (local only) | M4: migrated (800 `.phn`; the 12 PHPStan rule fixtures in `tests/PHPStan/Data` are plain `.php`, copied as written) on a `main` at PHPStan level max; `phaenon.json` builds `src`/`tests` into `.src`/`.tests` (gitignored), where Composer, PHPUnit, PHPStan and cs look; suite (1188 tests), PHPStan max and cs (no compiled-tree exceptions) pass on the output; `phn check` 11 findings, all PHPStan rules deliberately not matched (vault `dogfood`, `open-items`); `exclude` lists the analyser tooling and what `phpstan.neon` excludes. Run `composer update` after switching to the branch: `composer.lock` is ignored. M6: reflection, object-mapper and mongodb-odm come from the sibling dogfood checkouts as path repositories (`dev-phaenon-dogfood as` the released version), `phaenon/phn` from this checkout, whose `bin/phn` the plugin runs to build them at every autoload dump; its own build stays `composer build` (`extra.phaenon.build: false`) |
 | `tq-cli` | `~/labs/tequila/tq-cli-phaenon-dogfood` (a worktree of `~/labs/tequila/tq-cli`), branch `phaenon-dogfood` (local only) | M5: 859 `.phn`, the fifteen `Api::concurrently` fan-outs as `concurrently` blocks; suite (2052 tests), PHPStan 10 and cs pass on the output, `phn check` 0 over `src` and `tests`. Requires `phaenon/concurrent` and `phaenon/runtime` as path repositories from the sibling checkouts |
 | `tequila/nats` | `~/labs/tequila/nats` | M5: `RevoltTransport`, the pump lease and the opt-in reader task merged upstream (tequila/nats#13); no Phaenon sources |
 | later | `php-service-template` (M6), `iam` (M7) | `../design/roadmap.md` §3 |
@@ -70,6 +70,10 @@ internal/conformance  suites over the php-src corpus with `php` as the oracle
 stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime and phaenon/concurrent sources (.phn), the amp/Revolt declarations;
                       suggested/: the Monolog and Sentry API the runtime's Debug integrations are checked against, loaded only by the stdlib's own programs
 stdlib/gen            generator of stdlib/php-src (the newest release branch's stubs), versions_gen.go (the release each symbol came in) and constants.php
+internal/distribution tests of the phaenon/phn Composer plugin under a real Composer (PHAENON_COMPOSER)
+composer/             the phaenon/phn Composer plugin (PHP): the pinned binary, vendor/bin/phn, the builds at the autoload dump; composer.json at the root, .gitattributes keeps the dist to it
+tools/release         the release binaries: reproducible builds for five platforms, their checksums in composer/checksums.json
+.github/workflows     the release PR pins the checksums, the tag publishes the binaries (design/tooling.md §3.2)
 ```
 
 ## Build and test
@@ -88,10 +92,11 @@ PHAENON_PHPSTAN=$HOME/labs/tequila/object-mapper/tools/phpstan/vendor/bin/phpsta
 PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite emitter goldens
 PHAENON_PHP86=/opt/homebrew/opt/php@8.6/bin/php go test ./internal/emit  # goldens compiled for 8.6: php -l, behaviour
 PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go generate ./stdlib        # refresh stubs + version table (vault `testing`)
+PHAENON_COMPOSER=$(which composer) go test ./internal/distribution     # the Composer plugin under a real Composer
 ```
 
 `phn` itself: `phn build|check|migrate|stdlib|trace|lex|print` — run `phn` without arguments for usage; the
-README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`. `phn stdlib` writes the
+README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`, or, through the `phaenon/phn` plugin, this checkout's `bin/phn` (`go build -o bin/phn ./cmd/phn`; `PHN_BINARY` names another). `phn stdlib` writes the
 runtime package (`--out ../runtime/src`) and the concurrent package (`--concurrent-out
 ../concurrent/src`) from `stdlib/runtime/**/*.phn` (a subdirectory there is one in `src/`:
 `Debug/LineMap.phn` → `src/Debug/LineMap.php`) and `stdlib/concurrent/Scope.phn`; the tests
