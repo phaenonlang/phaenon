@@ -15,24 +15,26 @@ import (
 // do: partial applications and #[\Override] on constants are emitted as
 // written. For 8.5:
 //
-//   - a partial application becomes an arrow function whose parameters are
-//     named and typed after the callee's (the checker's records in
-//     program.File.Partials), or, in a pipe, the call PHP 8.6 makes of it
-//     when that is exact; in a constant expression it becomes the static
-//     closure PHP 8.5 accepts there;
+//   - a pipe PHP evaluates exactly as the call it makes (the checker's
+//     program.File.Folds) is written as that call, a run of them as nested
+//     calls, the code the pipeline stands for (fold.go);
+//   - any other partial application becomes an arrow function whose
+//     parameters are named and typed after the callee's (the checker's
+//     records in program.File.Partials), in a pipe one called at once; in
+//     a constant expression it becomes the static closure PHP 8.5 accepts
+//     there;
 //   - #[\Override] on a class constant or an enum case is dropped: 8.5
 //     rejects it at compile time, and the check it asks for is the
 //     checker's.
 //
 // The checker has refused (P1002) every form that has no exact lowering, so
-// the records seen here all lower. It runs after the other passes: a pipe
-// written as a call moves its left side, which it does only when no other
-// edit lies inside it.
+// the records seen here all lower. It runs after the other passes: a
+// folded pipeline carries the edits made inside it.
 func (e *emitter) lowerTarget(f *ast.File) error {
 	if e.opts.Program.Target().AtLeast(phpversion.PHP86) {
 		return nil
 	}
-	l := &targetLowering{e: e, bare: map[ast.Expr]bool{}, constExpr: map[ast.Expr]bool{}, pipes: map[ast.Expr]*ast.Binary{}}
+	l := &targetLowering{e: e, bare: map[ast.Expr]bool{}, constExpr: map[ast.Expr]bool{}, pipes: map[ast.Expr]*ast.Binary{}, leftOf: map[ast.Expr]*ast.Binary{}}
 	for _, s := range f.Stmts {
 		if _, ok := s.(*ast.Namespace); ok {
 			l.namespaced = true
@@ -40,6 +42,7 @@ func (e *emitter) lowerTarget(f *ast.File) error {
 	}
 	ast.Inspect(f, l.context)
 	var err error
+	var tops []*ast.Binary
 	ast.Inspect(f, func(n ast.Node) bool {
 		if err != nil {
 			return false
@@ -50,7 +53,13 @@ func (e *emitter) lowerTarget(f *ast.File) error {
 		case *ast.EnumCase:
 			l.dropOverride(n.Attrs)
 		case *ast.Binary:
-			if n.Op == token.T_PIPE {
+			switch {
+			case n.Op != token.T_PIPE:
+			case l.asCall(n):
+				if outer := l.leftOf[n]; outer == nil || !l.asCall(outer) {
+					tops = append(tops, n) // the last pipe of a run
+				}
+			default:
 				if args := callArgs(n.Right); args.Partial() {
 					err = l.pipe(n, args)
 				}
@@ -63,7 +72,32 @@ func (e *emitter) lowerTarget(f *ast.File) error {
 		}
 		return true
 	})
+	// Inner runs first: a run in a stage's argument moves with the stage.
+	for i := len(tops) - 1; i >= 0 && err == nil; i-- {
+		err = l.fold(tops[i])
+	}
 	return err
+}
+
+// folds reports a pipe the checker found PHP evaluates as the call it
+// makes.
+func (l *targetLowering) folds(p *ast.Binary) bool {
+	return l.e.opts.File != nil && l.e.opts.File.Folds[p]
+}
+
+// asCall reports a pipe the lowering writes as the call it makes: one that
+// folds, except a first-class callable after a pipe that stays a pipe,
+// which PHP 8.5 runs as written — `A |> (fn ($x) => …) |> f(...)` reads
+// better so than as `f(A |> (fn ($x) => …))`.
+func (l *targetLowering) asCall(p *ast.Binary) bool {
+	if !l.folds(p) {
+		return false
+	}
+	if callArgs(p.Right).Partial() {
+		return true
+	}
+	left, ok := p.Left.(*ast.Binary)
+	return !ok || left.Op != token.T_PIPE || l.asCall(left)
 }
 
 type targetLowering struct {
@@ -74,8 +108,9 @@ type targetLowering struct {
 	bare map[ast.Expr]bool
 	// constExpr marks the partial applications inside constant expressions.
 	constExpr map[ast.Expr]bool
-	// pipes maps a pipe's right side to the pipe.
+	// pipes maps a pipe's right side to the pipe, leftOf its left side.
 	pipes      map[ast.Expr]*ast.Binary
+	leftOf     map[ast.Expr]*ast.Binary
 	namespaced bool
 }
 
@@ -124,6 +159,7 @@ func (l *targetLowering) context(n ast.Node) bool {
 	case *ast.Binary:
 		if n.Op == token.T_PIPE {
 			l.pipes[n.Right] = n
+			l.leftOf[n.Left] = n
 		}
 	case *ast.Param:
 		if n.Default != nil {
@@ -272,13 +308,12 @@ func (l *targetLowering) partial(call ast.Expr, args *ast.ArgList) error {
 	l.e.insert(span.Start, head)
 	l.fillPlaceholders(args, rec, fb)
 	if tail != "" {
-		l.e.insert(span.End, tail)
+		l.e.insertEnd(span, tail)
 	}
 	return nil
 }
 
-// pipe lowers `A |> f(B, ?, C)`: to f(B, A, C) when B and C are literals
-// or constants and A moves without loss, otherwise to
+// pipe lowers `A |> f(B, ?, C)` that does not fold to
 // `A |> (fn (T $p) => f(B, $p, C))`, whose closure runs at once, after A,
 // as PHP 8.6 evaluates B and C.
 func (l *targetLowering) pipe(p *ast.Binary, args *ast.ArgList) error {
@@ -300,19 +335,11 @@ func (l *targetLowering) pipe(p *ast.Binary, args *ast.ArgList) error {
 			placeholder = a
 		}
 	}
-	left := p.Left.Span()
-	leftText := string(l.e.src[left.Start:left.End])
-	if rec.Direct && directCallee(p.Right) && !strings.Contains(leftText, "\n") && !l.e.editedWithin(left) && !lowersWithin(p.Left) {
-		gap := ast.Span{Start: left.Start, End: p.Right.Span().Start}
-		l.e.replace(gap, strings.Repeat("\n", bytes.Count(l.e.src[gap.Start:gap.End], []byte("\n"))))
-		l.e.replace(placeholder.Placeholder.S, leftText)
-		return nil
-	}
 	head, tail := closureParts(rec, false, false, captured(p.Right, args))
 	right := p.Right.Span()
 	l.e.insert(right.Start, "("+head)
 	l.e.replace(placeholder.Placeholder.S, "$"+rec.Params[0].Name)
-	l.e.insert(right.End, tail+")")
+	l.e.insertEnd(right, tail+")")
 	return nil
 }
 
@@ -412,37 +439,6 @@ func captured(call ast.Expr, args *ast.ArgList) []string {
 		}
 	}
 	return out
-}
-
-// directCallee reports a callee that evaluates to the same function
-// whether it is reached before the pipe's left side or after it: a named
-// function or a static method of a named class.
-func directCallee(e ast.Expr) bool {
-	switch e := e.(type) {
-	case *ast.Call:
-		_, ok := e.Callee.(*ast.Name)
-		return ok
-	case *ast.StaticCall:
-		_, ok := e.Class.(*ast.Name)
-		return ok
-	}
-	return false
-}
-
-// lowersWithin reports whether this pass will edit inside e: a partial
-// application or an anonymous class (its constants' attributes).
-func lowersWithin(e ast.Expr) bool {
-	found := false
-	ast.Inspect(e, func(n ast.Node) bool {
-		switch n := n.(type) {
-		case *ast.ArgList:
-			found = found || n.Partial()
-		case *ast.ClassDecl:
-			found = true
-		}
-		return !found
-	})
-	return found
 }
 
 // editedWithin reports whether an edit already touches the span.

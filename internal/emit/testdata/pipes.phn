@@ -66,6 +66,44 @@ fun weighted(list<int> $xs, int $factor): int => $xs
         }
     });
 
+// A bound argument the left side writes keeps the pipe: PHP 8.6 reads $n
+// after bump() has run, the call would read it before.
+fun bump(int &$n): string {
+    $n++;
+    return "b$n";
+}
+
+fun counted(): string {
+    $n = 1;
+    return bump($n) |> sprintf('%2$s/%1$d', $n, ?);
+}
+
+// A property is read after the left side: the stage stays a pipe's.
+final class Report {
+    fun __construct(private Log $log) {}
+
+    fun add(list<string> $rows): void {
+        $rows |> implode(', ', ?) |> $this->log->line(...);
+    }
+}
+
+// A comment between the stages stays where it is, and so does the pipe.
+fun shout(string $s): string => $s
+    |> trim(...) // the blanks around it
+    |> strtoupper(...);
+
+// A named placeholder, the head in parentheses.
+fun padded(?string $s): string => ($s ?? 'none') |> trim(...) |> str_pad(length: 8, string: ?);
+
+// A closure over lines moves with its stage.
+fun names(list<User> $users): string {
+    return $users
+        |> array_map(function (User $u): string {
+            return $u->email ?? '-';
+        }, ?)
+        |> implode(', ', ?);
+}
+
 echo implode(',', emails([new User('a@x'), new User(null), new User('b@x')])), "\n";
 echo encode(['a' => 1, 'b' => 2]), "\n";
 $log = new Log();
@@ -73,3 +111,10 @@ report($log, ['x', 'y'], 'anchors');
 echo implode('|', $log->lines), "\n";
 echo traced(), "\n";
 echo weighted([1, 2], 3), "\n";
+echo counted(), "\n";
+$log = new Log();
+(new Report($log))->add(['p', 'q']);
+echo implode('|', $log->lines), "\n";
+echo shout(' up '), "\n";
+echo padded(null), '|', padded(' ab '), "\n";
+echo names([new User('a@x'), new User(null)]), "\n";

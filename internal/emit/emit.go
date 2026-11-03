@@ -122,10 +122,10 @@ func compile(src []byte, f *ast.File, opts Options) ([]byte, *lineWriter, error)
 	if opts.File != nil {
 		e.eraseWrittenBytes()
 	}
+	e.lowerLine(f)
 	if err := e.lowerTarget(f); err != nil {
 		return nil, nil, err
 	}
-	e.lowerLine(f)
 	e.prologue(f)
 	out, w := e.apply()
 	return out, w, nil
@@ -157,6 +157,9 @@ type edit struct {
 	Early   bool
 	Free    bool
 	mapHere bool
+	// Owner is the node whose lowering wrote an insertion at its end, so
+	// that text moved with the node keeps it (renderSpan); zero otherwise.
+	Owner ast.Span
 }
 
 type emitter struct {
@@ -201,6 +204,13 @@ func (e *emitter) insert(at int, text string) {
 	e.replace(ast.Span{Start: at, End: at}, text)
 }
 
+// insertEnd is an in-place insertion at the end of the node owner whose
+// lowering it belongs to.
+func (e *emitter) insertEnd(owner ast.Span, text string) {
+	e.replace(ast.Span{Start: owner.End, End: owner.End}, text)
+	e.edits[len(e.edits)-1].Owner = owner
+}
+
 // replaceFree is a free edit: text the compiler lays out, whose line breaks
 // are its own; the span's line breaks go.
 func (e *emitter) replaceFree(s ast.Span, text string) {
@@ -216,16 +226,7 @@ func (e *emitter) insertFree(at int, text string) {
 // come first, then the other insertions, then a replacement starting
 // there; insertions of a kind keep their order of registration.
 func (e *emitter) apply() ([]byte, *lineWriter) {
-	sort.SliceStable(e.edits, func(i, j int) bool {
-		a, b := e.edits[i], e.edits[j]
-		if a.Start != b.Start {
-			return a.Start < b.Start
-		}
-		if a.Early != b.Early {
-			return a.Early
-		}
-		return a.Start == a.End && b.Start != b.End
-	})
+	sort.SliceStable(e.edits, func(i, j int) bool { return editLess(e.edits[i], e.edits[j]) })
 	w := newLineWriter(e.src, e.indents)
 	w.free(e.header, 0)
 	pos := 0
@@ -265,6 +266,18 @@ func (e *emitter) apply() ([]byte, *lineWriter) {
 	}
 	w.out.WriteString(linemap.Build(source, w.classify()).String() + "\n")
 	return w.out.Bytes(), w
+}
+
+// editLess orders edits as apply writes them: by offset, and at one
+// offset early insertions, then the other insertions, then a replacement.
+func editLess(a, b edit) bool {
+	if a.Start != b.Start {
+		return a.Start < b.Start
+	}
+	if a.Early != b.Early {
+		return a.Early
+	}
+	return a.Start == a.End && b.Start != b.End
 }
 
 // spliced is the source with the edits applied and nothing else: the text
