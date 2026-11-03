@@ -64,7 +64,7 @@ internal/program      program model: project files, Composer vendor code (lazy),
 internal/checker      the type checker behind `phn check`
 internal/emit         patch-based emitter: PSR-12 layout of what it writes, the line map; generics erasure, is/as lowering
 internal/linemap      the `// phaenon-map v1 …` comment every compiled file ends with: parse, write, lookups
-internal/trace        `phn trace`: positions in compiled files → `.phn` positions
+internal/trace        `phn trace`: positions in compiled files → `.phn` positions, in text, GitHub workflow commands and CI reports (Checkstyle, JUnit, Clover, Cobertura)
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
 internal/conformance  suites over the php-src corpus with `php` as the oracle
 stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime and phaenon/concurrent sources (.phn), the amp/Revolt declarations;
