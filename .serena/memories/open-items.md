@@ -679,9 +679,10 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
 - **The steps in Tequila's reusable workflows** (§7.2: `phn check --format=github`, PHPStan and
   PHPUnit through `phn trace`) are not written; they are Tequila-side and come with the template
   (slice 8).
-- **Annotation paths are relative to the working directory**, as PHPStan's are: a project in a
-  subdirectory of its repository gets paths GitHub cannot match. `GITHUB_WORKSPACE` could anchor
-  them when a project needs it.
+- ~~**Annotation paths are relative to the working directory**, as PHPStan's are: a project in a
+  subdirectory of its repository gets paths GitHub cannot match.~~ — done 2026-11-03, `942cb28`:
+  `trace.AnnotationPath` starts them at the git repository's root (`GITHUB_WORKSPACE` without
+  git); `phn check --format=github` and the commands `phn trace` rewrites use it.
 - **Clover's `loc` and `ncloc` stay the compiled file's**, and a class's metrics follow a merge only
   in a file that declares one class (Clover does not say which class a line belongs to).
 - **php-code-coverage counts comment lines inside a multi-line method chain as statements**
