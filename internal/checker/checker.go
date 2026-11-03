@@ -18,6 +18,12 @@ import (
 type Options struct {
 	// Deprecations reports calls to @deprecated declarations (P4006).
 	Deprecations bool
+	// Observe, when set, is called with the type given to each expression
+	// typed in a checked file, every time it is typed (a loop body, an
+	// argument inferred in two passes): the last call holds the type the
+	// checker settled on. phn migrate compares a file's types before and
+	// after a rewrite with it.
+	Observe func(f *program.File, e ast.Expr, t types.Type)
 }
 
 // Diagnostic is one finding.
