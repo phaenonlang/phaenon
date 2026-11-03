@@ -60,10 +60,9 @@ usage:
                                                            (function braces up, class-like braces on their own line,
                                                            one-line docblocks, => bodies) unless --keep-layout;
                                                            --php writes the target into phaenon.json
-  phn stdlib [--out DIR] [--concurrent-out DIR] [--plugin-stubs DIR] [--check]
+  phn stdlib [--out DIR] [--concurrent-out DIR] [--check]
                                                            write the compiled stdlib (Seq.php, …) into DIR, the compiled
-                                                           phaenon/concurrent package into the second, or the PhpStorm
-                                                           plugin's pseudo-classes (ListMethods.php, …) into the third
+                                                           phaenon/concurrent package into the second
   phn trace [--root PREFIX=LOCAL]... [<text>...]           rewrite the positions in compiled files (stack traces,
                                                            PHPUnit, PHPStan --error-format=raw) into .phn positions;
                                                            reads the arguments, or stdin without them
@@ -82,8 +81,7 @@ Without a project file, build writes Foo.php next to Foo.phn, or under DIR (mirr
 given) with --out. A file with type errors is not written unless --emit-on-error is given (the
 exit status still reports the errors). --check writes nothing and fails when any output is
 missing, stale or orphaned.
-stdlib materialises the classes behind the method syntax, as the phaenon/runtime package ships them,
-and with --plugin-stubs the editor-only pseudo-classes the PhpStorm plugin bundles.
+stdlib materialises the classes behind the method syntax, as the phaenon/runtime package ships them.
 check reads vendor code through the nearest vendor/composer autoload maps.
 Every compiled file ends with a line map (// phaenon-map v1 …) that trace reads: file.php:42,
 file.php(42) and "file.php on line 42" become the .phn's path and line; anything else, positions in
@@ -288,10 +286,9 @@ func stdlibCmd(args []string) {
 	fs := flag.NewFlagSet("stdlib", flag.ExitOnError)
 	out := fs.String("out", "", "directory to write the compiled stdlib into")
 	concurrentOut := fs.String("concurrent-out", "", "directory to write the compiled phaenon/concurrent package into")
-	plugin := fs.String("plugin-stubs", "", "directory to write the PhpStorm plugin's pseudo-classes into")
 	check := fs.Bool("check", false, "verify the files there are up to date; write nothing")
 	fs.Parse(args)
-	if (*out == "" && *concurrentOut == "" && *plugin == "") || fs.NArg() != 0 {
+	if (*out == "" && *concurrentOut == "") || fs.NArg() != 0 {
 		usage()
 	}
 	if *out != "" {
@@ -307,13 +304,6 @@ func stdlibCmd(args []string) {
 			fail("%v", err)
 		}
 		materialise("concurrent package", compiled, *concurrentOut, *check)
-	}
-	if *plugin != "" {
-		stubs, err := emit.PluginStubs()
-		if err != nil {
-			fail("%v", err)
-		}
-		materialise("plugin stub", stubs, *plugin, *check)
 	}
 }
 
