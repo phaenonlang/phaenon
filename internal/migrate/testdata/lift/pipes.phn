@@ -52,10 +52,21 @@ fun padded(string $s): string => $s
 
 // Bound arguments that are variables and closures may run after the
 // piped value: nothing the inner calls assign.
-fun listed(string $glue, list<int> $xs): string => $xs
-    |> array_map(fn (int $x): string => (string) ($x * 2), ?)
-    |> implode($glue, ?)
-    |> sprintf('[%s]', ?);
+fun listed(string $glue, list<int> $xs): string
+    => sprintf('[%s]', implode($glue, array_map(fn (int $x): string => (string) ($x * 2), $xs)));
+
+// A method stage on a property its class declares without hooks: the
+// pipeline reads it after the inner calls, which do not assign it.
+final class Banner
+{
+    fun __construct(private Text $text) {}
+
+    fun title(string $csv): string => $csv
+        |> trim(...)
+        |> strtoupper(...)
+        |> explode(',', ?)
+        |> $this->text->join(...);
+}
 
 // A method stage on a variable, resolved through the type the checker
 // gives it.
@@ -103,10 +114,7 @@ fun long(): string => sprintf('%s and %s', 'a fairly long literal', 'another fai
 fun widest(list<int> $numbers): int {
     $width = 0;
     foreach ($numbers as $n) {
-        $width = ((string) $n)
-            |> trim(...)
-            |> \strlen(...)
-            |> max($width, ?);
+        $width = max($width, \strlen(trim((string) $n)));
     }
     return $width;
 }
@@ -154,6 +162,7 @@ echo traced(), "\n";
 echo padded('  HeLLo '), "\n";
 echo listed('+', [1, 2, 3]), "\n";
 echo shoutAll($text, ' x,y '), "\n";
+echo (new Banner(new Text('/')))->title(' a,b '), "\n";
 echo split(1), "\n";
 echo implode('|', nested(['a-b ', ' ', 'c'])), "\n";
 echo multiline(['an', 'apple', 'tree']), "\n";

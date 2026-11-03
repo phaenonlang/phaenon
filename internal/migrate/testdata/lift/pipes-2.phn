@@ -1,8 +1,8 @@
 // --pipes=2: two calls are a chain too.
 
-fun countLine(list<int> $xs): string => $xs |> count(...) |> sprintf('%d items', ?);
+fun countLine(list<int> $xs): string => sprintf('%d items', count($xs));
 
-fun bounded(int $x): int => $x |> min(10, ?) |> max(0, ?);
+fun bounded(int $x): int => max(0, min(10, $x));
 
 // One call is not.
 fun single(string $s): string => trim($s);

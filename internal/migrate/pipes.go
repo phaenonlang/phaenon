@@ -19,15 +19,22 @@ package migrate
 // other than literals, constants and closures, otherwise the innermost call
 // itself. A stage that takes only the piped value is a first-class
 // callable; any other one a partial application with `?`, or `name: ?`,
-// where the piped value stood.
+// where the piped value stood. A pipeline follows the data: the piped value
+// goes into a stage's first parameter, or into the data parameter of PHP's
+// functions that take it last (dataLast: array_map, implode, explode,
+// preg_*, str_replace, in_array …); `sprintf('%d', count($x))` and
+// `self::assertSame($expected, f($x))` stay calls.
 //
 // The rewrite is exact or it is not made. A pipeline evaluates the piped
 // value before a stage's other arguments and before a method's receiver, so
-// every argument written before the nested call, and a method stage's
-// receiver, must be a literal, a constant, a variable or a closure, and the
-// inner calls must not assign a variable read there; the piped parameter
-// must not be by reference; nothing is spread; the callee must resolve
-// through the program model, which says which parameter is by reference.
+// every argument written before the nested call must be a literal, a
+// constant, a variable or a closure, and the inner calls must not assign a
+// variable read there (evalorder); a method stage's receiver must be $this,
+// such a variable, or a property of either that its class declares
+// without hooks and the inner calls do not assign — a method they run is
+// taken not to reassign it. The piped parameter must not be by reference;
+// nothing is spread; the callee must resolve through the program model,
+// which says which parameter is by reference.
 // A link of the chain that breaks one of these splits it: the part above
 // takes the call below the break as its head, the part below stands as an
 // argument, and each part of at least the minimum length is rewritten.
@@ -92,7 +99,19 @@ const (
 	ReasonLong     = "a stage past 120 columns"
 	ReasonLowering = "PHP 8.5 lowering"
 	ReasonCheck    = "undone by the check"
+	ReasonData     = "not the data parameter"
 )
+
+// dataLast names the parameter that takes the data in PHP's functions that
+// take it after their other arguments: a pipe stage may feed it, as it may
+// feed any function's first parameter (design/tooling.md §8.1).
+var dataLast = map[string]string{
+	"array_map": "array", "implode": "array", "join": "array", "explode": "string",
+	"preg_match": "subject", "preg_match_all": "subject", "preg_split": "subject", "preg_grep": "array",
+	"preg_replace": "subject", "preg_replace_callback": "subject", "preg_replace_callback_array": "subject",
+	"preg_filter": "subject", "mb_split": "string", "str_replace": "subject", "str_ireplace": "subject",
+	"in_array": "haystack", "array_search": "haystack", "array_key_exists": "array", "key_exists": "array",
+}
 
 // piper finds and rewrites the chains of one file.
 type piper struct {
@@ -456,12 +475,10 @@ func (r *piper) stageable(call ast.Expr, piped int, ctx walkCtx) string {
 			return ReasonSpread
 		}
 	}
-	written := evalorder.Writes(args.Args[piped].Value, r.byValue(ctx))
-	if mc, ok := call.(*ast.MethodCall); ok {
-		v, ok := mc.Object.(*ast.Variable)
-		if !ok || written.Has(v.Name) {
-			return ReasonOrder
-		}
+	inner := args.Args[piped].Value
+	written := evalorder.Writes(inner, r.byValue(ctx))
+	if mc, ok := call.(*ast.MethodCall); ok && !r.stableReceiver(mc.Object, written, inner, ctx) {
+		return ReasonOrder
 	}
 	for _, a := range args.Args[:piped] {
 		if !evalorder.Movable(a.Value, written) {
@@ -485,6 +502,9 @@ func (r *piper) stageable(call ast.Expr, piped int, ctx walkCtx) string {
 	}
 	if p.ByRef {
 		return ReasonByRef
+	}
+	if p != params[0] && !r.takesDataLast(call, p) {
+		return ReasonData
 	}
 	if !r.prog.Target().AtLeast(phpversion.PHP86) && !(len(args.Args) == 1 && args.Args[0].Name == nil) && !lowerable(params, args.Args, piped, p) {
 		return ReasonLowering
@@ -596,9 +616,103 @@ func specialClassName(n *ast.Name) string {
 	return ""
 }
 
+// stableReceiver reports a method stage's receiver that is the same object
+// when it is read after the piped value as before it: $this, a variable the
+// inner calls do not write, or a property of either that its class declares
+// without hooks, which the inner calls do not assign. A method the inner
+// calls run may still assign the property: the codemod takes a declared
+// property as not changed by computing a value for it (design/tooling.md
+// §8.1), and the 8.5 lowering keeps such a stage a pipe's.
+func (r *piper) stableReceiver(obj ast.Expr, written evalorder.Set, inner ast.Expr, ctx walkCtx) bool {
+	switch o := obj.(type) {
+	case *ast.Variable:
+		return !written.Has(o.Name)
+	case *ast.PropertyFetch:
+		id, ok := o.Name.(*ast.Ident)
+		if !ok || o.NullSafe || !r.stableReceiver(o.Object, written, inner, ctx) {
+			return false
+		}
+		if _, isVar := o.Object.(*ast.Variable); !isVar {
+			return false
+		}
+		cl := r.receiverClass(o.Object, ctx)
+		if cl == nil {
+			return false
+		}
+		pr := cl.FindProperty(id.Name)
+		if pr == nil || pr.Magic || pr.Static || len(pr.Hooks) > 0 {
+			return false
+		}
+		return !assignsProperty(inner, id.Name)
+	}
+	return false
+}
+
+// assignsProperty reports an assignment or an increment of a property
+// named name in e.
+func assignsProperty(e ast.Expr, name string) bool {
+	found := false
+	ast.InspectScope(e, func(n ast.Node) bool {
+		var target ast.Expr
+		switch n := n.(type) {
+		case *ast.Assign:
+			target = n.Target
+		case *ast.IncDec:
+			target = n.Expr
+		}
+		for target != nil && !found {
+			switch t := target.(type) {
+			case *ast.PropertyFetch:
+				id, ok := t.Name.(*ast.Ident)
+				found = !ok || id.Name == name
+				target = t.Object
+			case *ast.Index:
+				target = t.Array
+			default:
+				target = nil
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+// takesDataLast reports a function of dataLast called with the piped value
+// in its data parameter.
+func (r *piper) takesDataLast(call ast.Expr, p *program.Param) bool {
+	c, ok := call.(*ast.Call)
+	if !ok || r.pfile == nil {
+		return false
+	}
+	n, ok := c.Callee.(*ast.Name)
+	if !ok {
+		return false
+	}
+	ns, global := r.pfile.ScopeAt(call.Span().Start).ResolveFunction(n)
+	if r.prog.Function(ns) != nil && !strings.EqualFold(ns, global) {
+		return false // a function of the namespace, not PHP's
+	}
+	data, ok := dataLast[strings.ToLower(strings.TrimPrefix(global, "\\"))]
+	return ok && p.Name == data
+}
+
 // receiverClass is the class of a method call's receiver: the enclosing
-// class for $this, the class the checker gave a variable otherwise.
+// class for $this, the class the checker gave a variable otherwise, the
+// declared class of a property of either.
 func (r *piper) receiverClass(obj ast.Expr, ctx walkCtx) *program.Class {
+	if pf, ok := obj.(*ast.PropertyFetch); ok {
+		id, ok := pf.Name.(*ast.Ident)
+		cl := r.receiverClass(pf.Object, ctx)
+		if !ok || cl == nil {
+			return nil
+		}
+		if pr := cl.FindProperty(id.Name); pr != nil {
+			if t, ok := pr.Type.(types.Class); ok {
+				return r.prog.Class(t.Name)
+			}
+		}
+		return nil
+	}
 	v, ok := obj.(*ast.Variable)
 	if !ok {
 		return nil
