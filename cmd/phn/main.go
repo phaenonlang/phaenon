@@ -73,8 +73,10 @@ usage:
                                                            Debug/LineMap.php, …) into DIR, the compiled
                                                            phaenon/concurrent package into the second
   phn trace [--root PREFIX=LOCAL]... [<text>...]           rewrite the positions in compiled files (stack traces,
-                                                           PHPUnit, PHPStan --error-format=raw) into .phn positions;
-                                                           reads the arguments, or stdin without them
+                                                           PHPUnit, PHPStan --error-format=raw or github) into .phn
+                                                           positions; reads the arguments, or stdin without them,
+                                                           where a Checkstyle, JUnit, Clover or Cobertura report is
+                                                           rewritten as that report
   phn lex   [--php] <file>                                 dump the token stream
   phn print [--php] <file>                                 parse and pretty-print
   phn version                                              print phn's version
@@ -98,7 +100,10 @@ package with a phaenon.json from its .phn sources.
 Every compiled file ends with a line map (// phaenon-map v1 …) that trace reads: file.php:42,
 file.php(42) and "file.php on line 42" become the .phn's path and line; anything else, positions in
 files without a map included, passes through unchanged. --root /app=. reads a path under /app (a
-production deployment) from the local checkout, so a pasted trace maps too.
+production deployment) from the local checkout, so a pasted trace maps too. A GitHub workflow
+command (::error file=…,line=…::) gets the source's file and lines, without its columns. A report
+on stdin is read whole; in coverage, the compiled lines that come from one source line count as
+that line, covered when any of them is.
 --php reads the file as plain PHP (with <?php tags) instead of Phaenon.`))
 	os.Exit(2)
 }

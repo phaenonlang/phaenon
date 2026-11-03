@@ -1,0 +1,5 @@
+namespace App;
+
+fun bad(): int => "not, an: int";
+
+fun alsoBad(): string => 5 + 1;
