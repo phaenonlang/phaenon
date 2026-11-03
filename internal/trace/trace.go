@@ -10,6 +10,12 @@
 // a valid map, the path becomes the source's and the line the forward
 // lookup's. Everything else, positions in files without a map included,
 // stays byte for byte as it was.
+//
+// The CI formats are read too (design/tooling.md §7.1): a GitHub workflow
+// command that annotates a compiled file (Command, PHPStan's
+// --error-format=github), and the XML reports of Report — Checkstyle,
+// JUnit, Clover and Cobertura — whose files, lines and coverage it carries
+// over to the sources.
 package trace
 
 import (
@@ -59,8 +65,34 @@ func New(roots []Root) *Tracer {
 var position = regexp.MustCompile(`((?:[A-Za-z]:)?[^\s"'()<>\[\],;:]*\.php)(?::(\d+)|\((\d+)\)|( on line )(\d+))`)
 
 // Rewrite returns text with every position in a mapped compiled file
-// rewritten to its source position.
+// rewritten to its source position. A line that is a GitHub workflow
+// command annotating a mapped file (PHPStan's --error-format=github) has its
+// file and lines rewritten, its columns dropped: the map holds lines, and a
+// compiled line's column is not the source's.
 func (t *Tracer) Rewrite(text string) string {
+	if !strings.Contains(text, "::") {
+		return t.rewritePositions(text)
+	}
+	lines := strings.SplitAfter(text, "\n")
+	for i, l := range lines {
+		body := strings.TrimSuffix(l, "\n")
+		brk := l[len(body):]
+		if strings.HasSuffix(body, "\r") {
+			body, brk = body[:len(body)-1], "\r"+brk
+		}
+		if c, ok := ParseCommand(body); ok {
+			if r, ok := t.rewriteCommand(c); ok {
+				lines[i] = r + brk
+				continue
+			}
+		}
+		lines[i] = t.rewritePositions(l)
+	}
+	return strings.Join(lines, "")
+}
+
+// rewritePositions rewrites the positions of free text.
+func (t *Tracer) rewritePositions(text string) string {
 	return position.ReplaceAllStringFunc(text, func(match string) string {
 		g := position.FindStringSubmatch(match)
 		path := g[1]
@@ -86,9 +118,54 @@ func (t *Tracer) Rewrite(text string) string {
 		if !ok {
 			return match
 		}
-		source := filepath.Clean(filepath.Join(filepath.Dir(local), filepath.FromSlash(m.Source)))
-		return source + before + strconv.Itoa(src) + after
+		return source(local, m) + before + strconv.Itoa(src) + after
 	})
+}
+
+// rewriteCommand is the annotation c points at the source, false when its
+// file has no map.
+func (t *Tracer) rewriteCommand(c Command) (string, bool) {
+	file, ok := c.Get("file")
+	if !ok {
+		return "", false
+	}
+	local := t.local(file)
+	m := t.mapOf(local)
+	if m == nil {
+		return "", false
+	}
+	out := Command{Name: c.Name, Message: t.rewritePositions(c.Message)}
+	for _, p := range c.Props {
+		switch p.Key {
+		case "file":
+			p.Value = source(local, m)
+		case "line", "endLine":
+			p.Value = forward(m, p.Value)
+		case "col", "endColumn":
+			continue
+		}
+		out.Props = append(out.Props, p)
+	}
+	return out.String(), true
+}
+
+// source is the path of the source a compiled file's map names, beside the
+// compiled file at local.
+func source(local string, m *linemap.Map) string {
+	return filepath.Clean(filepath.Join(filepath.Dir(local), filepath.FromSlash(m.Source)))
+}
+
+// forward is the source line of the compiled line the decimal digits name,
+// the digits themselves when they name no line.
+func forward(m *linemap.Map, digits string) string {
+	n, err := strconv.Atoi(digits)
+	if err != nil {
+		return digits
+	}
+	if src, ok := m.Forward(n); ok {
+		return strconv.Itoa(src)
+	}
+	return digits
 }
 
 // local is where a path the text names lies on this machine: under the

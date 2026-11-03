@@ -1,0 +1,2 @@
+::error file=@DIR@/.src/Bad.php,line=11,col=0::Function App\bad() should return int but returns string.
+::error file=@DIR@/.src/Bad.php,line=16,col=0::Function App\alsoBad() should return string but returns int.

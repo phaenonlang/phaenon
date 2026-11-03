@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="@DIR@/phpunit.xml" tests="5" assertions="4" errors="1" failures="1" skipped="0" time="0.004570">
+    <testsuite name="unit" tests="5" assertions="4" errors="1" failures="1" skipped="0" time="0.004570">
+      <testsuite name="App\Tests\BoxTest" file="@DIR@/.tests/BoxTest.php" tests="5" assertions="4" errors="1" failures="1" skipped="0" time="0.004570">
+        <testcase name="testGet" file="@DIR@/.tests/BoxTest.php" line="14" class="App\Tests\BoxTest" classname="App.Tests.BoxTest" assertions="1" time="0.001553"/>
+        <testcase name="testRecordAndLabel" file="@DIR@/.tests/BoxTest.php" line="19" class="App\Tests\BoxTest" classname="App.Tests.BoxTest" assertions="1" time="0.000718"/>
+        <testcase name="testPlain" file="@DIR@/.tests/BoxTest.php" line="26" class="App\Tests\BoxTest" classname="App.Tests.BoxTest" assertions="1" time="0.000532"/>
+        <testcase name="testRefuses" file="@DIR@/.tests/BoxTest.php" line="31" class="App\Tests\BoxTest" classname="App.Tests.BoxTest" assertions="0" time="0.001307">
+          <error type="LogicException">App\Tests\BoxTest::testRefuses
+LogicException: refused
+
+@DIR@/.src/Box.php:40
+@DIR@/.tests/BoxTest.php:33</error>
+        </testcase>
+        <testcase name="testLabelFails" file="@DIR@/.tests/BoxTest.php" line="36" class="App\Tests\BoxTest" classname="App.Tests.BoxTest" assertions="1" time="0.000459">
+          <failure type="PHPUnit\Framework\ExpectationFailedException">App\Tests\BoxTest::testLabelFails
+Failed asserting that two strings are identical.
+--- Expected
++++ Actual
+@@ @@
+-'wrong'
++'***************************************2'
+
+@DIR@/.tests/BoxTest.php:38</failure>
+        </testcase>
+      </testsuite>
+    </testsuite>
+  </testsuite>
+</testsuites>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<checkstyle>
+<file name="@DIR@/src/Bad.phn">
+  <error line="3" severity="error" message="Function App\bad() should return int but returns string." source="return.type" />
+  <error line="5" severity="error" message="Function App\alsoBad() should return string but returns int." source="return.type" />
+</file>
+</checkstyle>

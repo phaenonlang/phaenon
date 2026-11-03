@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<checkstyle>
+<file name="@DIR@/.src/Bad.php">
+  <error line="11" column="1" severity="error" message="Function App\bad() should return int but returns string." source="return.type" />
+  <error line="16" column="1" severity="error" message="Function App\alsoBad() should return string but returns int." source="return.type" />
+</file>
+</checkstyle>
