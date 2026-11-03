@@ -43,6 +43,6 @@ final class DevUp
     {
         $run = static fn (string ...$parts): string => \implode(' ', \array_values($parts));
 
-        return $run('kubectl', ...$args) . $args->values()->join(' ');
+        return $run('kubectl', ...$args) . \implode(' ', \array_values($args));
     }
 }

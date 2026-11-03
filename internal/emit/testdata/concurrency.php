@@ -8,7 +8,6 @@ namespace App;
 
 use Amp\Cancellation;
 use Phaenon\Concurrent\Scope;
-use Phaenon\Seq;
 
 final class User
 {
@@ -90,7 +89,7 @@ final class Profiles
     {
         $total = 0;
         Scope::run(function () use ($ids, &$total) {
-            $tasks = Seq::map($ids, fn (int $id) => Scope::spawn(fn () => $this->orders->count($id)));
+            $tasks = array_map(fn (int $id) => Scope::spawn(fn () => $this->orders->count($id)), $ids);
             foreach (Scope::all($tasks) as $n) {
                 $total += $n;
             }
@@ -121,4 +120,4 @@ final class Profiles
         return Scope::map($ids, fn (int $id) => $this->orders->count($id));
     }
 }
-// phaenon-map v1 concurrency.phn 1-6=1 7:1 11-11=4 12:5 34-36=27 37:27 50-52=40 53:40 74-76=61 77:61 86-88=70 89:70 115-118=96 119:96
+// phaenon-map v1 concurrency.phn 1-6=1 7:1 33-35=27 36:27 49-51=40 52:40 73-75=61 76:61 85-87=70 88:70 114-117=96 118:96

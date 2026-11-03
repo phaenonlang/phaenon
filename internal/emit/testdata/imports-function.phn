@@ -14,8 +14,10 @@ final class Stamp
     {
     }
 
-    public function label(string $who): string
+    public function label(string $who, mixed $tags): string
     {
-        return sprintf('%s at %s', $who->upper(), $this->at->format('H:i'));
+        $listed = $tags is list<string> ? \implode(', ', $tags) : '-';
+
+        return sprintf('%s at %s (%s)', $who, $this->at->format('H:i'), $listed);
     }
 }

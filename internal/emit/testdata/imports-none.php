@@ -6,7 +6,7 @@ declare(strict_types=1);
 
 namespace App\Report;
 
-use Phaenon\Str;
+use Phaenon\Type;
 
 /**
  * A file without imports: the one the compiler adds opens a use block of its
@@ -15,9 +15,9 @@ use Phaenon\Str;
  */
 final class Slug
 {
-    public static function of(string $title): string
+    public static function of(mixed $words): string
     {
-        return Str::replace(Str::lower(Str::trim($title)), ' ', '-');
+        return Type::list(Type::string())->check($words) ? \strtolower(\implode('-', $words)) : '';
     }
 }
 // phaenon-map v1 imports-none.phn 1-6=1 7:1 8-9=1 10:2

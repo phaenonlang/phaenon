@@ -2,9 +2,11 @@ namespace App;
 
 use Closure;
 
-// Method syntax on lists, maps and strings compiles to the stdlib's static
-// calls, the class imported by the compiler (design/collections.md §3.1,
-// roadmap D11); a tuple (A, B) erases to the shape array{A, B}.
+// Lists, maps and strings go through PHP's functions, chained left to
+// right with pipes (roadmap D20): list<T> and map<K, V> erase to array with
+// their types in docblocks, a tuple (A, B) to the shape array{A, B}, and
+// the compiler imports \Phaenon\Type for `is` beside the file's own
+// imports (design/collections.md §2, roadmap D11).
 
 final class User
 {
@@ -15,66 +17,89 @@ final class User
 
 function emails(list<User> $users): list<string>
 {
-    return $users
-        ->filter(fn (User $u) => $u->active)
-        ->map(fn (User $u) => $u->name->lower() . '@example.com');
+    $active = array_values(array_filter($users, fn (User $u) => $u->active));
+
+    return array_map(fn (User $u) => strtolower($u->name) . '@example.com', $active);
 }
 
 function byName(list<User> $users): map<string, User>
 {
-    return $users->keyBy(fn (User $u) => $u->name);
+    $out = [];
+    foreach ($users as $u) {
+        $out[$u->name] = $u;
+    }
+
+    return $out;
 }
 
 function oldest(list<User> $users): ?User
 {
-    return $users->sortBy(fn (User $u) => -$u->age)->first();
+    usort($users, fn (User $a, User $b) => $b->age <=> $a->age);
+
+    return $users[0] ?? null;
 }
 
 function pairs(list<string> $names, list<int> $ages): list<(string, int)>
 {
-    return $names->zip($ages);
+    $out = [];
+    foreach ($names as $i => $name) {
+        $out[] = [$name, $ages[$i] ?? 0];
+    }
+
+    return $out;
 }
 
 function describe(list<(string, int)> $pairs): string
 {
     $lines = [];
     foreach ($pairs as [$name, $age]) {
-        $lines[] = $name->padEnd(10) . $age;
+        $lines[] = str_pad($name, 10) . $age;
     }
 
-    return $lines->isEmpty() ? '-' : $lines->join("\n");
+    return $lines === [] ? '-' : implode("\n", $lines);
 }
 
-function ages(map<string, User> $users): map<string, int>
+function adults(map<string, User> $users): map<string, int>
 {
-    return $users->map(fn (User $u) => $u->age)->filter(fn (int $age) => $age >= 18);
+    $ages = array_map(fn (User $u) => $u->age, $users);
+
+    return array_filter($ages, fn (int $age) => $age >= 18);
 }
 
 function keys(map<string, int> $counts): string
 {
-    return $counts->keys()->sort()->join(', ');
+    $keys = array_keys($counts);
+    sort($keys);
+
+    return implode(', ', $keys);
 }
 
 function slug(string $title): string
 {
-    return $title->trim()->lower()->replace(' ', '-');
+    return $title
+        |> trim(...)
+        |> strtolower(...)
+        |> (fn (string $s) => str_replace(' ', '-', $s));
 }
 
 function initials(string $name): string
 {
-    return $name->split(' ')->map(fn (string $part) => $part->slice(0, 1)->upper())->join('');
+    $initial = fn (string $part) => strtoupper(substr($part, 0, 1));
+
+    return implode('', array_map($initial, explode(' ', $name)));
 }
 
 function nullable(?string $s): int
 {
-    return $s === null ? 0 : $s->length();
+    return $s === null ? 0 : mb_strlen($s);
 }
 
 function nullsafe(?string $s, ?User $u): string
 {
-    $n = $s?->length();
+    $n = $s === null ? null : mb_strlen($s);
+    $name = $u?->name;
 
-    return ($u?->name->upper() ?? '-') . ($n ?? 0);
+    return strtoupper($name ?? '-') . ($n ?? 0);
 }
 
 final class Id implements \Stringable
@@ -91,7 +116,7 @@ final class Id implements \Stringable
 
 function prefixed(Id $id): bool
 {
-    return $id->startsWith('u-');
+    return str_starts_with((string) $id, 'u-');
 }
 
 function firstPair(list<(string, int)> $pairs): ?(string, int)

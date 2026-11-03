@@ -8,16 +8,17 @@ namespace App\Report;
 
 use ArrayObject;
 use DateTimeImmutable;
-use Phaenon\Seq;
-use Phaenon\Str;
+use Phaenon\Concurrent\Scope;
+use Phaenon\Type;
 use Stringable;
 
-// A sorted use block: the imports the compiler adds (Seq, Str) join it in
-// their alphabetical place, each on a line of its own (roadmap D11, D19).
+// A sorted use block: the imports the compiler adds (Scope for
+// `concurrently`, Type for `is`) join it in their alphabetical place, each on
+// a line of its own (roadmap D11, D19).
 
 final class Summary implements Stringable
 {
-    /** @param ArrayObject<int, string> $lines */
+    /** @param ArrayObject<int, mixed> $lines */
     public function __construct(private readonly ArrayObject $lines, private readonly DateTimeImmutable $at)
     {
     }
@@ -26,7 +27,16 @@ final class Summary implements Stringable
     {
         $lines = \array_values($this->lines->getArrayCopy());
 
-        return $this->at->format('Y-m-d') . ' ' . Seq::join(Seq::map($lines, fn (string $l) => Str::trim($l)), ', ');
+        $text = Type::list(Type::string())->check($lines) ? \implode(', ', \array_map(\trim(...), $lines)) : '-';
+
+        return $this->at->format('Y-m-d') . ' ' . $text;
+    }
+
+    public function warm(): void
+    {
+        Scope::run(function () {
+            Scope::spawn(fn () => $this->lines->count());
+        });
     }
 }
 // phaenon-map v1 imports-sorted.phn 1-6=1 7:1 11-12=4 13:5

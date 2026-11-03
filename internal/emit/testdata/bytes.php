@@ -7,11 +7,10 @@ declare(strict_types=1);
 namespace App;
 
 use Phaenon\Bytes;
-use Phaenon\Seq;
 
-// bytes erases to string: the (bytes) cast disappears and the methods
-// become Bytes:: calls, the class imported by the compiler
-// (design/strings.md §5, roadmap D11).
+// bytes erases to string: the (bytes) cast disappears, PHP's functions
+// take bytes as they take strings, and \Phaenon\Bytes holds the checked
+// conversions (design/strings.md §2, §5).
 
 final class Token
 {
@@ -36,12 +35,14 @@ final class Token
 
     public function matches(string $candidate): bool
     {
-        return Bytes::equals($this->secret, $candidate);
+        return hash_equals($this->secret, $candidate);
     }
 
     public function fingerprint(): string
     {
-        return Bytes::hex(Bytes::slice(hash('sha256', $this->secret, true), 0, 8));
+        return hash('sha256', $this->secret, true)
+            |> (fn (string $h) => substr($h, 0, 8))
+            |> Bytes::hex(...);
     }
 }
 
@@ -52,7 +53,7 @@ function fromBinary(string $raw): string
 
 function label(string $id): string
 {
-    return 'id-' . Bytes::hex($id) . ' (' . Bytes::length($id) . ' bytes)';
+    return 'id-' . Bytes::hex($id) . ' (' . strlen($id) . ' bytes)';
 }
 
 /**
@@ -61,7 +62,7 @@ function label(string $id): string
  */
 function keys(array $keys): array
 {
-    return Seq::map($keys, fn (string $k) => Bytes::base64($k, urlSafe: true));
+    return array_map(fn (string $k) => Bytes::base64($k, urlSafe: true), $keys);
 }
 
 // `.` joins binary to binary and erases unchanged (strings.md §2).
@@ -99,7 +100,7 @@ final class Archive
     public function bytes(): string
     {
         /** @var string $out */
-        $out = Bytes::concat(...$this->entries);
+        $out = implode('', $this->entries);
 
         return $out;
     }
@@ -110,7 +111,7 @@ final class Archive
      */
     public function measure(string $entry): array
     {
-        return ['bytes' => Bytes::length($entry), 'data' => $entry];
+        return ['bytes' => strlen($entry), 'data' => $entry];
     }
 
     /**
@@ -122,4 +123,4 @@ final class Archive
         return $from[0] ?? '';
     }
 }
-// phaenon-map v1 bytes.phn 1-6=1 7:1 10-10=3 11:4 58-61=51 62:51 68-70=57 71:57 116-119=102 120:103
+// phaenon-map v1 bytes.phn 1-6=1 7:1 59-62=53 63:53 69-71=59 72:59 117-120=104 121:105

@@ -33,7 +33,7 @@ final class Blocks
     {
         $total = 0;
         concurrently (timeout: 2, cancellation: $stop) {
-            $tasks = $ids->map(fn (int $i) => spawn $this->work->count($i));
+            $tasks = array_map(fn (int $i) => spawn $this->work->count($i), $ids);
             foreach (Scope::all($tasks) as $n) {
                 $total += $n;
             }

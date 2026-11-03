@@ -1,12 +1,14 @@
 namespace Phaenon;
 
 /**
- * The binary functions of the Phaenon stdlib (design/strings.md §2, §4). A
- * `bytes` value is a PHP string kept apart from text: it has no `.`, no
- * interpolation and no Str methods, and `(bytes) $raw` is how binary data
- * held in a PHP string enters the type, free at runtime. Every function
- * takes the bytes first; only text() scans. In Phaenon source these are
- * the methods of a bytes value: `$b->hex()` compiles to `Bytes::hex($b)`.
+ * The checked conversions between bytes and text (design/strings.md §2). A
+ * `bytes` value is a PHP string kept apart from text: `.` joins it only to
+ * other bytes, it has no interpolation, and `(bytes) $raw` is how binary
+ * data held in a PHP string enters the type, free at runtime, as
+ * `(string) $b` is the unchecked way back. These functions are the
+ * conversions that check their input or spell the bytes out; PHP's own
+ * functions do the rest, typed for bytes by the overlay: strlen(),
+ * substr(), hash_equals(), ord($b[$i]).
  */
 final class Bytes
 {
@@ -15,6 +17,8 @@ final class Bytes
     }
 
     /**
+     * The bytes a string of hex digits spells, either case.
+     *
      * @throws \ValueError when $hex is not an even number of hex digits
      */
     static fun fromHex(string $hex): bytes
@@ -28,6 +32,8 @@ final class Bytes
     }
 
     /**
+     * The bytes a base64 string encodes, padded or not.
+     *
      * @throws \ValueError when $b64 is not base64 (standard or URL-safe alphabet)
      */
     static fun fromBase64(string $b64): bytes
@@ -40,31 +46,18 @@ final class Bytes
         return (bytes) $b;
     }
 
-    static fun length(bytes $b): int
-    {
-        return strlen($b);
-    }
-
-    static fun isEmpty(bytes $b): bool
-    {
-        return 0 === strlen($b);
-    }
-
-    static fun slice(bytes $b, int $start, ?int $length = null): bytes
-    {
-        return substr($b, $start, $length);
-    }
-
-    static fun concat(bytes ...$parts): bytes
-    {
-        return (bytes) implode('', $parts);
-    }
-
+    /**
+     * The bytes as lower-case hex digits, two per byte.
+     */
     static fun hex(bytes $b): string
     {
         return bin2hex($b);
     }
 
+    /**
+     * The bytes in base64: the standard alphabet with padding, or the
+     * URL-safe one without it.
+     */
     static fun base64(bytes $b, bool $urlSafe = false): string
     {
         $s = base64_encode($b);
@@ -98,28 +91,5 @@ final class Bytes
         } finally {
             mb_substitute_character($substitute);
         }
-    }
-
-    /**
-     * Constant-time comparison, for secrets and signatures.
-     */
-    static fun equals(bytes $a, bytes $b): bool
-    {
-        return hash_equals($a, $b);
-    }
-
-    /**
-     * The byte at $i, 0–255; negative indexes count from the end.
-     *
-     * @throws \OutOfRangeException
-     */
-    static fun at(bytes $b, int $i): int
-    {
-        $n = strlen($b);
-        if ($i < -$n || $i >= $n) {
-            throw new \OutOfRangeException(sprintf('Bytes::at(): index %d out of range for %d bytes', $i, $n));
-        }
-
-        return ord(substr($b, $i, 1));
     }
 }

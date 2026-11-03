@@ -7,7 +7,7 @@ declare(strict_types=1);
 namespace App\Report;
 
 use DateTimeImmutable;
-use Phaenon\Str;
+use Phaenon\Type;
 
 use function sprintf;
 
@@ -21,9 +21,11 @@ final class Stamp
     {
     }
 
-    public function label(string $who): string
+    public function label(string $who, mixed $tags): string
     {
-        return sprintf('%s at %s', Str::upper($who), $this->at->format('H:i'));
+        $listed = Type::list(Type::string())->check($tags) ? \implode(', ', $tags) : '-';
+
+        return sprintf('%s at %s (%s)', $who, $this->at->format('H:i'), $listed);
     }
 }
 // phaenon-map v1 imports-function.phn 1-6=1 7:1 10-10=3 11:4

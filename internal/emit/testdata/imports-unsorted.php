@@ -8,21 +8,23 @@ namespace App\Report;
 
 use Stringable;
 use ArrayObject;
-use Phaenon\Str;
+use Phaenon\Type;
 
 // An unsorted use block has no alphabetical place to offer: the import the
 // compiler adds goes after its last class import (roadmap D11).
 
 final class Heading implements Stringable
 {
-    /** @param ArrayObject<int, string> $words */
+    /** @param ArrayObject<int, mixed> $words */
     public function __construct(private readonly ArrayObject $words)
     {
     }
 
     public function __toString(): string
     {
-        return Str::upper(\implode(' ', $this->words->getArrayCopy()));
+        $words = $this->words->getArrayCopy();
+
+        return Type::list(Type::string())->check($words) ? \strtoupper(\implode(' ', $words)) : '';
     }
 }
 // phaenon-map v1 imports-unsorted.phn 1-6=1 7:1 11-11=4 12:5

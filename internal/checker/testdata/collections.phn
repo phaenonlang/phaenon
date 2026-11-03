@@ -1,7 +1,9 @@
 namespace Coll;
 
-// Method syntax on lists, maps and strings (design/collections.md §3.1,
-// strings.md §4), tuples (§2.4) and bytes (strings.md §2).
+// Lists and maps (design/collections.md §2), tuples (§2.4) and bytes
+// (strings.md §2) as PHP's functions see them, and `->`, which means what
+// PHP means by it: a method call on a list, a map, a string or bytes is
+// the error PHP makes it (roadmap D20).
 
 function takesInt(int $i): void
 {
@@ -20,45 +22,21 @@ final class User
 
 function lists(list<User> $users, list<int> $ns): void
 {
-    takesInt($users->count());
-    takesString($users->first()?->name ?? '');
-    $names = $users->map(fn (User $u) => $u->name);
+    takesInt(count($users));
+    $names = array_map(fn (User $u) => $u->name, $users);
     takesString($names[0]);
-    takesInt($names->first()); // want P2103
-    $sum = $ns->reduce(0, fn (int $acc, int $n) => $acc + $n);
-    takesInt($sum);
-    $byName = $users->keyBy(fn (User $u) => $u->name);
-    takesInt($byName->get('x')); // want P2103
-    $users->sort(fn (User $a, User $b) => $a->age <=> $b->age)->each(fn (User $u) => takesString($u->name));
-    $users->frobnicate(); // want P2006
-    $users->map(); // want P2101
+    takesInt($names[0]); // want P2103
+    takesInt(array_sum($ns));
+    takesString(implode(',', $names));
 }
 
 function maps(map<string, int> $counts, map<int, string> $names): void
 {
-    takesInt($counts->get('a') ?? 0);
-    takesString($counts->keys()[0]);
-    takesInt($names->keys()[0]);
-    $doubled = $counts->map(fn (int $n) => $n * 2);
-    takesInt($doubled->values()->first() ?? 0);
-    takesString($doubled->get('a')); // want P2103
-    foreach ($counts->toList() as [$key, $count]) {
-        takesString($key);
-        takesInt($count);
-    }
-    takesString($counts->with('b', 2)->without('a')->isEmpty()); // want P2103
-}
-
-function strings(string $s, ?string $maybe): void
-{
-    takesInt($s->length());
-    takesString($s->upper()->trim());
-    takesInt($s->indexOf('x') ?? -1);
-    takesString($s->split(',')->first() ?? '');
-    takesInt($s->upper()); // want P2103
-    $maybe->length(); // want P2105
-    takesString($maybe?->length()); // want P2103
-    takesInt($maybe?->length() ?? 0);
+    takesInt($counts['a'] ?? 0);
+    takesString(array_keys($counts)[0]);
+    takesInt(array_keys($names)[0]);
+    $doubled = array_map(fn (int $n) => $n * 2, $counts);
+    takesString($doubled['a'] ?? ''); // want P2103
 }
 
 final class Id implements \Stringable
@@ -78,22 +56,18 @@ final class Id implements \Stringable
     }
 }
 
-function stringable(Id $id, string|Id $either, ?Id $maybe): void
+function notObjects(list<User> $users, map<string, int> $counts, string $s, ?string $maybe, bytes $raw, string|User $value, Id $id): void
 {
+    takesInt($users->count()); // want P2105 "cannot call method count() on list<Coll\User>"
+    takesString($counts->keys()[0]); // want P2105 "cannot call method keys() on array<string, int>"
+    takesString($s->upper()->trim()); // want P2105 "cannot call method upper() on string"
+    $maybe->length(); // want P2105 "cannot call method length() on string|null"
+    takesInt($maybe?->length() ?? 0); // want P2105 "cannot call method length() on string"
+    takesInt($raw->length()); // want P2105 "cannot call method length() on bytes"
+    $value->upper(); // want P2105 "cannot call method upper() on string|Coll\User"
+    $users->map(...); // want P2105
     takesInt($id->own());
-    takesString($id->upper());
-    takesString($either->trim());
-    takesInt($maybe?->length() ?? 0);
-    takesString($maybe?->upper()); // want P2103
-    $id->frobnicate(); // want P2006
-}
-
-function nullsafe(?string $s, ?User $u, list<string> $xs, ?Id $id): void
-{
-    takesInt($s?->length() ?? 0);
-    takesString($u?->name->upper() ?? '');
-    takesString($xs->first()?->upper()); // want P2519
-    takesString($id?->own()); // want P2103
+    takesString($id->upper()); // want P2006 "unknown method Coll\Id::upper()"
 }
 
 function tuples((string, int) $pair, list<(string, int)> $pairs): (int, string)
@@ -109,12 +83,6 @@ function tuples((string, int) $pair, list<(string, int)> $pairs): (int, string)
     }
 
     return [$age, $name];
-}
-
-function mixedReceiver(list<int>|map<string, int> $either, string|User $value): void
-{
-    $either->isEmpty(); // want P2519
-    $value->upper(); // want P2519
 }
 
 function bytesAreNotText(bytes $raw, string $text): void
@@ -133,5 +101,5 @@ function keyBoundParam<K of object, V>(map<K, V> $m): void // want P2518
 
 function impliedKeyBound<K, V>(map<K, V> $m): list<K>
 {
-    return $m->keys();
+    return array_keys($m);
 }
