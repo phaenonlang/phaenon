@@ -156,6 +156,26 @@ function anonymous(array $xs): int
     return tagged(array_values(array_filter(array_map(fn (int $x): int => $x - 1, $xs))), new class { public int $a = 1; });
 }
 
+// For PHP 8.5 the stage's closure captures what the class's constructor
+// arguments read, not its property or its method's variables.
+/** @param list<int> $xs */
+function captures(array $xs, int $base): int
+{
+    return tagged(array_values(array_filter(array_map(fn (int $x): int => $x - $base, $xs))), new class ($base) {
+        public int $a = 1;
+
+        public function __construct(public int $base)
+        {
+        }
+
+        public function sum(): int
+        {
+            $xs = [$this->a, $this->base];
+            return array_sum($xs);
+        }
+    });
+}
+
 // A chain that is an argument on a line of its own.
 function wrapped(string $s): Text
 {
@@ -177,4 +197,4 @@ echo implode('|', nested(['a-b ', ' ', 'c'])), "\n";
 echo multiline(['an', 'apple', 'tree']), "\n";
 echo long(), "\n";
 echo wrapped(' Q ')->join(['1', '2']), "\n";
-echo widest([7, 1234, 56]), ' ', anonymous([1, 2, 3]), "\n";
+echo widest([7, 1234, 56]), ' ', anonymous([1, 2, 3]), ' ', captures([1, 2, 3], 1), "\n";

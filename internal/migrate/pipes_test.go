@@ -24,15 +24,29 @@ func pipes(t *testing.T, src string, target phpversion.Version, min int) (string
 	return string(out[0]), rep
 }
 
-// For PHP 8.6 an anonymous class in a bound argument moves to its stage's
-// line; its type, whose name holds the line, is not a change the check
-// undoes. (For 8.5 the chain stays: TestLift's pipes fixture.)
+// An anonymous class in a bound argument moves to its stage's line; its
+// type, whose name holds the line, is not a change the check undoes. For
+// PHP 8.5 the stage is lowered as any other: the class's members are no
+// variables of the closure (TestLift's pipes fixture runs one).
 func TestPipesMoveAnAnonymousClass(t *testing.T) {
 	src := "/** @param list<int> $xs */\nfun tagged(array $xs, object $o): int => count($xs);\n\n/** @param list<int> $xs */\nfun f(array $xs): int {\n    return tagged(array_values(array_filter(array_map(fn (int $x): int => $x - 1, $xs))), new class { public int $a = 1; });\n}\n"
 	want := "/** @param list<int> $xs */\nfun tagged(array $xs, object $o): int => count($xs);\n\n/** @param list<int> $xs */\nfun f(array $xs): int {\n    return $xs\n        |> array_map(fn (int $x): int => $x - 1, ?)\n        |> array_filter(...)\n        |> array_values(...)\n        |> tagged(?, new class { public int $a = 1; });\n}\n"
+	for _, target := range []phpversion.Version{phpversion.PHP85, phpversion.PHP86} {
+		got, rep := pipes(t, src, target, 3)
+		if got != want || rep.Pipelines != 1 {
+			t.Errorf("target %s: %d pipelines, %v; got:\n%s", target, rep.Pipelines, rep.Undone, got)
+		}
+	}
+}
+
+// An anonymous class's constructor may take a variable by reference, as any
+// constructor may: an argument written before the nested call that reads
+// the variable keeps the chain as calls.
+func TestPipesKeepOrderAroundAnAnonymousClass(t *testing.T) {
+	src := "fun f(string $s): string => str_repeat($s, strlen(implode(',', array_keys(get_object_vars(new class ($s) { fun __construct(string &$t) { $t = 'x'; } })))));\n"
 	got, rep := pipes(t, src, phpversion.PHP86, 3)
-	if got != want || rep.Pipelines != 1 {
-		t.Errorf("%d pipelines, %v; got:\n%s", rep.Pipelines, rep.Undone, got)
+	if got != src || rep.Left[ReasonOrder] != 1 {
+		t.Errorf("left %v; got:\n%s", rep.Left, got)
 	}
 }
 
