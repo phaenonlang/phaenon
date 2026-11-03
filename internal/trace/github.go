@@ -1,6 +1,8 @@
 package trace
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -98,4 +100,53 @@ func unescape(s string) string {
 	}
 	s = strings.NewReplacer("%0D", "\r", "%0A", "\n", "%3A", ":", "%2C", ",").Replace(s)
 	return strings.ReplaceAll(s, "%25", "%")
+}
+
+// AnnotationPath is the path a workflow command names a file by. GitHub
+// matches an annotation's file against the repository, so the path starts
+// at the root of the git repository that holds the file: the nearest
+// directory above it with a .git, a directory or, in a worktree or a
+// submodule, a file. The working directory is not that root when a project
+// is kept in a subdirectory of its repository, and a path relative to it
+// names no file GitHub knows. A file in no git repository, as in a tree
+// actions/checkout downloaded where git is missing, is taken relative to
+// GITHUB_WORKSPACE, then to the working directory, when it lies under one,
+// and stays as given otherwise. Separators are forward slashes.
+func AnnotationPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	for dir := filepath.Dir(abs); ; {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			if rel, ok := under(dir, abs); ok {
+				return rel
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	wd, _ := os.Getwd()
+	for _, base := range []string{os.Getenv("GITHUB_WORKSPACE"), wd} {
+		if base == "" {
+			continue
+		}
+		if rel, ok := under(base, abs); ok {
+			return rel
+		}
+	}
+	return filepath.ToSlash(path)
+}
+
+// under is path relative to dir, with forward slashes, when it lies under
+// it.
+func under(dir, path string) (string, bool) {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }

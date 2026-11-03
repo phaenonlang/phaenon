@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"encoding/xml"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,6 +14,11 @@ import (
 // holding the characters the formats escape.
 func formatTree(t *testing.T) string {
 	root := t.TempDir()
+	writeFormatTree(t, root)
+	return root
+}
+
+func writeFormatTree(t *testing.T, root string) {
 	writeTree(t, root, map[string]string{
 		"composer.json":                     `{"name": "acme/app", "require": {"php": ">=8.5"}}`,
 		"phaenon.json":                      `{"roots": {"src": ".src"}}`,
@@ -20,7 +26,6 @@ func formatTree(t *testing.T) string {
 		"vendor/composer/autoload_psr4.php": "<?php\n\nreturn array();\n",
 		"src/Bad.phn":                       "namespace App;\n\nfun bad(): int => \"50%, a: <b> & 'c'\";\n\nfun alsoBad(): string => 5 + 1;\n",
 	})
-	return root
 }
 
 // TestCheckFormats: every format carries the same findings, and the
@@ -97,5 +102,22 @@ func TestCheckFormats(t *testing.T) {
 
 	if _, stderr, err := run(t, root, bin, "check", "--format=sarif"); err == nil || !strings.Contains(stderr, "--format is one of") {
 		t.Errorf("an unknown format should be refused (%v): %s", err, stderr)
+	}
+}
+
+// In a project kept in a subdirectory of its repository, an annotation names
+// the file by its path in the repository, which GitHub matches; Checkstyle
+// keeps the path relative to the working directory.
+func TestCheckFormatsInSubdirectory(t *testing.T) {
+	bin := phnBinary(t)
+	repo := t.TempDir()
+	writeTree(t, repo, map[string]string{".git/HEAD": "ref: refs/heads/main\n"})
+	root := filepath.Join(repo, "app")
+	writeFormatTree(t, root)
+	if stdout, _, _ := run(t, root, bin, "check", "--format=github"); !strings.HasPrefix(stdout, "::error file=app/src/Bad.phn,line=3,") {
+		t.Errorf("--format=github:\n%s", stdout)
+	}
+	if stdout, _, _ := run(t, root, bin, "check", "--format=checkstyle"); !strings.Contains(stdout, `<file name="src/Bad.phn">`) {
+		t.Errorf("--format=checkstyle:\n%s", stdout)
 	}
 }

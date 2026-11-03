@@ -67,8 +67,9 @@ var position = regexp.MustCompile(`((?:[A-Za-z]:)?[^\s"'()<>\[\],;:]*\.php)(?::(
 // Rewrite returns text with every position in a mapped compiled file
 // rewritten to its source position. A line that is a GitHub workflow
 // command annotating a mapped file (PHPStan's --error-format=github) has its
-// file and lines rewritten, its columns dropped: the map holds lines, and a
-// compiled line's column is not the source's.
+// file rewritten to the source's AnnotationPath and its lines to the
+// source's, its columns dropped: the map holds lines, and a compiled line's
+// column is not the source's.
 func (t *Tracer) Rewrite(text string) string {
 	if !strings.Contains(text, "::") {
 		return t.rewritePositions(text)
@@ -138,7 +139,7 @@ func (t *Tracer) rewriteCommand(c Command) (string, bool) {
 	for _, p := range c.Props {
 		switch p.Key {
 		case "file":
-			p.Value = source(local, m)
+			p.Value = AnnotationPath(source(local, m))
 		case "line", "endLine":
 			p.Value = forward(m, p.Value)
 		case "col", "endColumn":

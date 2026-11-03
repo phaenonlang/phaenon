@@ -26,13 +26,13 @@ func writeJSON(w io.Writer, diags []checker.Diagnostic) {
 }
 
 // writeGitHub writes each finding as the workflow command that makes it an
-// annotation of the job: the file relative to the working directory, as
-// GitHub matches it against the repository, the code as its title. The end
-// column is written for a finding on one line only, where the runner reads
-// it, and is inclusive there.
+// annotation of the job: the file by its path in the repository
+// (trace.AnnotationPath), which GitHub matches, the code as the title. The
+// end column is written for a finding on one line only, where the runner
+// reads it, and is inclusive there.
 func writeGitHub(w io.Writer, diags []checker.Diagnostic) {
 	for _, d := range diags {
-		props := []trace.Prop{{Key: "file", Value: reportPath(d.File)}, {Key: "line", Value: strconv.Itoa(d.Line)}}
+		props := []trace.Prop{{Key: "file", Value: trace.AnnotationPath(d.File)}, {Key: "line", Value: strconv.Itoa(d.Line)}}
 		if d.EndLine >= d.Line {
 			props = append(props, trace.Prop{Key: "endLine", Value: strconv.Itoa(d.EndLine)})
 		}
@@ -76,8 +76,8 @@ func xmlAttr(s string) string {
 	return b.String()
 }
 
-// reportPath is a finding's path as a report names it: relative to the
-// working directory when it lies under it, with forward slashes.
+// reportPath is a finding's path as a Checkstyle report names it: relative
+// to the working directory when it lies under it, with forward slashes.
 func reportPath(p string) string {
 	if filepath.IsAbs(p) {
 		if wd, err := os.Getwd(); err == nil {
