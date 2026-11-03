@@ -245,11 +245,13 @@ func (e *emitter) mergeThrows(declStart, nameStart int, doc, tag string) {
 // methodHead rewrites `[modifiers] fun` as `[modifiers] function` in PSR-12
 // order with `public` written out. A head broken over lines or holding a
 // comment keeps its modifiers as written and has only the keyword replaced,
-// so nothing the programmer wrote is lost.
+// so nothing the programmer wrote is lost. Modifiers already written so
+// stay the source's text and only the keyword is the compiler's, so that a
+// tool's change of a modifier is carried back (phn fix).
 func (e *emitter) methodHead(n *ast.MethodDecl) {
 	head := e.src[n.Head.Start:n.Head.End]
+	kw := ast.Span{Start: n.Head.End - len("fun"), End: n.Head.End}
 	if bytes.ContainsAny(head, "\n\r/#") {
-		kw := ast.Span{Start: n.Head.End - len("fun"), End: n.Head.End}
 		if n.Modifiers&(ast.ModPublic|ast.ModProtected|ast.ModPrivate) == 0 {
 			e.replace(kw, "public function")
 		} else {
@@ -257,7 +259,13 @@ func (e *emitter) methodHead(n *ast.MethodDecl) {
 		}
 		return
 	}
-	e.replace(n.Head, methodModifiers(n.Modifiers)+"function")
+	mods := string(head[:len(head)-len("fun")])
+	canonical := methodModifiers(n.Modifiers)
+	if mods == canonical {
+		e.replace(kw, "function")
+		return
+	}
+	e.replace(n.Head, canonical+"function")
 }
 
 // methodModifiers renders a method's modifiers in PSR-12 order, `public`
