@@ -200,6 +200,21 @@ that come from one source line count as that line: covered when any of them is. 
 Sentry integration do the same for logged exceptions, and the PhpStorm plugin reads the map for
 navigation and debugging (`design/line-map.md` §4).
 
+PHP's rewriting tools run on the outputs too, where their configuration already points, and
+`phn fix` carries what they change back to the `.phn`:
+
+```sh
+phn fix -- tools/php-cs-fixer/vendor/bin/php-cs-fixer fix   # the fixer's changes, in the .phn
+phn fix -- vendor/bin/rector process                        # Rector's
+phn fix --check -- tools/php-cs-fixer/vendor/bin/php-cs-fixer fix   # each change at its .phn line; nothing written
+```
+
+A change of what the source wrote is applied to the source, and so is a deletion whose ends lie
+in it. A change of text the compiler wrote — the header, a docblock, the `function` of a `fun`,
+an erased type — is not: the rebuild writes that text anew. `phn fix` then rebuilds and runs the
+tool again, carrying what has become the source's, for three rounds at most, and reports what the
+tool still changes; the exit status is 1 then (`design/tooling.md` §4).
+
 A library ships its `.phn` sources and no compiled PHP (`roadmap.md` D13): with `phn` and the
 library pinned, the output is reproducible byte for byte, and the Composer plugin below builds it
 where it is installed.
@@ -321,6 +336,7 @@ crossing it, a spawn body mutating an outer variable, and `sleep()`/`usleep()` i
 ```sh
 phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] # type-check and compile .phn → .php; no paths: phaenon.json
 phn check [--format=text|json|github|checkstyle] [--no-deprecations] [--exclude PATH]... path... # type-check .phn (and .php) files
+phn fix [--check] -- command [arg...]                 # run php-cs-fixer, Rector… on the outputs; carry their changes back to the .phn
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Bytes, Debug/…), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
