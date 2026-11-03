@@ -210,7 +210,6 @@ func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature
 	}
 	rec.Pipe, rec.Rest, rec.Named = inPipe, rest, named
 	_, rec.Void = sig.ret.(types.Void)
-	rec.Direct = inPipe && pipeDirect(args)
 	rec.Refused = x.partialRefusal(callee, args, sig, rec, rest, named, inPipe)
 	if x.c.file.Partials == nil {
 		x.c.file.Partials = map[*ast.ArgList]*program.Partial{}
@@ -438,25 +437,6 @@ func stableArg(e ast.Expr) bool {
 		return true
 	}
 	return false
-}
-
-// literalArg reports a bound argument whose evaluation has no effect and
-// reads nothing a pipe's left side can change: a literal or a constant.
-func literalArg(e ast.Expr) bool {
-	if _, v := e.(*ast.Variable); v {
-		return false
-	}
-	if p, ok := e.(*ast.Paren); ok {
-		return literalArg(p.Expr)
-	}
-	if a, ok := e.(*ast.ArrayLit); ok {
-		for _, it := range a.Items {
-			if it != nil && ((it.Key != nil && !literalArg(it.Key)) || !literalArg(it.Value)) {
-				return false
-			}
-		}
-	}
-	return stableArg(e)
 }
 
 // stableReceiver is a receiver an arrow function may evaluate at each call:

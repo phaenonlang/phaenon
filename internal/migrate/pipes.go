@@ -63,6 +63,7 @@ import (
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/evalorder"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
@@ -92,14 +93,6 @@ const (
 	ReasonLowering = "PHP 8.5 lowering"
 	ReasonCheck    = "undone by the check"
 )
-
-// scopeCalls read or write the calling scope, or are compiled away
-// (assert() under zend.assertions=-1): through a pipe they would run as a
-// callable, which PHP refuses or evaluates differently.
-var scopeCalls = map[string]bool{
-	"compact": true, "extract": true, "func_get_args": true, "func_get_arg": true,
-	"func_num_args": true, "get_defined_vars": true, "assert": true,
-}
 
 // piper finds and rewrites the chains of one file.
 type piper struct {
@@ -354,7 +347,7 @@ func (r *piper) chain(top ast.Expr, parent ast.Node, ctx walkCtx) {
 		return
 	}
 	for _, call := range path {
-		if r.scopeCall(call) {
+		if evalorder.ScopeCall(call) {
 			c.reason = ReasonScope
 			return
 		}
@@ -403,17 +396,6 @@ func argIndex(call, inner ast.Expr) int {
 	return -1
 }
 
-// scopeCall reports compact(), extract() and the other calls that cannot
-// become a callable.
-func (r *piper) scopeCall(e ast.Expr) bool {
-	c, ok := e.(*ast.Call)
-	if !ok {
-		return false
-	}
-	n, ok := c.Callee.(*ast.Name)
-	return ok && scopeCalls[strings.ToLower(n.Parts[len(n.Parts)-1])]
-}
-
 // subject is the index of the innermost call's subject: its one argument
 // that is not a literal, a constant or a closure, when the call can take it
 // from a pipe; -1 when the call is the head itself.
@@ -423,7 +405,7 @@ func (r *piper) subject(call ast.Expr, ctx walkCtx) int {
 		if a.Value == nil || a.Unpack {
 			return -1
 		}
-		if constant(a.Value) || closure(a.Value) {
+		if evalorder.Constant(a.Value) || evalorder.Closure(a.Value) {
 			continue
 		}
 		if s >= 0 {
@@ -474,15 +456,15 @@ func (r *piper) stageable(call ast.Expr, piped int, ctx walkCtx) string {
 			return ReasonSpread
 		}
 	}
-	assigned := r.assignedIn(args.Args[piped].Value, ctx)
+	written := evalorder.Writes(args.Args[piped].Value, r.byValue(ctx))
 	if mc, ok := call.(*ast.MethodCall); ok {
 		v, ok := mc.Object.(*ast.Variable)
-		if !ok || v.Name != "this" && (assigned[v.Name] || assigned["*"]) {
+		if !ok || written.Has(v.Name) {
 			return ReasonOrder
 		}
 	}
 	for _, a := range args.Args[:piped] {
-		if !orderSafe(a.Value, assigned) {
+		if !evalorder.Movable(a.Value, written) {
 			return ReasonOrder
 		}
 	}
@@ -659,175 +641,22 @@ func bind(params []*program.Param, args []*ast.Arg, i int) *program.Param {
 	return nil
 }
 
-// assignedIn collects the variables evaluating e may assign: assignment
-// targets, increments, by-reference uses, and variables passed to a
-// parameter that is by reference or cannot be resolved, a constructor's
-// among them. "*" stands for any. An anonymous class's methods assign
-// variables of their own (ast.InspectScope).
-func (r *piper) assignedIn(e ast.Expr, ctx walkCtx) map[string]bool {
-	out := map[string]bool{}
-	ast.InspectScope(e, func(n ast.Node) bool {
-		switch n := n.(type) {
-		case *ast.Assign:
-			targetVars(n.Target, out)
-		case *ast.IncDec:
-			targetVars(n.Expr, out)
-		case *ast.ClosureUse:
-			if n.ByRef {
-				out[n.Var.Name] = true
-			}
-		case *ast.VariableVariable, *ast.Include, *ast.Eval:
-			out["*"] = true
-		case *ast.New:
-			args := n.Args
-			if n.Anon != nil {
-				args = n.Anon.Args
-			}
-			if args != nil {
-				for _, a := range args.Args {
-					if v := rootVar(a.Value); v != "" {
-						out[v] = true
-					}
-				}
-			}
-		case *ast.Call, *ast.MethodCall, *ast.StaticCall:
-			args := callArgs(n.(ast.Expr))
-			if args == nil || args.FirstClassCallable {
-				break
-			}
-			params, ok := r.params(n.(ast.Expr), ctx)
-			for i, a := range args.Args {
-				v := rootVar(a.Value)
-				if v == "" {
-					continue
-				}
-				if ok && !a.Unpack {
-					if p := bind(params, args.Args, i); p != nil && !p.ByRef {
-						continue
-					}
-				}
-				out[v] = true
-			}
-		}
-		return true
-	})
-	return out
-}
-
-// targetVars adds the variables an assignment to t writes.
-func targetVars(t ast.Expr, out map[string]bool) {
-	switch t := t.(type) {
-	case *ast.ArrayLit:
-		for _, it := range t.Items {
-			if it != nil {
-				targetVars(it.Value, out)
-			}
-		}
-	default:
-		if v := rootVar(t); v != "" {
-			out[v] = true
-		} else if t != nil {
-			if _, ok := t.(*ast.StaticPropertyFetch); !ok {
-				out["*"] = true
-			}
-		}
-	}
-}
-
-// rootVar is the variable an lvalue is rooted in: $a for $a, $a[1], $a->b.
-func rootVar(e ast.Expr) string {
-	switch e := e.(type) {
-	case *ast.Variable:
-		return e.Name
-	case *ast.Index:
-		return rootVar(e.Array)
-	case *ast.PropertyFetch:
-		return rootVar(e.Object)
-	}
-	return ""
-}
-
-// constant reports a literal or a constant: nothing to evaluate.
-func constant(e ast.Expr) bool {
-	switch e := e.(type) {
-	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.MagicConst, *ast.ConstFetch, *ast.Name:
-		return true
-	case *ast.ClassConstFetch:
-		_, named := e.Class.(*ast.Name)
-		_, ident := e.Name.(*ast.Ident)
-		return named && ident
-	case *ast.Unary:
-		if e.Op == token.Kind('-') || e.Op == token.Kind('+') {
-			switch e.Expr.(type) {
-			case *ast.IntLit, *ast.FloatLit:
-				return true
-			}
-		}
-	case *ast.ArrayLit:
-		if e.Kind == ast.ArrayList {
+// byValue resolves the calls under an inner call for evalorder.Writes: an
+// argument goes by value when the program model resolves its callee and
+// binds it to a parameter that is not by reference. A constructor's
+// arguments are not resolved.
+func (r *piper) byValue(ctx walkCtx) evalorder.ByValue {
+	return func(call ast.Expr, i int) bool {
+		if _, isNew := call.(*ast.New); isNew {
 			return false
 		}
-		for _, it := range e.Items {
-			if it == nil || it.ByRef || it.Unpack || it.Key != nil && !constant(it.Key) || !constant(it.Value) {
-				return false
-			}
+		params, ok := r.params(call, ctx)
+		if !ok {
+			return false
 		}
-		return true
+		p := bind(params, callArgs(call).Args, i)
+		return p != nil && !p.ByRef
 	}
-	return false
-}
-
-// closure reports an expression that creates a closure.
-func closure(e ast.Expr) bool {
-	switch e.(type) {
-	case *ast.Closure, *ast.ArrowFunc:
-		return true
-	}
-	args := callArgs(e)
-	return args != nil && args.Closure()
-}
-
-// orderSafe reports an argument that may be evaluated after the inner
-// calls: a literal, a constant, a variable or a closure capturing none of
-// the variables they assign, a first-class callable of a named function.
-func orderSafe(e ast.Expr, assigned map[string]bool) bool {
-	if constant(e) {
-		return true
-	}
-	touched := func(name string) bool { return name != "this" && (assigned[name] || assigned["*"]) }
-	switch e := e.(type) {
-	case *ast.Variable:
-		return !touched(e.Name)
-	case *ast.Closure:
-		for _, u := range e.Uses {
-			if !u.ByRef && touched(u.Var.Name) {
-				return false
-			}
-		}
-		return true
-	case *ast.ArrowFunc:
-		params := map[string]bool{}
-		for _, p := range e.Params {
-			if p.Var != nil {
-				params[p.Var.Name] = true
-			}
-		}
-		safe := true
-		ast.InspectScope(e.Body, func(n ast.Node) bool {
-			if v, ok := n.(*ast.Variable); ok && !params[v.Name] && touched(v.Name) {
-				safe = false
-			}
-			return safe
-		})
-		return safe
-	case *ast.Call:
-		_, named := e.Callee.(*ast.Name)
-		return named && e.Args.FirstClassCallable
-	case *ast.StaticCall:
-		_, named := e.Class.(*ast.Name)
-		return named && e.Args.FirstClassCallable
-	}
-	return false
 }
 
 // atomic reports a head that needs no parentheses before `|>`.
@@ -868,27 +697,14 @@ func newStage(call ast.Expr, piped int) stage {
 
 // ------------------------------------------------------------------ layout
 
-// fullSpan is the span of a node and everything in it: the tree's span of
-// a prefix expression, `(string) $x` or `throw $e`, ends at its operator.
-func fullSpan(n ast.Node) ast.Span {
-	s := n.Span()
-	ast.Inspect(n, func(c ast.Node) bool {
-		if e := c.Span().End; e > s.End {
-			s.End = e
-		}
-		return true
-	})
-	return s
-}
-
 // pieces are the spans a pipeline copies from the source: its head and
 // the bound arguments of its stages.
 func (p *pipeline) pieces() []ast.Span {
-	out := []ast.Span{fullSpan(p.head)}
+	out := []ast.Span{p.head.Span()}
 	for _, s := range p.stages {
 		for i, a := range s.args.Args {
 			if i != s.piped {
-				out = append(out, fullSpan(a))
+				out = append(out, a.Span())
 			}
 		}
 	}
@@ -950,7 +766,7 @@ func (r *piper) multiLine(p *pipeline) bool {
 	if p.paren {
 		b.WriteString("(")
 	}
-	head := fullSpan(p.head)
+	head := p.head.Span()
 	b.Write(r.src[head.Start:head.End])
 	if p.paren {
 		b.WriteString(")")
@@ -977,7 +793,7 @@ func (r *piper) stageText(s stage) string {
 	for i, a := range s.args.Args {
 		switch {
 		case i != s.piped:
-			s := fullSpan(a)
+			s := a.Span()
 			parts = append(parts, string(r.src[s.Start:s.End]))
 		case a.Name != nil:
 			parts = append(parts, a.Name.Name+": ?")
@@ -1243,7 +1059,7 @@ func (r *piper) writePipeline(w *outBuf, p *pipeline) {
 	if p.paren {
 		w.gen("(")
 	}
-	head := fullSpan(p.head)
+	head := p.head.Span()
 	r.piece(w, head, indentOf(r.src, head.Start), ind)
 	if p.paren {
 		w.gen(")")
@@ -1264,7 +1080,7 @@ func (r *piper) writePipeline(w *outBuf, p *pipeline) {
 					w.gen(", ")
 				}
 				if i != s.piped {
-					s := fullSpan(a)
+					s := a.Span()
 					r.piece(w, s, indentOf(r.src, s.Start), stageInd)
 					continue
 				}

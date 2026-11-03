@@ -2,6 +2,7 @@ package checker
 
 import (
 	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/evalorder"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
@@ -77,7 +78,7 @@ func pipeCall(e *ast.Binary) (ast.Expr, *ast.ArgList) {
 }
 
 // recordPipePartial records `A |> f(B, ?, C)` for the emitter: lowered for
-// 8.5 to f(B, A, C) when B and C are literals or constants, and otherwise to
+// 8.5 to f(B, A, C) when the pipe folds (recordFold), and otherwise to
 // A |> (fn (T $p) => f(B, $p, C)), whose closure runs at once, so that B
 // and C are evaluated after A as on 8.6 (§5.3). param is the parameter the
 // left side was bound to.
@@ -93,14 +94,54 @@ func (x *fnCtx) recordPipePartial(right ast.Expr, args *ast.ArgList, sig *signat
 	x.recordPartial(right, args, sig, []pfaSlot{slot}, false, false, true, func(*program.Param) types.Type { return t })
 }
 
-// pipeDirect reports whether a pipe into a partial application lowers to
-// the plain call, f(B, A, C): every bound argument is a literal or a
-// constant, so evaluating them after the left side changes nothing.
-func pipeDirect(args *ast.ArgList) bool {
-	for _, a := range args.Args {
-		if a.Placeholder == nil && a.Value != nil && !literalArg(a.Value) {
-			return false
+// recordFold records whether PHP evaluates the pipe exactly as the call
+// it makes (program.File.Folds): the left side goes by value, and the
+// stage's callee and the arguments written before the placeholder compute
+// the same whether they are evaluated before the left side, as in the
+// call, or after it, as in the pipe (evalorder). The callee is a named
+// function other than compact() and its kind, a static method of a named
+// class, or a method of $this or of a variable the left side does not
+// write; a variable callee the same.
+func (x *fnCtx) recordFold(e *ast.Binary, args *ast.ArgList) {
+	fold := x.pipeParam != nil && !x.pipeParam.ByRef && x.pipeSig != nil
+	if fold {
+		written := evalorder.Writes(e.Left, func(call ast.Expr, i int) bool {
+			a := evalorder.Args(call)
+			return a != nil && x.byValue[a.Args[i]]
+		})
+		fold = foldCallee(e.Right, written)
+		for _, a := range args.Args {
+			if !fold || a.Placeholder != nil {
+				break
+			}
+			fold = a.Value != nil && !a.Unpack && evalorder.Movable(a.Value, written)
 		}
 	}
-	return true
+	if x.c.file.Folds == nil {
+		x.c.file.Folds = map[*ast.Binary]bool{}
+	}
+	x.c.file.Folds[e] = fold
+}
+
+// foldCallee reports a stage's callee that is the same function before
+// the left side is evaluated and after.
+func foldCallee(right ast.Expr, written evalorder.Set) bool {
+	switch c := right.(type) {
+	case *ast.Call:
+		switch callee := c.Callee.(type) {
+		case *ast.Name:
+			return !evalorder.ScopeCall(c)
+		case *ast.Variable:
+			return !written.Has(callee.Name)
+		}
+	case *ast.StaticCall:
+		_, named := c.Class.(*ast.Name)
+		_, ident := c.Name.(*ast.Ident)
+		return named && ident
+	case *ast.MethodCall:
+		v, isVar := c.Object.(*ast.Variable)
+		_, ident := c.Name.(*ast.Ident)
+		return !c.NullSafe && isVar && ident && !written.Has(v.Name)
+	}
+	return false
 }
