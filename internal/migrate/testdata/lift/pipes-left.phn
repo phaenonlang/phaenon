@@ -32,9 +32,17 @@ final class Shelf
 {
     fun __construct(private Labeller $labeller) {}
 
-    // The receiver is a property: a pipeline would read it after the
-    // inner calls.
-    fun shelve(string $s): string => $this->labeller->label(strtoupper(trim($s)));
+    // A property with hooks is no receiver: a pipeline would run its get
+    // hook after the inner calls.
+    public Labeller $hooked {
+        get => $this->labeller;
+    }
+
+    fun shelve(string $s): string => $this->hooked->label(strtoupper(trim($s)));
+
+    // Nor is a property the inner calls assign.
+    fun relabel(string $s): string
+        => $this->labeller->label(strtoupper(trim(($this->labeller = new Labeller()) ? $s : '')));
 }
 
 // A call before the nested one would run after it.
@@ -102,7 +110,7 @@ fun heredoc(string $s): string
         [%s]
         TXT);
 
-echo (new Shelf(new Labeller()))->shelve(' s '), "\n";
+echo (new Shelf(new Labeller()))->shelve(' s '), ' ', (new Shelf(new Labeller()))->relabel(' r '), "\n";
 echo order(), "\n";
 echo several(' a ', ' b '), "\n";
 echo assigned(1), "\n";

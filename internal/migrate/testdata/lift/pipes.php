@@ -77,6 +77,18 @@ function listed(string $glue, array $xs): string
     return sprintf('[%s]', implode($glue, array_map(fn (int $x): string => (string) ($x * 2), $xs)));
 }
 
+// A method stage on a property its class declares without hooks: the
+// pipeline reads it after the inner calls, which do not assign it.
+final class Banner
+{
+    public function __construct(private Text $text) {}
+
+    public function title(string $csv): string
+    {
+        return $this->text->join(explode(',', strtoupper(trim($csv))));
+    }
+}
+
 // A method stage on a variable, resolved through the type the checker
 // gives it.
 function shoutAll(Text $text, string $csv): string
@@ -192,6 +204,7 @@ echo traced(), "\n";
 echo padded('  HeLLo '), "\n";
 echo listed('+', [1, 2, 3]), "\n";
 echo shoutAll($text, ' x,y '), "\n";
+echo (new Banner(new Text('/')))->title(' a,b '), "\n";
 echo split(1), "\n";
 echo implode('|', nested(['a-b ', ' ', 'c'])), "\n";
 echo multiline(['an', 'apple', 'tree']), "\n";
