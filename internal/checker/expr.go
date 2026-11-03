@@ -35,6 +35,14 @@ func localArgs(name string, env *state) bool {
 // expr types an expression in env, with an optional expected type for
 // contextual typing. It updates env for assignments and other side effects.
 func (x *fnCtx) expr(e ast.Expr, env *state, expected types.Type) types.Type {
+	t := x.exprType(e, env, expected)
+	if observe := x.c.opts.Observe; observe != nil && e != nil {
+		observe(x.file, e, t)
+	}
+	return t
+}
+
+func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type {
 	if t, ok := x.argKnown[e]; ok && e != nil {
 		return t // a pipe's left side, typed once before the stage it feeds
 	}
