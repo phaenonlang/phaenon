@@ -8,13 +8,15 @@ use ArrayObject;
 
 final class Heading implements Stringable
 {
-    /** @param ArrayObject<int, string> $words */
+    /** @param ArrayObject<int, mixed> $words */
     public function __construct(private readonly ArrayObject $words)
     {
     }
 
     public function __toString(): string
     {
-        return \implode(' ', $this->words->getArrayCopy())->upper();
+        $words = $this->words->getArrayCopy();
+
+        return $words is list<string> ? \strtoupper(\implode(' ', $words)) : '';
     }
 }

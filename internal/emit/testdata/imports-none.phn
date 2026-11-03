@@ -7,8 +7,8 @@ namespace App\Report;
  */
 final class Slug
 {
-    public static function of(string $title): string
+    public static function of(mixed $words): string
     {
-        return $title->trim()->lower()->replace(' ', '-');
+        return $words is list<string> ? \strtolower(\implode('-', $words)) : '';
     }
 }

@@ -454,13 +454,6 @@ func (p *Program) IsCallableName(name string) bool {
 
 // ------------------------------------------------------------------ files and scopes
 
-// File is one parsed source file and its namespace scopes.
-// MethodTarget is the emitter's instruction for one method-syntax call.
-type MethodTarget struct {
-	Class string
-	Guard bool
-}
-
 // Partial is the checker's account of a partial application (PHP 8.6,
 // design/php-versions.md §5), which the emitter needs to lower it for an
 // 8.5 target: the parameters of the closure it creates, in PHP's order,
@@ -508,17 +501,13 @@ type PartialParam struct {
 	Arg *ast.Arg
 }
 
+// File is one parsed source file and its namespace scopes.
 type File struct {
 	Path    string
 	Src     []byte
 	AST     *ast.File
 	Mode    lexer.Mode
 	Checked bool
-	// MethodTargets records the calls whose receiver is a list, map, string
-	// or bytes value (or a \Stringable for the Str methods): the stdlib
-	// class the emitter rewrites the call to, and whether the receiver may
-	// be null (`?->`, or a short-circuited chain) so the call is guarded.
-	MethodTargets map[*ast.MethodCall]MethodTarget
 	// Partials records each checked partial application by its argument
 	// list (see Partial).
 	Partials map[*ast.ArgList]*Partial

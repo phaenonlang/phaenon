@@ -61,7 +61,8 @@ usage:
                                                            one-line docblocks, => bodies) unless --keep-layout;
                                                            --php writes the target into phaenon.json
   phn stdlib [--out DIR] [--concurrent-out DIR] [--check]
-                                                           write the compiled stdlib (Seq.php, …) into DIR, the compiled
+                                                           write the compiled phaenon/runtime sources (Bytes.php,
+                                                           Debug/LineMap.php, …) into DIR, the compiled
                                                            phaenon/concurrent package into the second
   phn trace [--root PREFIX=LOCAL]... [<text>...]           rewrite the positions in compiled files (stack traces,
                                                            PHPUnit, PHPStan --error-format=raw) into .phn positions;
@@ -81,7 +82,8 @@ Without a project file, build writes Foo.php next to Foo.phn, or under DIR (mirr
 given) with --out. A file with type errors is not written unless --emit-on-error is given (the
 exit status still reports the errors). --check writes nothing and fails when any output is
 missing, stale or orphaned.
-stdlib materialises the classes behind the method syntax, as the phaenon/runtime package ships them.
+stdlib materialises the classes written in Phaenon (stdlib/runtime, stdlib/concurrent) as the
+phaenon/runtime and phaenon/concurrent packages ship them.
 check reads vendor code through the nearest vendor/composer autoload maps.
 Every compiled file ends with a line map (// phaenon-map v1 …) that trace reads: file.php:42,
 file.php(42) and "file.php on line 42" become the .phn's path and line; anything else, positions in

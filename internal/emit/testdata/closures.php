@@ -6,9 +6,6 @@ declare(strict_types=1);
 
 namespace App;
 
-use Phaenon\Map;
-use Phaenon\Seq;
-
 // Closure types with PHPStan's parameter markers (design/generics.md §11.3):
 // `T=` is an optional parameter, `T...` the variadic one. The type erases to
 // \Closure; the docblock spells the signature as written, which is what
@@ -73,7 +70,7 @@ final class DevUp
     {
         $run = static fn (string ...$parts): string => \implode(' ', \array_values($parts));
 
-        return $run('kubectl', ...$args) . Seq::join(Map::values($args), ' ');
+        return $run('kubectl', ...$args) . \implode(' ', \array_values($args));
     }
 }
-// phaenon-map v1 closures.phn 1-6=1 7:1 8-10=1 11:2 19-21=10 22:10 23-25=11 26:11 27-29=12 30:12 32-35=14 36:14 46-48=24 49:24 58-62=33 63:33
+// phaenon-map v1 closures.phn 1-6=1 7:1 16-18=10 19:10 20-22=11 23:11 24-26=12 27:12 29-32=14 33:14 43-45=24 46:24 55-59=33 60:33

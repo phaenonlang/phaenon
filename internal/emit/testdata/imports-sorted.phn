@@ -4,12 +4,13 @@ use ArrayObject;
 use DateTimeImmutable;
 use Stringable;
 
-// A sorted use block: the imports the compiler adds (Seq, Str) join it in
-// their alphabetical place, each on a line of its own (roadmap D11, D19).
+// A sorted use block: the imports the compiler adds (Scope for
+// `concurrently`, Type for `is`) join it in their alphabetical place, each on
+// a line of its own (roadmap D11, D19).
 
 final class Summary implements Stringable
 {
-    /** @param ArrayObject<int, string> $lines */
+    /** @param ArrayObject<int, mixed> $lines */
     public function __construct(private readonly ArrayObject $lines, private readonly DateTimeImmutable $at)
     {
     }
@@ -18,6 +19,15 @@ final class Summary implements Stringable
     {
         $lines = \array_values($this->lines->getArrayCopy());
 
-        return $this->at->format('Y-m-d') . ' ' . $lines->map(fn (string $l) => $l->trim())->join(', ');
+        $text = $lines is list<string> ? \implode(', ', \array_map(\trim(...), $lines)) : '-';
+
+        return $this->at->format('Y-m-d') . ' ' . $text;
+    }
+
+    public function warm(): void
+    {
+        concurrently {
+            spawn $this->lines->count();
+        }
     }
 }

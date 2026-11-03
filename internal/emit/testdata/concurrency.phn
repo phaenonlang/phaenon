@@ -71,7 +71,7 @@ final class Profiles
     {
         $total = 0;
         concurrently (cancellation: $stop) {
-            $tasks = $ids->map(fn (int $id) => spawn $this->orders->count($id));
+            $tasks = array_map(fn (int $id) => spawn $this->orders->count($id), $ids);
             foreach (Scope::all($tasks) as $n) {
                 $total += $n;
             }

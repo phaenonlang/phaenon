@@ -18,7 +18,7 @@ func TestStdlibPackagePaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"Bytes.php", "Debug/LineMap.php", "Debug/Monolog/LineMapProcessor.php", "Debug/Sentry/LineMapIntegration.php", "Debug/ThrowableRewriter.php", "Map.php", "Seq.php", "Str.php"}
+	want := []string{"Bytes.php", "Debug/LineMap.php", "Debug/Monolog/LineMapProcessor.php", "Debug/Sentry/LineMapIntegration.php", "Debug/ThrowableRewriter.php"}
 	var got []string
 	for name := range compiled {
 		got = append(got, name)
@@ -28,7 +28,7 @@ func TestStdlibPackagePaths(t *testing.T) {
 		t.Errorf("Stdlib() compiles\n%v\nwant\n%v", got, want)
 	}
 	for stub, want := range map[string]string{
-		"runtime/Seq.phn":           "Seq.php",
+		"runtime/Bytes.phn":         "Bytes.php",
 		"runtime/Type.php":          "Type.php",
 		"runtime/Debug/LineMap.phn": "Debug/LineMap.php",
 		"concurrent/Scope.phn":      "Scope.php",

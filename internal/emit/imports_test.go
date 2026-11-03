@@ -22,58 +22,58 @@ func TestImportPlacement(t *testing.T) {
 	}{
 		{
 			name: "sorts before the first import",
-			src:  "namespace App;\n\nuse Stringable;\n\nfun f(string $s): string\n{\n    return $s->upper();\n}\n",
-			want: "namespace App;\n\nuse Phaenon\\Str;\nuse Stringable;\n\nfunction f(string $s): string\n{\n    return Str::upper($s);\n}\n",
+			src:  "namespace App;\n\nuse Stringable;\n\nfun f(mixed $m): bool\n{\n    return $m is list<string>;\n}\n",
+			want: "namespace App;\n\nuse Phaenon\\Type;\nuse Stringable;\n\nfunction f(mixed $m): bool\n{\n    return Type::list(Type::string())->check($m);\n}\n",
 		},
 		{
 			name: "sorts after the last import",
-			src:  "namespace App;\n\nuse ArrayObject;\nuse Countable;\n\nfun f(string $s): string\n{\n    return $s->upper();\n}\n",
-			want: "namespace App;\n\nuse ArrayObject;\nuse Countable;\nuse Phaenon\\Str;\n\nfunction f(string $s): string\n{\n    return Str::upper($s);\n}\n",
+			src:  "namespace App;\n\nuse ArrayObject;\nuse Countable;\n\nfun f(mixed $m): bool\n{\n    return $m is list<string>;\n}\n",
+			want: "namespace App;\n\nuse ArrayObject;\nuse Countable;\nuse Phaenon\\Type;\n\nfunction f(mixed $m): bool\n{\n    return Type::list(Type::string())->check($m);\n}\n",
 		},
 		{
 			name: "after a neighbour with a comment: below the comment's line",
-			src:  "namespace App;\n\nuse ArrayObject; // why\nuse Stringable;\n\nfun f(string $s): string\n{\n    return $s->upper();\n}\n",
-			want: "namespace App;\n\nuse ArrayObject; // why\nuse Phaenon\\Str;\nuse Stringable;\n\nfunction f(string $s): string\n{\n    return Str::upper($s);\n}\n",
+			src:  "namespace App;\n\nuse ArrayObject; // why\nuse Stringable;\n\nfun f(mixed $m): bool\n{\n    return $m is list<string>;\n}\n",
+			want: "namespace App;\n\nuse ArrayObject; // why\nuse Phaenon\\Type;\nuse Stringable;\n\nfunction f(mixed $m): bool\n{\n    return Type::list(Type::string())->check($m);\n}\n",
 		},
 		{
 			name: "a group use sorts by its prefix",
-			src:  "namespace App;\n\nuse App\\Model\\{User, Group};\nuse Stringable;\n\nfun f(string $s): string\n{\n    return $s->upper();\n}\n",
-			want: "namespace App;\n\nuse App\\Model\\{User, Group};\nuse Phaenon\\Str;\nuse Stringable;\n\nfunction f(string $s): string\n{\n    return Str::upper($s);\n}\n",
+			src:  "namespace App;\n\nuse App\\Model\\{User, Group};\nuse Stringable;\n\nfun f(mixed $m): bool\n{\n    return $m is list<string>;\n}\n",
+			want: "namespace App;\n\nuse App\\Model\\{User, Group};\nuse Phaenon\\Type;\nuse Stringable;\n\nfunction f(mixed $m): bool\n{\n    return Type::list(Type::string())->check($m);\n}\n",
 		},
 		{
 			name: "only function imports: the class import goes first, a group of its own",
-			src:  "namespace App;\n\nuse function sprintf;\n\nfun f(string $s): string\n{\n    return sprintf('%s', $s->upper());\n}\n",
-			want: "namespace App;\n\nuse Phaenon\\Str;\n\nuse function sprintf;\n\nfunction f(string $s): string\n{\n    return sprintf('%s', Str::upper($s));\n}\n",
+			src:  "namespace App;\n\nuse function is_array;\n\nfun f(mixed $m): bool\n{\n    return is_array($m) && $m is list<string>;\n}\n",
+			want: "namespace App;\n\nuse Phaenon\\Type;\n\nuse function is_array;\n\nfunction f(mixed $m): bool\n{\n    return is_array($m) && Type::list(Type::string())->check($m);\n}\n",
 		},
 		{
 			name: "no imports: a block after the namespace, before a generated docblock",
-			src:  "namespace App;\n\nfinal class Box<T>\n{\n    public fun label(string $s): string\n    {\n        return $s->upper();\n    }\n}\n",
-			want: "namespace App;\n\nuse Phaenon\\Str;\n\n/**\n * @template T\n */\nfinal class Box\n{\n    public function label(string $s): string\n    {\n        return Str::upper($s);\n    }\n}\n",
+			src:  "namespace App;\n\nfinal class Box<T>\n{\n    public fun holds(mixed $m): bool\n    {\n        return $m is list<string>;\n    }\n}\n",
+			want: "namespace App;\n\nuse Phaenon\\Type;\n\n/**\n * @template T\n */\nfinal class Box\n{\n    public function holds(mixed $m): bool\n    {\n        return Type::list(Type::string())->check($m);\n    }\n}\n",
 		},
 		{
 			name: "no imports, no blank line after the namespace: the block gets one",
-			src:  "namespace App;\nfun f(string $s): string\n{\n    return $s->upper();\n}\n",
-			want: "namespace App;\n\nuse Phaenon\\Str;\n\nfunction f(string $s): string\n{\n    return Str::upper($s);\n}\n",
+			src:  "namespace App;\nfun f(mixed $m): bool\n{\n    return $m is list<string>;\n}\n",
+			want: "namespace App;\n\nuse Phaenon\\Type;\n\nfunction f(mixed $m): bool\n{\n    return Type::list(Type::string())->check($m);\n}\n",
 		},
 		{
 			name: "no imports, the statement on the namespace's line",
-			src:  "namespace App; fun f(string $s): string { return $s->upper(); }\n",
-			want: "namespace App;\n\nuse Phaenon\\Str;\n\nfunction f(string $s): string\n{\n    return Str::upper($s);\n}\n",
+			src:  "namespace App; fun f(mixed $m): bool { return $m is list<string>; }\n",
+			want: "namespace App;\n\nuse Phaenon\\Type;\n\nfunction f(mixed $m): bool\n{\n    return Type::list(Type::string())->check($m);\n}\n",
 		},
 		{
 			name: "no namespace: at the start",
-			src:  "fun f(string $s): string\n{\n    return $s->upper();\n}\n",
-			want: "use Phaenon\\Str;\n\nfunction f(string $s): string\n{\n    return Str::upper($s);\n}\n",
+			src:  "fun f(mixed $m): bool\n{\n    return $m is list<string>;\n}\n",
+			want: "use Phaenon\\Type;\n\nfunction f(mixed $m): bool\n{\n    return Type::list(Type::string())->check($m);\n}\n",
 		},
 		{
 			name: "no namespace, an own declare: after it",
-			src:  "declare(strict_types=1);\n\nfun f(string $s): string\n{\n    return $s->upper();\n}\n",
-			want: "declare(strict_types=1);\n\nuse Phaenon\\Str;\n\nfunction f(string $s): string\n{\n    return Str::upper($s);\n}\n",
+			src:  "declare(strict_types=1);\n\nfun f(mixed $m): bool\n{\n    return $m is list<string>;\n}\n",
+			want: "declare(strict_types=1);\n\nuse Phaenon\\Type;\n\nfunction f(mixed $m): bool\n{\n    return Type::list(Type::string())->check($m);\n}\n",
 		},
 		{
 			name: "the file imports the class itself: nothing added",
-			src:  "namespace App;\n\nuse Phaenon\\Str;\n\nfun f(string $s): string\n{\n    return $s->upper();\n}\n",
-			want: "namespace App;\n\nuse Phaenon\\Str;\n\nfunction f(string $s): string\n{\n    return Str::upper($s);\n}\n",
+			src:  "namespace App;\n\nuse Phaenon\\Type;\n\nfun f(mixed $m): bool\n{\n    return Type::int()->check($m) || $m is list<string>;\n}\n",
+			want: "namespace App;\n\nuse Phaenon\\Type;\n\nfunction f(mixed $m): bool\n{\n    return Type::int()->check($m) || Type::list(Type::string())->check($m);\n}\n",
 		},
 	}
 	for _, c := range cases {
@@ -115,13 +115,13 @@ func TestImportPlacement(t *testing.T) {
 // name, and a relative qualified name — in code or in a docblock — whose
 // first segment is that name, which PHP and PHPStan would resolve through
 // the import. A name that merely starts with the same letters
-// (`Strings\Pad` against `Str`) or is fully qualified leaves it free. line
+// (`Types\Check` against `Type`) or is fully qualified leaves it free. line
 // is the source line whose compiled line is checked, found through the
 // line map.
 func TestImportShadowing(t *testing.T) {
-	pad := "namespace App\\Str;\n\nfinal class Pad\n{\n    public static fun left(string $s): string\n    {\n        return ' ' . $s;\n    }\n}\n"
-	pads := "namespace App\\Strings;\n\nfinal class Pad\n{\n    public static fun left(string $s): string\n    {\n        return ' ' . $s;\n    }\n}\n"
-	sameName := "namespace App;\n\nfinal class Str\n{\n}\n"
+	check := "namespace App\\Type;\n\nfinal class Check\n{\n    public static fun both(bool $a, bool $b): bool\n    {\n        return $a && $b;\n    }\n}\n"
+	checks := "namespace App\\Types;\n\nfinal class Check\n{\n    public static fun both(bool $a, bool $b): bool\n    {\n        return $a && $b;\n    }\n}\n"
+	sameName := "namespace App;\n\nfinal class Type\n{\n}\n"
 	cases := []struct {
 		name   string
 		others []string
@@ -131,38 +131,38 @@ func TestImportShadowing(t *testing.T) {
 	}{
 		{
 			name:   "a relative qualified name begins with the short name: FQCN",
-			others: []string{pad},
-			src:    "namespace App;\n\nfun f(string $s): string\n{\n    return Str\\Pad::left($s->upper());\n}\n",
+			others: []string{check},
+			src:    "namespace App;\n\nfun f(mixed $m): bool\n{\n    return Type\\Check::both(true, $m is list<string>);\n}\n",
 			line:   5,
-			want:   "    return Str\\Pad::left(\\Phaenon\\Str::upper($s));",
+			want:   "    return Type\\Check::both(true, \\Phaenon\\Type::list(\\Phaenon\\Type::string())->check($m));",
 		},
 		{
 			name:   "a docblock's relative qualified name begins with it: FQCN",
-			others: []string{pad},
-			src:    "namespace App;\n\n/** @param Str\\Pad $p */\nfun f(object $p, string $s): string\n{\n    return $s->upper();\n}\n",
+			others: []string{check},
+			src:    "namespace App;\n\n/** @param Type\\Check $c */\nfun f(object $c, mixed $m): bool\n{\n    return $m is list<string>;\n}\n",
 			line:   6,
-			want:   "    return \\Phaenon\\Str::upper($s);",
+			want:   "    return \\Phaenon\\Type::list(\\Phaenon\\Type::string())->check($m);",
 		},
 		{
 			name:   "a class of the namespace has the short name: FQCN",
 			others: []string{sameName},
-			src:    "namespace App;\n\nfun f(string $s): string\n{\n    return $s->upper();\n}\n",
+			src:    "namespace App;\n\nfun f(mixed $m): bool\n{\n    return $m is list<string>;\n}\n",
 			line:   5,
-			want:   "    return \\Phaenon\\Str::upper($s);",
+			want:   "    return \\Phaenon\\Type::list(\\Phaenon\\Type::string())->check($m);",
 		},
 		{
 			name:   "a longer first segment is another name: imported",
-			others: []string{pads},
-			src:    "namespace App;\n\nfun f(string $s): string\n{\n    return Strings\\Pad::left($s->upper());\n}\n",
+			others: []string{checks},
+			src:    "namespace App;\n\nfun f(mixed $m): bool\n{\n    return Types\\Check::both(true, $m is list<string>);\n}\n",
 			line:   5,
-			want:   "    return Strings\\Pad::left(Str::upper($s));",
+			want:   "    return Types\\Check::both(true, Type::list(Type::string())->check($m));",
 		},
 		{
 			name:   "a fully qualified name goes through no import: imported",
-			others: []string{pad},
-			src:    "namespace App;\n\nfun f(string $s): string\n{\n    return \\App\\Str\\Pad::left($s->upper());\n}\n",
+			others: []string{check},
+			src:    "namespace App;\n\nfun f(mixed $m): bool\n{\n    return \\App\\Type\\Check::both(true, $m is list<string>);\n}\n",
 			line:   5,
-			want:   "    return \\App\\Str\\Pad::left(Str::upper($s));",
+			want:   "    return \\App\\Type\\Check::both(true, Type::list(Type::string())->check($m));",
 		},
 	}
 	for _, c := range cases {
@@ -197,9 +197,9 @@ func TestImportShadowing(t *testing.T) {
 			if got := lineText(out, n); got != c.want {
 				t.Errorf("source line %d, output line %d:\n got %q\nwant %q\n%s", c.line, n, got, c.want, out)
 			}
-			imported := strings.Contains(string(out), "use Phaenon\\Str;")
-			if wantImport := !strings.Contains(c.want, "\\Phaenon\\Str::"); imported != wantImport {
-				t.Errorf("use Phaenon\\Str; present = %v, want %v\n%s", imported, wantImport, out)
+			imported := strings.Contains(string(out), "use Phaenon\\Type;")
+			if wantImport := !strings.Contains(c.want, "\\Phaenon\\Type::"); imported != wantImport {
+				t.Errorf("use Phaenon\\Type; present = %v, want %v\n%s", imported, wantImport, out)
 			}
 		})
 	}

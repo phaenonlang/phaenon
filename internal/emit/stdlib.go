@@ -11,7 +11,7 @@ import (
 
 // Stdlib compiles the stdlib written in Phaenon (stdlib/runtime/**/*.phn)
 // to the PHP the phaenon/runtime package ships, keyed by the path below the
-// package's src/ ("Seq.php", "Debug/LineMap.php"). The sources are the
+// package's src/ ("Bytes.php", "Debug/LineMap.php"). The sources are the
 // compiler's own declaration of these classes, so they are compiled from
 // the embedded copy: a project cannot build them, the embedded copy already
 // declares the names. The program also holds the declarations of the

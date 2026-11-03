@@ -28,9 +28,6 @@ type lowering struct {
 	e *emitter
 	p *program.Program
 	f *program.File
-	// bare holds the expressions that are a whole statement, return value
-	// or assigned value: a guarded stdlib call there needs no parentheses.
-	bare map[ast.Expr]bool
 }
 
 // scope is what a body needs to lower its expressions.
@@ -104,7 +101,7 @@ func (e *emitter) lowerGenerics(f *ast.File) error {
 		}
 		return nil
 	}
-	l := &lowering{e: e, p: e.opts.Program, f: e.opts.File, bare: map[ast.Expr]bool{}}
+	l := &lowering{e: e, p: e.opts.Program, f: e.opts.File}
 	return l.stmts(f.Stmts)
 }
 
@@ -1007,17 +1004,6 @@ func (l *lowering) walk(root ast.Node, sc *scope) error {
 				l.e.replace(ast.Span{Start: n.S.Start, End: n.Expr.Span().Start}, "")
 			}
 			return true
-		case *ast.Return:
-			if n.Expr != nil {
-				l.bare[n.Expr] = true
-			}
-			return true
-		case *ast.ExprStmt:
-			l.bare[n.Expr] = true
-			return true
-		case *ast.Assign:
-			l.bare[n.Value] = true
-			return true
 		case *ast.IsExpr:
 			err = l.isExpr(n, sc)
 			return false
@@ -1032,10 +1018,6 @@ func (l *lowering) walk(root ast.Node, sc *scope) error {
 			err = l.walkOr(err, n.Args, sc)
 			return false
 		case *ast.MethodCall:
-			if target, ok := l.f.MethodTargets[n]; ok {
-				err = l.stdlibCall(n, target, sc)
-				return false
-			}
 			err = l.walkOr(err, n.Object, sc)
 			if _, isIdent := n.Name.(*ast.Ident); !isIdent {
 				err = l.walkOr(err, n.Name, sc)
@@ -1464,58 +1446,3 @@ func phpString(s string) string {
 }
 
 var _ = fmt.Sprintf
-
-// ------------------------------------------------------------------ stdlib method syntax
-
-// stdlibCall rewrites `$xs->map($f)` as `Seq::map($xs, $f)` (design/collections.md
-// §3.1): the receiver becomes the first argument and the class is imported
-// (roadmap D11). The receiver's text stays where it is, so a chain written
-// over several lines keeps its lines.
-func (l *lowering) stdlibCall(n *ast.MethodCall, target program.MethodTarget, sc *scope) error {
-	cls := target.Class
-	id, ok := n.Name.(*ast.Ident)
-	if !ok || n.Args == nil {
-		return l.errorf(n, "cannot compile this method call on a %s value", strings.ToLower(cls[strings.LastIndex(cls, "\\")+1:]))
-	}
-	obj := n.Object.Span()
-	arrowText := "->"
-	if n.NullSafe {
-		arrowText = "?->"
-	}
-	rel := bytes.Index(l.e.src[obj.End:], []byte(arrowText))
-	if rel < 0 {
-		return l.errorf(n, "cannot find the %s of this call", arrowText)
-	}
-	arrow := obj.End + rel
-	call := l.e.importShort(cls, sc.res) + "::" + id.Name + "("
-	closing := ""
-	if target.Guard {
-		// `$x?->f()` and `$a?->b->f()`: PHP would skip the call, the static
-		// call would not. The receiver is a path without side effects
-		// (checker: purePath), so it may be read twice.
-		recv := strings.ReplaceAll(string(l.e.src[obj.Start:obj.End]), "\n", " ")
-		// In the else branch the chain is known non-null, so its ?-> are
-		// plain -> there (PHPStan would otherwise flag them as never null).
-		call = "null === " + recv + " ? null : " + call
-		elseRecv := strings.ReplaceAll(string(l.e.src[obj.Start:obj.End]), "?->", "->")
-		defer l.e.replace(obj, elseRecv) // after the inserts at the span's ends
-		if !l.bare[n] {
-			call, closing = "("+call, ")"
-		}
-	}
-	l.e.insert(obj.Start, call)
-	if len(n.Args.Args) > 0 {
-		comma := ","
-		if arrow == obj.End {
-			comma = ", "
-		}
-		l.e.insert(obj.End, comma)
-	}
-	gone := ast.Span{Start: arrow, End: n.Args.S.Start + 1} // `->name<…>(`
-	l.e.replace(gone, strings.Repeat("\n", bytes.Count(l.e.src[gone.Start:gone.End], []byte("\n"))))
-	if closing != "" {
-		l.e.insert(n.S.End, closing)
-	}
-	err := l.walk(n.Object, sc)
-	return l.walkOr(err, n.Args, sc)
-}

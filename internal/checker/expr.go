@@ -294,7 +294,7 @@ func (x *fnCtx) checkStringable(t types.Type, span ast.Span) {
 			return
 		case types.Bytes:
 			// design/strings.md §2: text and binary never mix silently.
-			x.report(span, P2530, "bytes is not text: ->text() decodes it as UTF-8, ->hex() or ->base64() spells it out")
+			x.report(span, P2530, "bytes is not text: \\Phaenon\\Bytes::text() decodes it as UTF-8, Bytes::hex() or Bytes::base64() spells it out")
 			return
 		case types.Array, types.Shape:
 			x.report(span, P2312, "array cannot be converted to string")
@@ -1057,6 +1057,9 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 			out = append(out, m.Value)
 		case types.String, types.StringLit:
 			out = append(out, types.TString)
+		case types.Bytes:
+			// One byte, still binary: `ord($b[$i])` reads it (strings.md §2).
+			out = append(out, types.TBytes)
 		case types.Null:
 			if !lenient {
 				x.report(e.Array.Span(), P2302, "cannot use null as an array")
@@ -1475,12 +1478,14 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		// `.` joins two values of the same kind (strings.md §2): binary
 		// joined to binary stays binary, as `.=` on a bytes buffer does;
 		// binary mixed with text is the confusion bytes exists to catch,
-		// reported once, its result already reported.
-		if concatBytes(l) && concatBytes(r) {
+		// reported once, its result already reported. An operand already
+		// reported (`$s->bytes()` on a string) joins the other side's kind.
+		lb, rb := concatBytes(l), concatBytes(r)
+		if (lb || types.Equal(l, types.TError)) && (rb || types.Equal(r, types.TError)) && (lb || rb) {
 			return types.TBytes
 		}
 		if hasBytes(l) || hasBytes(r) {
-			x.report(span, P2530, "cannot concatenate bytes and text: ->text() decodes bytes as UTF-8, ->bytes() encodes text, (bytes) '' starts a binary buffer")
+			x.report(span, P2530, "cannot concatenate bytes and text: \\Phaenon\\Bytes::text() decodes bytes as UTF-8, (bytes) takes text as its UTF-8 bytes, (bytes) '' starts a binary buffer")
 			x.checkStringable(types.Subtract(l, types.TBytes, x.p()), span)
 			x.checkStringable(types.Subtract(r, types.TBytes, x.p()), span)
 			return types.TError

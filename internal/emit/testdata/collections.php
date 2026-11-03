@@ -7,14 +7,13 @@ declare(strict_types=1);
 namespace App;
 
 use Closure;
-use Phaenon\Map;
-use Phaenon\Seq;
-use Phaenon\Str;
 use Phaenon\Type;
 
-// Method syntax on lists, maps and strings compiles to the stdlib's static
-// calls, the class imported by the compiler (design/collections.md §3.1,
-// roadmap D11); a tuple (A, B) erases to the shape array{A, B}.
+// Lists, maps and strings go through PHP's functions, chained left to
+// right with pipes (roadmap D20): list<T> and map<K, V> erase to array with
+// their types in docblocks, a tuple (A, B) to the shape array{A, B}, and
+// the compiler imports \Phaenon\Type for `is` beside the file's own
+// imports (design/collections.md §2, roadmap D11).
 
 final class User
 {
@@ -29,9 +28,9 @@ final class User
  */
 function emails(array $users): array
 {
-    return Seq::map(Seq::filter($users,
-        fn (User $u) => $u->active),
-        fn (User $u) => Str::lower($u->name) . '@example.com');
+    $active = array_values(array_filter($users, fn (User $u) => $u->active));
+
+    return array_map(fn (User $u) => strtolower($u->name) . '@example.com', $active);
 }
 
 /**
@@ -40,7 +39,12 @@ function emails(array $users): array
  */
 function byName(array $users): array
 {
-    return Seq::keyBy($users, fn (User $u) => $u->name);
+    $out = [];
+    foreach ($users as $u) {
+        $out[$u->name] = $u;
+    }
+
+    return $out;
 }
 
 /**
@@ -48,7 +52,9 @@ function byName(array $users): array
  */
 function oldest(array $users): ?User
 {
-    return Seq::first(Seq::sortBy($users, fn (User $u) => -$u->age));
+    usort($users, fn (User $a, User $b) => $b->age <=> $a->age);
+
+    return $users[0] ?? null;
 }
 
 /**
@@ -58,7 +64,12 @@ function oldest(array $users): ?User
  */
 function pairs(array $names, array $ages): array
 {
-    return Seq::zip($names, $ages);
+    $out = [];
+    foreach ($names as $i => $name) {
+        $out[] = [$name, $ages[$i] ?? 0];
+    }
+
+    return $out;
 }
 
 /**
@@ -68,19 +79,21 @@ function describe(array $pairs): string
 {
     $lines = [];
     foreach ($pairs as [$name, $age]) {
-        $lines[] = Str::padEnd($name, 10) . $age;
+        $lines[] = str_pad($name, 10) . $age;
     }
 
-    return Seq::isEmpty($lines) ? '-' : Seq::join($lines, "\n");
+    return $lines === [] ? '-' : implode("\n", $lines);
 }
 
 /**
  * @param array<string, User> $users
  * @return array<string, int>
  */
-function ages(array $users): array
+function adults(array $users): array
 {
-    return Map::filter(Map::map($users, fn (User $u) => $u->age), fn (int $age) => $age >= 18);
+    $ages = array_map(fn (User $u) => $u->age, $users);
+
+    return array_filter($ages, fn (int $age) => $age >= 18);
 }
 
 /**
@@ -88,29 +101,38 @@ function ages(array $users): array
  */
 function keys(array $counts): string
 {
-    return Seq::join(Seq::sort(Map::keys($counts)), ', ');
+    $keys = array_keys($counts);
+    sort($keys);
+
+    return implode(', ', $keys);
 }
 
 function slug(string $title): string
 {
-    return Str::replace(Str::lower(Str::trim($title)), ' ', '-');
+    return $title
+        |> trim(...)
+        |> strtolower(...)
+        |> (fn (string $s) => str_replace(' ', '-', $s));
 }
 
 function initials(string $name): string
 {
-    return Seq::join(Seq::map(Str::split($name, ' '), fn (string $part) => Str::upper(Str::slice($part, 0, 1))), '');
+    $initial = fn (string $part) => strtoupper(substr($part, 0, 1));
+
+    return implode('', array_map($initial, explode(' ', $name)));
 }
 
 function nullable(?string $s): int
 {
-    return $s === null ? 0 : Str::length($s);
+    return $s === null ? 0 : mb_strlen($s);
 }
 
 function nullsafe(?string $s, ?User $u): string
 {
-    $n = null === $s ? null : Str::length($s);
+    $n = $s === null ? null : mb_strlen($s);
+    $name = $u?->name;
 
-    return ((null === $u?->name ? null : Str::upper($u->name)) ?? '-') . ($n ?? 0);
+    return strtoupper($name ?? '-') . ($n ?? 0);
 }
 
 final class Id implements \Stringable
@@ -127,7 +149,7 @@ final class Id implements \Stringable
 
 function prefixed(Id $id): bool
 {
-    return Str::startsWith($id, 'u-');
+    return str_starts_with((string) $id, 'u-');
 }
 
 /**
@@ -166,4 +188,4 @@ function exported(object $value): array
 
     return [];
 }
-// phaenon-map v1 collections.phn 1-6=1 7:1 10-13=3 14:4 26-29=16 30:16 37-40=23 41:23 46-48=28 49:28 54-58=33 59:33 64-66=38 67:38 77-80=48 81:48 86-88=53 89:53 133-136=97 137:97 156-158=116 159:116
+// phaenon-map v1 collections.phn 1-6=1 7:1 10-10=3 11:4 25-28=18 29:18 36-39=25 40:25 50-52=35 53:35 60-64=42 65:42 75-77=52 78:52 88-91=62 92:62 99-101=69 102:69 155-158=122 159:122 178-180=141 181:141

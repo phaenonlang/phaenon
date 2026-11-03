@@ -931,6 +931,7 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 		x.argsOnly(e.Args, env)
 		return types.TMixed
 	}
+	base := types.StripNull(obj)
 	if e.NullSafe {
 		if !types.IsNullable(obj) && !types.IsMixed(obj) {
 			x.report(e.S, P2307, "?-> on %s, which is never null", x.typeName(obj))
@@ -941,9 +942,12 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 			x.argsOnly(e.Args, env)
 			return types.TMixed
 		}
-		x.report(e.Object.Span(), P2105, "cannot call method %s() on %s (possibly null)", name, x.typeName(obj))
+		if types.IsObjectLike(base) || types.IsMixed(base) {
+			// A string or an array that may be null is reported once,
+			// below, as the value it is.
+			x.report(e.Object.Span(), P2105, "cannot call method %s() on %s (possibly null)", name, x.typeName(obj))
+		}
 	}
-	base := types.StripNull(obj)
 	if types.IsMixed(base) {
 		x.memberOnMixed(base, e.Object.Span(), "cannot call method %s() on mixed", name)
 		x.argsOnly(e.Args, env)
@@ -952,20 +956,20 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 		}
 		return types.TMixed
 	}
-	if cls, ambiguous := x.stdlibReceiver(base); cls != "" || ambiguous {
-		return x.stdlibMethod(e, cls, name, obj, env, expected)
-	}
-	if x.stringableFallback(base, name) {
-		return x.stdlibMethod(e, "Phaenon\\Str", name, obj, env, expected)
-	}
 	if !types.IsObjectLike(base) {
 		if c, isCallable := base.(types.Callable); isCallable && c.Closure {
 			// Closure methods: call, bindTo, …
 			base = types.NewClass("Closure")
 		} else {
-			x.report(e.Object.Span(), P2105, "cannot call method %s() on %s", name, x.typeName(base))
+			// A string, an array, a scalar: PHP's error (PHPStan's
+			// method.nonObject), and the call's value is not known.
+			recv := obj
+			if e.NullSafe {
+				recv = base
+			}
+			x.report(e.Object.Span(), P2105, "cannot call method %s() on %s", name, x.typeName(recv))
 			x.argsOnly(e.Args, env)
-			return types.TMixed
+			return types.TError
 		}
 	}
 	var out []types.Type
@@ -2340,14 +2344,6 @@ func (x *fnCtx) pipe(e *ast.Binary, left types.Type, env *state) types.Type {
 	}()
 	if call, args := pipeCall(e); call != nil {
 		t := x.expr(call, env, nil)
-		if mc, ok := call.(*ast.MethodCall); ok {
-			// Method syntax on a list or string is recorded for the emitter
-			// under the call it reads: the stage as written.
-			if target, ok := x.c.file.MethodTargets[mc]; ok {
-				x.c.file.MethodTargets[e.Right.(*ast.MethodCall)] = target
-				delete(x.c.file.MethodTargets, mc)
-			}
-		}
 		if args.Partial() && x.pipeParam != nil && x.pipeSig != nil {
 			x.recordPipePartial(e.Right, args, x.pipeSig, x.pipeParam)
 		}

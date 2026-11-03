@@ -48,10 +48,6 @@ type Checker struct {
 	// (guards.go).
 	guards []libraryGuard
 	file   *program.File
-	// stdlibUsed names the stdlib classes (Phaenon\Str, …) the current
-	// file's method syntax compiles to: an import of one of them is used by
-	// the output even when the source never writes the class name.
-	stdlibUsed map[string]bool
 	// callSeq numbers call sites so a callee's type parameters get fresh
 	// identities per call (T of the callee is not T of the caller).
 	callSeq int
@@ -177,13 +173,10 @@ func (c *Checker) rollback(mark int) {
 func (c *Checker) checkFile(f *program.File) {
 	phaenon := f.Mode == lexer.ModePhaenon
 	c.ignored[f.Path] = ignoredLines(f.Src, f.Mode)
-	c.stdlibUsed = map[string]bool{}
 	// Top-level code runs in a context without a class.
 	scope := f.ScopeAt(0)
 	ctx := c.newCtx(f, scope, nil, true)
 	env := newEnv()
-	// Imports are judged once the bodies have been checked: a method call
-	// on a string or a list is what uses `use Phaenon\Str;`.
 	var uses []*ast.Use
 	var visit func(stmts []ast.Stmt)
 	visit = func(stmts []ast.Stmt) {
@@ -226,17 +219,13 @@ func (c *Checker) checkFile(f *program.File) {
 
 // checkUse reports unused imports (P2013) — only when nothing in the file
 // mentions the alias. Cheap text scan: the alias as a word outside the use
-// statement itself; an import of the stdlib class behind the file's method
-// syntax counts as used, since the compiled code names it.
+// statement itself.
 func (c *Checker) checkUse(f *program.File, u *ast.Use) {
 	src := string(f.Src)
 	for _, it := range u.Items {
 		alias := it.Name.Parts[len(it.Name.Parts)-1]
 		if it.Alias != nil {
 			alias = it.Alias.Name
-		}
-		if it.Alias == nil && c.stdlibUsed[strings.Join(it.Name.Parts, "\\")] {
-			continue
 		}
 		before := src[:it.S.Start]
 		after := src[it.S.End:]

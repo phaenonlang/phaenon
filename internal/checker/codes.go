@@ -136,7 +136,9 @@ var (
 	P2515 = Code{"P2515", Error, "uninitialised readonly property"}
 	P2516 = Code{"P2516", Error, "untyped declaration"}
 	P2518 = Code{"P2518", Error, "map key type outside int|string"}
-	P2519 = Code{"P2519", Error, "method call on a receiver that is not one kind of value"}
+	// P2519 reported method syntax on a receiver that mixed lists, maps and
+	// strings; retired with the method syntax by D20 on 2026-11-03
+	// (design/roadmap.md), the code is not reused.
 	P2530 = Code{"P2530", Error, "bytes used as text"}
 	P2531 = Code{"P2531", Error, "closure in a constant expression captures its scope"}
 
