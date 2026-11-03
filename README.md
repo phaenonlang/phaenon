@@ -190,9 +190,27 @@ Sentry integration do the same for logged exceptions, and the PhpStorm plugin re
 navigation and debugging (`design/line-map.md` §4).
 
 A library ships its `.phn` sources and no compiled PHP (`roadmap.md` D13): with `phn` and the
-library pinned, the output is reproducible byte for byte. The Composer plugin that builds every
-installed package on `composer install` is M6 work; until then a consumer runs `phn build` in
-`vendor/<package>`.
+library pinned, the output is reproducible byte for byte, and the Composer plugin below builds it
+where it is installed.
+
+### Installing through Composer
+
+```sh
+composer require phaenon/phn
+```
+
+`phaenon/phn` is a Composer plugin (`design/tooling.md` §3). It brings the `phn` binary for the
+platform, pinned by its SHA-256 in the package, so `composer.lock` pins the compiler too, and links
+it as `vendor/bin/phn`. When Composer writes the autoloader, it compiles every installed package
+that has a `phaenon.json` (each for its own target, its findings shown as warnings, skipped while
+nothing changed: `phn build --vendor`), then the project itself (`phn build`), so that
+`--classmap-authoritative` finds the outputs. With no `phaenon.json` anywhere it does nothing.
+
+- `PHN_BINARY=/path/to/phn` uses another binary, such as one built from a checkout.
+- `"extra": {"phaenon": {"binary-url": "https://mirror/{version}/{file}"}}` fetches the binary from
+  a mirror, with the credentials of `auth.json`.
+- `"extra": {"phaenon": {"build": false}}` leaves the project's own build to its workflow.
+- `composer install --no-scripts` builds nothing; the `dump-autoload` that follows does.
 
 ## Declarations
 
@@ -295,6 +313,8 @@ phn check [--json] [--no-deprecations] [--exclude PATH]... path...              
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Bytes, Debug/…), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
+phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them
+phn version                               # the version a release sets, dev otherwise
 phn lex   [--php] file                    # token stream
 phn print [--php] file                    # parse and pretty-print
 ```
@@ -337,5 +357,11 @@ diagnostics as `// want P2103` comments on the offending lines. `PHAENON_PHPSTAN
 additionally runs PHPStan at level max over the same corpus and fails when PHPStan reports
 something the corpus does not expect — the checker may be stricter than PHPStan, never more
 lenient. `PHAENON_COMPOSER_PROJECT=/path/to/a/composer/project` exercises the vendor reader.
+
+`PHAENON_COMPOSER=$(which composer) go test ./internal/distribution` runs the `phaenon/phn` plugin
+under a real Composer in temporary projects: the builds at the autoload dump, the download and its
+checksum, the launcher. `go run ./tools/release -version X.Y.Z -out dist` builds the release
+binaries and writes their checksums (`-verify` compares instead); two builds from the same sources
+and toolchain give the same bytes.
 
 License: MIT.
