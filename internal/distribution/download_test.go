@@ -80,6 +80,30 @@ func TestDownloadChecksumMismatch(t *testing.T) {
 	w.expectRuns()
 }
 
+// A binary the mirror does not have fails the install with one line that
+// names the URL and the status, without the stack trace Composer prints for
+// a download promise left unhandled.
+func TestDownloadMissing(t *testing.T) {
+	w := newWorld(t, "")
+	m := newMirror(t)
+	w.pin("0.1.0", strings.Repeat("ab", 32))
+
+	p := w.newProject("app", project{phaenonJSON: true, mirror: m})
+	out, err := p.composer("install")
+
+	if err == nil {
+		t.Fatalf("composer install passed without a binary:\n%s", out)
+	}
+	if !strings.Contains(out, "cannot download phn 0.1.0") || !strings.Contains(out, "404") {
+		t.Errorf("composer's output lacks the failed download:\n%s", out)
+	}
+	if strings.Contains(out, "Unhandled promise rejection") || strings.Contains(out, "Stack trace") {
+		t.Errorf("a failed download should not print a stack trace:\n%s", out)
+	}
+	expectAbsent(t, p.installed())
+	w.expectRuns()
+}
+
 func expectServed(t *testing.T, m *mirror, want int) {
 	t.Helper()
 	downloads, leaked := m.served()
