@@ -1,0 +1,9 @@
+# The dist archive of the Composer package phaenon/phn holds the plugin alone
+# (design/tooling.md §3.1): composer.json, composer/ and LICENSE. Everything else
+# at the root is left out, so a file added there later stays out by default.
+# Go builds module zips with these attributes switched off (golang/go#27153), so
+# `go install` still gets the whole module.
+/* export-ignore
+/composer.json -export-ignore
+/composer -export-ignore
+/LICENSE -export-ignore

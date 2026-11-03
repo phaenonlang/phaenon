@@ -1,0 +1,36 @@
+{
+  "name": "phaenon/phn",
+  "description": "The Phaenon compiler for Composer projects: brings the phn binary as vendor/bin/phn and compiles every installed package that has a phaenon.json, and the project itself, when Composer writes the autoloader",
+  "type": "composer-plugin",
+  "license": "MIT",
+  "keywords": [
+    "phaenon",
+    "compiler",
+    "type checker",
+    "generics",
+    "composer-plugin"
+  ],
+  "homepage": "https://phaenon.dev",
+  "require": {
+    "php": ">=8.3",
+    "composer-plugin-api": "^2.3",
+    "phaenon/runtime": "0.1.*"
+  },
+  "suggest": {
+    "phaenon/concurrent": "0.1.*: the runtime of concurrently { } blocks and spawn"
+  },
+  "autoload": {
+    "psr-4": {
+      "Phaenon\\Composer\\": "composer/src/"
+    }
+  },
+  "bin": [
+    "composer/bin/phn"
+  ],
+  "extra": {
+    "class": "Phaenon\\Composer\\Plugin",
+    "branch-alias": {
+      "dev-main": "0.1.x-dev"
+    }
+  }
+}
