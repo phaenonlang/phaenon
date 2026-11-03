@@ -19,8 +19,9 @@ use Composer\Util\ProcessExecutor;
  * every installed package that has a phaenon.json, then the root project if it has one, so that
  * the autoloader, `--classmap-authoritative` included, is written over outputs that exist.
  *
- * An `install --no-autoloader` builds at the `dump-autoload` that follows. Under `--no-plugins`
- * nothing here runs, and vendor/bin/phn fetches the binary when it is first used.
+ * A project with no Phaenon code, its own or installed, needs no binary, and the plugin does
+ * nothing. An `install --no-autoloader` builds at the `dump-autoload` that follows. Under
+ * `--no-plugins` nothing here runs, and vendor/bin/phn fetches the binary when it is first used.
  */
 final class Plugin implements PluginInterface, EventSubscriberInterface
 {
@@ -53,25 +54,47 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         $io = $event->getIO();
         try {
             $settings = Settings::fromExtra($composer->getPackage()->getExtra());
+        } catch (\UnexpectedValueException $e) {
+            throw self::failure($io, $e->getMessage(), 1, $e);
+        }
+        // Composer runs in the root project's directory (--working-dir moves it there), the
+        // directory its autoload paths are relative to.
+        $projectDir = ComposerPlatform::getCwd();
+        $packages = self::phaenonPackages($composer);
+        $buildsProject = $settings->buildRoot && is_file($projectDir . '/phaenon.json');
+        if ($packages === [] && !$buildsProject) {
+            $io->writeError(
+                'phaenon/phn: nothing to build: no installed package has a phaenon.json, and the project builds none',
+                true,
+                IOInterface::VERBOSE,
+            );
+
+            return;
+        }
+
+        try {
             $binary = self::resolver($composer, $io, $settings)->resolve();
         } catch (BinaryUnavailable | \UnexpectedValueException $e) {
             throw self::failure($io, $e->getMessage(), 1, $e);
         }
-        $io->writeError(sprintf('phaenon/phn: building with %s', $binary), true, IOInterface::VERBOSE);
+        $io->writeError(sprintf(
+            'phaenon/phn: building %s with %s',
+            implode(', ', $buildsProject ? [...$packages, 'the project'] : $packages),
+            $binary,
+        ), true, IOInterface::VERBOSE);
 
         AutoloadMaps::write($composer, $event->isDevMode());
 
-        // Composer runs in the root project's directory (--working-dir moves it there), the
-        // directory its autoload paths are relative to.
-        $projectDir = ComposerPlatform::getCwd();
         $build = new Build($binary, $projectDir, new ProcessExecutor($io), $io);
         try {
-            $build->run(
-                ['build', '--vendor'],
-                'an installed package\'s output could not be written, as phn\'s messages above say '
-                . '(the findings of installed packages are only warnings)',
-            );
-            if ($settings->buildRoot && is_file($projectDir . '/phaenon.json')) {
+            if ($packages !== []) {
+                $build->run(
+                    ['build', '--vendor'],
+                    'an installed package\'s output could not be written, as phn\'s messages above say '
+                    . '(the findings of installed packages are only warnings)',
+                );
+            }
+            if ($buildsProject) {
                 $build->run(
                     ['build'],
                     'the project does not build, as phn\'s messages above say. '
@@ -81,6 +104,25 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         } catch (BuildFailed $e) {
             throw self::failure($io, $e->getMessage(), $e->getCode(), $e);
         }
+    }
+
+    /**
+     * The installed packages that have a phaenon.json, the ones `phn build --vendor` builds.
+     *
+     * @return list<string> their names
+     */
+    private static function phaenonPackages(Composer $composer): array
+    {
+        $installationManager = $composer->getInstallationManager();
+        $names = [];
+        foreach ($composer->getRepositoryManager()->getLocalRepository()->getCanonicalPackages() as $package) {
+            $path = $installationManager->getInstallPath($package);
+            if ($path !== null && is_file($path . '/phaenon.json')) {
+                $names[] = $package->getPrettyName();
+            }
+        }
+
+        return $names;
     }
 
     private static function resolver(Composer $composer, IOInterface $io, Settings $settings): BinaryResolver
