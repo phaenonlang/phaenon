@@ -247,6 +247,31 @@ func compareChecks(path string, before, after *checked, res *pipeResult) string 
 	}
 	srcBefore := before.prog.File(path).Src
 	newTypes := after.types[path]
+	// An anonymous class is named by its line and a number in declaration
+	// order, which a pipeline that moves one class ahead of another
+	// changes: a class of the rewrite goes by the name of the class it was.
+	declared := map[ast.Span]string{}
+	for _, cl := range before.prog.Classes() {
+		if cl.Anonymous && cl.File != nil && cl.File.Path == path {
+			if ns, ok := res.mapSpan(cl.Span); ok {
+				declared[ns] = cl.Name
+			}
+		}
+	}
+	rename := map[string]string{}
+	for _, cl := range after.prog.Classes() {
+		if cl.Anonymous && cl.File != nil && cl.File.Path == path && declared[cl.Span] != "" {
+			rename[cl.Name] = declared[cl.Span]
+		}
+	}
+	renamed := func(t types.Type) string {
+		return reAnonymous.ReplaceAllStringFunc(types.Print(t), func(name string) string {
+			if was, ok := rename[name]; ok {
+				return was
+			}
+			return name
+		})
+	}
 	var spans []ast.Span
 	for s := range before.types[path] {
 		spans = append(spans, s)
@@ -269,21 +294,24 @@ func compareChecks(path string, before, after *checked, res *pipeResult) string 
 		if !ok {
 			continue
 		}
-		if a, b := printType(t0), printType(t1); a != b {
+		if a, b := printType(types.Print(t0)), printType(renamed(t1)); a != b {
 			return fmt.Sprintf("`%s` is %s as calls and %s as a pipeline", clip(string(srcBefore[s.Start:s.End])), a, b)
 		}
 	}
 	return ""
 }
 
-// reAnonymousLine is the line in an anonymous class's name, which a
-// pipeline that moves the class to another line changes.
-var reAnonymousLine = regexp.MustCompile(`(class@anonymous[^:\s]*):\d+(#\d+)`)
+// reAnonymous is an anonymous class's name, reAnonymousLine the line in
+// it, which a pipeline that moves the class to another line changes.
+var (
+	reAnonymous     = regexp.MustCompile(`class@anonymous[^:\s]*:\d+#\d+`)
+	reAnonymousLine = regexp.MustCompile(`(class@anonymous[^:\s]*):\d+(#\d+)`)
+)
 
 // printType prints a type for the comparison: anonymous classes by file
 // and number, not line.
-func printType(t types.Type) string {
-	return reAnonymousLine.ReplaceAllString(types.Print(t), "$1$2")
+func printType(printed string) string {
+	return reAnonymousLine.ReplaceAllString(printed, "$1$2")
 }
 
 // mapSpan finds where a span of the source went in the rewrite: both its
