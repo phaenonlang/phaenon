@@ -1,2 +1,0 @@
-::error file=@DIR@/src/Bad.phn,line=3::Function App\bad() should return int but returns string.
-::error file=@DIR@/src/Bad.phn,line=5::Function App\alsoBad() should return string but returns int.

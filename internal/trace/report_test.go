@@ -12,7 +12,8 @@ import (
 // out over six lines, expression bodies, an empty constructor body, a test
 // compiled from .phn whose failures name compiled frames, and Plain.php,
 // hand-written PHP copied without a map. The absolute path of the project
-// is @DIR@ in the files.
+// is @DIR@ in the XML reports; PHPStan's GitHub output names the files
+// relative to the project, where it ran.
 const reportsDir = "testdata/reports"
 
 func projectDir(t *testing.T) string {
@@ -70,8 +71,26 @@ func TestReports(t *testing.T) {
 		}
 		golden(t, strings.TrimSuffix(c.file, ".xml")+".want.xml", strings.ReplaceAll(string(out), dir, "@DIR@"))
 	}
-	got := New(nil).Rewrite(readReport(t, "phpstan-github.txt", dir))
-	golden(t, "phpstan-github.want.txt", strings.ReplaceAll(got, dir, "@DIR@"))
+}
+
+// PHPStan's workflow commands name the files relative to the working
+// directory, here the project kept in app/ of its repository; traced, they
+// name the sources by their paths in the repository, which GitHub matches.
+func TestReportGitHub(t *testing.T) {
+	compiled, err := os.ReadFile(filepath.Join(projectDir(t), ".src", "Bad.php"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := readReport(t, "phpstan-github.txt", "")
+	repo := t.TempDir()
+	mustWrite(t, filepath.Join(repo, ".git", "HEAD"), "ref: refs/heads/main\n")
+	mustWrite(t, filepath.Join(repo, "app", ".src", "Bad.php"), string(compiled))
+	t.Chdir(filepath.Join(repo, "app"))
+	want := "::error file=app/src/Bad.phn,line=3::Function App\\bad() should return int but returns string.\n" +
+		"::error file=app/src/Bad.phn,line=5::Function App\\alsoBad() should return string but returns int.\n"
+	if got := New(nil).Rewrite(in); got != want {
+		t.Errorf("got\n%swant\n%s", got, want)
+	}
 }
 
 // TestReportCoverageMerge pins what the goldens show for the folded
