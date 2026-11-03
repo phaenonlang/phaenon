@@ -1,1 +1,25 @@
-{"version": null, "assets": {}}
+{
+    "version": "0.1.0",
+    "assets": {
+        "darwin-amd64": {
+            "file": "phn-darwin-amd64",
+            "sha256": "07269d7bbec2e8255e4e61130d7b41127c409cb10ec23158ca64010b848a96c8"
+        },
+        "darwin-arm64": {
+            "file": "phn-darwin-arm64",
+            "sha256": "f23af9eec9405b1306bd2fb42117a51d22cf13a3cd007379faf1668073ad006c"
+        },
+        "linux-amd64": {
+            "file": "phn-linux-amd64",
+            "sha256": "90e865d9b29729f64e2a16f246df0999bfa5ece7d3fdc1b766799bd0a7c81667"
+        },
+        "linux-arm64": {
+            "file": "phn-linux-arm64",
+            "sha256": "b4177fcafa0c56dcb79da8f6be0ea9422669c5c8c281d5956d537bf4dd684c0e"
+        },
+        "windows-amd64": {
+            "file": "phn-windows-amd64.exe",
+            "sha256": "da97153d992b718a86d623326ec68120302e60c739bae61797b1a174d9e0551a"
+        }
+    }
+}
