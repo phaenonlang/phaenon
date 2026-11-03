@@ -89,18 +89,41 @@ func (e *Error) Error() string {
 
 // File compiles one .phn source to PHP.
 func File(src []byte, opts Options) ([]byte, error) {
+	out, _, err := FileVerbatim(src, opts)
+	return out, err
+}
+
+// Verbatim is a run of the output copied from the source byte for byte:
+// source offsets [Src, Src+Len) at output offset Out. An output's verbatim
+// spans are the complement of the emitter's edits and of the indentation it
+// adds; everything between them is text the compiler wrote. phn fix carries
+// a tool's change of the output back to the source through them
+// (design/tooling.md §4).
+type Verbatim struct {
+	Src, Out, Len int
+}
+
+// FileVerbatim is File with the output's verbatim spans, in output order,
+// two spans never adjacent on both sides.
+func FileVerbatim(src []byte, opts Options) ([]byte, []Verbatim, error) {
+	f := (*ast.File)(nil)
 	if opts.File != nil && opts.File.AST != nil {
 		// The checker's tree: its records (method targets, …) key on nodes.
-		return Tree(src, opts.File.AST, opts)
-	}
-	f, err := parser.Parse(src, lexer.ModePhaenon)
-	if err != nil {
-		if pe, ok := err.(*parser.Error); ok {
-			return nil, &Error{File: opts.SourceName, Line: pe.Line, Msg: pe.Msg}
+		f = opts.File.AST
+	} else {
+		var err error
+		if f, err = parser.Parse(src, lexer.ModePhaenon); err != nil {
+			if pe, ok := err.(*parser.Error); ok {
+				return nil, nil, &Error{File: opts.SourceName, Line: pe.Line, Msg: pe.Msg}
+			}
+			return nil, nil, err
 		}
-		return nil, err
 	}
-	return Tree(src, f, opts)
+	out, w, err := compile(src, f, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, w.verbatim(), nil
 }
 
 // Tree compiles an already parsed file. src must be the text f was parsed from.
@@ -256,6 +279,7 @@ func (e *emitter) apply() ([]byte, *lineWriter) {
 	if w.mapAt >= 0 {
 		// Before __halt_compiler(): what follows is data and stays as written.
 		line := linemap.Build(source, w.classify()).String() + "\n"
+		w.insertedAt, w.inserted = w.mapAt, len(line)
 		out := w.out.Bytes()
 		return append(out[:w.mapAt:w.mapAt], append([]byte(line), out[w.mapAt:]...)...), w
 	}

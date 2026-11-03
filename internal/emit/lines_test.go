@@ -68,6 +68,7 @@ func TestLineMapProperty(t *testing.T) {
 		}
 		compiled++
 		checkLineMap(t, in.path, in.src, out, w)
+		checkVerbatim(t, in.path, in.src, out, w.verbatim())
 	}
 	if compiled < 50 {
 		t.Errorf("only %d files compiled: the property needs a corpus", compiled)
@@ -130,6 +131,28 @@ func checkLineMap(t *testing.T, path string, src, out []byte, w *lineWriter) {
 	}
 }
 
+// checkVerbatim: every verbatim span holds the source bytes it names, in
+// order on both sides, none overlapping another (phn fix relies on it).
+func checkVerbatim(t *testing.T, path string, src, out []byte, vs []Verbatim) {
+	t.Helper()
+	prev := Verbatim{}
+	for i, v := range vs {
+		if v.Len <= 0 || v.Out+v.Len > len(out) || v.Src+v.Len > len(src) ||
+			!bytes.Equal(out[v.Out:v.Out+v.Len], src[v.Src:v.Src+v.Len]) {
+			t.Errorf("%s: verbatim span %+v does not hold its source bytes", path, v)
+			return
+		}
+		if i > 0 && (v.Out < prev.Out+prev.Len || v.Src < prev.Src+prev.Len) {
+			t.Errorf("%s: verbatim span %+v overlaps or precedes %+v", path, v, prev)
+			return
+		}
+		if i > 0 && v.Out == prev.Out+prev.Len && v.Src == prev.Src+prev.Len {
+			t.Errorf("%s: verbatim spans %+v and %+v continue each other", path, prev, v)
+		}
+		prev = v
+	}
+}
+
 // lineIndex returns a function giving the 1-based line of a byte offset.
 func lineIndex(text []byte) func(int) int {
 	var starts []int
@@ -158,4 +181,17 @@ func lineText(text []byte, n int) string {
 		return ""
 	}
 	return lines[n-1]
+}
+
+// The map line written before __halt_compiler() moves the spans after it.
+func TestVerbatimHaltCompiler(t *testing.T) {
+	src := []byte("namespace App;\n\necho 1;\n__halt_compiler();raw data\n")
+	out, vs, err := FileVerbatim(src, Options{SourceName: "a.phn", StrictTypes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkVerbatim(t, "a.phn", src, out, vs)
+	if last := vs[len(vs)-1]; string(out[last.Out:last.Out+last.Len]) != "__halt_compiler();raw data\n" {
+		t.Errorf("last span %q:\n%s", out[last.Out:last.Out+last.Len], out)
+	}
 }

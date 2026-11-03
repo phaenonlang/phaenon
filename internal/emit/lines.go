@@ -61,6 +61,9 @@ type lineWriter struct {
 	lines      []outLine
 	segments   []segment
 	mapAt      int // output offset of the map line before __halt_compiler, -1: none
+	// inserted bytes, the map line before __halt_compiler, went in at
+	// output offset insertedAt after the segments were written.
+	insertedAt, inserted int
 }
 
 func newLineWriter(src []byte, indents []indentReq) *lineWriter {
@@ -223,4 +226,23 @@ func (w *lineWriter) classify() []linemap.Line {
 		out[i] = ml
 	}
 	return out
+}
+
+// verbatim is the segments as the final output holds them: past the map
+// line written before __halt_compiler, and merged where one continues the
+// other on both sides.
+func (w *lineWriter) verbatim() []Verbatim {
+	var vs []Verbatim
+	for _, s := range w.segments {
+		v := Verbatim{Src: s.Start, Out: s.Out, Len: s.End - s.Start}
+		if w.inserted > 0 && v.Out >= w.insertedAt {
+			v.Out += w.inserted
+		}
+		if n := len(vs); n > 0 && vs[n-1].Out+vs[n-1].Len == v.Out && vs[n-1].Src+vs[n-1].Len == v.Src {
+			vs[n-1].Len += v.Len
+			continue
+		}
+		vs = append(vs, v)
+	}
+	return vs
 }
