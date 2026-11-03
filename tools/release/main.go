@@ -1,8 +1,9 @@
 // Command release builds phn's release binaries and pins their checksums
 // (design/tooling.md §3.2): one static binary per platform, built so that
-// the same sources and the Go toolchain go.mod names give the same bytes
-// anywhere — -trimpath, no VCS stamp, no build ID, the version set by the
-// linker. The checksums go into composer/checksums.json, which the
+// the same sources give the same bytes anywhere — exactly the toolchain
+// go.mod's toolchain line names (GOTOOLCHAIN, since the line alone is only
+// a minimum: a newer local Go would build instead), -trimpath, no VCS
+// stamp, no build ID, the version set by the linker. The checksums go into composer/checksums.json, which the
 // phaenon/phn plugin verifies every download against, so composer.lock pins
 // the binary through the package.
 //
@@ -61,6 +62,8 @@ const checksumsPath = "composer/checksums.json"
 // composer.json: the requirement and the suggestion's leading constraint.
 var lockstep = regexp.MustCompile(`("phaenon/(?:runtime|concurrent)":\s*")(\d+\.\d+\.\*)`)
 
+var toolchainLine = regexp.MustCompile(`(?m)^toolchain (go\d+\.\d+\.\d+)$`)
+
 var semver = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$`)
 
 func main() {
@@ -71,6 +74,16 @@ func main() {
 	if !semver.MatchString(*version) {
 		fail("release: -version must be X.Y.Z, not %q", *version)
 	}
+	gomod, err := os.ReadFile("go.mod")
+	if err != nil {
+		fail("release: %v", err)
+	}
+	tc := toolchainLine.FindSubmatch(gomod)
+	if tc == nil {
+		fail("release: go.mod names no toolchain goX.Y.Z to build with")
+	}
+	toolchain := string(tc[1])
+	fmt.Printf("toolchain %s\n", toolchain)
 	parts := strings.SplitN(*version, ".", 3)
 	minor := parts[0] + "." + parts[1] + ".*"
 	manifest, err := os.ReadFile("composer.json")
@@ -104,7 +117,7 @@ func main() {
 		dst := filepath.Join(*out, file)
 		cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false",
 			"-ldflags", "-s -w -buildid= -X main.version="+*version, "-o", dst, "./cmd/phn")
-		cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+p.goos, "GOARCH="+p.goarch, "GOFLAGS=", "GOAMD64=v1", "GOARM64=v8.0")
+		cmd.Env = append(os.Environ(), "GOTOOLCHAIN="+toolchain, "CGO_ENABLED=0", "GOOS="+p.goos, "GOARCH="+p.goarch, "GOFLAGS=", "GOAMD64=v1", "GOARM64=v8.0")
 		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 		if err := cmd.Run(); err != nil {
 			fail("release: building %s: %v", p.key, err)
