@@ -65,27 +65,48 @@ func File(src []byte, opts Options) ([]byte, error) {
 
 // Convert is File with the notes of the generics lift.
 func Convert(src []byte, opts Options) ([]byte, []Note, error) {
-	// The lift runs on the line-preserving form so its notes carry the
-	// input's line numbers; the leading blank lines go afterwards.
-	out, closeTag, err := strip(src)
+	out, notes, closeTag, err := Prepare(src, opts)
 	if err != nil {
 		return nil, nil, err
 	}
-	var notes []Note
+	out, err = Finish(out, closeTag, opts)
+	return out, notes, err
+}
+
+// Prepare is the first half of Convert: the tags and the declare removed,
+// the docblocks lifted, the lines where they were. phn migrate rewrites
+// chains as pipelines (Pipes) between the halves, so that a body that
+// becomes a pipeline can still be laid out as `=>`. closeTag reports a
+// dropped trailing `?>`, which Finish needs.
+func Prepare(src []byte, opts Options) (out []byte, notes []Note, closeTag bool, err error) {
+	// The lift runs on the line-preserving form so its notes carry the
+	// input's line numbers; the leading blank lines go afterwards.
+	out, closeTag, err = strip(src)
+	if err != nil {
+		return nil, nil, false, err
+	}
 	if opts.Generics {
 		if out, notes, err = Lift(out, opts); err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 	}
+	return out, notes, closeTag, nil
+}
+
+// Finish is the second half of Convert: the canonical layout, unless
+// opts.Layout is off, and the blank lines the removed tag left behind,
+// unless opts.KeepLines.
+func Finish(out []byte, closeTag bool, opts Options) ([]byte, error) {
+	var err error
 	if opts.Layout {
 		if out, err = Layout(out, opts.Stats); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	if !opts.KeepLines {
 		out = trim(out, closeTag)
 	}
-	return out, notes, nil
+	return out, nil
 }
 
 // trim drops the blank lines the removed tag and declare leave behind.
