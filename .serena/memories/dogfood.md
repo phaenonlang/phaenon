@@ -19,6 +19,13 @@ push dogfood work without a maintainer's go-ahead.
   blame-ignore entry: core 72 pipelines (`eb69b190`, `e111c0d6`), tq-cli 594 (`32c98c1`,
   `904a342`), mongodb-odm 4 (`27486f7`, `41ddb00`); reflector and object-mapper unchanged. The
   8.5 output is the old code apart from layout, except at property receivers ([[open-items]] D20).
+- **Distribution (M6 slice 1, 2026-11-03):** reflector (`d3b1a76`), object-mapper (`fe895fc`) and
+  mongodb-odm (`a918d2a`) are in the sibling layout, their PHP no longer committed. Core takes them
+  as path repositories of these checkouts (`dev-phaenon-dogfood as` 1.3.1 / 0.1.0 / 0.5.2) and
+  `phaenon/phn` from the compiler checkout (`3b57e3bd`); tq-cli takes the plugin too (`eccc939`).
+  The plugin runs the checkout's `bin/phn` at every autoload dump: core's vendor libraries, all of
+  tq-cli. Core's suite (1188), PHPStan max and cs pass, also on a `--classmap-authoritative` dump
+  with the libraries' outputs deleted; tq-cli's (2052) on a tree the plugin built from scratch.
 
 ## `tequila/reflection` — M1, M2
 

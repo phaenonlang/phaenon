@@ -449,7 +449,9 @@ plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
   locker, which keeps the autoloader suffix the lock's hash), and 2.3 types `getInstallPath()` as
   `string`. Against 2.11 it is clean.
 - The release workflows have not run yet: the first release PR is their test.
-- tq-cli still calls `phn` from `PATH`; it can take the plugin as core does.
+- The dogfood trees take `phaenon/phn` from this checkout (core `3b57e3bd`, tq-cli `eccc939`), so
+  the plugin runs `bin/phn`: rebuild it (`go build -o bin/phn ./cmd/phn`) after changing the
+  compiler, or set `PHN_BINARY`.
 
 ## Small things
 
