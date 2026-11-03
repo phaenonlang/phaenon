@@ -673,6 +673,22 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
   `~/.local/bin/serena`). Generalise or move them before publishing.
 - `tequila/reflection`'s `phaenon-dogfood` branch exists only locally.
 
+## M6 — `phn fix` (slice 3, 2026-11-03)
+
+`../design/tooling.md` §4 (the settlements under "Done in slice 3"). Left:
+- **The fixer's rule is not named** in a report (the draft's `(phpdoc_align)`): `phn fix` sees the
+  outputs, not the tool's log. php-cs-fixer's `--format=json -v` lists the fixers per file and
+  could be read when the tool is known to be php-cs-fixer.
+- **Docblocks and empty bodies the compiler writes are indented with spaces** in a tab-indented
+  source (the expression-body lowering follows the source's indentation, these do not). PSR-12
+  wants spaces, so only a project against PSR-12 sees it: 633 docblocks and 426 empty bodies in
+  the measure's tab configuration.
+- **Two kinds of layout the compiler lays out itself stay in the `.phn` as a tool left them**: a
+  leading blank line (the header absorbs it) and a class-like brace on the declaration's line. They
+  are `phn fmt`'s first layer.
+- **Types Rector adds to the closures the compiler writes for a pipeline** are refused (3 on core
+  with the type-declaration set); they would need the pipeline's stages typed in the source.
+
 ## M6 — CI formats (slice 2, 2026-11-03)
 
 `../design/tooling.md` §7.1 (the settlements under "Done in slice 2"). Left:

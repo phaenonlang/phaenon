@@ -52,7 +52,7 @@ squash merges).
 ## This repository
 
 ```text
-cmd/phn/              CLI: build, check, migrate, stdlib, trace, lex, print
+cmd/phn/              CLI: build, check, fix, migrate, stdlib, trace, lex, print
 internal/token        token set: PHP 8.5's plus Phaenon's, named like token_name()
 internal/lexer        hand-written port of zend_language_scanner.l; lossless
 internal/ast          typed node families; Phaenon constructs are additions to the PHP tree
@@ -64,6 +64,7 @@ internal/program      program model: project files, Composer vendor code (lazy),
 internal/checker      the type checker behind `phn check`
 internal/emit         patch-based emitter: PSR-12 layout of what it writes, the line map; generics erasure, is/as lowering
 internal/linemap      the `// phaenon-map v1 …` comment every compiled file ends with: parse, write, lookups
+internal/fix          `phn fix`: a PHP tool's changes of the outputs carried back to the sources through the emitter's verbatim spans
 internal/trace        `phn trace`: positions in compiled files → `.phn` positions, in text, GitHub workflow commands and CI reports (Checkstyle, JUnit, Clover, Cobertura)
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
 internal/conformance  suites over the php-src corpus with `php` as the oracle
@@ -95,7 +96,7 @@ PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go generate ./stdlib        # refresh
 PHAENON_COMPOSER=$(which composer) go test ./internal/distribution     # the Composer plugin under a real Composer
 ```
 
-`phn` itself: `phn build|check|migrate|stdlib|trace|lex|print` — run `phn` without arguments for usage; the
+`phn` itself: `phn build|check|fix|migrate|stdlib|trace|lex|print` — run `phn` without arguments for usage; the
 README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`, or, through the `phaenon/phn` plugin, this checkout's `bin/phn` (`go build -o bin/phn ./cmd/phn`; `PHN_BINARY` names another). `phn stdlib` writes the
 runtime package (`--out ../runtime/src`) and the concurrent package (`--concurrent-out
 ../concurrent/src`) from `stdlib/runtime/**/*.phn` (a subdirectory there is one in `src/`:

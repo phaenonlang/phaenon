@@ -85,5 +85,11 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
    against the draft (`../design/tooling.md` §7.1). Proved on tq-cli's suite under PCOV and on
    core's findings; left in [[open-items]] § M6 — CI formats. Next: slice 3, `phn fix`, measured
    first (§4).
+8. 2026-11-03: **M6 slice 3, first half: `phn fix`** (`internal/fix`: token-aligned diff, carry
+   through `emit.FileVerbatim`'s spans; `cmd/phn/fix.go`: build, run, carry, rebuild in up to
+   three rounds, report; `--check`). Measured on a copy of core (`../design/tooling.md` §4, "Done in
+   slice 3"): with core's php-cs-fixer configuration nothing is refused in the end, so the gate
+   passes and `phn fmt` gets both layers. Method modifiers in PSR-12 order became verbatim text
+   for it (outputs byte-identical). Left in [[open-items]] § M6 — `phn fix`. Next: `phn fmt`.
 
 ← [[Home]]
