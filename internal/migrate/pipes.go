@@ -514,9 +514,8 @@ func (r *piper) stageable(call ast.Expr, piped int, ctx walkCtx) string {
 // for PHP 8.5 as an arrow function called at once (design/php-versions.md
 // §5.3), as the checker decides it: no bound argument is by reference,
 // writes to a variable, or reads one named as the piped parameter, which
-// the arrow function's parameter would hide. A bound anonymous class is
-// refused too: the emitter mistakes its property names for variables to
-// capture.
+// the arrow function's parameter would hide. An anonymous class's members
+// are none of these (ast.InspectScope).
 func lowerable(params []*program.Param, args []*ast.Arg, piped int, p *program.Param) bool {
 	for i, a := range args {
 		if i == piped {
@@ -526,12 +525,7 @@ func lowerable(params []*program.Param, args []*ast.Arg, piped int, p *program.P
 			return false
 		}
 		clash := false
-		ast.Inspect(a.Value, func(n ast.Node) bool {
-			_, anonymous := n.(*ast.ClassDecl)
-			clash = clash || anonymous
-			return !clash
-		})
-		ast.Inspect(a.Value, func(n ast.Node) bool {
+		ast.InspectScope(a.Value, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.Assign, *ast.IncDec, *ast.Yield, *ast.YieldFrom:
 				clash = true
@@ -667,10 +661,12 @@ func bind(params []*program.Param, args []*ast.Arg, i int) *program.Param {
 
 // assignedIn collects the variables evaluating e may assign: assignment
 // targets, increments, by-reference uses, and variables passed to a
-// parameter that is by reference or cannot be resolved. "*" stands for any.
+// parameter that is by reference or cannot be resolved, a constructor's
+// among them. "*" stands for any. An anonymous class's methods assign
+// variables of their own (ast.InspectScope).
 func (r *piper) assignedIn(e ast.Expr, ctx walkCtx) map[string]bool {
 	out := map[string]bool{}
-	ast.Inspect(e, func(n ast.Node) bool {
+	ast.InspectScope(e, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.Assign:
 			targetVars(n.Target, out)
@@ -683,8 +679,12 @@ func (r *piper) assignedIn(e ast.Expr, ctx walkCtx) map[string]bool {
 		case *ast.VariableVariable, *ast.Include, *ast.Eval:
 			out["*"] = true
 		case *ast.New:
-			if n.Args != nil {
-				for _, a := range n.Args.Args {
+			args := n.Args
+			if n.Anon != nil {
+				args = n.Anon.Args
+			}
+			if args != nil {
+				for _, a := range args.Args {
 					if v := rootVar(a.Value); v != "" {
 						out[v] = true
 					}
@@ -813,7 +813,7 @@ func orderSafe(e ast.Expr, assigned map[string]bool) bool {
 			}
 		}
 		safe := true
-		ast.Inspect(e.Body, func(n ast.Node) bool {
+		ast.InspectScope(e.Body, func(n ast.Node) bool {
 			if v, ok := n.(*ast.Variable); ok && !params[v.Name] && touched(v.Name) {
 				safe = false
 			}
