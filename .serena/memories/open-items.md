@@ -1,7 +1,7 @@
 ---
 type: backlog
 tags: [phaenon, backlog]
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Open and deferred items
@@ -419,9 +419,15 @@ plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
     `php-versions.md` §5.3 says direct; a head and first stage on different lines compile to
     `return ` + a line at column 0. Design question: lower a pipeline whose stages are all exact
     as direct calls back to the nested calls.
-  - **Bug**: an anonymous class in a bound argument makes the 8.5 closure capture its property
+  - ~~**Bug**: an anonymous class in a bound argument makes the 8.5 closure capture its property
     names (`new class { public int $a = 1; }` → `use ($a)`, "Undefined variable"). Migrate
-    refuses such stages for 8.5 until it is fixed.
+    refuses such stages for 8.5 until it is fixed.~~ — done 2026-11-03, `0c1ecf9`, `a22893c`,
+    `8b4495b`: `ast.InspectScope` is the one walk of a variable scope (an anonymous class gives
+    its constructor arguments, nothing of its members), used by the partial-application capture
+    and refusals, the `concurrently`/`spawn` use clause (which had missed the constructor
+    arguments) and P2604, and the codemod's rules; the codemod's refusal is gone. Still skipping
+    anonymous classes whole: the yield and goto walks (`bodyHasYield`, `firstYield`,
+    `noCrossing`), so a `yield` in a constructor argument goes unseen.
   - **Rule questions**: property receivers as stable (92 of tq-cli's 239 evaluation-order
     refusals are `$this->output->writeln(…)`); chains that follow a non-data argument
     (`strlen(X) |> substr($subject, ?)`, `sprintf(…, ?) |> Shape::array($perClass, ?)`); an
