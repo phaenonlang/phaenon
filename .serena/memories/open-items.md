@@ -414,10 +414,10 @@ plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
   `93ed297`: the checker records `File.Folds` with the shared rule of `internal/evalorder`, the
   emitter writes a folding run as nested calls, `fold.go`); the codemod follows the data and takes
   hook-free property receivers (`c57c0a0`); the check no longer undoes pipelines over renumbered
-  anonymous classes (`9027c50`, core had lost 23). Applied to the five dogfood trees in their
-  working trees, **not committed** until a maintainer has read the diff (core 72 pipelines,
-  tq-cli 594, mongodb-odm 4; suites, PHPStan, cs green, findings unchanged; core's first run is in
-  `git stash` on its branch). Open:
+  anonymous classes (`9027c50`, core had lost 23). Applied to the five dogfood trees and
+  committed after review (core 72 pipelines `eb69b190`, tq-cli 594 `32c98c1`, mongodb-odm 4
+  `27486f7`, each with a blame-ignore entry; reflector and object-mapper had no chain that
+  qualifies; suites, PHPStan, cs green, findings unchanged). Open:
   - ~~The 8.5 output of a pipeline reads poorly~~ — done 2026-11-03 (T11).
   - ~~Anonymous-class capture bug~~ — done 2026-11-03, `0c1ecf9`, `a22893c`, `8b4495b`
     (`ast.InspectScope`). Still skipping anonymous classes whole: the yield and goto walks

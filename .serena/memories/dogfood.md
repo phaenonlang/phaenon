@@ -1,7 +1,7 @@
 ---
 type: reference
 tags: [phaenon, dogfood, tequila]
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Dogfood — the Tequila targets
@@ -14,6 +14,11 @@ ecosystem compatibility constrains every design choice.
 Tequila repos have their own rules (`~/labs/tequila/platform/CLAUDE.md`): Conventional Commits,
 squash-merged PRs, release-please. Do not apply Phaenon's commit style there, and do not merge or
 push dogfood work without a maintainer's go-ahead.
+
+- **Pipes (2026-11-03):** the `pipes` codemod is applied to every tree and committed with a
+  blame-ignore entry: core 72 pipelines (`eb69b190`, `e111c0d6`), tq-cli 594 (`32c98c1`,
+  `904a342`), mongodb-odm 4 (`27486f7`, `41ddb00`); reflector and object-mapper unchanged. The
+  8.5 output is the old code apart from layout, except at property receivers ([[open-items]] D20).
 
 ## `tequila/reflection` — M1, M2
 
