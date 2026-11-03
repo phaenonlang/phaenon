@@ -10,7 +10,10 @@
 //	go run ./tools/release -version 0.1.0 -out dist -verify   # build, refuse unless they match
 //
 // The release PR's workflow runs the first and commits the checksums; the
-// tag's workflow runs the second before it publishes the binaries.
+// tag's workflow runs the second before it publishes the binaries. Both
+// keep the lockstep of design/tooling.md §3.4: composer.json requires
+// phaenon/runtime, and suggests phaenon/concurrent, at the release's minor
+// version, which the first writes and the second checks.
 package main
 
 import (
@@ -25,6 +28,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 )
 
 // platform is one release asset: its key in checksums.json and Go's names.
@@ -53,6 +57,10 @@ type checksums struct {
 
 const checksumsPath = "composer/checksums.json"
 
+// lockstep finds the version constraints of the runtime packages in
+// composer.json: the requirement and the suggestion's leading constraint.
+var lockstep = regexp.MustCompile(`("phaenon/(?:runtime|concurrent)":\s*")(\d+\.\d+\.\*)`)
+
 var semver = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$`)
 
 func main() {
@@ -62,6 +70,27 @@ func main() {
 	flag.Parse()
 	if !semver.MatchString(*version) {
 		fail("release: -version must be X.Y.Z, not %q", *version)
+	}
+	parts := strings.SplitN(*version, ".", 3)
+	minor := parts[0] + "." + parts[1] + ".*"
+	manifest, err := os.ReadFile("composer.json")
+	if err != nil {
+		fail("release: %v", err)
+	}
+	found := lockstep.FindAllSubmatch(manifest, -1)
+	if len(found) == 0 {
+		fail("release: composer.json names no phaenon/runtime constraint X.Y.*")
+	}
+	for _, m := range found {
+		if *verify && string(m[2]) != minor {
+			fail("release: composer.json has %s%s\", the release needs %s", m[1], m[2], minor)
+		}
+	}
+	if !*verify {
+		manifest = lockstep.ReplaceAll(manifest, []byte("${1}"+minor))
+		if err := os.WriteFile("composer.json", manifest, 0o644); err != nil {
+			fail("%v", err)
+		}
 	}
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fail("%v", err)
