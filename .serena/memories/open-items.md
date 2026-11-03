@@ -438,17 +438,23 @@ plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
 ## M6 — distribution (slice 1, 2026-11-03)
 
 `../design/tooling.md` §3. Left after slice 1:
-- **The first release**: a `release/v0.1.0` PR (its workflow pins the checksums and the lockstep
-  constraints), the tag, and the binaries published on the registry's release-asset door for
-  Tequila's CI (`extra.phaenon.binary-url`); tagging and publishing need a maintainer's go-ahead.
-  Until then every install with Phaenon code needs `PHN_BINARY` or a compiler checkout's `bin/phn`.
+- **v0.1.0 is released** (2026-11-03): phaenonlang/phaenon#1, tag `v0.1.0` (five binaries and
+  `phn-0.1.0-src.tar.gz`, verified by the tag's workflow), `phaenon/runtime` and
+  `phaenon/concurrent` `v0.1.0`. The first PR showed CI's setup-go building with go1.27.3 against a
+  local go1.27.2, so `tools/release` forces go.mod's toolchain line (`ec90670`); with it a macOS
+  build matches the Linux one byte for byte. Fixed after the tag, for 0.1.1: a failed download
+  printed a promise stack trace (`b3b8d30`).
+- **No download path for a private repository**: `releases/download/…` answers 404 even with a
+  GitHub token (private assets come only through the API's asset endpoint), so until the
+  repositories are public the plugin downloads only from a mirror. Publishing the binaries on the
+  registry's release-asset door for Tequila's CI (`extra.phaenon.binary-url`) is a Tequila-side
+  step not taken yet; locally, `PHN_BINARY` or a compiler checkout's `bin/phn`.
 - A source install of `phaenon/phn` (`--prefer-source`, a dev version from VCS) is a checkout too:
   it holds `go.mod`, so the plugin wants `PHN_BINARY` or a `bin/phn` built there.
 - PHPStan on the plugin against Composer 2.3 (the floor `composer-plugin-api ^2.3` admits) reports
   two deliberate findings: `AutoloadGenerator::dump()` takes an eighth argument from 2.4 on (the
   locker, which keeps the autoloader suffix the lock's hash), and 2.3 types `getInstallPath()` as
   `string`. Against 2.11 it is clean.
-- The release workflows have not run yet: the first release PR is their test.
 - The dogfood trees take `phaenon/phn` from this checkout (core `3b57e3bd`, tq-cli `eccc939`), so
   the plugin runs `bin/phn`: rebuild it (`go build -o bin/phn ./cmd/phn`) after changing the
   compiler, or set `PHN_BINARY`.
