@@ -27,6 +27,7 @@ suites, and the tools they shell out to. Without its variable a suite **skips**,
 | `PHAENON_UPDATE` | `TestGenerics` (emit) | Rewrites the expected `.php` goldens from the current output | `1` |
 | `PHAENON_GOLDEN` | `TestGolden` (checker) | Only golden files whose name contains this substring | e.g. `generics` |
 | `PHAENON_COMPOSER_PROJECT` | `internal/program` | A Composer project to exercise the vendor reader | e.g. `/Users/petr/labs/tequila/object-mapper` |
+| `PHAENON_COMPOSER` | `internal/distribution` | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects (a fake `phn`, an `httptest` mirror; Packagist off); needs the `runtime` checkout beside the repository or the main checkout | `$(which composer)` |
 | `PHAENON_PHP86` | `TestPHPStanParity` (checker) | A php 8.6: PHPStan runs on it for the goldens whose header says `// target: 8.6` (they skip without it, unless `PHAENON_PHP` is an 8.6) | `/opt/homebrew/opt/php@8.6/bin/php` |
 | `PHAENON_PHP_SRC` | `TestFresh` (`stdlib/gen`) too | Compares the committed stubs and version table with the clone's release branches | as above |
 

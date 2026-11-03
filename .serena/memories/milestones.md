@@ -67,5 +67,14 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
    finds goes into [[open-items]] § the plugin's line map.
 5. 2026-11-02: the M6 design is drafted, `../design/tooling.md` (design `94f1864`), waiting for
    its review: ten questions in its §13, the slices in §11. Nothing of M6 is built before it.
+6. 2026-11-03: `tooling.md` reviewed (T1–T13); D20 removed the method syntax, and the `pipes`
+   codemod is applied to the dogfood trees ([[dogfood]]). **M6 slice 1, distribution** (compiler
+   `f005498`…`5edac67`): `phn build --vendor` and installed packages read from their sources,
+   P4013/P4014, reproducible release binaries pinned in `composer/checksums.json` with the two
+   release workflows, and the `phaenon/phn` Composer plugin (`composer/`, tested by
+   `internal/distribution`). reflector, object-mapper and mongodb-odm moved to the sibling layout,
+   and core takes them as path repositories built by the plugin (§3.5): suite, PHPStan max and cs
+   pass, `--classmap-authoritative` included. Not done until a first release: no tag yet, the
+   binaries are not on the registry's release-asset door ([[open-items]] § M6).
 
 ← [[Home]]

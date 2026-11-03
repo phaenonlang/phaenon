@@ -435,6 +435,22 @@ plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
     is checked, resolved `X` in that file's scope (`Ci\Validate\NewSecretReads` against the imported
     `Secrets\NewSecretReads`).
 
+## M6 — distribution (slice 1, 2026-11-03)
+
+`../design/tooling.md` §3. Left after slice 1:
+- **The first release**: a `release/v0.1.0` PR (its workflow pins the checksums and the lockstep
+  constraints), the tag, and the binaries published on the registry's release-asset door for
+  Tequila's CI (`extra.phaenon.binary-url`); tagging and publishing need a maintainer's go-ahead.
+  Until then every install with Phaenon code needs `PHN_BINARY` or a compiler checkout's `bin/phn`.
+- A source install of `phaenon/phn` (`--prefer-source`, a dev version from VCS) is a checkout too:
+  it holds `go.mod`, so the plugin wants `PHN_BINARY` or a `bin/phn` built there.
+- PHPStan on the plugin against Composer 2.3 (the floor `composer-plugin-api ^2.3` admits) reports
+  two deliberate findings: `AutoloadGenerator::dump()` takes an eighth argument from 2.4 on (the
+  locker, which keeps the autoloader suffix the lock's hash), and 2.3 types `getInstallPath()` as
+  `string`. Against 2.11 it is clean.
+- The release workflows have not run yet: the first release PR is their test.
+- tq-cli still calls `phn` from `PATH`; it can take the plugin as core does.
+
 ## Small things
 
 - `phn migrate` could rewrite `static function (…) { return …; }` in attribute arguments and constants back
