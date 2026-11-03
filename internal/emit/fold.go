@@ -270,8 +270,15 @@ func (f folder) compact(c *foldCall, indent string) (string, bool) {
 	return b.String(), true
 }
 
-// multi writes c with one argument per line, one level in from indent.
+// multi writes c with one argument per line, one level in from indent. A
+// call whose one argument is the inner call keeps it on its line, so that
+// nested calls close together: `array_values(array_filter(` + its
+// arguments + `))`, as they are written by hand.
 func (f folder) multi(c *foldCall, indent string) (string, bool) {
+	if len(c.args) == 1 && c.args[0].inner != nil && c.args[0].name == "" {
+		t, ok := f.multi(c.args[0].inner, indent)
+		return c.callee + t + ")", ok
+	}
 	in := indent + f.unit
 	var b strings.Builder
 	b.WriteString(c.callee)
