@@ -3,7 +3,8 @@
 A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for PHP".
 
 - `phn` — the compiler (this repository, Go)
-- `phaenon/runtime` — the PHP runtime package (`\Phaenon\Type`, stdlib, the line map for Monolog and Sentry)
+- `phaenon/runtime` — the PHP runtime package (`\Phaenon\Type` behind `is` / `as`, the checked
+  conversions of `\Phaenon\Bytes`, the line map for Monolog and Sentry)
 - `design/` — language design documents
 
 Status: pre-alpha. M0 done — lexer, parser and printer are conformance-tested against php-src's
@@ -14,9 +15,11 @@ type checker for the PHP subset plus the PHPStan docblock vocabulary; on the fir
 libraries it reports exactly what PHPStan reports at level 10. M3 done — generics are syntax:
 `class Box<T>`, `list<T>`, `map<K, V>`, `class<T>`, `Closure(T): U`, `is` / `as`, `type` aliases;
 they compile to PHP with PHPStan docblocks, and `phn migrate` lifts PHPStan's docblock generics
-into that syntax. M4 done — `list<T>`, `map<K, V>`, tuples and `bytes` with a stdlib written in
-Phaenon behind method syntax (`$xs->map(…)` → `Seq::map($xs, …)`), `fun` with `public` implied,
-closures in attributes, and a project file that builds sources into sibling output directories.
+into that syntax. M4 done — `list<T>`, `map<K, V>`, tuples and `bytes`, `fun` with `public`
+implied, closures in attributes, and a project file that builds sources into sibling output
+directories. (The method syntax on lists, maps and strings M4 also brought, and its stdlib `Seq`,
+`Map` and `Str`, were removed by D20: `->` means what PHP means by it, and these values go through
+PHP's functions, chained with pipes.)
 Four Tequila libraries build from `.phn` with their suites passing, `tequila/core` among them;
 the checker reads the extensions the local `php` has loaded (ext-mongodb and friends) from its
 reflection. M5 done — structured concurrency: `concurrently { … }` blocks and `spawn` over amp v3
@@ -272,9 +275,8 @@ crossing it, a spawn body mutating an outer variable, and `sleep()`/`usleep()` i
 phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] # type-check and compile .phn → .php; no paths: phaenon.json
 phn check [--json] [--no-deprecations] [--exclude PATH]... path...              # type-check .phn (and .php) files
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
-phn stdlib --out DIR [--check]                         # the compiled stdlib (Seq, Map, Str, Bytes, Debug/…), as phaenon/runtime ships it
+phn stdlib --out DIR [--check]                         # the compiled stdlib (Bytes, Debug/…), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
-phn stdlib --plugin-stubs DIR  # the PhpStorm plugin's editor-only pseudo-classes (ListMethods.php, …) from the same sources
 phn lex   [--php] file                    # token stream
 phn print [--php] file                    # parse and pretty-print
 ```
