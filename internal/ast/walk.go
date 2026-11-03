@@ -373,6 +373,27 @@ func Inspect(n Node, f func(Node) bool) {
 	}
 }
 
+// InspectScope is Inspect confined to one variable scope, for the passes
+// that ask which variables of a scope some code reads or writes. A class
+// declared under n, named or anonymous, has none of them: its attributes,
+// members, property defaults and method bodies are not visited, except an
+// anonymous class's constructor arguments, which are evaluated where the
+// class is instantiated — `new class ($a) { public int $b = 1; }` reads $a
+// and has no $b. f is not called for the class itself. Closures and arrow
+// functions are left to f: whether their bodies belong to the scope is the
+// pass's rule.
+func InspectScope(n Node, f func(Node) bool) {
+	var visit func(Node) bool
+	visit = func(m Node) bool {
+		if c, ok := m.(*ClassDecl); ok {
+			Inspect(c.Args, visit)
+			return false
+		}
+		return f(m)
+	}
+	Inspect(n, visit)
+}
+
 // isNil reports whether n is nil or an interface holding a typed nil pointer
 // (an optional child such as Arg.Name or New.Anon that was not written).
 func isNil(n Node) bool {

@@ -220,7 +220,8 @@ func mentionsClass(t types.Type, class string) bool {
 // order: `++`/`--`, compound assignments (`+=`, `??=`, …), element writes
 // (`$x[] = …`, `$x['k'] = …`), and a plain `$x = …` whose right-hand side
 // reads $x. A plain assignment of a fresh value is a rebinding, not a
-// mutation. Nested functions and classes are their own scopes.
+// mutation. Nested functions and classes are their own scopes; an
+// anonymous class's constructor arguments are the body's (ast.InspectScope).
 func mutatedVariables(body []ast.Stmt) []*ast.Variable {
 	var out []*ast.Variable
 	var root func(e ast.Expr) *ast.Variable
@@ -234,7 +235,7 @@ func mutatedVariables(body []ast.Stmt) []*ast.Variable {
 		return nil
 	}
 	for _, s := range body {
-		ast.Inspect(s, func(n ast.Node) bool {
+		ast.InspectScope(s, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.Assign:
 				v := root(n.Target)
@@ -249,7 +250,7 @@ func mutatedVariables(body []ast.Stmt) []*ast.Variable {
 				if v := root(n.Expr); v != nil {
 					out = append(out, v)
 				}
-			case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl, *ast.FunctionDecl, *ast.Spawn:
+			case *ast.Closure, *ast.ArrowFunc, *ast.FunctionDecl, *ast.Spawn:
 				return false
 			}
 			return true
@@ -258,16 +259,17 @@ func mutatedVariables(body []ast.Stmt) []*ast.Variable {
 	return out
 }
 
-// readsVariable reports whether e mentions $name (nested closures' bodies aside).
+// readsVariable reports whether e mentions $name (nested closures' bodies
+// and classes aside, an anonymous class's constructor arguments included).
 func readsVariable(e ast.Expr, name string) bool {
 	found := false
-	ast.Inspect(e, func(n ast.Node) bool {
+	ast.InspectScope(e, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.Variable:
 			if n.Name == name {
 				found = true
 			}
-		case *ast.Closure, *ast.ClassDecl:
+		case *ast.Closure:
 			return false
 		}
 		return !found

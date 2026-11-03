@@ -472,10 +472,12 @@ func stableReceiver(e ast.Expr) bool {
 }
 
 // writes reports an expression that assigns: written inside a closure, the
-// assignment would change the closure's copy of the variable.
+// assignment would change the closure's copy of the variable. What an
+// anonymous class's methods assign is theirs; its constructor arguments
+// are the expression's (ast.InspectScope).
 func writes(e ast.Expr) bool {
 	found := false
-	ast.Inspect(e, func(n ast.Node) bool {
+	ast.InspectScope(e, func(n ast.Node) bool {
 		switch n.(type) {
 		case *ast.Assign, *ast.IncDec, *ast.Yield, *ast.YieldFrom:
 			found = true
@@ -488,10 +490,11 @@ func writes(e ast.Expr) bool {
 }
 
 // clash returns a variable the expression reads that has the name of one
-// of the closure's parameters.
+// of the closure's parameters. An anonymous class's properties and method
+// bodies read none: only its constructor arguments are the expression's.
 func clash(e ast.Expr, params map[string]bool) string {
 	name := ""
-	ast.Inspect(e, func(n ast.Node) bool {
+	ast.InspectScope(e, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.Variable:
 			if params[n.Name] && name == "" {
