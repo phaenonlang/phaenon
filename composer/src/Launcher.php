@@ -8,9 +8,10 @@ namespace Phaenon\Composer;
  * vendor/bin/phn: runs the phn binary with the launcher's arguments, standard streams and exit
  * status.
  *
- * The binary is PHN_BINARY, otherwise the one the plugin installed in the package. When neither is
- * there, as after an install with --no-plugins, the launcher fetches it as the plugin would: the
- * same pinned checksum, the root composer.json's binary-url, Composer's cache.
+ * The binary is PHN_BINARY, otherwise a checkout's own build, otherwise the one the plugin
+ * installed in the package. When that is missing too, as after an install with --no-plugins, the
+ * launcher fetches it as the plugin would: the same pinned checksum, the root composer.json's
+ * binary-url, Composer's cache.
  */
 final class Launcher
 {
@@ -53,7 +54,11 @@ final class Launcher
         }
         // This file is composer/src/Launcher.php in the installed package.
         $packageDir = \dirname(__DIR__, 2);
-        $installed = BinaryResolver::installedPath($packageDir, Platform::current());
+        $build = BinaryResolver::checkoutBuild($packageDir);
+        if ($build !== null) {
+            return $build;
+        }
+        $installed = BinaryResolver::installedPath($packageDir);
         // The plugin checked the binary against the pinned checksum when it put it there, and
         // Composer replaces the package directory with each version. Hashing 9 MB on every run
         // would add some 45 ms to each command.
@@ -71,7 +76,7 @@ final class Launcher
             },
         );
 
-        return $resolver->install();
+        return $resolver->resolve();
     }
 
     /**

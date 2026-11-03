@@ -62,16 +62,12 @@ final readonly class Platform
         return $this->os . '-' . $this->arch;
     }
 
-    public function isWindows(): bool
-    {
-        return $this->os === 'windows';
-    }
-
     /**
-     * The installed binary's file name.
+     * The binary's file name in bin/ on the platform PHP runs on, released for or not: a
+     * checkout's own build is named the same way.
      */
-    public function executable(): string
+    public static function executableName(): string
     {
-        return $this->isWindows() ? 'phn.exe' : 'phn';
+        return PHP_OS_FAMILY === 'Windows' ? 'phn.exe' : 'phn';
     }
 }
