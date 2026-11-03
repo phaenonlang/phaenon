@@ -1,0 +1,53 @@
+// targets: 8.5, 8.6
+// Pipelines as phn migrate writes them (design/tooling.md §8.1), compiled
+// for PHP 8.5 (pipes.php: the partial applications lowered as
+// design/php-versions.md §5.3 says) and for PHP 8.6 (pipes.8.6.php).
+
+final class User {
+    fun __construct(public ?string $email) {}
+}
+
+final class Log {
+    /** @var list<string> */
+    public array $lines = [];
+
+    fun line(string $s): void {
+        $this->lines[] = $s;
+    }
+}
+
+fun trace(string $label, string $value): string {
+    echo "eval $label\n";
+    return $value;
+}
+
+// Closures bound before and after the piped value.
+fun emails(list<User> $users): list<string> => $users
+    |> array_map(fn (User $u): ?string => $u->email, ?)
+    |> array_filter(?, fn (?string $e): bool => $e !== null)
+    |> array_values(...);
+
+// Literal bound arguments and first-class callables.
+fun encode(map<string, int> $parts): string => $parts
+    |> json_encode(?, \JSON_THROW_ON_ERROR)
+    |> base64_encode(...)
+    |> strtr(?, '+/', '-_')
+    |> rtrim(?, '=');
+
+// A variable bound after the piped value, a method stage.
+fun report(Log $log, list<string> $rows, string $what): void {
+    $rows
+        |> count(...)
+        |> sprintf('%d %s published.', ?, $what)
+        |> $log->line(...);
+}
+
+// The head is the innermost call: it runs first, as it did nested.
+fun traced(): string => trace('head', ' x ') |> trim(...) |> strtoupper(...);
+
+echo implode(',', emails([new User('a@x'), new User(null), new User('b@x')])), "\n";
+echo encode(['a' => 1, 'b' => 2]), "\n";
+$log = new Log();
+report($log, ['x', 'y'], 'anchors');
+echo implode('|', $log->lines), "\n";
+echo traced(), "\n";

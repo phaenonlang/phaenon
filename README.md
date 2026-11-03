@@ -65,7 +65,7 @@ output whose source is gone is removed. `exclude` names the paths the checker le
 (fixtures another analyser owns); `phn build` compiles them all the same.
 
 ```sh
-phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function` → `fun`, canonical layout
+phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function` → `fun`, nested calls as |> pipelines, canonical layout
 phn build                      # the roots of phaenon.json → their outputs
 phn build --check              # CI: fail when an output is missing, stale or has no source
 phn check                      # type-check the roots, minus "exclude"
@@ -125,15 +125,33 @@ without a description becomes `throws X` after the return type, several of them 
 (`throws A|B`); a `@throws` with prose stays. It also runs on `.phn` files, so a project migrated
 earlier can be lifted later; a declaration already written in Phaenon keeps its type then.
 
+Next it writes chains of nested calls as pipelines (`design/tooling.md` §8.1): PHP 8.5's `|>`
+with PHP 8.6's partial application, which the compiler lowers for an 8.5 target
+(`design/php-versions.md` §5.3). `array_values(array_filter(array_map(fn ($u) => $u->email,
+$users), fn ($e) => $e !== null))` becomes `$users |> array_map(fn ($u) => $u->email, ?) |>
+array_filter(?, fn ($e) => $e !== null) |> array_values(...)`, one stage per line from three
+stages (or past 120 columns). The head is the innermost call's one argument that is not a literal,
+a constant or a closure, else that call; a stage that takes only the piped value is `f(...)`, any
+other `f(a, ?)` or `f(name: ?)`. A chain of three calls or more is rewritten — `--pipes=2` from
+two, `--keep-calls` none — and only where the pipeline is exact: the arguments before the nested
+call and a method's receiver are literals, constants, variables or closures the inner calls do not
+assign, the piped parameter is not by reference, nothing is spread, and the callee resolves
+through the program model. Chains in constant expressions and string interpolation, with a
+`compact()`-like call, a comment between the calls, another call beside the nested one, or a
+layout the pipeline would break (an operand, a stage past 120 columns, one stage per line in the
+middle of a line) stay calls. Migrate type-checks the files before and after the rewrite and gives
+a file its calls back when its findings, or the type of any expression in it, change; the summary
+counts the chains written as pipelines and those left as calls, by reason.
+
 Then it lays the code out in the canonical style (`design/functions.md` §5): the opening brace of a
 function, method or closure moves up to the declaration's line, while a class, interface, trait or
 enum keeps its brace on a line of its own (moved back down where an earlier migrate moved it up), a
 docblock with one line of content becomes one line, and a body that is exactly one `return expr;`
 — or one expression statement under `void` or `never` — becomes `=> expr;`, wrapped after the
 arrow when the line would pass 120 columns. A body with a comment inside stays a block, as do
-constructors, destructors and generators. These are the only edits that change a file's line count
-(beside docblock lines whose tags were lifted); `--keep-layout` skips them. Re-running migrate on
-its own output changes nothing.
+constructors, destructors and generators. These and the pipelines are the only edits that change
+a file's line count (beside docblock lines whose tags were lifted); `--keep-layout` skips the
+layout. Re-running migrate on its own output changes nothing.
 
 The generated file is laid out as PSR-12 wants it wherever the compiler writes or rewrites
 something: the open tag, a marker and `declare(strict_types=1)` on lines of their own (Phaenon is
@@ -274,7 +292,7 @@ crossing it, a spawn body mutating an outer variable, and `sleep()`/`usleep()` i
 ```sh
 phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] # type-check and compile .phn → .php; no paths: phaenon.json
 phn check [--json] [--no-deprecations] [--exclude PATH]... path...              # type-check .phn (and .php) files
-phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
+phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Bytes, Debug/…), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
 phn lex   [--php] file                    # token stream
@@ -305,8 +323,9 @@ numbers included. ≈2.5 min each. `PHAENON_PHPT_FILTER=ext/standard/tests` narr
 corpus subset; `PHAENON_SHOW_DIFFS=n` controls how many differences are listed.
 
 `internal/migrate/testdata/lift/*.php` are migrated and compared with the `.phn` and `.notes`
-next to them (`PHAENON_UPDATE=1` rewrites them); the output must parse, lift to itself and compile
-to the signatures the input declared. `testdata/lift/vendor/` (PSR-4 `Acme\`) holds the parents
+next to them (`PHAENON_UPDATE=1` rewrites them); the output must parse, migrate to itself and
+compile to the signatures the input declared. With `PHAENON_PHP86`, the `pipes*` fixtures run as
+written and compiled for 8.5 and 8.6, and must print the same. `testdata/lift/vendor/` (PSR-4 `Acme\`) holds the parents
 declared in other files, vendor PHP and project `.phn`.
 
 `internal/emit/testdata/*.phn` are compiled through the checker and the emitter and compared

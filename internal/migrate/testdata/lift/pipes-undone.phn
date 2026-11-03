@@ -1,0 +1,12 @@
+// The check undoes a file's pipelines when a finding changes: the ignore
+// comment silences the next line, and the pipeline would move the bad
+// argument to a line of its own. The first chain goes back with it.
+
+fun good(string $s): string => strtoupper(trim(str_repeat($s, 2)));
+
+fun bad(string $s): string {
+    // @phpstan-ignore argument.type
+    return strtoupper(trim(str_repeat($s, '2')));
+}
+
+echo good(' a '), "\n";

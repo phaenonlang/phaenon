@@ -1,0 +1,16 @@
+// Pipelines and partial applications already written stay as they are:
+// migrate on its own output changes nothing.
+
+fun shout(string $s): string => $s |> trim(...) |> strtoupper(...);
+
+fun doubled(list<int> $xs): string => $xs
+    |> array_map(fn (int $x): int => $x * 2, ?)
+    |> implode(',', ?)
+    |> sprintf('[%s]', ?);
+
+// A chain inside a stage stays: one stage per line, its pipeline would end
+// in the middle of the outer one.
+fun inner(list<string> $xs): string
+    => $xs |> array_map(fn (string $x): string => strtoupper(trim(str_repeat($x, 2))), ?) |> implode('/', ?);
+
+echo shout(' a '), ' ', doubled([1, 2]), ' ', inner([' p', 'q ']), "\n";

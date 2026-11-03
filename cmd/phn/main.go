@@ -54,11 +54,14 @@ usage:
                                                            type-check and compile .phn files to .php
   phn check [--json] [--no-deprecations] [--exclude PATH]... [<path>...]
                                                            type-check .phn files, write nothing
-  phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--php X.Y] <path>...
+  phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] <path>...
                                                            rewrite .php files as .phn; lift generic docblocks and bare
-                                                           @throws into syntax, function into fun; lay the code out
-                                                           (function braces up, class-like braces on their own line,
-                                                           one-line docblocks, => bodies) unless --keep-layout;
+                                                           @throws into syntax, function into fun; write chains of
+                                                           three nested calls or more as |> pipelines unless
+                                                           --keep-calls (--pipes=2: from two), undone in a file whose
+                                                           types or findings they change; lay the code out (function
+                                                           braces up, class-like braces on their own line, one-line
+                                                           docblocks, => bodies) unless --keep-layout;
                                                            --php writes the target into phaenon.json
   phn stdlib [--out DIR] [--concurrent-out DIR] [--check]
                                                            write the compiled phaenon/runtime sources (Bytes.php,
@@ -380,44 +383,11 @@ func typeCheck(files []string, target phpversion.Version, opts checker.Options) 
 // the project file's roots) and the files themselves, .php in PHP mode. A
 // file that does not parse is reported as P1000 and left out.
 func loadProgram(files []string, target phpversion.Version, checked bool) (*program.Program, []checker.Diagnostic) {
-	p := program.New()
-	p.SetTarget(target)
-	if err := p.LoadStubs(); err != nil {
-		fail("stdlib: %v", err)
-	}
-	var diags []checker.Diagnostic
+	anchor := ""
 	if len(files) > 0 {
-		// The extensions the local php has loaded beyond php-src's: php is
-		// the oracle for what exists (PHN_PHP names another binary).
-		php := os.Getenv("PHN_PHP")
-		if php == "" {
-			php = "php"
-		}
-		cacheDir, err := os.UserCacheDir()
-		if err != nil {
-			cacheDir = os.TempDir()
-		}
-		embedded := stdlib.EmbeddedExtensions()
-		if _, err := p.LoadExtensions(php, cacheDir, func(lower string) bool { return embedded[lower] }); err != nil {
-			diags = append(diags, checker.Diagnostic{File: files[0], Line: 1, Col: 1, Severity: checker.Warning, Code: "P4007",
-				Message: "PHP extensions could not be read (" + err.Error() + "); only php-src's extensions are known"})
-		}
-		// php-src's library is embedded for every target; the other
-		// extensions are read from php, which then must be as new as the
-		// target (design/php-versions.md §6).
-		if v, err := phpversion.Parse(releaseLine(p.ExtensionsPHP())); err == nil && v.Less(target) {
-			diags = append(diags, checker.Diagnostic{File: files[0], Line: 1, Col: 1, Severity: checker.Warning, Code: checker.P4012.ID,
-				Message: fmt.Sprintf("%s is PHP %s, older than the target %s: the extensions it loads are known as they are on PHP %s (PHN_PHP names another php)",
-					php, p.ExtensionsPHP(), target, v)})
-		}
-		if l, err := program.FindComposer(filepath.Dir(files[0])); err == nil {
-			l.Sources = projectSources
-			p.AddLoader(l)
-		} else {
-			diags = append(diags, checker.Diagnostic{File: files[0], Line: 1, Col: 1, Severity: checker.Warning, Code: "P4005",
-				Message: "no vendor/composer directory found above " + files[0] + "; only the PHP standard library is known"})
-		}
+		anchor = files[0]
 	}
+	p, diags := newProgram(anchor, target)
 	for _, in := range files {
 		src, err := os.ReadFile(in)
 		if err != nil {
@@ -433,6 +403,52 @@ func loadProgram(files []string, target phpversion.Version, checked bool) (*prog
 				line = pe.Line
 			}
 			diags = append(diags, checker.Diagnostic{File: in, Line: line, Col: 1, Severity: checker.Error, Code: "P1000", Message: err.Error()})
+		}
+	}
+	return p, diags
+}
+
+// newProgram is a program with the standard library, the extensions the
+// local php loads and, found from anchor (a file of the project), the
+// vendor code; without an anchor, the standard library alone. diags are
+// the warnings about what could not be read.
+func newProgram(anchor string, target phpversion.Version) (*program.Program, []checker.Diagnostic) {
+	p := program.New()
+	p.SetTarget(target)
+	if err := p.LoadStubs(); err != nil {
+		fail("stdlib: %v", err)
+	}
+	var diags []checker.Diagnostic
+	if anchor != "" {
+		// The extensions the local php has loaded beyond php-src's: php is
+		// the oracle for what exists (PHN_PHP names another binary).
+		php := os.Getenv("PHN_PHP")
+		if php == "" {
+			php = "php"
+		}
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			cacheDir = os.TempDir()
+		}
+		embedded := stdlib.EmbeddedExtensions()
+		if _, err := p.LoadExtensions(php, cacheDir, func(lower string) bool { return embedded[lower] }); err != nil {
+			diags = append(diags, checker.Diagnostic{File: anchor, Line: 1, Col: 1, Severity: checker.Warning, Code: "P4007",
+				Message: "PHP extensions could not be read (" + err.Error() + "); only php-src's extensions are known"})
+		}
+		// php-src's library is embedded for every target; the other
+		// extensions are read from php, which then must be as new as the
+		// target (design/php-versions.md §6).
+		if v, err := phpversion.Parse(releaseLine(p.ExtensionsPHP())); err == nil && v.Less(target) {
+			diags = append(diags, checker.Diagnostic{File: anchor, Line: 1, Col: 1, Severity: checker.Warning, Code: checker.P4012.ID,
+				Message: fmt.Sprintf("%s is PHP %s, older than the target %s: the extensions it loads are known as they are on PHP %s (PHN_PHP names another php)",
+					php, p.ExtensionsPHP(), target, v)})
+		}
+		if l, err := program.FindComposer(filepath.Dir(anchor)); err == nil {
+			l.Sources = projectSources
+			p.AddLoader(l)
+		} else {
+			diags = append(diags, checker.Diagnostic{File: anchor, Line: 1, Col: 1, Severity: checker.Warning, Code: "P4005",
+				Message: "no vendor/composer directory found above " + anchor + "; only the PHP standard library is known"})
 		}
 	}
 	return p, diags
@@ -520,10 +536,19 @@ func migrateCmd(args []string) {
 	keepDoc := fs.Bool("keep-docblocks", false, "leave generic docblocks as they are")
 	keepPublic := fs.Bool("keep-public", false, "write `public fun` and keep `public` before private(set) (Phaenon implies it)")
 	keepLayout := fs.Bool("keep-layout", false, "keep braces, docblocks and bodies as they are (no canonical layout)")
+	keepCalls := fs.Bool("keep-calls", false, "keep nested calls as they are (no pipelines)")
+	pipes := fs.Int("pipes", 3, "write chains of this many nested calls or more as pipelines (2 or more)")
 	phpTarget := fs.String("php", "", "write this target (X.Y) into phaenon.json, creating it if needed")
 	fs.Parse(args)
 	if fs.NArg() == 0 && *phpTarget == "" {
 		usage()
+	}
+	if *pipes < 2 {
+		fail("phn migrate --pipes: a chain is two calls or more (--keep-calls writes none)")
+	}
+	minCalls := *pipes
+	if *keepCalls {
+		minCalls = 0
 	}
 	if *phpTarget != "" {
 		v, err := phpversion.Parse(*phpTarget)
@@ -546,6 +571,11 @@ func migrateCmd(args []string) {
 		}
 	}
 	files := collect(fs.Args(), excluded, ".php", ".phn")
+	proj := loadProject()
+	if proj != nil {
+		projectSources = proj.sources()
+	}
+	target := projectTarget(proj, fs.Args()).Version
 	// The lift predicts the override-erasure rule, which needs the method
 	// a declaration overrides: the program model of the files as they are
 	// before the migration, the project's other files and the vendor code
@@ -553,10 +583,6 @@ func migrateCmd(args []string) {
 	// .phn declares the same classes.
 	var prog *program.Program
 	if !*keepDoc {
-		proj := loadProject()
-		if proj != nil {
-			projectSources = proj.sources()
-		}
 		var model []string
 		for _, in := range files {
 			if strings.HasSuffix(in, ".php") {
@@ -569,37 +595,39 @@ func migrateCmd(args []string) {
 			}
 			model = append(model, in)
 		}
-		prog, _ = loadProgram(model, projectTarget(proj, fs.Args()).Version, false)
+		prog, _ = loadProgram(model, target, false)
 	}
-	skipped, migrated, lifted, kept := 0, 0, 0, 0
+	// Each file is prepared — tags stripped, docblocks lifted — then all of
+	// them go through the pipes codemod together, which type-checks them
+	// before and after the rewrite, and each is laid out and written.
+	type job struct {
+		in, dst  string
+		src, phn []byte
+		notes    []migrate.Note
+		closeTag bool
+		opts     migrate.Options
+	}
+	var jobs []*job
+	skipped := 0
 	var stats migrate.Stats
-	linesBefore, linesAfter := 0, 0
 	for _, in := range files {
 		src, err := os.ReadFile(in)
 		if err != nil {
 			fail("%v", err)
 		}
-		var phn []byte
-		var notes []migrate.Note
-		opts := migrate.Options{Generics: !*keepDoc, KeepPublic: *keepPublic, Layout: !*keepLayout, Stats: &stats, Program: prog, File: modelFile(prog, in)}
+		j := &job{in: in, dst: in, src: src}
+		j.opts = migrate.Options{Generics: !*keepDoc, KeepPublic: *keepPublic, Layout: !*keepLayout, Stats: &stats, Program: prog, File: modelFile(prog, in)}
 		if strings.HasSuffix(in, ".phn") {
-			phn = src
+			j.phn = src
+			j.opts.KeepLines = true // a .phn keeps its first lines
 			if !*keepDoc {
-				if phn, notes, err = migrate.Lift(src, opts); err != nil {
+				if j.phn, j.notes, err = migrate.Lift(src, j.opts); err != nil {
 					fail("%s: %v", in, err)
 				}
 			}
-			if !*keepLayout {
-				if phn, err = migrate.Layout(phn, &stats); err != nil {
-					fail("%s: %v", in, err)
-				}
-			}
-			if bytes.Equal(phn, src) {
-				continue
-			}
-			lifted++
 		} else {
-			phn, notes, err = migrate.Convert(src, opts)
+			j.dst = strings.TrimSuffix(in, ".php") + ".phn"
+			j.phn, j.notes, j.closeTag, err = migrate.Prepare(src, j.opts)
 			if err != nil {
 				if errors.Is(err, migrate.ErrNotPlainCode) || errors.Is(err, migrate.ErrGenerated) {
 					fmt.Fprintf(os.Stderr, "%s: skipped: %v\n", in, err)
@@ -608,23 +636,43 @@ func migrateCmd(args []string) {
 				}
 				fail("%s: %v", in, err)
 			}
+		}
+		jobs = append(jobs, j)
+	}
+	var report *migrate.PipeReport
+	if minCalls > 0 && len(jobs) > 0 {
+		report = migratePipes(jobs[0].in, target, minCalls, func(yield func(path string, src *[]byte)) {
+			for _, j := range jobs {
+				yield(j.dst, &j.phn)
+			}
+		})
+	}
+	migrated, lifted, kept := 0, 0, 0
+	linesBefore, linesAfter := 0, 0
+	for _, j := range jobs {
+		phn, err := migrate.Finish(j.phn, j.closeTag, j.opts)
+		if err != nil {
+			fail("%s: %v", j.in, err)
+		}
+		if j.dst == j.in {
+			if bytes.Equal(phn, j.src) {
+				continue
+			}
+			lifted++
+		} else {
 			migrated++
 		}
-		for _, n := range notes {
-			fmt.Fprintf(os.Stderr, "%s:%d: %s\n", in, n.Line, n.Msg)
+		for _, n := range j.notes {
+			fmt.Fprintf(os.Stderr, "%s:%d: %s\n", j.in, n.Line, n.Msg)
 			kept++
 		}
-		linesBefore += bytes.Count(src, []byte("\n"))
+		linesBefore += bytes.Count(j.src, []byte("\n"))
 		linesAfter += bytes.Count(phn, []byte("\n"))
-		dst := in
-		if strings.HasSuffix(in, ".php") {
-			dst = strings.TrimSuffix(in, ".php") + ".phn"
-		}
-		if err := os.WriteFile(dst, phn, 0o644); err != nil {
+		if err := os.WriteFile(j.dst, phn, 0o644); err != nil {
 			fail("%v", err)
 		}
-		if dst != in {
-			if err := os.Remove(in); err != nil {
+		if j.dst != j.in {
+			if err := os.Remove(j.in); err != nil {
 				fail("%v", err)
 			}
 		}
@@ -634,6 +682,51 @@ func migrateCmd(args []string) {
 		fmt.Printf("%d @throws lifted, %d bodies written as =>, %d braces moved up, %d class braces moved down, %d empty bodies written as {}, %d docblocks collapsed; %d lines became %d\n",
 			stats.Throws, stats.Arrows, stats.Braces, stats.Down, stats.Empty, stats.Docblocks, linesBefore, linesAfter)
 	}
+	if report != nil {
+		line := fmt.Sprintf("%d chains as pipelines, %d left as calls", report.Pipelines, report.LeftCalls())
+		if r := report.Reasons(); r != "" {
+			line += " (" + r + ")"
+		}
+		fmt.Println(line)
+	}
+}
+
+// migratePipes runs the pipes codemod over the prepared files, which
+// sources yields with their destination paths, and replaces each source
+// with its rewrite. The program models are built as check builds them,
+// from anchor, with the sources in memory.
+func migratePipes(anchor string, target phpversion.Version, minCalls int, sources func(yield func(path string, src *[]byte))) *migrate.PipeReport {
+	var in []migrate.PipeFile
+	var srcs []*[]byte
+	sources(func(path string, src *[]byte) {
+		in = append(in, migrate.PipeFile{Path: path, Src: *src})
+		srcs = append(srcs, src)
+	})
+	load := func(files map[string][]byte, checked map[string]bool) (*program.Program, error) {
+		p, _ := newProgram(anchor, target)
+		paths := make([]string, 0, len(files))
+		for path := range files {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		for _, path := range paths {
+			if _, err := p.AddFile(path, files[path], lexer.ModePhaenon, checked[path]); err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+		}
+		return p, nil
+	}
+	out, rep, err := migrate.Pipes(in, migrate.PipeOptions{MinCalls: minCalls, Load: load})
+	if err != nil {
+		fail("phn migrate: %v", err)
+	}
+	for i, src := range srcs {
+		*src = out[i]
+	}
+	for i, n := range rep.Undone {
+		fmt.Fprintf(os.Stderr, "%s: %s\n", rep.UndoneIn[i], n.Msg)
+	}
+	return rep
 }
 
 // modelFile returns the file at path in the program model, nil without one.

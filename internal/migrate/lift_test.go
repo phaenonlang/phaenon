@@ -3,7 +3,9 @@ package migrate
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/emit"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
@@ -32,10 +35,71 @@ func liftModel(t *testing.T, path string, src []byte, mode lexer.Mode) (*program
 	return p, f
 }
 
+// pipeLoad builds the program model of a pipes run over fixtures: the
+// stubs, the vendor fixtures, the sources.
+func pipeLoad(srcs map[string][]byte, checked map[string]bool) (*program.Program, error) {
+	p := program.New()
+	if err := p.LoadStubs(); err != nil {
+		return nil, err
+	}
+	p.AddLoader(program.DirLoader{Prefix: "Acme\\", Dir: filepath.Join("testdata", "lift", "vendor", "Acme")})
+	paths := make([]string, 0, len(srcs))
+	for path := range srcs {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if _, err := p.AddFile(path, srcs[path], lexer.ModePhaenon, checked[path]); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	return p, nil
+}
+
+// fixturePipes is the pipes threshold a fixture's name asks for: off in
+// one named keep-calls (--keep-calls), 2 in one named pipes-2 (--pipes=2),
+// 3 otherwise.
+func fixturePipes(name string) int {
+	switch {
+	case strings.HasSuffix(name, "keep-calls"):
+		return 0
+	case strings.HasSuffix(name, "pipes-2"):
+		return 2
+	}
+	return 3
+}
+
+// migrateFixture runs what phn migrate runs on a file: Prepare, Pipes,
+// Finish. The notes are the lift's, then the pipes' at the lines of the
+// lifted source.
+func migrateFixture(t *testing.T, in, dst string, src []byte, layout bool, pipes int) ([]byte, []Note) {
+	t.Helper()
+	p, f := liftModel(t, in, src, lexer.ModePHP)
+	opts := Options{Generics: true, Layout: layout, Program: p, File: f}
+	pre, notes, closeTag, err := Prepare(src, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	piped, rep, err := Pipes([]PipeFile{{Path: dst, Src: pre}}, PipeOptions{MinCalls: pipes, Load: pipeLoad})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Finish(piped[0], closeTag, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes = append(notes, rep.Notes[dst]...)
+	notes = append(notes, rep.Undone...)
+	return got, notes
+}
+
 // TestLift converts every testdata/lift/*.php as phn migrate does — tags
-// lifted, the canonical layout applied, except in a fixture named
+// lifted, chains of three calls or more written as pipelines (see
+// fixturePipes), the canonical layout applied, except in a fixture named
 // keep-layout — and compares the result with the .phn beside it and the
 // notes with the .notes file. PHAENON_UPDATE=1 rewrites the expectations.
+// With PHAENON_PHP86, a fixture named pipes* runs as written and compiled
+// from its .phn, under PHP 8.6: they must print the same.
 func TestLift(t *testing.T) {
 	inputs, _ := filepath.Glob("testdata/lift/*.php")
 	if len(inputs) == 0 {
@@ -44,25 +108,26 @@ func TestLift(t *testing.T) {
 	for _, in := range inputs {
 		name := strings.TrimSuffix(filepath.Base(in), ".php")
 		layout := !strings.HasSuffix(name, "keep-layout")
+		pipes := fixturePipes(name)
 		t.Run(name, func(t *testing.T) {
 			src, err := os.ReadFile(in)
 			if err != nil {
 				t.Fatal(err)
 			}
-			p, f := liftModel(t, in, src, lexer.ModePHP)
-			got, notes, err := Convert(src, Options{Generics: true, Layout: layout, Program: p, File: f})
-			if err != nil {
-				t.Fatal(err)
-			}
+			wantFile := strings.TrimSuffix(in, ".php") + ".phn"
+			notesFile := strings.TrimSuffix(in, ".php") + ".notes"
+			got, notes := migrateFixture(t, in, wantFile, src, layout, pipes)
 			if _, err := parser.Parse(got, lexer.ModePhaenon); err != nil {
 				t.Fatalf("output does not parse: %v\n%s", err, got)
 			}
 			var b strings.Builder
+			lifted := 0
 			for _, n := range notes {
 				fmt.Fprintf(&b, "%d: %s\n", n.Line, n.Msg)
+				if !strings.Contains(n.Msg, "left as calls") && !strings.Contains(n.Msg, "pipelines undone") {
+					lifted++
+				}
 			}
-			wantFile := strings.TrimSuffix(in, ".php") + ".phn"
-			notesFile := strings.TrimSuffix(in, ".php") + ".notes"
 			if os.Getenv("PHAENON_UPDATE") != "" {
 				os.WriteFile(wantFile, got, 0o644)
 				os.WriteFile(notesFile, []byte(b.String()), 0o644)
@@ -76,12 +141,20 @@ func TestLift(t *testing.T) {
 			if string(wantNotes) != b.String() {
 				t.Errorf("notes differ from %s (PHAENON_UPDATE=1 to rewrite):\n%s", notesFile, b.String())
 			}
-			// Lifting is idempotent: the output has nothing left to lift,
-			// nor to lay out.
-			p, f = liftModel(t, wantFile, got, lexer.ModePhaenon)
+			// Migrating is idempotent: the output has nothing left to lift,
+			// no chain left to rewrite, nothing to lay out.
+			p, f := liftModel(t, wantFile, got, lexer.ModePhaenon)
 			again, notes2, err := Lift(got, Options{Generics: true, Program: p, File: f})
 			if err != nil {
 				t.Fatal(err)
+			}
+			piped, rep, err := Pipes([]PipeFile{{Path: wantFile, Src: again}}, PipeOptions{MinCalls: pipes, Load: pipeLoad})
+			if err != nil {
+				t.Fatal(err)
+			}
+			again = piped[0]
+			if rep.Pipelines > 0 {
+				t.Errorf("second run wrote %d more pipelines", rep.Pipelines)
 			}
 			if layout {
 				if again, err = Layout(again, nil); err != nil {
@@ -89,13 +162,18 @@ func TestLift(t *testing.T) {
 				}
 			}
 			if string(again) != string(got) {
-				t.Errorf("second lift changed the output:\n%s", again)
+				t.Errorf("second run changed the output:\n%s", again)
 			}
-			if len(notes2) != len(notes) {
-				t.Errorf("second lift gave %d notes, first %d", len(notes2), len(notes))
+			if len(notes2) != lifted {
+				t.Errorf("second lift gave %d notes, first %d", len(notes2), lifted)
+			}
+			if strings.HasPrefix(name, "pipes") {
+				sameOutput(t, in, wantFile, got)
 			}
 			// The lift keeps what PHP sees: compiled, the output declares
-			// the native types the input declared.
+			// the native types the input declared. Checked, so that the
+			// emitter has the checker's records of partial applications.
+			f.Checked = true
 			checker.New(p, checker.Options{}).Check()
 			compiled, err := emit.File(got, emit.Options{SourceName: wantFile, StrictTypes: true, Program: p, File: f})
 			if err != nil {
@@ -106,6 +184,77 @@ func TestLift(t *testing.T) {
 			}
 		})
 	}
+}
+
+// sameOutput runs a fixture as written and its migrated .phn compiled for
+// PHP 8.6 and for PHP 8.5 under PHAENON_PHP86, and the original and the 8.5
+// output under the php on PATH when it is an 8.5: each pair must print the
+// same, so a pipeline behaves as the nested calls did, evaluation order
+// included.
+func sameOutput(t *testing.T, in, phnPath string, phn []byte) {
+	t.Helper()
+	php86 := os.Getenv("PHAENON_PHP86")
+	if php86 == "" {
+		return
+	}
+	run := func(php, path string) string {
+		out, err := exec.Command(php, "-n", "-d", "display_errors=1", "-d", "error_reporting=-1", path).CombinedOutput()
+		if err != nil {
+			t.Errorf("%s %s: %v\n%s", php, path, err, out)
+		}
+		return string(out)
+	}
+	dir := t.TempDir()
+	compiled := map[phpversion.Version]string{}
+	for _, target := range []phpversion.Version{phpversion.PHP85, phpversion.PHP86} {
+		p, err := pipeLoad(map[string][]byte{phnPath: phn}, map[string]bool{phnPath: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.SetTarget(target)
+		f := p.File(phnPath)
+		for _, d := range checker.New(p, checker.Options{}).Check() {
+			// P2112 is the by-reference refusal's own call, a call result
+			// passed by reference, which PHP runs with a reference-returning
+			// function.
+			if d.File == phnPath && d.Severity == checker.Error && d.Code != checker.P2112.ID {
+				t.Errorf("checker (target %s): %s:%d: %s: %s", target, d.File, d.Line, d.Code, d.Message)
+			}
+		}
+		out, err := emit.File(phn, emit.Options{SourceName: phnPath, StrictTypes: true, Program: p, File: f})
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, target.String()+".php")
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		compiled[target] = path
+	}
+	want := run(php86, in)
+	if want == "" {
+		t.Errorf("%s prints nothing", in)
+	}
+	for _, target := range []phpversion.Version{phpversion.PHP86, phpversion.PHP85} {
+		if got := run(php86, compiled[target]); got != want {
+			t.Errorf("compiled for %s, under PHP 8.6, prints differently from the original:\n--- got\n%s\n--- want\n%s", target, got, want)
+		}
+	}
+	t.Logf("%s: %d lines, the same under PHP 8.6 as written and compiled for 8.5 and 8.6", in, strings.Count(want, "\n"))
+	php, _ := exec.LookPath("php")
+	if php == "" {
+		return
+	}
+	if v, err := exec.Command(php, "-n", "-r", "echo PHP_MAJOR_VERSION, '.', PHP_MINOR_VERSION;").Output(); err != nil || string(v) != "8.5" {
+		return
+	}
+	if err := exec.Command(php, "-n", "-l", in).Run(); err != nil {
+		return // the fixture is written in PHP 8.6
+	}
+	if got, want := run(php, compiled[phpversion.PHP85]), run(php, in); got != want {
+		t.Errorf("compiled for 8.5, under PHP 8.5, prints differently from the original:\n--- got\n%s\n--- want\n%s", got, want)
+	}
+	t.Logf("%s: the same under PHP 8.5 as written and compiled for 8.5", in)
 }
 
 // signatureDiff compares the native signatures of the functions and methods
