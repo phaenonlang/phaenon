@@ -409,29 +409,27 @@ plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
 - Core's call on `bool|string|Redis` (`RedisIdempotencyStore.phn:66`) is now `P2105`, one of the
   eleven deliberate findings: PHPStan is silent on it because of its phpredis stubs, the overlay
   types the chain as `bool|string|Redis`.
-- **The `pipes` codemod** (compiler `ecbde14`, `a8230c1`; `../design/tooling.md` §8.1) is merged
-  and on by default, not yet applied to the dogfood trees. Measured on copies (2026-11-03,
-  `~/.claude/jobs/c6e329b2/tmp/pipes-measure/`, `run.sh` re-measures): core 156 chains rewritten,
-  142 left; tq-cli 851 and 459; none undone, `phn check` unchanged, idempotent. Open:
-  - **The 8.5 output of a pipeline reads poorly**: a stage with a bound argument becomes an arrow
-    function, or a long-form closure with an inline `@var` where PHP cannot declare the type
-    (`list<User>`); a stage with literal bound arguments after the first is wrapped although
-    `php-versions.md` §5.3 says direct; a head and first stage on different lines compile to
-    `return ` + a line at column 0. Design question: lower a pipeline whose stages are all exact
-    as direct calls back to the nested calls.
-  - ~~**Bug**: an anonymous class in a bound argument makes the 8.5 closure capture its property
-    names (`new class { public int $a = 1; }` → `use ($a)`, "Undefined variable"). Migrate
-    refuses such stages for 8.5 until it is fixed.~~ — done 2026-11-03, `0c1ecf9`, `a22893c`,
-    `8b4495b`: `ast.InspectScope` is the one walk of a variable scope (an anonymous class gives
-    its constructor arguments, nothing of its members), used by the partial-application capture
-    and refusals, the `concurrently`/`spawn` use clause (which had missed the constructor
-    arguments) and P2604, and the codemod's rules; the codemod's refusal is gone. Still skipping
-    anonymous classes whole: the yield and goto walks (`bodyHasYield`, `firstYield`,
-    `noCrossing`), so a `yield` in a constructor argument goes unseen.
-  - **Rule questions**: property receivers as stable (92 of tq-cli's 239 evaluation-order
-    refusals are `$this->output->writeln(…)`); chains that follow a non-data argument
-    (`strlen(X) |> substr($subject, ?)`, `sprintf(…, ?) |> Shape::array($perClass, ?)`); an
-    assertion or an output call as the last stage (`actual |> … |> self::assertSame(expected, ?)`).
+- **The `pipes` codemod** (compiler `ecbde14`, `a8230c1`; `../design/tooling.md` §8.1, decisions
+  T11–T13) is merged and on by default. 2026-11-03: the 8.5 output folds (compiler `0b7af16`,
+  `93ed297`: the checker records `File.Folds` with the shared rule of `internal/evalorder`, the
+  emitter writes a folding run as nested calls, `fold.go`); the codemod follows the data and takes
+  hook-free property receivers (`c57c0a0`); the check no longer undoes pipelines over renumbered
+  anonymous classes (`9027c50`, core had lost 23). Applied to the five dogfood trees in their
+  working trees, **not committed** until a maintainer has read the diff (core 72 pipelines,
+  tq-cli 594, mongodb-odm 4; suites, PHPStan, cs green, findings unchanged; core's first run is in
+  `git stash` on its branch). Open:
+  - ~~The 8.5 output of a pipeline reads poorly~~ — done 2026-11-03 (T11).
+  - ~~Anonymous-class capture bug~~ — done 2026-11-03, `0c1ecf9`, `a22893c`, `8b4495b`
+    (`ast.InspectScope`). Still skipping anonymous classes whole: the yield and goto walks
+    (`bodyHasYield`, `firstYield`, `noCrossing`), so a `yield` in a constructor argument goes
+    unseen.
+  - ~~Rule questions~~ — decided 2026-11-03 (T12, T13).
+  - A prefix expression's span ended at its operator (`(string) $n`, `!$x`, `throw $e`): fixed in
+    the parser (`cb5a93b`); the codemod's `fullSpan` workaround is gone.
+  - Single-argument assertions end pipelines (`… |> self::assertFalse(...)`: 22 in core's tests,
+    21 in tq-cli's), which the data rule allows: the value is the first parameter.
+  - A folded run's lines are one hold of the pipeline's first source line in the line map: a
+    breakpoint on a later stage line goes to the next statement.
   - Per-chain notes reach the API (`PipeReport.Notes`) and the goldens, not the CLI.
   - Unconfirmed checker issue: a promoted parameter's `new X()` default, typed while another file
     is checked, resolved `X` in that file's scope (`Ci\Validate\NewSecretReads` against the imported
