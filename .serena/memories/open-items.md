@@ -64,14 +64,16 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 - ~~`?->` on a list / map / string receiver~~ — done 2026-10-30: a guard `null === $x ? null :
   Str::f($x)` when the receiver is a side-effect-free path, `P2519` otherwise
-  (`collections.md` §3.1).
-- ~~A `\Stringable` receiver gets the `Str` methods~~ — done 2026-10-30.
+  (`collections.md` §3.1). Moot since D20 (2026-11-03, `08edf59`): the method syntax is gone,
+  `P2519` is retired.
+- ~~A `\Stringable` receiver gets the `Str` methods~~ — done 2026-10-30; removed by D20.
 - ~~`phn build --no-types`~~ — removed 2026-10-30; `--emit-on-error` builds a file with findings.
 - ~~`phn migrate`: `array{A, B}` → `(A, B)`~~ — done 2026-10-30 (two or more elements; `(A)`
   would read as a cast).
-- The runtime package `../runtime` gets `Seq`, `Map`, `Str`, `Bytes` from `phn stdlib --out
-  src` (the `.phn` sources are the one source; `phn build` cannot compile them, the embedded
-  copy already declares the classes). Pending: the package's tests and a freshness check.
+- ~~The runtime package `../runtime` gets `Seq`, `Map`, `Str`, `Bytes` from `phn stdlib --out
+  src`~~ — since D20 (2026-11-03, runtime `057fcf9`) it holds `Type`, `Bytes` (its six checked
+  conversions) and `Debug`, compiled from `stdlib/runtime/**/*.phn`, with its tests and
+  `TestRuntimePackageFresh`.
 - ~~`Bytes.phn`, the `(bytes)` cast, `P2530`, the overlay's binary producers~~ — done 2026-10-30.
 - ~~`P2516` to an error, `P2518` (`map` key bound)~~ — done 2026-10-30 (`P2516` had been an error
   since the checker landed; the comment said otherwise).
@@ -89,7 +91,8 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - ~~`json_encode(…, JSON_THROW_ON_ERROR)` typed `string|false`~~ — `string` since 2026-10-31.
 - ~~Runtime package review notes~~ — guarded 2026-10-31 in the `.phn` sources: `Str::indexOf`
   answers `null` for an offset outside the string, `Str::replaceAll` throws `ValueError` on an
-  empty search string, `Seq::unique` compares strictly (`../runtime` `619873b`).
+  empty search string, `Seq::unique` compares strictly (`../runtime` `619873b`). The three classes
+  went with D20 (2026-11-03).
 - PSR-3 `log($level)` implementations: `P2516` wants a type; `mixed $level` is the spelling (the
   interface leaves it untyped, so `mixed` is what it is). No compiler change; core's test loggers
   got it 2026-10-31.
@@ -211,8 +214,8 @@ Decisions are in `../design/php-versions.md` §9; these are what the first build
 - In a pipe, a bound argument that writes through a by-reference parameter of a call nested in it
   (`$x |> f(g($m), ?)` with `g(&$m)`) writes the lowered closure's copy; only direct assignments,
   `++`/`--` and `yield` are refused.
-- Method syntax on lists and strings with placeholders (`$names->map(?)`) is not lowered to the
-  `Seq`/`Str` call; in a pipe the stage's method target is kept, outside a pipe nothing is done.
+- ~~Method syntax on lists and strings with placeholders (`$names->map(?)`) is not lowered to the
+  `Seq`/`Str` call; in a pipe the stage's method target is kept, outside a pipe nothing is done.~~ — moot since D20 (2026-11-03): the method syntax is gone.
 - PHP's "named parameter overwrites previous argument" is reported for partial applications
   (`P2010`) but not for ordinary calls.
 - An internal function's `= UNKNOWN` default that `...` or a named argument would need (PHP:
@@ -386,6 +389,27 @@ braces (§7). Left:
 - `../jetbrains/src/test/testData/reflector/*.phn` are older copies of the reflector sources; half
   differ from the tree since D18/D19. Refresh them when the plugin's fixtures are next touched.
 
+## D20 — no method syntax on values that are not objects (2026-11-03)
+
+Decision: `../design/roadmap.md` D20. Compiler `46e4c93`, `08edf59`, `98b663d`; runtime `057fcf9`;
+plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
+- **The plugin's hover for variables**: a variable holding a `list`, `map` or `bytes` reads
+  PhpStorm's `User[]` / `string`; declarations still print as written. The pseudo-classes carried
+  the Phaenon spelling; getting it back needs another marker in the type that is not a class.
+- **`map<K, V>` has no key type in the editor**: PhpStorm holds none for an array, and the
+  pseudo-class's type argument was where it lived.
+- **Pipe-aware completion** in the plugin and the LSP (after `|>`, the functions whose first
+  parameter takes the left side's type, inserted as `f(?, …)`): `../design/tooling.md` §6.1,
+  M6 slice 4. PhpStorm 2025.1 does not parse `|>` (PHP 8.5 language level).
+- **`phn stdlib` deletes no file whose source is gone**: the runtime's `Seq.php`, `Map.php`,
+  `Str.php` were removed by hand (AGENTS.md says so).
+- **The runtime's PHP 8.3 floor** in its composer.json has lost its stated reason
+  (`mb_str_pad`, used by `Str`); align it with the compiler's floor when slice 1 versions the
+  packages.
+- Core's call on `bool|string|Redis` (`RedisIdempotencyStore.phn:66`) is now `P2105`, one of the
+  eleven deliberate findings: PHPStan is silent on it because of its phpredis stubs, the overlay
+  types the chain as `bool|string|Redis`.
+
 ## Small things
 
 - `phn migrate` could rewrite `static function (…) { return …; }` in attribute arguments and constants back
@@ -517,7 +541,9 @@ braces (§7). Left:
 - **A group-use member** used only by an erased construct comes back from Optimize Imports as
   its own statement next to the shrunk group.
 - No Phaenon-only syntax yet: generics, `is` / `as`, `type` aliases show as PHP syntax errors.
-- ~~**M4 ships with editor support for the method syntax**~~ — done 2026-10-31 (`../jetbrains`
+- ~~**M4 ships with editor support for the method syntax**~~ — superseded by D20 (2026-11-03,
+  `../jetbrains` `77b1d1b`: the pseudo-classes, the receiver types, the redirect to `Seq` and
+  `phn stdlib --plugin-stubs` are gone; what follows is history). Done 2026-10-31 (`../jetbrains`
   `43db968`, `bbb8bc4`, `f7a05b0`): Phaenon syntax is erased to whitespace tokens in front of
   PhpStorm's parser (`PhaenonLexer`, eager function bodies), `$x is Foo` becomes `instanceof`,
   `(bytes)` a string cast; `list`/`map`/`string`/`bytes`/`\Stringable` receivers get

@@ -160,8 +160,8 @@ push dogfood work without a maintainer's go-ahead.
 - Gotcha: PHPStan's temp cache (`sys_get_temp_dir()/phpstan`) can break and make the pre-commit
   hook fail with `opendir … Failed to open directory` warnings while `composer phpstan` itself
   reports no errors; `rm -rf` that directory (it is regenerated). Seen twice on 2026-10-31.
-- The plugin's pseudo-classes are generated from the stdlib sources since 2026-10-31
-  (`phn stdlib --plugin-stubs ../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`).
+- ~~The plugin's pseudo-classes are generated from the stdlib sources~~ — gone with D20
+  (2026-11-03).
 
 - **`fun` re-migration (2026-11-01, D15):** `find src tests -name '*.phn' | xargs phn migrate` over every
   dogfood tree respelled its declarations (core 732 of 812 files, mongodb-odm 111 of 125, object-mapper
@@ -317,8 +317,8 @@ push dogfood work without a maintainer's go-ahead.
   (ignored), where Composer, PHPUnit, PHPStan (level 10, `src` only) and php-cs-fixer point
   (`main`'s rules, no exception since D19). `phaenon/concurrent` comes from `../../phaenon/concurrent`
   as a Composer **path repository** (symlinked into `vendor/phaenon/concurrent`), and
-  `phaenon/runtime` the same way from `../../phaenon/runtime` (the `bytes` code calls `Phaenon\Bytes`
-  / `Phaenon\Str`): `composer update phaenon/concurrent phaenon/runtime` after switching to the
+  `phaenon/runtime` the same way from `../../phaenon/runtime` (the `bytes` code calls `Phaenon\Bytes::text()`;
+  since D20, `725f47a`, the rest is PHP's own spelling): `composer update phaenon/concurrent phaenon/runtime` after switching to the
   branch.
 - **The fifteen `Api::concurrently` fan-outs are `concurrently` blocks** (`$tasks[$key] = spawn
   …` in a loop, `return Scope::all($tasks)`; `spawn { try … }` for the probes that catch;

@@ -163,8 +163,8 @@ existing classes. Those findings are ignored per file in `internal/checker/phpst
 
 ## The stdlib written in Phaenon
 
-`stdlib/runtime/*.phn` is read as the compiler's declaration of `Seq`, `Map`, `Str`, `Bytes`
-and compiled for the emit goldens' PHPStan run. `TestRuntimeStubs` (`internal/checker/stdlib_test.go`)
+`stdlib/runtime/**/*.phn` is read as the compiler's declaration of `Bytes` and the `Debug` classes
+(`Seq`, `Map`, `Str` went with D20 on 2026-11-03) and compiled for the emit goldens' PHPStan run. `TestRuntimeStubs` (`internal/checker/stdlib_test.go`)
 type-checks those bodies: `phn check stdlib/runtime/X.phn` cannot (the class is already declared
 by the embedded copy, `P2511`), so the test marks the embedded files as checked instead.
 
@@ -203,10 +203,9 @@ requirements. `phn` is not installed on `PATH`: build it from the repo (`AGENTS.
 
 - `TestRuntimePackageFresh` (`internal/emit`) compares the compiled stdlib with `../runtime/src`;
   `TestConcurrentPackageFresh` compares the compiled `Scope.php` with `../concurrent/src`
-  (2026-11-01); `TestPluginStubsFresh` compares the generated pseudo-classes with
-  `../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`. All skip without the checkout;
-  `phn stdlib --out ../runtime/src --concurrent-out ../concurrent/src --plugin-stubs ../jetbrains/src/main/resources/stubs/phaenon/Phaenon/Internal`
-  rewrites all three (`--check` to verify).
+  (2026-11-01). Both skip without the checkout; `phn stdlib --out ../runtime/src --concurrent-out
+  ../concurrent/src` rewrites both (`--check` to verify). It deletes no file whose source is gone.
+  (`TestPluginStubsFresh` and `--plugin-stubs` went with D20 on 2026-11-03.)
 - `TestRuntimeStubs` type-checks `stdlib/concurrent/Scope.phn` as well. The behaviour of the
   scope — joins, cancellation, deadlines — is tested only in `../concurrent` (`composer test`,
   14 tests against the real amp 3.1 / Revolt 1.0; `composer stan` at level max): the compiler's
