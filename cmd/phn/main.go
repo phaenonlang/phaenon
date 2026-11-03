@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -57,8 +58,10 @@ usage:
   phn build --vendor                                       compile the installed Composer packages that carry a
                                                            phaenon.json, each for its own target, their findings as
                                                            warnings; a package nothing changed in is skipped
-  phn check [--json] [--no-deprecations] [--exclude PATH]... [<path>...]
-                                                           type-check .phn files, write nothing
+  phn check [--format=F] [--no-deprecations] [--exclude PATH]... [<path>...]
+                                                           type-check .phn files, write nothing; the findings as
+                                                           text, json (an object per line, also --json), github
+                                                           (workflow commands: annotations) or checkstyle (XML)
   phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] <path>...
                                                            rewrite .php files as .phn; lift generic docblocks and bare
                                                            @throws into syntax, function into fun; write chains of
@@ -529,10 +532,17 @@ func newProgram(anchor string, target phpversion.Version) (*program.Program, []c
 
 func checkCmd(args []string) {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
-	asJSON := fs.Bool("json", false, "print diagnostics as JSON lines")
+	format := fs.String("format", "text", "how to write the findings: "+strings.Join(checkFormats, ", "))
+	asJSON := fs.Bool("json", false, "the same as --format=json")
 	noDeprecations := fs.Bool("no-deprecations", false, "do not report deprecated calls")
 	excludeFlag(fs)
 	fs.Parse(args)
+	if *asJSON {
+		*format = "json"
+	}
+	if !slices.Contains(checkFormats, *format) {
+		fail("phn check: --format is one of %s, not %q", strings.Join(checkFormats, ", "), *format)
+	}
 	proj := loadProject()
 	roots := fs.Args()
 	if len(roots) == 0 {
@@ -560,19 +570,27 @@ func checkCmd(args []string) {
 	diags = append(diags, installedDiags(files, loadedProgram)...)
 	errors, warnings := 0, 0
 	for _, d := range diags {
-		if *asJSON {
-			fmt.Printf(`{"file":%q,"line":%d,"col":%d,"endLine":%d,"endCol":%d,"severity":%q,"code":%q,"message":%q}`+"\n",
-				d.File, d.Line, d.Col, d.EndLine, d.EndCol, d.Severity, d.Code, d.Message)
-		} else {
-			printDiag(d)
-		}
 		if d.Severity == checker.Error {
 			errors++
 		} else {
 			warnings++
 		}
 	}
-	if !*asJSON {
+	switch *format {
+	case "json":
+		writeJSON(os.Stdout, diags)
+	case "github":
+		writeGitHub(os.Stdout, diags)
+	case "checkstyle":
+		writeCheckstyle(os.Stdout, diags)
+	default:
+		for _, d := range diags {
+			printDiag(d)
+		}
+	}
+	// The summary goes with the formats a person reads, a job's log among
+	// them; the others are documents a tool reads whole.
+	if *format == "text" || *format == "github" {
 		fmt.Printf("%d files checked: %d errors, %d warnings\n", len(files), errors, warnings)
 	}
 	if errors > 0 {
