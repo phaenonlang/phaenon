@@ -35,6 +35,8 @@ func main() {
 		build(os.Args[2:])
 	case "check":
 		checkCmd(os.Args[2:])
+	case "fix":
+		fixCmd(os.Args[2:])
 	case "migrate":
 		migrateCmd(os.Args[2:])
 	case "stdlib":
@@ -62,6 +64,11 @@ usage:
                                                            type-check .phn files, write nothing; the findings as
                                                            text, json (an object per line, also --json), github
                                                            (workflow commands: annotations) or checkstyle (XML)
+  phn fix [--check] -- <command> [<arg>...]                run a PHP rewriting tool (php-cs-fixer, Rector) on the
+                                                           project's outputs and carry its changes back to the .phn;
+                                                           a change of text the compiler wrote is not carried; then
+                                                           rebuild, run the tool again and report what it still
+                                                           changes; --check reports and writes no source
   phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] <path>...
                                                            rewrite .php files as .phn; lift generic docblocks and bare
                                                            @throws into syntax, function into fun; write chains of
@@ -249,6 +256,19 @@ type buildJob struct {
 	// dependency builds an installed package: its findings are printed as
 	// warnings and never withhold an output.
 	dependency bool
+	// quiet prints no findings: phn fix builds to run a tool, not to check.
+	quiet bool
+	// kept, when set, receives every output the build compiles, written or
+	// already current, by output path (phn fix).
+	kept map[string]keptOutput
+}
+
+// keptOutput is a compiled output as the build wrote it, with the source
+// it came from and the output's verbatim spans.
+type keptOutput struct {
+	source    string
+	src, data []byte
+	spans     []emit.Verbatim
 }
 
 type buildResult struct {
@@ -284,7 +304,9 @@ func (j buildJob) run() buildResult {
 		if j.dependency {
 			d.Severity = checker.Warning
 		}
-		printDiag(d)
+		if !j.quiet {
+			printDiag(d)
+		}
 		if d.Severity == checker.Error {
 			broken[d.File] = true
 		}
@@ -310,11 +332,14 @@ func (j buildJob) run() buildResult {
 		}
 		dst := outputPath(in)
 		opts := emit.Options{SourceName: in, MapSource: mapSource(in, dst), StrictTypes: true, Program: loadedProgram, File: loadedProgram.File(in)}
-		php, err := emit.File(src, opts)
+		php, spans, err := emit.FileVerbatim(src, opts)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			res.failed++
 			continue
+		}
+		if j.kept != nil {
+			j.kept[dst] = keptOutput{source: in, src: src, data: php, spans: spans}
 		}
 		cur, readErr := os.ReadFile(dst)
 		if readErr == nil && bytes.Equal(cur, php) {
