@@ -8,10 +8,12 @@ namespace Phaenon\Composer;
  * Finds the phn binary a run uses, and installs the pinned one when it is missing
  * (design/tooling.md §3.2).
  *
- * `PHN_BINARY` wins and is used as it is. Otherwise the binary is the release asset that
- * composer/checksums.json pins for the platform, installed as bin/phn in the package. It is
- * downloaded once into Composer's cache, and every copy is checked against the pinned SHA-256
- * before it is used, so the binary that runs is the one composer.lock pins.
+ * `PHN_BINARY` wins and is used as it is. A package that is a checkout of the compiler, as through
+ * a symlinked path repository, runs the developer's own build in its bin/, and nothing is ever
+ * written into it. Otherwise the binary is the release asset that composer/checksums.json pins for
+ * the platform, installed as bin/phn in the package. It is downloaded once into Composer's cache,
+ * and every copy is checked against the pinned SHA-256 before it is used, so the binary that runs
+ * is the one composer.lock pins.
  *
  * Nothing here needs Composer: the launcher uses it with a downloader of its own.
  */
@@ -38,14 +40,15 @@ final readonly class BinaryResolver
     }
 
     /**
-     * The binary to run: PHN_BINARY, otherwise the pinned binary, installed if it is not.
+     * The binary to run: PHN_BINARY, otherwise a checkout's own build, otherwise the pinned
+     * binary, installed if it is not.
      *
      * @throws BinaryUnavailable
      * @throws \UnexpectedValueException when composer/checksums.json is broken
      */
     public function resolve(): string
     {
-        return self::override() ?? $this->install();
+        return self::override() ?? self::checkoutBuild($this->packageDir) ?? $this->install();
     }
 
     /**
@@ -69,9 +72,36 @@ final readonly class BinaryResolver
         return $path;
     }
 
-    public static function installedPath(string $packageDir, Platform $platform): string
+    /**
+     * In a checkout of the compiler the package's bin/ is the developer's: `go build -o bin/phn
+     * ./cmd/phn` writes there. Its build is used as it is, without a checksum, and nothing is
+     * downloaded or written into the checkout.
+     *
+     * @return ?string null when the package is not a checkout
+     *
+     * @throws BinaryUnavailable when the checkout has no build to run
+     */
+    public static function checkoutBuild(string $packageDir): ?string
     {
-        return $packageDir . '/bin/' . $platform->executable();
+        if (!self::isCheckout($packageDir)) {
+            return null;
+        }
+        $build = self::installedPath($packageDir);
+        if (is_file($build) && is_executable($build)) {
+            return $build;
+        }
+        throw new BinaryUnavailable(sprintf(
+            'phaenon/phn is installed from a checkout of the compiler, %s, which has no executable bin/%s: '
+            . 'run `go build -o bin/phn ./cmd/phn` there, or set %s to the path of a phn binary',
+            $packageDir,
+            Platform::executableName(),
+            self::OVERRIDE,
+        ));
+    }
+
+    public static function installedPath(string $packageDir): string
+    {
+        return $packageDir . '/bin/' . Platform::executableName();
     }
 
     /**
@@ -90,17 +120,17 @@ final readonly class BinaryResolver
 
     /**
      * Puts the pinned binary in place as bin/phn, unless an identical one is there already.
+     * Reached only through resolve(), past the checkout's rule.
      *
      * @return string its path
      *
      * @throws BinaryUnavailable
      * @throws \UnexpectedValueException when composer/checksums.json is broken
      */
-    public function install(): string
+    private function install(): string
     {
-        $platform = Platform::current();
-        $binary = Checksums::read($this->packageDir . '/composer/checksums.json')->binaryFor($platform);
-        $target = self::installedPath($this->packageDir, $platform);
+        $binary = Checksums::read($this->packageDir . '/composer/checksums.json')->binaryFor(Platform::current());
+        $target = self::installedPath($this->packageDir);
         if ($binary->matches($target)) {
             return $target;
         }
@@ -180,6 +210,16 @@ final readonly class BinaryResolver
             ));
         }
         self::place($temporary, $destination);
+    }
+
+    /**
+     * A checkout holds the compiler's Go module, which the dist archive leaves out.
+     */
+    private static function isCheckout(string $packageDir): bool
+    {
+        $goMod = @file_get_contents($packageDir . '/go.mod');
+
+        return \is_string($goMod) && preg_match('{^module\s+github\.com/phaenonlang/phaenon\s*$}m', $goMod) === 1;
     }
 
     private static function temporary(string $path): string

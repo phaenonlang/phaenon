@@ -116,6 +116,16 @@ func (w *world) pin(version, sha string) {
 	writeJSON(w.t, filepath.Join(w.plugin, "composer", "checksums.json"), checksums)
 }
 
+// checkout makes the package copy a checkout of the compiler: it holds the Go
+// module, and the fake phn as the developer's build in bin/ when build is set.
+func (w *world) checkout(build bool) {
+	w.t.Helper()
+	writeFile(w.t, filepath.Join(w.plugin, "go.mod"), []byte("module github.com/phaenonlang/phaenon\n\ngo 1.27\n"), 0o644)
+	if build {
+		copyFile(w.t, w.fake, filepath.Join(w.plugin, "bin", "phn"))
+	}
+}
+
 // run is one run of the fake phn.
 type run struct {
 	dir  string
@@ -170,13 +180,14 @@ type project struct {
 	w   *world
 	dir string
 
-	phaenonJSON bool           // the root has a phaenon.json
-	extra       map[string]any // the root's extra
-	config      map[string]any // added to the root's config
-	libraries   []string       // Phaenon libraries the root requires, such as "acme/lib"
-	mirror      *mirror        // binary-url and auth.json for the mirror
-	baseURL     bool           // binary-url as a base URL rather than a template
-	override    bool           // PHN_BINARY names the fake
+	phaenonJSON   bool           // the root has a phaenon.json
+	extra         map[string]any // the root's extra
+	config        map[string]any // added to the root's config
+	libraries     []string       // Phaenon libraries the root requires, such as "acme/lib"
+	mirror        *mirror        // binary-url and auth.json for the mirror
+	baseURL       bool           // binary-url as a base URL rather than a template
+	override      bool           // PHN_BINARY names the fake
+	symlinkPlugin bool           // the package is symlinked into vendor, not copied
 }
 
 // newProject writes the root project p describes into a directory of its own.
@@ -195,7 +206,7 @@ func (p *project) write() {
 	t.Helper()
 	repositories := []any{
 		map[string]any{"packagist.org": false},
-		pathRepository(p.w.plugin, "phaenon/phn", "0.1.x-dev", false),
+		pathRepository(p.w.plugin, "phaenon/phn", "0.1.x-dev", p.symlinkPlugin),
 		// The runtime is symlinked, and its version given whatever branch the checkout is on.
 		pathRepository(p.w.runtime, "phaenon/runtime", "0.1.x-dev", true),
 	}
