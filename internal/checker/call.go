@@ -1669,6 +1669,12 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 		return false
 	}
 	for i, b := range bindings {
+		if x.pipeLeft > 0 && !b.param.ByRef {
+			if x.byValue == nil {
+				x.byValue = map[*ast.Arg]bool{}
+			}
+			x.byValue[b.arg] = true
+		}
 		if isClosure(b.arg.Value) {
 			continue
 		}
@@ -2347,6 +2353,7 @@ func (x *fnCtx) pipe(e *ast.Binary, left types.Type, env *state) types.Type {
 		if args.Partial() && x.pipeParam != nil && x.pipeSig != nil {
 			x.recordPipePartial(e.Right, args, x.pipeSig, x.pipeParam)
 		}
+		x.recordFold(e, args)
 		return t
 	}
 	operand := &ast.Arg{S: e.Left.Span(), Value: e.Left}

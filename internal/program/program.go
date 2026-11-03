@@ -465,9 +465,9 @@ type Partial struct {
 	Refused string
 	// Pipe marks the right side of a pipe that PHP turns into a call
 	// (`A |> f(B, ?, C)` is f(B, A, C)); Params then holds the one
-	// parameter the left side goes to. Direct says every bound argument is
-	// a literal or a constant, so the call may be written as such.
-	Pipe, Direct bool
+	// parameter the left side goes to. Whether the pipe may be written as
+	// that call is File.Folds.
+	Pipe bool
 	// Rest marks a `...` placeholder; Named a named argument before it.
 	Rest, Named bool
 	// Void says the callee returns void: a closure body calls it without
@@ -511,6 +511,13 @@ type File struct {
 	// Partials records each checked partial application by its argument
 	// list (see Partial).
 	Partials map[*ast.ArgList]*Partial
+	// Folds marks each checked pipe PHP evaluates exactly as the call it
+	// makes (`A |> f(B, ?, C)` as f(B, A, C)): the stage's callee and the
+	// arguments before the placeholder compute the same before A as after
+	// it, and A goes by value. The 8.5 lowering writes these pipes as the
+	// calls (design/php-versions.md §5.3). A pipe the checker did not reach
+	// is absent.
+	Folds map[*ast.Binary]bool
 	// Scopes maps statement ranges to the namespace scope in force there.
 	Scopes  []ScopedRange
 	lines   []int

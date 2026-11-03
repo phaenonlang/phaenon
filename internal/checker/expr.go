@@ -1409,7 +1409,9 @@ func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Typ
 	case token.T_COALESCE:
 		return x.coalesce(e, env, expected)
 	case token.T_PIPE:
+		x.pipeLeft++
 		left := x.expr(e.Left, env, nil)
+		x.pipeLeft--
 		return x.pipe(e, left, env)
 	}
 	l := x.expr(e.Left, env, nil)
