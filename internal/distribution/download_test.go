@@ -23,19 +23,19 @@ func TestDownloadInstallsAndCaches(t *testing.T) {
 	w.pin("0.1.0", sha256Hex(binary))
 	cached := filepath.Join(w.cache, "phaenon-phn", "0.1.0", assetFile())
 
-	first := w.newProject("first", project{mirror: m})
+	first := w.newProject("first", project{phaenonJSON: true, mirror: m})
 	first.mustComposer("install")
 	expectFile(t, first.installed(), binary, 0o755)
 	expectFile(t, cached, binary, 0)
 	expectServed(t, m, 1)
-	w.expectRuns(run{first.dir, []string{"build", "--vendor"}})
+	w.expectRuns(run{first.dir, []string{"build"}})
 
 	stdout, stderr, status := first.launch(nil, "version")
 	if stdout != "phn fake\n" || status != 0 {
 		t.Errorf("vendor/bin/phn version: %q, status %d, stderr %q; want the installed binary's answer", stdout, status, stderr)
 	}
 
-	second := w.newProject("second", project{mirror: m})
+	second := w.newProject("second", project{phaenonJSON: true, mirror: m})
 	second.mustComposer("install")
 	expectFile(t, second.installed(), binary, 0o755)
 	expectServed(t, m, 1)
@@ -44,7 +44,7 @@ func TestDownloadInstallsAndCaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The base-URL form of binary-url: the file name is appended.
-	third := w.newProject("third", project{mirror: m, baseURL: true})
+	third := w.newProject("third", project{phaenonJSON: true, mirror: m, baseURL: true})
 	out := third.mustComposer("install")
 	if !strings.Contains(out, "does not match its checksum: downloading it again") {
 		t.Errorf("composer's output does not say the cache entry was replaced:\n%s", out)
@@ -64,7 +64,7 @@ func TestDownloadChecksumMismatch(t *testing.T) {
 	pinned := strings.Repeat("ab", 32)
 	w.pin("0.1.0", pinned)
 
-	p := w.newProject("app", project{mirror: m})
+	p := w.newProject("app", project{phaenonJSON: true, mirror: m})
 	out, err := p.composer("install")
 
 	if err == nil {

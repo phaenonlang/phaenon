@@ -58,28 +58,55 @@ func TestAutoloadMapsAreCurrentWhenPhnRuns(t *testing.T) {
 	)
 }
 
-// TestNoProjectBuildWithoutPhaenonJSON: a root project without a phaenon.json
-// has no Phaenon code of its own; only the installed packages are built.
-func TestNoProjectBuildWithoutPhaenonJSON(t *testing.T) {
+// TestNothingToBuild: a project with no Phaenon code, its own or installed,
+// installs without a binary. With no release pinned and no PHN_BINARY, the
+// plugin runs nothing, fetches nothing and says nothing.
+func TestNothingToBuild(t *testing.T) {
 	w := newWorld(t, "")
-	p := w.newProject("app", project{override: true})
+	p := w.newProject("app", project{})
+
+	out := p.mustComposer("install")
+
+	w.expectRuns()
+	expectAbsent(t, p.installed())
+	if strings.Contains(out, "phaenon/phn:") {
+		t.Errorf("the plugin spoke with nothing to build:\n%s", out)
+	}
+}
+
+// TestOnlyInstalledPackages: a root project without a phaenon.json has no
+// Phaenon code of its own; only the installed packages are built.
+func TestOnlyInstalledPackages(t *testing.T) {
+	w := newWorld(t, "")
+	p := w.newProject("app", project{libraries: []string{"acme/lib"}, override: true})
 
 	p.mustComposer("install")
 
 	w.expectRuns(run{p.dir, []string{"build", "--vendor"}})
 }
 
-// TestProjectBuildTurnedOff: extra.phaenon.build false leaves the root
-// project's build to its own workflow (T4).
-func TestProjectBuildTurnedOff(t *testing.T) {
+// TestOnlyTheProject: when no installed package has a phaenon.json, only the
+// root project is built.
+func TestOnlyTheProject(t *testing.T) {
 	w := newWorld(t, "")
-	p := w.newProject("app", project{
-		phaenonJSON: true,
-		extra:       map[string]any{"phaenon": map[string]any{"build": false}},
-		override:    true,
-	})
+	p := w.newProject("app", project{phaenonJSON: true, override: true})
 
 	p.mustComposer("install")
+
+	w.expectRuns(run{p.dir, []string{"build"}})
+}
+
+// TestProjectBuildTurnedOff: extra.phaenon.build false leaves the root
+// project's build to its own workflow (T4), and with no Phaenon package
+// installed there is then nothing to build.
+func TestProjectBuildTurnedOff(t *testing.T) {
+	w := newWorld(t, "")
+	off := map[string]any{"phaenon": map[string]any{"build": false}}
+	p := w.newProject("app", project{phaenonJSON: true, extra: off, libraries: []string{"acme/lib"}, override: true})
+	alone := w.newProject("alone", project{phaenonJSON: true, extra: off})
+
+	p.mustComposer("install")
+	alone.mustComposer("install")
 
 	w.expectRuns(run{p.dir, []string{"build", "--vendor"}})
 }
@@ -110,7 +137,7 @@ func TestFailingBuildFailsTheCommand(t *testing.T) {
 // holds the classes phn wrote.
 func TestBuildsAtTheDumpAfterNoAutoloader(t *testing.T) {
 	w := newWorld(t, "")
-	p := w.newProject("app", project{phaenonJSON: true, override: true})
+	p := w.newProject("app", project{phaenonJSON: true, libraries: []string{"acme/lib"}, override: true})
 
 	p.mustComposer("install", "--no-dev", "--no-scripts", "--no-autoloader")
 	w.expectRuns()
@@ -130,11 +157,11 @@ func TestBuildsAtTheDumpAfterNoAutoloader(t *testing.T) {
 }
 
 // TestNoReleasedBinary: with no release pinned, as in the repository until
-// the first one, the install fails and the launcher refuses, both naming
-// PHN_BINARY.
+// the first one, a project with Phaenon code fails to install and the
+// launcher refuses, both naming PHN_BINARY.
 func TestNoReleasedBinary(t *testing.T) {
 	w := newWorld(t, "")
-	p := w.newProject("app", project{})
+	p := w.newProject("app", project{phaenonJSON: true})
 
 	out, err := p.composer("install")
 	if err == nil || !strings.Contains(out, "pins no released phn binary") || !strings.Contains(out, "set PHN_BINARY") {
