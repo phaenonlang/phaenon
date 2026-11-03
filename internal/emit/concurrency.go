@@ -297,10 +297,12 @@ func varUses(roots []ast.Node, skip ast.Span) uses {
 // span skip, with whether the mention reads the variable (an assignment
 // target, a foreach variable or a catch variable does not). A nested
 // function or closure is another scope and is not entered — a closure's use
-// list is, since it reads the variables here. Arrow functions, blocks and
-// spawns capture implicitly and are entered; an arrow function's parameters
-// shadow the variables of their name inside it. `$this` and the superglobals
-// are nobody's to capture.
+// list is, since it reads the variables here. A class has no variables of
+// the scope, but an anonymous class's constructor arguments are evaluated
+// in it (ast.InspectScope). Arrow functions, blocks and spawns capture
+// implicitly and are entered; an arrow function's parameters shadow the
+// variables of their name inside it. `$this` and the superglobals are
+// nobody's to capture.
 func walkVars(root ast.Node, skip ast.Span, shadow map[string]bool, f func(v *ast.Variable, read bool)) {
 	targets := map[*ast.Variable]bool{}
 	var markTargets func(e ast.Expr)
@@ -316,7 +318,7 @@ func walkVars(root ast.Node, skip ast.Span, shadow map[string]bool, f func(v *as
 			}
 		}
 	}
-	ast.Inspect(root, func(n ast.Node) bool {
+	ast.InspectScope(root, func(n ast.Node) bool {
 		if n != root && skip.End > skip.Start {
 			if s := n.Span(); s.Start >= skip.Start && s.End <= skip.End {
 				return false
@@ -362,7 +364,7 @@ func walkVars(root ast.Node, skip ast.Span, shadow map[string]bool, f func(v *as
 				walkVars(n.Body, skip, inner, f)
 				return false
 			}
-		case *ast.FunctionDecl, *ast.MethodDecl, *ast.ClassDecl:
+		case *ast.FunctionDecl, *ast.MethodDecl:
 			if n != root {
 				return false
 			}
@@ -389,7 +391,8 @@ func superglobal(name string) bool {
 
 // assignedIn lists the variables a block body writes: assignment targets
 // (destructuring and element writes included), `++`/`--`, foreach keys and
-// values, catch variables. Nested functions and classes are other scopes.
+// values, catch variables. Nested functions and classes are other scopes,
+// an anonymous class's constructor arguments aside (ast.InspectScope).
 func assignedIn(body []ast.Stmt) []*ast.Variable {
 	var out []*ast.Variable
 	var target func(e ast.Expr)
@@ -408,7 +411,7 @@ func assignedIn(body []ast.Stmt) []*ast.Variable {
 		}
 	}
 	for _, s := range body {
-		ast.Inspect(s, func(n ast.Node) bool {
+		ast.InspectScope(s, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.Assign:
 				target(n.Target)
@@ -421,7 +424,7 @@ func assignedIn(body []ast.Stmt) []*ast.Variable {
 				if n.Var != nil {
 					out = append(out, n.Var)
 				}
-			case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl, *ast.FunctionDecl, *ast.Spawn:
+			case *ast.Closure, *ast.ArrowFunc, *ast.FunctionDecl, *ast.Spawn:
 				return false
 			}
 			return true

@@ -45,9 +45,31 @@ fun report(Log $log, list<string> $rows, string $what): void {
 // The head is the innermost call: it runs first, as it did nested.
 fun traced(): string => trace('head', ' x ') |> trim(...) |> strtoupper(...);
 
+// An anonymous class bound in a stage whose closure needs a use clause: its
+// constructor argument is a variable of the function, its property and its
+// method's local, named like the closure's parameter, are not.
+interface Weighted {
+    fun weight(): int;
+}
+
+fun weigh(list<int> $xs, Weighted $w): int => array_sum($xs) * $w->weight();
+
+fun weighted(list<int> $xs, int $factor): int => $xs
+    |> weigh(?, new class ($factor) implements Weighted {
+        public int $a = 1;
+
+        fun __construct(private int $factor) {}
+
+        fun weight(): int {
+            $xs = [$this->a, $this->factor];
+            return array_sum($xs);
+        }
+    });
+
 echo implode(',', emails([new User('a@x'), new User(null), new User('b@x')])), "\n";
 echo encode(['a' => 1, 'b' => 2]), "\n";
 $log = new Log();
 report($log, ['x', 'y'], 'anchors');
 echo implode('|', $log->lines), "\n";
 echo traced(), "\n";
+echo weighted([1, 2], 3), "\n";

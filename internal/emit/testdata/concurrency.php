@@ -119,5 +119,30 @@ final class Profiles
     {
         return Scope::map($ids, fn (int $id) => $this->orders->count($id));
     }
+
+    // An anonymous class in a block: its constructor argument is captured,
+    // its property and its method's local are not.
+    public function weighted(int $id, int $factor): int
+    {
+        return Scope::run(function () use ($factor, $id) {
+            $weight = new class ($factor) {
+                public int $a = 1;
+
+                public function __construct(private int $factor)
+                {
+                }
+
+                public function of(int $n): int
+                {
+                    $scaled = $n * $this->factor;
+
+                    return $scaled + $this->a;
+                }
+            };
+            $count = Scope::spawn(fn () => $this->orders->count($id));
+
+            return $weight->of($count->await());
+        });
+    }
 }
 // phaenon-map v1 concurrency.phn 1-6=1 7:1 33-35=27 36:27 49-51=40 52:40 73-75=61 76:61 85-87=70 88:70 114-117=96 118:96
