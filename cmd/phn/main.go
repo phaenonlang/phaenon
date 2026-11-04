@@ -37,6 +37,8 @@ func main() {
 		checkCmd(os.Args[2:])
 	case "fix":
 		fixCmd(os.Args[2:])
+	case "fmt":
+		fmtCmd(os.Args[2:])
 	case "migrate":
 		migrateCmd(os.Args[2:])
 	case "stdlib":
@@ -69,6 +71,12 @@ usage:
                                                            a change of text the compiler wrote is not carried; then
                                                            rebuild, run the tool again and report what it still
                                                            changes; --check reports and writes no source
+  phn fmt [--check] [<file>...]                            lay .phn files out: Phaenon's layout (braces, {}, one-line
+                                                           docblocks, the spacing of type parameters and arguments,
+                                                           throws, is, as, concurrently, spawn), then the project's
+                                                           fixer through phn fix (phaenon.json "fmt", or
+                                                           tools/php-cs-fixer or vendor/bin/php-cs-fixer); no files:
+                                                           the roots; --check writes nothing and fails on a change
   phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] <path>...
                                                            rewrite .php files as .phn; lift generic docblocks and bare
                                                            @throws into syntax, function into fun; write chains of

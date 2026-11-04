@@ -156,3 +156,45 @@ func TestFixCheck(t *testing.T) {
 		t.Errorf("a tool that changes nothing: %v %q", err, stdout)
 	}
 }
+
+// phn fmt lays the .phn out, then runs the project's fixer through phn fix;
+// --check then finds nothing left. With "fmt": [] only the first layer runs.
+func TestFmt(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	tool := fakeToolCommand(t, fakeSpec{Replace: [][2]string{{"int $a,int $b", "int $a, int $b"}}})
+	writeTree(t, root, map[string]string{
+		"phaenon.json": `{"roots": {"src": ".src"}, "fmt": [` + strconvQuote(tool) + `, "fix"]}`,
+		"src/Box.phn":  "\n\nnamespace App;\n\nfinal class Box {\n    fun add(int $a,int $b): list < int > {\n        return [$a];\n    }\n}\n",
+	})
+	if _, stderr, err := run(t, root, bin, "fmt", "--check"); err == nil || !strings.Contains(stderr, "src/Box.phn: not in Phaenon's layout") {
+		t.Errorf("--check passed on an unformatted file (%v): %s", err, stderr)
+	}
+	if box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn")); !strings.HasPrefix(string(box), "\n\n") {
+		t.Error("--check wrote Box.phn")
+	}
+	stdout, stderr, err := run(t, root, bin, "fmt")
+	if err != nil {
+		t.Fatalf("phn fmt: %v\n%s%s", err, stdout, stderr)
+	}
+	want := "namespace App;\n\nfinal class Box\n{\n    fun add(int $a, int $b): list<int> {\n        return [$a];\n    }\n}\n"
+	if box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn")); string(box) != want {
+		t.Errorf("Box.phn:\n%s\nwant\n%s", box, want)
+	}
+	if stdout, stderr, err := run(t, root, bin, "fmt", "--check"); err != nil {
+		t.Errorf("--check after phn fmt: %v\n%s%s", err, stdout, stderr)
+	}
+
+	writeTree(t, root, map[string]string{
+		"phaenon.json": `{"roots": {"src": ".src"}, "fmt": []}`,
+		"src/Box.phn":  "namespace App;\n\nfinal class Box\n{\n    fun add(int $a,int $b): int => $a;\n}\n",
+	})
+	if stdout, _, err := run(t, root, bin, "fmt", "--check"); err != nil || strings.Contains(stdout, "php-cs-fixer") {
+		t.Errorf(`"fmt": [] still ran the fixer, or the layout failed (%v):\n%s`, err, stdout)
+	}
+}
+
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}

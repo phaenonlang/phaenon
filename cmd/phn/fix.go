@@ -50,14 +50,20 @@ func fixCmd(args []string) {
 		fail("phn fix: no %s here: the tool runs on the outputs of a project's roots", ProjectFile)
 	}
 	proj.requireRoots("fix")
-	tool := toolName(command)
+	status, left := runFix(proj, command, *check)
+	exitFix(status, left)
+}
 
+// runFix runs phn fix's steps for the command and returns the tool's exit
+// status and whether changes are left: with check, any change.
+func runFix(proj *project, command []string, check bool) (int, bool) {
+	tool := toolName(command)
 	built := fixBuild(proj)
 	status := runTool(command, false)
 	after := readOutputs(proj)
 	r := built.compare(after, tool)
 	switch {
-	case *check:
+	case check:
 		r.print(true)
 		built.restore(after)
 		if r.changed() > 0 {
@@ -65,14 +71,11 @@ func fixCmd(args []string) {
 		} else {
 			fmt.Printf("%s changes nothing\n", tool)
 		}
-		exitFix(status, r.changed() > 0)
-		return
-	}
-	if r.changed() == 0 {
+		return status, r.changed() > 0
+	case r.changed() == 0:
 		built.restore(after)
 		fmt.Printf("%s changed nothing\n", tool)
-		exitFix(status, false)
-		return
+		return status, false
 	}
 	unparsed := false
 	for round := 1; ; round++ {
@@ -98,7 +101,7 @@ func fixCmd(args []string) {
 	} else {
 		fmt.Printf("after the rebuild, %s changes nothing\n", tool)
 	}
-	exitFix(status, r.changed() > 0 || unparsed)
+	return status, r.changed() > 0 || unparsed
 }
 
 // fixRounds bounds the carrying: a change of text the compiler derives
