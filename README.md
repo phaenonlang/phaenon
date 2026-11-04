@@ -230,6 +230,20 @@ phn fmt src/Foo.phn     # given files only
 phn fmt --check         # CI: fail when either layer would change a file; nothing written
 ```
 
+In editors, `phn lsp` is the checker as a language server (LSP over stdio, `design/tooling.md`
+§6). It checks a file as it is typed, against the whole project with the open buffers as they
+are, and the whole project on each save, building the outputs after it as `phn build` does. It
+answers hover, go to definition, document symbols, completion (after `|>`, the functions that
+take the left side), signature help and formatting (the first layer). The PhpStorm plugin
+(`../jetbrains`) starts it for diagnostics and build on save only, since PhpStorm's own PHP
+support answers the rest. `phn watch` checks and builds after each change, for a terminal.
+
+```sh
+phn lsp                 # the project around the working directory, on stdin and stdout
+phn watch               # check and build the roots each time a file changes; --no-build checks only
+phn fmt --stdin         # the first layer, standard input to standard output (the plugin's Reformat Code)
+```
+
 A library ships its `.phn` sources and no compiled PHP (`roadmap.md` D13): with `phn` and the
 library pinned, the output is reproducible byte for byte, and the Composer plugin below builds it
 where it is installed.
@@ -353,6 +367,9 @@ phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] 
 phn check [--format=text|json|github|checkstyle] [--no-deprecations] [--exclude PATH]... path... # type-check .phn (and .php) files
 phn fix [--check] -- command [arg...]                 # run php-cs-fixer, Rector… on the outputs; carry their changes back to the .phn
 phn fmt [--check] [file...]                           # Phaenon's layout, then the project's fixer through phn fix; no files: the roots
+phn fmt --stdin                                       # Phaenon's layout of standard input, onto standard output
+phn lsp                                               # the language server: diagnostics, hover, definition, completion, build on save
+phn watch [--no-build] [--interval D]                 # check and build the roots each time a file changes
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Bytes, Debug/…), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/phaenonlang/phaenon/internal/format"
@@ -18,10 +19,29 @@ import (
 //
 // Without files it formats the roots of phaenon.json. With --check nothing
 // is written and the status is 1 when either layer would change a file.
+// With --stdin the first layer lays out standard input onto standard
+// output: the PhpStorm plugin's Reformat Code runs it after PhpStorm's own
+// formatter (design/tooling.md §5.1).
 func fmtCmd(args []string) {
 	fs := flag.NewFlagSet("fmt", flag.ExitOnError)
 	check := fs.Bool("check", false, "report the files that are not formatted; write nothing")
+	stdin := fs.Bool("stdin", false, "lay out standard input in Phaenon's layout (the first layer) onto standard output")
 	fs.Parse(args)
+	if *stdin {
+		if fs.NArg() > 0 || *check {
+			fail("phn fmt --stdin takes no files and no --check")
+		}
+		src, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fail("phn fmt: %v", err)
+		}
+		out, err := format.Source(src)
+		if err != nil {
+			fail("phn fmt: %v", err) // nothing on stdout: the caller keeps its text
+		}
+		os.Stdout.Write(out)
+		return
+	}
 	proj := loadProject()
 	files := fs.Args()
 	if len(files) == 0 {

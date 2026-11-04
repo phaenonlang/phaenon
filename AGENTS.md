@@ -19,7 +19,7 @@ The workspace is `~/labs/phaenon/`; the other repos are siblings, reached as `..
 | **design** | `../design` | `phaenonlang/design` | The language design and every decision: `language-overview.md` (scope), `generics.md` (decisions §11), `checker.md` (decisions §9, open §10), `roadmap.md` (decisions D1–D8, milestones M0–M7, working method §4) | Markdown only |
 | **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `\Phaenon\Type`, behind structural `is` / `as`; `\Phaenon\Bytes`, the checked conversions between `bytes` and text; `Phaenon\Debug`: the line map reader (`LineMap`), a Monolog processor and a Sentry integration that point production errors at `.phn` positions (`../design/line-map.md` §4.3); `src/` except `Type.php` is compiled from `stdlib/runtime/**/*.phn` | `composer install`, `composer test`, `composer stan` |
 | **concurrent** | `../concurrent` | `phaenonlang/concurrent` | Composer package `phaenon/concurrent`: `\Phaenon\Concurrent\Scope` behind `concurrently { }` and `spawn`, on amp v3 / Revolt; `src/Scope.php` is compiled from `stdlib/concurrent/Scope.phn` here | `composer install`, `composer test`, `composer stan` |
-| **jetbrains** | `../jetbrains` | `phaenonlang/jetbrains` | PhpStorm plugin: `.phn` read as PHP code without the open tag (Kotlin, Gradle); no Phaenon-only syntax yet | `./gradlew test`, `./gradlew buildPlugin` |
+| **jetbrains** | `../jetbrains` | `phaenonlang/jetbrains` | PhpStorm plugin: `.phn` read as PHP code without the open tag (Kotlin, Gradle); `phn lsp`'s diagnostics and build on save; Reformat Code ends with `phn fmt --stdin` | `./gradlew test` (`PHAENON_PHN=bin/phn` of this repo for the layout tests), `./gradlew buildPlugin` |
 | **php-src** | `../php-src` | clone of `php/php-src` | **Read-only reference.** The scanner and grammar the lexer and parser port, the `.phpt` corpus of the conformance suite, the source of `stdlib/php-src` | Never modify, build or change its git state |
 
 **Tequila dogfood targets** — the PHP platform behind tequila.dev, the codebase Phaenon must run.
@@ -52,7 +52,7 @@ squash merges).
 ## This repository
 
 ```text
-cmd/phn/              CLI: build, check, fix, fmt, migrate, stdlib, trace, lex, print
+cmd/phn/              CLI: build, check, fix, fmt, lsp, watch, migrate, stdlib, trace, lex, print
 internal/token        token set: PHP 8.5's plus Phaenon's, named like token_name()
 internal/lexer        hand-written port of zend_language_scanner.l; lossless
 internal/ast          typed node families; Phaenon constructs are additions to the PHP tree
@@ -66,6 +66,7 @@ internal/emit         patch-based emitter: PSR-12 layout of what it writes, the 
 internal/linemap      the `// phaenon-map v1 …` comment every compiled file ends with: parse, write, lookups
 internal/format       `phn fmt`'s first layer: Phaenon's layout (spaces for tabs, migrate's braces and docblocks, the spacing of Phaenon's syntax)
 internal/tabs         the tabs Phaenon forbids (D21: outside strings and comments' text), found for P1005 and replaced by migrate and fmt
+internal/lsp          `phn lsp`: JSON-RPC on stdio, a program per check (parsed trees shared), hover, definition, completion, build on save
 internal/fix          `phn fix`: a PHP tool's changes of the outputs carried back to the sources through the emitter's verbatim spans
 internal/trace        `phn trace`: positions in compiled files → `.phn` positions, in text, GitHub workflow commands and CI reports (Checkstyle, JUnit, Clover, Cobertura)
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
@@ -98,7 +99,7 @@ PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go generate ./stdlib        # refresh
 PHAENON_COMPOSER=$(which composer) go test ./internal/distribution     # the Composer plugin under a real Composer
 ```
 
-`phn` itself: `phn build|check|fix|fmt|migrate|stdlib|trace|lex|print` — run `phn` without arguments for usage; the
+`phn` itself: `phn build|check|fix|fmt|lsp|watch|migrate|stdlib|trace|lex|print` — run `phn` without arguments for usage; the
 README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`, or, through the `phaenon/phn` plugin, this checkout's `bin/phn` (`go build -o bin/phn ./cmd/phn`; `PHN_BINARY` names another). `phn stdlib` writes the
 runtime package (`--out ../runtime/src`) and the concurrent package (`--concurrent-out
 ../concurrent/src`) from `stdlib/runtime/**/*.phn` (a subdirectory there is one in `src/`:
