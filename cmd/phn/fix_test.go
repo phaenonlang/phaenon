@@ -21,6 +21,16 @@ func TestMain(m *testing.M) {
 type fakeSpec struct {
 	Replace [][2]string `json:"replace"`
 	Create  []string    `json:"create"`
+	// Rules, with the options that ask for a report (--format=json,
+	// --output-format=json), are reported as applied to every file the
+	// tool changes: php-cs-fixer's fixers, or Rector's rectors with the
+	// line each names.
+	Rules []fakeRule `json:"rules"`
+}
+
+type fakeRule struct {
+	Name string `json:"name"`
+	Line int    `json:"line"`
 }
 
 func fakeTool(spec string) {
@@ -28,6 +38,7 @@ func fakeTool(spec string) {
 	if err := json.Unmarshal([]byte(spec), &s); err != nil {
 		panic(err)
 	}
+	var changed []string
 	filepath.WalkDir(".src", func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -39,11 +50,51 @@ func fakeTool(spec string) {
 		}
 		if text != string(data) {
 			os.WriteFile(path, []byte(text), 0o644)
+			changed = append(changed, path)
 		}
 		return nil
 	})
 	for _, path := range s.Create {
 		os.WriteFile(path, []byte("<?php\n"), 0o644)
+	}
+	args := strings.Join(os.Args[1:], " ")
+	switch {
+	case strings.Contains(args, "--output-format=json"):
+		type change struct {
+			Rector string `json:"rector"`
+			Line   int    `json:"line"`
+		}
+		type diff struct {
+			File    string   `json:"file"`
+			Changes []change `json:"changes"`
+		}
+		var doc struct {
+			FileDiffs []diff `json:"file_diffs"`
+		}
+		for _, path := range changed {
+			d := diff{File: path}
+			for _, r := range s.Rules {
+				d.Changes = append(d.Changes, change{Rector: `Rector\\Fake\\` + r.Name, Line: r.Line})
+			}
+			doc.FileDiffs = append(doc.FileDiffs, d)
+		}
+		json.NewEncoder(os.Stdout).Encode(doc)
+	case strings.Contains(args, "--format=json"):
+		type file struct {
+			Name          string   `json:"name"`
+			AppliedFixers []string `json:"appliedFixers"`
+		}
+		var doc struct {
+			Files []file `json:"files"`
+		}
+		for _, path := range changed {
+			f := file{Name: path}
+			for _, r := range s.Rules {
+				f.AppliedFixers = append(f.AppliedFixers, r.Name)
+			}
+			doc.Files = append(doc.Files, f)
+		}
+		json.NewEncoder(os.Stdout).Encode(doc)
 	}
 }
 
@@ -66,13 +117,18 @@ const boxSource = "namespace App;\n\nfinal class Box {\n    fun __construct(priv
 // fakeTool is the test binary under a tool's name, with what it changes.
 func fakeToolCommand(t *testing.T, spec fakeSpec) string {
 	t.Helper()
+	return fakeNamedTool(t, "php-cs-fixer", spec)
+}
+
+func fakeNamedTool(t *testing.T, name string, spec fakeSpec) string {
+	t.Helper()
 	data, _ := json.Marshal(spec)
 	t.Setenv("PHN_FAKE_TOOL", string(data))
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	tool := filepath.Join(t.TempDir(), "php-cs-fixer")
+	tool := filepath.Join(t.TempDir(), name)
 	if err := os.Symlink(self, tool); err != nil {
 		t.Fatal(err)
 	}
@@ -197,4 +253,70 @@ func TestFmt(t *testing.T) {
 func strconvQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// The report names the rule behind a change when the tool's own report
+// says: php-cs-fixer's fixers per file (exact when one fixer changed the
+// file), Rector's rectors by the line of the node each rewrote.
+func TestFixNamesRules(t *testing.T) {
+	bin := phnBinary(t)
+	braces := fakeSpec{Replace: [][2]string{{"private int $n)\n    {\n    }", "private int $n) {}"}}}
+
+	root := fixTree(t)
+	braces.Rules = []fakeRule{{Name: "braces_position"}}
+	_, stderr, _ := run(t, root, bin, "fix", "--check", "--", fakeToolCommand(t, braces), "fix")
+	if want := `src/Box.phn:4: php-cs-fixer (braces_position) changes text the compiler wrote: "\n   " → ""`; !strings.Contains(stderr, want) {
+		t.Errorf("one fixer: stderr lacks %s:\n%s", want, stderr)
+	}
+	braces.Rules = []fakeRule{{Name: "single_line_empty_body"}, {Name: "braces_position"}}
+	_, stderr, _ = run(t, root, bin, "fix", "--check", "--", fakeToolCommand(t, braces), "fix")
+	if want := `php-cs-fixer (one of braces_position, single_line_empty_body) changes`; !strings.Contains(stderr, want) {
+		t.Errorf("two fixers: stderr lacks %s:\n%s", want, stderr)
+	}
+	// A command that chooses its own format gets no report from phn.
+	_, stderr, _ = run(t, root, bin, "fix", "--check", "--", fakeToolCommand(t, braces), "fix", "--format=txt")
+	if strings.Contains(stderr, "php-cs-fixer (") {
+		t.Errorf("--format=txt: a rule was named:\n%s", stderr)
+	}
+
+	// Rector names the line of the node each rector rewrote: the
+	// constructor's for the one, the class's for the other. The change in
+	// the constructor goes to the constructor's rector, the innermost.
+	built, err := os.ReadFile(filepath.Join(root, ".src/Box.php"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lineOf := func(text string) int {
+		i := strings.Index(string(built), text)
+		if i < 0 {
+			t.Fatalf("%q not in the output:\n%s", text, built)
+		}
+		return strings.Count(string(built[:i]), "\n") + 1
+	}
+	rectors := fakeSpec{Replace: braces.Replace, Rules: []fakeRule{
+		{Name: "ClassRector", Line: lineOf("final class Box")},
+		{Name: "ConstructorRector", Line: lineOf("public function __construct")},
+	}}
+	_, stderr, _ = run(t, root, bin, "fix", "--check", "--", fakeNamedTool(t, "rector", rectors), "process")
+	if want := `src/Box.phn:4: rector (ConstructorRector) changes text the compiler wrote`; !strings.Contains(stderr, want) {
+		t.Errorf("rector: stderr lacks %s:\n%s", want, stderr)
+	}
+}
+
+func TestWithRuleReport(t *testing.T) {
+	for _, c := range []struct{ in, want, tool string }{
+		{"tools/php-cs-fixer fix", "tools/php-cs-fixer fix --format=json -v", "php-cs-fixer"},
+		{"php8.5 tools/php-cs-fixer.phar fix --dry-run -- a.php", "php8.5 tools/php-cs-fixer.phar fix --format=json -v --dry-run -- a.php", "php-cs-fixer"},
+		{"php-cs-fixer fix --format=checkstyle", "php-cs-fixer fix --format=checkstyle", ""},
+		{"php-cs-fixer check", "php-cs-fixer check", ""},
+		{"vendor/bin/rector process src", "vendor/bin/rector process --output-format=json src", "rector"},
+		{"vendor/bin/rector", "vendor/bin/rector --output-format=json", "rector"},
+		{"vendor/bin/rector process --output-format=github", "vendor/bin/rector process --output-format=github", ""},
+		{"vendor/bin/phpcbf src", "vendor/bin/phpcbf src", ""},
+	} {
+		got, tool := withRuleReport(strings.Fields(c.in))
+		if strings.Join(got, " ") != c.want || tool != c.tool {
+			t.Errorf("%s: got %q %q, want %q %q", c.in, strings.Join(got, " "), tool, c.want, c.tool)
+		}
+	}
 }

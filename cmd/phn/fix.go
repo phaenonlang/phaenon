@@ -58,13 +58,22 @@ func fixCmd(args []string) {
 // status and whether changes are left: with check, any change.
 func runFix(proj *project, command []string, check bool) (int, bool) {
 	tool := toolName(command)
+	command, reporting := withRuleReport(command)
+	run := func(quiet bool) (int, *ruleReport) {
+		if reporting == "" {
+			return runTool(command, quiet, nil), nil
+		}
+		var stdout bytes.Buffer
+		status := runTool(command, quiet, &stdout)
+		return status, readRuleReport(reporting, stdout.Bytes())
+	}
 	built := fixBuild(proj)
-	status := runTool(command, false)
+	status, rules := run(false)
 	after := readOutputs(proj)
-	r := built.compare(after, tool)
+	r := built.compare(after, tool, rules)
 	switch {
 	case check:
-		r.print(true)
+		r.print(true, command)
 		built.restore(after)
 		if r.changed() > 0 {
 			fmt.Printf("%s would change %d files: %s\n", tool, r.files, r.counts(true))
@@ -87,16 +96,16 @@ func runFix(proj *project, command []string, check bool) (int, bool) {
 		}
 		fmt.Printf("%s%s changed %d files: %s\n", prefix, tool, r.files, r.counts(false))
 		built = fixBuild(proj)
-		runTool(command, true)
+		_, rules = run(true)
 		after = readOutputs(proj)
-		r = built.compare(after, tool)
+		r = built.compare(after, tool, rules)
 		if len(r.carried) == 0 || round == fixRounds {
 			break
 		}
 	}
 	built.restore(after)
 	if r.changed() > 0 {
-		r.print(true)
+		r.print(true, command)
 		fmt.Printf("after the rebuild, %s still changes %d files: %s\n", tool, r.files, r.counts(true))
 	} else {
 		fmt.Printf("after the rebuild, %s changes nothing\n", tool)
@@ -137,8 +146,10 @@ func toolName(command []string) string {
 var phpBinary = regexp.MustCompile(`^php[0-9.]*$`)
 
 // runTool runs the command in the working directory and returns its exit
-// status. A second run's output is kept back unless it fails.
-func runTool(command []string, quiet bool) int {
+// status. A second run's output is kept back unless it fails. stdout, when
+// set, receives the standard output instead (a report phn reads), which is
+// printed only if the tool fails.
+func runTool(command []string, quiet bool, stdout *bytes.Buffer) int {
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stdin = os.Stdin
 	var buf bytes.Buffer
@@ -146,6 +157,9 @@ func runTool(command []string, quiet bool) int {
 		cmd.Stdout, cmd.Stderr = &buf, &buf
 	} else {
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	}
+	if stdout != nil {
+		cmd.Stdout = stdout
 	}
 	err := cmd.Run()
 	var exit *exec.ExitError
@@ -155,6 +169,9 @@ func runTool(command []string, quiet bool) int {
 	case errors.As(err, &exit):
 		if quiet {
 			os.Stderr.Write(buf.Bytes())
+		}
+		if stdout != nil {
+			os.Stderr.Write(stdout.Bytes())
 		}
 		return exit.ExitCode()
 	default:
@@ -250,7 +267,13 @@ type fixPosition struct {
 	file     string
 	line     int
 	old, new string
-	compiler bool // the change is of text the compiler wrote
+	compiler bool   // the change is of text the compiler wrote
+	rule     string // the tool's rule behind the change, when its report says
+	// out, data and hunk are the change as the tool made it: the output's
+	// path, its text as the tool read it, the hunk in it (narrowFixers).
+	out  string
+	data []byte
+	hunk fix.Hunk
 }
 
 func (r *fixReport) changed() int { return len(r.carried) + len(r.refused) + len(r.others) }
@@ -272,7 +295,7 @@ func (r *fixReport) counts(would bool) string {
 }
 
 // compare diffs the outputs as the tool left them against the build.
-func (t *builtTree) compare(now map[string][]byte, tool string) *fixReport {
+func (t *builtTree) compare(now map[string][]byte, tool string, rules *ruleReport) *fixReport {
 	r := &fixReport{tool: tool, sources: map[string][]byte{}}
 	var paths []string
 	for path := range t.files {
@@ -309,7 +332,8 @@ func (t *builtTree) compare(now map[string][]byte, tool string) *fixReport {
 				if m != nil {
 					line, _ = m.Forward(line)
 				}
-				return fixPosition{file: k.source, line: line, old: string(k.data[h.Start:h.End]), new: h.Text}
+				return fixPosition{file: k.source, line: line, old: string(k.data[h.Start:h.End]), new: h.Text,
+					rule: rules.rules(path, k.data, h), out: path, data: k.data, hunk: h}
 			}
 			isRefused := map[fix.Hunk]bool{}
 			for _, h := range refused {
@@ -335,7 +359,8 @@ func (t *builtTree) compare(now map[string][]byte, tool string) *fixReport {
 		if source, ok := t.copies[path]; ok {
 			for _, h := range fix.Diff(was, cur) {
 				line := bytes.Count(was[:h.Start], []byte("\n")) + 1
-				r.carried = append(r.carried, fixPosition{file: source, line: line, old: string(was[h.Start:h.End]), new: h.Text})
+				r.carried = append(r.carried, fixPosition{file: source, line: line, old: string(was[h.Start:h.End]), new: h.Text,
+					rule: rules.rules(path, was, h), out: path, data: was, hunk: h})
 			}
 			r.sources[source] = cur
 			continue
@@ -355,11 +380,20 @@ func (r *fixReport) write() {
 	}
 }
 
-// print reports the changes: with all, the ones carried back too.
-func (r *fixReport) print(all bool) {
+// print reports the changes: with all, the ones carried back too. The
+// php-cs-fixer changes its report leaves at "one of …" are narrowed first,
+// by running the candidate fixers alone (narrowFixers) with command.
+func (r *fixReport) print(all bool, command []string) {
 	positions := r.refused
 	if all {
 		positions = append(append([]fixPosition(nil), r.carried...), r.refused...)
+	}
+	if toolName(command) == "php-cs-fixer" {
+		ptrs := make([]*fixPosition, len(positions))
+		for i := range positions {
+			ptrs[i] = &positions[i]
+		}
+		narrowFixers(command, ptrs)
 	}
 	sort.SliceStable(positions, func(i, j int) bool {
 		if positions[i].file != positions[j].file {
@@ -372,7 +406,11 @@ func (r *fixReport) print(all bool) {
 		if p.compiler {
 			what = "changes text the compiler wrote"
 		}
-		fmt.Fprintf(os.Stderr, "%s:%d: %s %s: %s → %s\n", reportPath(p.file), p.line, r.tool, what, clip(p.old), clip(p.new))
+		tool := r.tool
+		if p.rule != "" {
+			tool += " (" + p.rule + ")"
+		}
+		fmt.Fprintf(os.Stderr, "%s:%d: %s %s: %s → %s\n", reportPath(p.file), p.line, tool, what, clip(p.old), clip(p.new))
 	}
 	for _, s := range r.others {
 		fmt.Fprintln(os.Stderr, s)
