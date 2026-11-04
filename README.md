@@ -215,7 +215,8 @@ an erased type — is not: the rebuild writes that text anew. `phn fix` then reb
 tool again, carrying what has become the source's, for three rounds at most, and reports what the
 tool still changes; the exit status is 1 then (`design/tooling.md` §4).
 
-`phn fmt` formats the `.phn` in two layers. The first is Phaenon's layout, with no options: a
+`phn fmt` formats the `.phn` in two layers. The first is Phaenon's layout, with no options:
+spaces for tabs (a tab outside a string or a comment's text doesn't compile, `P1005`), a
 function's brace on its declaration's line, a class-like's on its own, `{}` for an empty body,
 one-line docblocks, and the spacing of what only Phaenon has (`class Box<T of Item>`,
 `map<string, list<int>>`, `Closure(int): bool`, `throws A|B`, `$x as? User`, `concurrently (…) {`).

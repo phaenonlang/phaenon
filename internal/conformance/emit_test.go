@@ -102,6 +102,9 @@ func TestEmitExecution(t *testing.T) {
 	type result struct {
 		path, diff, skippedCause string
 		observes                 bool
+		// tabLayout: the original fails on its heredoc's indentation,
+		// which the migration's spaces (design/functions.md §5.5) change.
+		tabLayout bool
 	}
 	results := make([]result, len(jobs))
 	var wg sync.WaitGroup
@@ -137,7 +140,8 @@ func TestEmitExecution(t *testing.T) {
 			}
 			if a1 != b {
 				observes := observesLines(j.orig) && reDigits.ReplaceAllString(a1, "N") == reDigits.ReplaceAllString(b, "N")
-				results[i] = result{path: j.path, diff: excerptDiff(a1, b), observes: observes}
+				results[i] = result{path: j.path, diff: excerptDiff(a1, b), observes: observes,
+					tabLayout: reHeredocIndentError.MatchString(a1) && bytes.ContainsRune(j.orig, '\t')}
 				return
 			}
 			results[i] = result{path: j.path}
@@ -145,7 +149,7 @@ func TestEmitExecution(t *testing.T) {
 	}
 	wg.Wait()
 
-	var same, differ, skipped, observing int
+	var same, differ, skipped, observing, tabLayout int
 	shown := 0
 	for _, r := range results {
 		switch {
@@ -154,6 +158,14 @@ func TestEmitExecution(t *testing.T) {
 		case r.diff != "":
 			if rel, err := filepath.Rel(src, r.path); err == nil && emitDeviations[rel] {
 				same++
+				continue
+			}
+			if r.tabLayout {
+				// A test of PHP's heredoc indentation errors written with
+				// tabs: Phaenon's whitespace is spaces, and the migration's
+				// replacement makes the indentation consistent (or counts it
+				// in other columns), so PHP reports another error, or none.
+				tabLayout++
 				continue
 			}
 			if r.observes {
@@ -174,8 +186,8 @@ func TestEmitExecution(t *testing.T) {
 			same++
 		}
 	}
-	t.Logf("emit execution: %d/%d files behave identically, lines included through the map (%.2f%%); %d read compiled lines as values, %d skipped (timeout / nondeterministic), %d not plain code (templates), %d newer than the oracle, %d emit errors",
-		same, same+differ, 100*float64(same)/float64(same+differ), observing, skipped, notPlain, newer, emitErrors)
+	t.Logf("emit execution: %d/%d files behave identically, lines included through the map (%.2f%%); %d read compiled lines as values, %d test heredoc indentation errors with tabs, %d skipped (timeout / nondeterministic), %d not plain code (templates), %d newer than the oracle, %d emit errors",
+		same, same+differ, 100*float64(same)/float64(same+differ), observing, tabLayout, skipped, notPlain, newer, emitErrors)
 }
 
 // The positions a run of the compiled t.php reports. Every pattern names
@@ -389,3 +401,7 @@ func hasRunSections(tt *phpt.Test) bool {
 	}
 	return false
 }
+
+// reHeredocIndentError matches PHP's parse errors about a heredoc's or
+// nowdoc's indentation.
+var reHeredocIndentError = regexp.MustCompile(`Invalid (body )?indentation`)

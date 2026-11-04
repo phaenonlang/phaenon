@@ -18,6 +18,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/tabs"
 )
 
 // ErrNotPlainCode marks a PHP file that has no .phn equivalent: it has
@@ -85,6 +86,9 @@ func Prepare(src []byte, opts Options) (out []byte, notes []Note, closeTag bool,
 	if err != nil {
 		return nil, nil, false, err
 	}
+	// Phaenon's whitespace is spaces (design/functions.md §5.5): not a
+	// layout --keep-layout keeps, since a tab would not compile.
+	out = tabs.Expand(out)
 	if opts.Generics {
 		if out, notes, err = Lift(out, opts); err != nil {
 			return nil, nil, false, err

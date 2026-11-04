@@ -1,0 +1,23 @@
+namespace Tabs;
+
+// Whitespace is spaces (design/functions.md §5.5, D21): a tab is allowed in
+// a string's content and in a comment's text only. A file with tabs elsewhere
+// gets one P1005, at its first such tab, counting the lines.
+
+// A comment's text keeps its tab:	here.
+final class Strings
+{
+    fun values(): array => ["a	b", 'c	d', <<<EOT
+        heredoc	text
+            	deeper
+        EOT];
+}
+
+final class Indented
+{
+	fun one(): int => 1; // want P1005 "(3 lines)"
+
+	fun two(): int {
+		return 2;
+    }
+}

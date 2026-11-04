@@ -8,6 +8,8 @@
 //     the expression bodies: a function's brace on its declaration's line,
 //     a class-like's on a line of its own, `{}` for an empty body, a
 //     one-line docblock on one line;
+//   - spaces for the tabs Phaenon forbids (design/functions.md §5.5),
+//     before anything else;
 //   - no blank line before the file's first line, which the compiler's
 //     header would absorb;
 //   - the spacing of Phaenon's own syntax: type parameters and type
@@ -32,13 +34,15 @@ import (
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/migrate"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/tabs"
 	"github.com/phaenonlang/phaenon/internal/token"
 )
 
 // Source lays a .phn out as Phaenon's layout wants it. Formatting the
 // result again changes nothing.
 func Source(src []byte) ([]byte, error) {
-	out := trimLeadingBlankLines(src)
+	// The tabs go first: every later step lays out spaces.
+	out := trimLeadingBlankLines(tabs.Expand(src))
 	out, err := migrate.LayoutBlocks(out)
 	if err != nil {
 		return nil, err
