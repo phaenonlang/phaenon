@@ -61,13 +61,13 @@ func Layout(src []byte, stats *Stats) ([]byte, error) {
 	// body that becomes an arrow moves its brace in the first pass, and the
 	// arrow carries the moved text. A method of an anonymous class inside
 	// a body that becomes an arrow is written as one in the next round.
-	out, err := layoutPass(src, stats, false)
+	out, err := layoutPass(src, stats, false, false)
 	if err != nil {
 		return nil, err
 	}
 	for {
 		before := stats.Arrows
-		if out, err = layoutPass(out, stats, true); err != nil {
+		if out, err = layoutPass(out, stats, true, false); err != nil {
 			return nil, err
 		}
 		if stats.Arrows == before {
@@ -80,8 +80,12 @@ func Layout(src []byte, stats *Stats) ([]byte, error) {
 // empty bodies and the one-line docblocks, which change the layout only.
 // It is phn fmt's share of the canonical layout (design/tooling.md §5.1);
 // turning a block into `=> expr` changes the code and stays migrate's.
+//
+// A body a single `return` makes a candidate for an arrow keeps the block
+// here, so its brace goes up like any other's: Layout leaves that brace to
+// the arrow its second pass writes.
 func LayoutBlocks(src []byte) ([]byte, error) {
-	return layoutPass(src, &Stats{}, false)
+	return layoutPass(src, &Stats{}, false, true)
 }
 
 type layout struct {
@@ -92,14 +96,17 @@ type layout struct {
 	// arrows are the declarations written as arrows in this pass; one
 	// nested in another waits for the next.
 	arrows []ast.Span
+	// blocks keeps every block a block (LayoutBlocks): no body is an
+	// arrow candidate.
+	blocks bool
 }
 
-func layoutPass(src []byte, stats *Stats, bodies bool) ([]byte, error) {
+func layoutPass(src []byte, stats *Stats, bodies, blocks bool) ([]byte, error) {
 	f, err := parser.Parse(src, lexer.ModePhaenon)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
-	l := &layout{tokenIndex: tokenIndex{lexer.Tokenize(src, lexer.ModePhaenon)}, src: src, stats: stats}
+	l := &layout{tokenIndex: tokenIndex{lexer.Tokenize(src, lexer.ModePhaenon)}, src: src, stats: stats, blocks: blocks}
 	if !bodies {
 		l.docblocks()
 	}
@@ -314,7 +321,10 @@ func (l *layout) function(name *ast.Ident, tps []*ast.TypeParam, ret ast.TypeExp
 	}
 	// A comment between the signature and the brace, or inside the braces,
 	// keeps the block: the arrow would have nowhere to put it.
-	expr := l.arrowCandidate(name, ret, body, sigEnd, span.End)
+	var expr ast.Expr
+	if !l.blocks {
+		expr = l.arrowCandidate(name, ret, body, sigEnd, span.End)
+	}
 	switch {
 	case expr != nil && bodies:
 		for _, a := range l.arrows {
