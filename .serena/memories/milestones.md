@@ -96,9 +96,8 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
    `internal/format/testdata`. Layer 2 is the project's fixer through `runFix`: phaenon.json
    `"fmt"`, `tools/php-cs-fixer` or `vendor/bin/php-cs-fixer`. `--check` writes nothing. On the
    measure's copy, core un-formatted through `phn fix` comes back byte for byte from one
-   `phn fmt`. Layer 1 changes nothing in the five dogfood trees. tq-cli's `cs` is `phn fmt`
-   (`e1b3586`). Core's is staged, waiting for its hooks: the bundle tests need the test
-   infrastructure (`../design/tooling.md` §5.4). Next: slice 4, `phn lsp`, on a maintainer's
-   go-ahead.
+   `phn fmt`. Layer 1 changes nothing in the five dogfood trees. Core's and tq-cli's `cs` are
+   `phn fmt` (core `6bf80807`, its hooks passed; tq-cli `e1b3586`) (`../design/tooling.md` §5.4).
+   Next: slice 4, `phn lsp`, on a maintainer's go-ahead.
 
 ← [[Home]]

@@ -695,8 +695,6 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
 - **The stdlib's six `.phn` are not in the canonical layout** (written before it): `phn fmt
   stdlib/**/*.phn` would put their method braces up and write `{}`, and the runtime and concurrent
   packages would then be regenerated (`phn stdlib`), since one-line docblocks reach the output.
-- **Core's `composer cs` → `phn fmt`** is staged on its dogfood branch, not committed: its
-  pre-commit hook runs the bundle tests, which need `tq test:infra:up`.
 - **PhpStorm's Reformat Code** writing the first layer comes with the editor slice (§6.2), on
   `internal/format/testdata`.
 - `phn fmt FILE…` hands the fixer the outputs as arguments, which php-cs-fixer reads as the paths
