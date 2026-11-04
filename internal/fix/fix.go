@@ -193,11 +193,15 @@ func backtrack(a, b []string, trace [][]int32) [][2]int {
 // new source with the hunks it refused, in order. A hunk that touches text
 // the compiler wrote is refused, unless the same change can be made where
 // it does not: an inserted or deleted run of a repeated byte, as in
-// indentation, slides to the left until it lies within a span.
+// indentation, slides to the left until it lies within a span. The spans
+// a folded pipe moves put source text out of order in the output, so the
+// placed hunks are applied in the source's order, and one that would
+// change source text another changes already is refused.
 func Carry(src, old []byte, spans []emit.Verbatim, hunks []Hunk) ([]byte, []Hunk) {
 	type edit struct {
 		start, end int
 		text       string
+		hunk       Hunk
 	}
 	var edits []edit
 	var refused []Hunk
@@ -206,7 +210,7 @@ func Carry(src, old []byte, spans []emit.Verbatim, hunks []Hunk) ([]byte, []Hunk
 		for _, across := range []bool{false, true} {
 			for _, c := range placements(old, h) {
 				if s, e, in := place(spans, c, across); in {
-					edits = append(edits, edit{s, e, c.Text})
+					edits = append(edits, edit{s, e, c.Text, h})
 					placed = true
 					break
 				}
@@ -222,14 +226,21 @@ func Carry(src, old []byte, spans []emit.Verbatim, hunks []Hunk) ([]byte, []Hunk
 	if len(edits) == 0 {
 		return src, refused
 	}
+	sort.SliceStable(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
 	var out bytes.Buffer
 	pos := 0
-	for _, e := range edits {
+	for i, e := range edits {
+		if e.start < pos || i > 0 && e.start == pos && e.start == e.end && edits[i-1].start == edits[i-1].end {
+			// Two changes of one source place, from two places in the output.
+			refused = append(refused, e.hunk)
+			continue
+		}
 		out.Write(src[pos:e.start])
 		out.WriteString(e.text)
 		pos = e.end
 	}
 	out.Write(src[pos:])
+	sort.SliceStable(refused, func(i, j int) bool { return refused[i].Start < refused[j].Start })
 	return out.Bytes(), refused
 }
 
@@ -286,7 +297,9 @@ func slideLeft(old []byte, h Hunk) (Hunk, bool) {
 // it: a method a tool removes goes with its head and its docblock. It must
 // delete some source: text the compiler wrote from none comes back with
 // the rebuild. A replacement that spans text the compiler wrote is
-// refused, since its new text is PHP the source may not take.
+// refused, since its new text is PHP the source may not take, and so is a
+// deletion whose source range holds text that lands elsewhere in the
+// output: an operand a folded pipe moved.
 func place(spans []emit.Verbatim, h Hunk, across bool) (int, int, bool) {
 	if !across {
 		return placeWithin(spans, h)
@@ -296,7 +309,16 @@ func place(spans []emit.Verbatim, h Hunk, across bool) (int, int, bool) {
 	}
 	s, ok1 := sourceStart(spans, h.Start)
 	e, ok2 := sourceEnd(spans, h.End)
-	return s, e, ok1 && ok2 && s < e
+	if !ok1 || !ok2 || s >= e {
+		return 0, 0, false
+	}
+	for _, v := range spans {
+		outside := v.Out+v.Len <= h.Start || v.Out >= h.End
+		if outside && v.Src < e && v.Src+v.Len > s {
+			return 0, 0, false
+		}
+	}
+	return s, e, true
 }
 
 // sourceStart maps the output offset where a deletion starts: into the

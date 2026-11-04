@@ -60,6 +60,9 @@ type lineWriter struct {
 	out        bytes.Buffer
 	lines      []outLine
 	segments   []segment
+	// moved are the source runs of free edits (edit.Pieces): verbatim, but
+	// on the compiler's lines, so no line of their source holds them.
+	moved []segment
 	mapAt      int // output offset of the map line before __halt_compiler, -1: none
 	// inserted bytes, the map line before __halt_compiler, went in at
 	// output offset insertedAt after the segments were written.
@@ -171,6 +174,14 @@ func (w *lineWriter) inPlace(text string, s ast.Span) {
 
 // free writes compiler-laid-out text anchored at source offset at.
 func (w *lineWriter) free(text string, at int) {
+	w.freeWith(text, at, nil)
+}
+
+// freeWith is free for text holding source runs at pieces.
+func (w *lineWriter) freeWith(text string, at int, pieces []piece) {
+	for _, p := range pieces {
+		w.moved = append(w.moved, segment{Span: p.Span, Out: w.out.Len() + p.Off})
+	}
 	w.out.WriteString(text)
 	anchor := w.lineOf(at)
 	for i := 0; i < len(text); i++ {
@@ -233,7 +244,12 @@ func (w *lineWriter) classify() []linemap.Line {
 // other on both sides.
 func (w *lineWriter) verbatim() []Verbatim {
 	var vs []Verbatim
-	for _, s := range w.segments {
+	all := w.segments
+	if len(w.moved) > 0 {
+		all = append(append([]segment{}, w.segments...), w.moved...)
+		sort.SliceStable(all, func(i, j int) bool { return all[i].Out < all[j].Out })
+	}
+	for _, s := range all {
 		v := Verbatim{Src: s.Start, Out: s.Out, Len: s.End - s.Start}
 		if w.inserted > 0 && v.Out >= w.insertedAt {
 			v.Out += w.inserted

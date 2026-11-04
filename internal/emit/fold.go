@@ -20,7 +20,9 @@ import (
 //	array_values(array_map(fn(User $u) => $u->email, $users))
 //
 // The run's text is a free edit (lines.go): its lines are the compiler's,
-// held at the run's first source line. It carries the edits made inside
+// held at the run's first source line, and the source's runs in it are
+// verbatim spans, so phn fix carries a change of an operand back. It
+// carries the edits made inside
 // the run — erased generics, a lowered partial application, an inner run —
 // rendered where they stand. It goes on one line when that fits in
 // foldWidth columns (an argument that spans lines keeps its lines, moved
@@ -36,7 +38,7 @@ const foldWidth = 120
 // foldCall is a stage written as a call: its callee up to and with the
 // opening parenthesis, and its arguments, one of them the piped value.
 type foldCall struct {
-	callee string
+	callee text
 	args   []foldArg
 }
 
@@ -45,9 +47,106 @@ type foldCall struct {
 // argument's `name: `.
 type foldArg struct {
 	name  string
-	text  string
+	text  text
 	src   ast.Span
 	inner *foldCall
+}
+
+// text is a fold's text as runs, each the source's bytes from offset src
+// or, where src is -1, the compiler's.
+type text []run
+
+type run struct {
+	s   string
+	src int
+}
+
+// lit appends text the compiler writes.
+func (t *text) lit(s string) {
+	if s != "" {
+		*t = append(*t, run{s, -1})
+	}
+}
+
+// source appends the source's bytes [at, at+len(s)).
+func (t *text) source(s string, at int) {
+	if s != "" {
+		*t = append(*t, run{s, at})
+	}
+}
+
+func (t *text) add(o text) { *t = append(*t, o...) }
+
+func (t text) String() string {
+	var b strings.Builder
+	for _, r := range t {
+		b.WriteString(r.s)
+	}
+	return b.String()
+}
+
+// pieces are t's source runs, at their offsets in t.String().
+func (t text) pieces() []piece {
+	var ps []piece
+	off := 0
+	for _, r := range t {
+		if r.src >= 0 {
+			ps = append(ps, piece{Off: off, Span: ast.Span{Start: r.src, End: r.src + len(r.s)}})
+		}
+		off += len(r.s)
+	}
+	return ps
+}
+
+// textOf is an edit's text as runs: its pieces the source's.
+func textOf(s string, pieces []piece) text {
+	var t text
+	pos := 0
+	for _, p := range pieces {
+		t.lit(s[pos:p.Off])
+		t.source(s[p.Off:p.Off+p.End-p.Start], p.Start)
+		pos = p.Off + p.End - p.Start
+	}
+	t.lit(s[pos:])
+	return t
+}
+
+// lines splits t after each line break.
+func (t text) lines() []text {
+	out := []text{nil}
+	for _, r := range t {
+		for r.s != "" {
+			i := strings.IndexByte(r.s, '\n')
+			if i < 0 {
+				out[len(out)-1] = append(out[len(out)-1], r)
+				break
+			}
+			out[len(out)-1] = append(out[len(out)-1], run{r.s[:i+1], r.src})
+			out = append(out, nil)
+			if r.src >= 0 {
+				r.src += i + 1
+			}
+			r.s = r.s[i+1:]
+		}
+	}
+	return out
+}
+
+// trimPrefix is t without its first n bytes.
+func (t text) trimPrefix(n int) text {
+	for len(t) > 0 && n > 0 {
+		r := t[0]
+		if len(r.s) > n {
+			if r.src >= 0 {
+				r.src += n
+			}
+			r.s = r.s[n:]
+			return append(text{r}, t[1:]...)
+		}
+		n -= len(r.s)
+		t = t[1:]
+	}
+	return t
 }
 
 // fold writes the run of folding pipes that ends at top as nested calls,
@@ -57,9 +156,9 @@ func (l *targetLowering) fold(top *ast.Binary) error {
 	span := top.Span()
 	used := map[int]bool{}
 	c, ok := l.foldCall(top, used)
-	text := ""
+	var t text
 	if ok {
-		text, ok = l.e.layoutFold(c, span)
+		t, ok = l.e.layoutFold(c, span)
 	}
 	for i, ed := range l.e.edits {
 		ok = ok && (used[i] || !inside(ed, span))
@@ -85,7 +184,8 @@ func (l *targetLowering) fold(top *ast.Binary) error {
 		}
 	}
 	l.e.edits = kept
-	l.e.replaceFree(span, text)
+	l.e.replaceFree(span, t.String())
+	l.e.edits[len(l.e.edits)-1].Pieces = t.pieces()
 	return nil
 }
 
@@ -99,7 +199,7 @@ func (l *targetLowering) foldCall(p *ast.Binary, used map[int]bool) (*foldCall, 
 		return nil, false
 	}
 	callee, ok := e.renderSpan(ast.Span{Start: rs.Start, End: args.S.Start + 1}, used)
-	if !ok || strings.Contains(callee, "\n") {
+	if !ok || strings.Contains(callee.String(), "\n") {
 		return nil, false
 	}
 	piped, ok := l.pipedArg(p.Left, used)
@@ -125,11 +225,11 @@ func (l *targetLowering) foldCall(p *ast.Binary, used map[int]bool) (*foldCall, 
 			c.args = append(c.args, arg)
 			continue
 		}
-		text, ok := e.renderSpan(a.S, used)
+		t, ok := e.renderSpan(a.S, used)
 		if !ok {
 			return nil, false
 		}
-		c.args = append(c.args, foldArg{text: text, src: a.S})
+		c.args = append(c.args, foldArg{text: t, src: a.S})
 	}
 	return c, !e.hasComment(prev, args.S.End)
 }
@@ -148,38 +248,42 @@ func (l *targetLowering) pipedArg(left ast.Expr, used map[int]bool) (foldArg, bo
 			s = in
 		}
 	}
-	text, ok := l.e.renderSpan(s, used)
-	return foldArg{text: text, src: s}, ok
+	t, ok := l.e.renderSpan(s, used)
+	return foldArg{text: t, src: s}, ok
 }
 
 // renderSpan is the output text of src[s]: the source with the edits that
 // belong to the span applied, in the order apply writes them. It marks
 // them in used, and reports false when an edit straddles the span.
-func (e *emitter) renderSpan(s ast.Span, used map[int]bool) (string, bool) {
+func (e *emitter) renderSpan(s ast.Span, used map[int]bool) (text, bool) {
 	var idx []int
 	for i, ed := range e.edits {
 		switch {
 		case inside(ed, s):
 			idx = append(idx, i)
 		case ed.Start < s.End && ed.End > s.Start:
-			return "", false
+			return nil, false
 		}
 	}
 	sort.SliceStable(idx, func(a, b int) bool { return editLess(e.edits[idx[a]], e.edits[idx[b]]) })
-	var b strings.Builder
+	var t text
 	pos := s.Start
 	for _, i := range idx {
 		ed := e.edits[i]
 		if ed.Start < pos {
-			return "", false
+			return nil, false
 		}
-		b.Write(e.src[pos:ed.Start])
-		b.WriteString(e.sourceRelative(ed))
+		t.source(string(e.src[pos:ed.Start]), pos)
+		if rel := e.sourceRelative(ed); rel == ed.Text {
+			t.add(textOf(ed.Text, ed.Pieces)) // an inner run keeps its source runs
+		} else {
+			t.lit(rel)
+		}
 		pos = ed.End
 		used[i] = true
 	}
-	b.Write(e.src[pos:s.End])
-	return b.String(), true
+	t.source(string(e.src[pos:s.End]), pos)
+	return t, true
 }
 
 // sourceRelative is an edit's text with its lines indented as the source's
@@ -218,7 +322,7 @@ func inside(ed edit, s ast.Span) bool {
 }
 
 // layoutFold lays out a folded run that replaces span s.
-func (e *emitter) layoutFold(c *foldCall, s ast.Span) (string, bool) {
+func (e *emitter) layoutFold(c *foldCall, s ast.Span) (text, bool) {
 	indent, col := e.outPosition(s.Start)
 	unit := "    "
 	if strings.Contains(indent, "\t") {
@@ -236,9 +340,9 @@ type folder struct {
 // call lays out c starting at column col of a line indented by indent,
 // trail columns following it on its last line: on that line when it fits,
 // one argument per line otherwise.
-func (f folder) call(c *foldCall, indent string, col, trail int) (string, bool) {
-	if text, ok := f.compact(c, indent); ok && fits(text, col, trail) {
-		return text, true
+func (f folder) call(c *foldCall, indent string, col, trail int) (text, bool) {
+	if t, ok := f.compact(c, indent); ok && fits(t.String(), col, trail) {
+		return t, true
 	}
 	return f.multi(c, indent)
 }
@@ -247,60 +351,61 @@ func (f folder) call(c *foldCall, indent string, col, trail int) (string, bool) 
 // with a closing bracket (a closure, an array) keeps its line breaks, its
 // lines moved to indent. Any other argument that spans lines — a pipe —
 // gets a line of its own (multi).
-func (f folder) compact(c *foldCall, indent string) (string, bool) {
-	var b strings.Builder
-	b.WriteString(c.callee)
+func (f folder) compact(c *foldCall, indent string) (text, bool) {
+	var b text
+	b.add(c.callee)
 	for i, a := range c.args {
 		if i > 0 {
-			b.WriteString(", ")
+			b.lit(", ")
 		}
-		b.WriteString(a.name)
+		b.lit(a.name)
 		t, ok := f.arg(a, indent, -1)
 		if !ok {
-			return "", false
+			return nil, false
 		}
-		if i := strings.LastIndexByte(t, '\n'); i >= 0 {
-			if last := strings.TrimLeft(t[i+1:], " \t"); last == "" || !strings.ContainsAny(last[:1], "})]") {
-				return "", false
+		ts := t.String()
+		if i := strings.LastIndexByte(ts, '\n'); i >= 0 {
+			if last := strings.TrimLeft(ts[i+1:], " \t"); last == "" || !strings.ContainsAny(last[:1], "})]") {
+				return nil, false
 			}
 		}
-		b.WriteString(t)
+		b.add(t)
 	}
-	b.WriteString(")")
-	return b.String(), true
+	b.lit(")")
+	return b, true
 }
 
 // multi writes c with one argument per line, one level in from indent. A
 // call whose one argument is the inner call keeps it on its line, so that
 // nested calls close together: `array_values(array_filter(` + its
 // arguments + `))`, as they are written by hand.
-func (f folder) multi(c *foldCall, indent string) (string, bool) {
+func (f folder) multi(c *foldCall, indent string) (text, bool) {
+	var b text
+	b.add(c.callee)
 	if len(c.args) == 1 && c.args[0].inner != nil && c.args[0].name == "" {
 		t, ok := f.multi(c.args[0].inner, indent)
-		return c.callee + t + ")", ok
+		b.add(t)
+		b.lit(")")
+		return b, ok
 	}
 	in := indent + f.unit
-	var b strings.Builder
-	b.WriteString(c.callee)
-	b.WriteString("\n")
+	b.lit("\n")
 	for _, a := range c.args {
-		b.WriteString(in)
-		b.WriteString(a.name)
+		b.lit(in + a.name)
 		t, ok := f.arg(a, in, width(in)+width(a.name))
 		if !ok {
-			return "", false
+			return nil, false
 		}
-		b.WriteString(t)
-		b.WriteString(",\n")
+		b.add(t)
+		b.lit(",\n")
 	}
-	b.WriteString(indent)
-	b.WriteString(")")
-	return b.String(), true
+	b.lit(indent + ")")
+	return b, true
 }
 
 // arg writes an argument on a line indented by indent: an inner call at
 // column col (compact when col < 0), text with its lines moved.
-func (f folder) arg(a foldArg, indent string, col int) (string, bool) {
+func (f folder) arg(a foldArg, indent string, col int) (text, bool) {
 	switch {
 	case a.inner == nil:
 		return f.e.reindent(a.text, a.src, indent)
@@ -327,27 +432,34 @@ func width(s string) int { return utf8.RuneCountInString(s) }
 // reindent moves the continuation lines of an argument's text, rendered
 // from the source span src (renderSpan), to start from indent as they
 // started from the indentation of src's first line. A multi-line string or
-// comment in it cannot move sideways.
-func (e *emitter) reindent(text string, src ast.Span, indent string) (string, bool) {
+// comment in it cannot move sideways. The indentation it writes is the
+// compiler's; the rest of each line stays the source's.
+func (e *emitter) reindent(t text, src ast.Span, indent string) (text, bool) {
 	from := e.lineIndent(src.Start)
-	if !strings.Contains(text, "\n") || from == indent {
-		return text, true
+	if !strings.Contains(t.String(), "\n") || from == indent {
+		return t, true
 	}
 	if e.multiLineToken(src.Start, src.End) {
-		return "", false
+		return nil, false
 	}
-	lines := strings.Split(text, "\n")
-	for i := 1; i < len(lines); i++ {
-		switch ln := lines[i]; {
-		case strings.TrimSpace(ln) == "":
-			lines[i] = ""
-		case strings.HasPrefix(ln, from):
-			lines[i] = indent + ln[len(from):]
+	lines := t.lines()
+	out := lines[0]
+	for _, l := range lines[1:] {
+		ln := l.String()
+		body, nl := strings.CutSuffix(ln, "\n")
+		switch {
+		case strings.TrimSpace(body) == "":
+			if nl {
+				out.lit("\n")
+			}
+		case strings.HasPrefix(body, from):
+			out.lit(indent)
+			out.add(l.trimPrefix(len(from)))
 		default:
-			return "", false
+			return nil, false
 		}
 	}
-	return strings.Join(lines, "\n"), true
+	return out, true
 }
 
 // outPosition is where offset at lands in the output: the indentation of

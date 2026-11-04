@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -132,7 +133,9 @@ func checkLineMap(t *testing.T, path string, src, out []byte, w *lineWriter) {
 }
 
 // checkVerbatim: every verbatim span holds the source bytes it names, in
-// order on both sides, none overlapping another (phn fix relies on it).
+// output order, none overlapping another on either side (phn fix relies on
+// it); the source order is the output's but for the runs a folded pipe
+// moves.
 func checkVerbatim(t *testing.T, path string, src, out []byte, vs []Verbatim) {
 	t.Helper()
 	prev := Verbatim{}
@@ -142,7 +145,7 @@ func checkVerbatim(t *testing.T, path string, src, out []byte, vs []Verbatim) {
 			t.Errorf("%s: verbatim span %+v does not hold its source bytes", path, v)
 			return
 		}
-		if i > 0 && (v.Out < prev.Out+prev.Len || v.Src < prev.Src+prev.Len) {
+		if i > 0 && v.Out < prev.Out+prev.Len {
 			t.Errorf("%s: verbatim span %+v overlaps or precedes %+v", path, v, prev)
 			return
 		}
@@ -150,6 +153,14 @@ func checkVerbatim(t *testing.T, path string, src, out []byte, vs []Verbatim) {
 			t.Errorf("%s: verbatim spans %+v and %+v continue each other", path, prev, v)
 		}
 		prev = v
+	}
+	bySrc := slices.Clone(vs)
+	slices.SortFunc(bySrc, func(a, b Verbatim) int { return a.Src - b.Src })
+	for i := 1; i < len(bySrc); i++ {
+		if a, b := bySrc[i-1], bySrc[i]; b.Src < a.Src+a.Len {
+			t.Errorf("%s: verbatim spans %+v and %+v share source bytes", path, a, b)
+			return
+		}
 	}
 }
 
