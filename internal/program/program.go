@@ -16,7 +16,6 @@ import (
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
-	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/types"
 	"github.com/phaenonlang/phaenon/stdlib"
@@ -54,6 +53,9 @@ type Program struct {
 	target    phpversion.Version
 	// extensionsPHP is the version of the php LoadExtensions reflected.
 	extensionsPHP string
+	// Parses, when set, keeps the trees of the files this program parses
+	// for the next program of the same process (ParseCache).
+	Parses *ParseCache
 }
 
 // Problem is a finding attached to a declaration site.
@@ -182,7 +184,7 @@ func (p *Program) AddFile(path string, src []byte, mode lexer.Mode, checked bool
 	if f, ok := p.files[path]; ok {
 		return f, nil
 	}
-	tree, err := parser.Parse(src, mode)
+	tree, err := p.Parses.parse(path, src, mode)
 	if err != nil {
 		return nil, err
 	}

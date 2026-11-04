@@ -2,10 +2,12 @@ package program
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
@@ -27,6 +29,10 @@ type ComposerLoader struct {
 	classmap map[string]string // lower FQN → path
 	files    []string
 	prefixes []string // psr4 prefixes, longest first
+
+	names     []string // the classmap's names, declared case
+	namesOnce sync.Once
+	allNames  []string
 }
 
 // ErrNoComposer is returned when no vendor/composer directory is found.
@@ -35,9 +41,19 @@ var ErrNoComposer = errors.New("no vendor/composer directory found")
 // FindComposer walks up from dir to the nearest vendor/composer directory
 // and loads its maps.
 func FindComposer(dir string) (*ComposerLoader, error) {
-	abs, err := filepath.Abs(dir)
+	cand, err := FindComposerDir(dir)
 	if err != nil {
 		return nil, err
+	}
+	return LoadComposer(cand)
+}
+
+// FindComposerDir walks up from dir to the nearest vendor/composer
+// directory, without reading its maps.
+func FindComposerDir(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
 	}
 	if st, err := os.Stat(abs); err == nil && !st.IsDir() {
 		abs = filepath.Dir(abs)
@@ -45,11 +61,11 @@ func FindComposer(dir string) (*ComposerLoader, error) {
 	for {
 		cand := filepath.Join(abs, "vendor", "composer")
 		if st, err := os.Stat(filepath.Join(cand, "autoload_psr4.php")); err == nil && !st.IsDir() {
-			return LoadComposer(cand)
+			return cand, nil
 		}
 		parent := filepath.Dir(abs)
 		if parent == abs {
-			return nil, ErrNoComposer
+			return "", ErrNoComposer
 		}
 		abs = parent
 	}
@@ -77,6 +93,7 @@ func LoadComposer(dir string) (*ComposerLoader, error) {
 		for k, v := range m {
 			if len(v) > 0 {
 				l.classmap[strings.ToLower(k)] = v[0]
+				l.names = append(l.names, k)
 			}
 		}
 	}
@@ -297,3 +314,76 @@ func (l DirLoader) Preload() []string { return nil }
 
 // Read implements Loader.
 func (l DirLoader) Read(path string) ([]byte, error) { return os.ReadFile(path) }
+
+// ClassNames lists the classes the maps can load, declared case: the
+// classmap's, and those the PSR-4 directories hold, one per file named
+// after its class (a project's output directories are read from their
+// sources). The directories are walked once per loader; phn lsp completes
+// class names from the list.
+func (l *ComposerLoader) ClassNames() []string {
+	l.namesOnce.Do(func() {
+		seen := map[string]bool{}
+		add := func(name string) {
+			if k := strings.ToLower(name); !seen[k] {
+				seen[k] = true
+				l.allNames = append(l.allNames, name)
+			}
+		}
+		for _, n := range l.names {
+			add(n)
+		}
+		for _, prefix := range l.prefixes {
+			for _, dir := range l.psr4[prefix] {
+				if src, ok := l.source(dir); ok {
+					dir = src
+				}
+				filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+					if err != nil {
+						return nil
+					}
+					if d.IsDir() {
+						if name := d.Name(); path != dir && (strings.HasPrefix(name, ".") || name == "vendor" || name == "node_modules") {
+							return filepath.SkipDir
+						}
+						return nil
+					}
+					ext := filepath.Ext(path)
+					if ext != ".php" && ext != ".phn" {
+						return nil
+					}
+					rel, err := filepath.Rel(dir, strings.TrimSuffix(path, ext))
+					if err != nil {
+						return nil
+					}
+					parts := strings.Split(filepath.ToSlash(rel), "/")
+					for _, part := range parts {
+						if !isClassSegment(part) {
+							return nil
+						}
+					}
+					add(prefix + strings.Join(parts, `\`))
+					return nil
+				})
+			}
+		}
+		sort.Strings(l.allNames)
+	})
+	return l.allNames
+}
+
+// isClassSegment reports whether a path segment can be part of a class
+// name: an identifier.
+func isClassSegment(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= 0x80:
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
