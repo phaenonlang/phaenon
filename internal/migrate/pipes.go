@@ -1020,13 +1020,10 @@ func (r *piper) insideBrackets(off int) bool {
 	return depth > 0
 }
 
-// levelOf is one indentation level in a file indented with ind.
-func levelOf(ind string) string {
-	if strings.Contains(ind, "\t") {
-		return "\t"
-	}
-	return "    "
-}
+// levelOf is one indentation level: four spaces, since Phaenon's
+// whitespace is spaces (design/functions.md §5.5) and Prepare has replaced
+// a PHP file's tabs.
+func levelOf(string) string { return "    " }
 
 // reindentable reports whether the lines after the first of a piece can
 // move from indentation from to indentation to: each starts with from or

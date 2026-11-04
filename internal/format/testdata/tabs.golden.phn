@@ -1,0 +1,18 @@
+namespace Tabs;
+
+// phn fmt replaces the tabs Phaenon forbids (design/functions.md §5.5) before
+// anything else; a string's and a comment's text keep theirs:	here.
+final class Box<T>
+{
+    /** One line. */
+    fun get(list<T> $xs): ?T {
+        return $xs[0]   ?? null; // the	tail
+    }
+
+    fun text(): string {
+        return <<<EOT
+            a	b
+            	c
+            EOT;
+    }
+}

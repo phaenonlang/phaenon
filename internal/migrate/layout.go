@@ -435,10 +435,7 @@ func (l *layout) arrow(name *ast.Ident, sigEnd int, e ast.Expr, stmt, decl ast.S
 	exprSpan := ast.Span{Start: e.Span().Start, End: l.toks[end].End}
 	text := string(src[exprSpan.Start:exprSpan.End])
 	declIndent := indentOf(src, name.S.Start)
-	level := "    "
-	if strings.Contains(declIndent, "\t") {
-		level = "\t"
-	}
+	level := "    " // whitespace is spaces (design/functions.md §5.5)
 	if stmtIndent := indentOf(src, stmt.Start); lineStart(src, stmt.Start) != lineStart(src, decl.Start) &&
 		strings.HasPrefix(stmtIndent, declIndent) && len(stmtIndent) > len(declIndent) && isLineStart(src, stmt.Start) {
 		level = stmtIndent[len(declIndent):]

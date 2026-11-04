@@ -60,15 +60,6 @@ func TestPipesKeepTypeArguments(t *testing.T) {
 	}
 }
 
-// A file indented with tabs gets its stages one tab in.
-func TestPipesIndentWithTabs(t *testing.T) {
-	src := "fun f(string $s): string {\n\treturn strtoupper(trim(str_repeat($s, 2)));\n}\n"
-	want := "fun f(string $s): string {\n\treturn $s\n\t\t|> str_repeat(?, 2)\n\t\t|> trim(...)\n\t\t|> strtoupper(...);\n}\n"
-	if got, _ := pipes(t, src, phpversion.PHP85, 3); got != want {
-		t.Errorf("got:\n%s", got)
-	}
-}
-
 // The summary counts chains by reason, the most frequent first.
 func TestPipeReportReasons(t *testing.T) {
 	r := &PipeReport{Left: map[string]int{ReasonOrder: 2, ReasonByRef: 5, ReasonSpread: 2}}

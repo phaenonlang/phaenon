@@ -10,6 +10,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/tabs"
 	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
@@ -176,9 +177,27 @@ func (c *Checker) rollback(mark int) {
 
 // ------------------------------------------------------------------ per file
 
+// checkTabs reports a .phn's tabs outside strings and comments' text, once
+// for the file: the remedy, phn fmt, is the file's too.
+func (c *Checker) checkTabs(f *program.File) {
+	offs := tabs.Find(f.Src)
+	if len(offs) == 0 {
+		return
+	}
+	where := "this line"
+	if n := tabs.Lines(f.Src, offs); n > 1 {
+		where = fmt.Sprintf("%d lines", n)
+	}
+	c.report(ast.Span{Start: offs[0], End: offs[0] + 1}, P1005,
+		"a tab outside a string or a comment's text (%s): Phaenon code is indented with spaces, and phn fmt replaces the tabs", where)
+}
+
 func (c *Checker) checkFile(f *program.File) {
 	phaenon := f.Mode == lexer.ModePhaenon
 	c.ignored[f.Path] = ignoredLines(f.Src, f.Mode)
+	if phaenon {
+		c.checkTabs(f)
+	}
 	// Top-level code runs in a context without a class.
 	scope := f.ScopeAt(0)
 	ctx := c.newCtx(f, scope, nil, true)

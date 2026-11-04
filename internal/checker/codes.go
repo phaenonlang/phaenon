@@ -37,6 +37,9 @@ var (
 	// that yields (design/functions.md §3.1); the grammar admits it. An
 	// abstract or interface method with one has a body, P2504 / P2514.
 	P1004 = Code{"P1004", Error, "expression body where Phaenon forbids one"}
+	// P1005: a tab outside a string's content or a comment's text
+	// (design/functions.md §5.5, D21); once per file, at the first.
+	P1005 = Code{"P1005", Error, "tab where Phaenon wants spaces"}
 
 	// P11xx — constructs PHP deprecates, reported whatever the target
 	// unless --no-deprecations (design/php-versions.md §4).

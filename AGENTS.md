@@ -64,7 +64,8 @@ internal/program      program model: project files, Composer vendor code (lazy),
 internal/checker      the type checker behind `phn check`
 internal/emit         patch-based emitter: PSR-12 layout of what it writes, the line map; generics erasure, is/as lowering
 internal/linemap      the `// phaenon-map v1 …` comment every compiled file ends with: parse, write, lookups
-internal/format       `phn fmt`'s first layer: Phaenon's layout (migrate's braces and docblocks, the spacing of Phaenon's syntax)
+internal/format       `phn fmt`'s first layer: Phaenon's layout (spaces for tabs, migrate's braces and docblocks, the spacing of Phaenon's syntax)
+internal/tabs         the tabs Phaenon forbids (D21: outside strings and comments' text), found for P1005 and replaced by migrate and fmt
 internal/fix          `phn fix`: a PHP tool's changes of the outputs carried back to the sources through the emitter's verbatim spans
 internal/trace        `phn trace`: positions in compiled files → `.phn` positions, in text, GitHub workflow commands and CI reports (Checkstyle, JUnit, Clover, Cobertura)
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
