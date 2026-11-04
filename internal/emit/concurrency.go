@@ -14,7 +14,7 @@ const ScopeClass = "Phaenon\\Concurrent\\Scope"
 
 // lowerConcurrency compiles the syntax of design/concurrency.md §6: a
 // `concurrently { … }` block becomes `Scope::run(function () use (…) { … })`
-// and `spawn expr` becomes `Scope::spawn(fn () => expr)`. The `use` clause
+// and `spawn expr` becomes `Scope::spawn(fn() => expr)`. The `use` clause
 // is computed the way a person writes it: a variable of the enclosing scope
 // the body reads is captured by value, one the body assigns and the
 // enclosing scope mentions as well by reference. Every edit keeps its line
@@ -173,11 +173,11 @@ func (l *concurrencyLowering) block(b *ast.Concurrently, names []string, byRef m
 	l.e.replace(b.Close, tail)
 }
 
-// spawn rewrites `spawn expr` as `Scope::spawn(fn () => expr)` and
+// spawn rewrites `spawn expr` as `Scope::spawn(fn() => expr)` and
 // `spawn {` … `}` as `Scope::spawn(function () use (…) {` … `})`.
 func (l *concurrencyLowering) spawn(s *ast.Spawn, names []string) {
 	if s.Expr != nil {
-		l.e.replace(s.Kw, l.scopeClass(s.Kw.Start)+"::spawn(fn () =>")
+		l.e.replace(s.Kw, l.scopeClass(s.Kw.Start)+"::spawn(fn() =>")
 		l.e.insert(s.Expr.Span().End, ")")
 		return
 	}

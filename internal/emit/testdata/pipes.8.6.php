@@ -11,9 +11,7 @@ declare(strict_types=1);
 
 final class User
 {
-    public function __construct(public ?string $email)
-    {
-    }
+    public function __construct(public ?string $email) {}
 }
 
 final class Log
@@ -102,9 +100,7 @@ function weighted(array $xs, int $factor): int
         |> weigh(?, new class ($factor) implements Weighted {
             public int $a = 1;
 
-            public function __construct(private int $factor)
-            {
-            }
+            public function __construct(private int $factor) {}
 
             public function weight(): int
             {
@@ -131,9 +127,7 @@ function counted(): string
 // A property is read after the left side: the stage stays a pipe's.
 final class Report
 {
-    public function __construct(private Log $log)
-    {
-    }
+    public function __construct(private Log $log) {}
 
     /**
      * @param list<string> $rows
@@ -185,4 +179,4 @@ echo implode('|', $log->lines), "\n";
 echo shout(' up '), "\n";
 echo padded(null), '|', padded(' ab '), "\n";
 echo names([new User('a@x'), new User(null)]), "\n";
-// phaenon-map v1 pipes.phn 1-6=1 7:1 13-13=6 14:7 15-16=7 17:8 20-20=10 21:11 25-25=14 26:15 31-31=19 32:20 37-40=25 41:25 42-43=25 44:26 47-47=28 48:29 50-52=31 53:31 54-55=31 56:32 60-60=35 61:36 63-65=38 66:38 67-67=38 68:39 76-78=46 79:47 84-84=51 85:52 88-90=55 91:55 92-94=55 95:56 96-98=57 99:57 100-101=57 102:58 106-107=61 108:62 110-110=63 111:64 115-115=67 116:68 120-120=71 121:72 126-126=76 127:77 133-133=82 134:83 135-136=83 137:84 138-140=85 141:85 142-142=85 143:86 149-150=91 151:92 153-153=93 154:94 157-159=96 160:97 162-164=99 165:99 166-166=99 167:100
+// phaenon-map v1 pipes.phn 1-6=1 7:1 13-13=6 14:7 18-18=10 19:11 23-23=14 24:15 29-29=19 30:20 35-38=25 39:25 40-41=25 42:26 45-45=28 46:29 48-50=31 51:31 52-53=31 54:32 58-58=35 59:36 61-63=38 64:38 65-65=38 66:39 74-76=46 77:47 82-82=51 83:52 86-88=55 89:55 90-92=55 93:56 94-96=57 97:57 98-99=57 100:58 106-106=63 107:64 111-111=67 112:68 116-116=71 117:72 122-122=76 123:77 129-129=82 130:83 132-134=85 135:85 136-136=85 137:86 143-144=91 145:92 147-147=93 148:94 151-153=96 154:97 156-158=99 159:99 160-160=99 161:100

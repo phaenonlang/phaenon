@@ -5,13 +5,15 @@
 // comments, formatting, code that is already plain PHP — passes through byte
 // for byte; the emitter is not a formatter.
 //
-// What the compiler writes or rewrites it lays out as PSR-12 wants it
-// (design/line-map.md §2, roadmap D19): the open tag, the @generated marker
-// and declare(strict_types=1) on lines of their own; the imports it adds on
-// lines of their own in the file's use block; the docblocks it writes or
-// extends as multi-line blocks, one tag per line; an expression body as a
-// block; the opening brace of a named function, method or class-like on
-// the next line (after a multi-line parameter list, on the `)` line).
+// What the compiler writes or rewrites it lays out as PER Coding Style 3.0
+// wants it (design/line-map.md §2, roadmap D19, D22): the open tag, the
+// @generated marker and declare(strict_types=1) on lines of their own; the
+// imports it adds on lines of their own in the file's use block; the
+// docblocks it writes or extends as multi-line blocks, one tag per line; an
+// expression body as a block; the opening brace of a named function, method
+// or class-like on the next line (after a multi-line parameter list, on the
+// `)` line), an empty body `{}` left on the declaration's line; the arrow
+// functions it writes as `fn(`, its closures' blocks on lines of their own.
 // __LINE__ becomes the source line as a literal.
 //
 // Line N of the output is therefore not line N of the .phn. Every edit is
@@ -231,6 +233,13 @@ func (e *emitter) insert(at int, text string) {
 // lowering it belongs to.
 func (e *emitter) insertEnd(owner ast.Span, text string) {
 	e.replace(ast.Span{Start: owner.End, End: owner.End}, text)
+	e.edits[len(e.edits)-1].Owner = owner
+}
+
+// insertEndFree is a free insertion at the end of the node owner whose
+// lowering it belongs to.
+func (e *emitter) insertEndFree(owner ast.Span, text string) {
+	e.replaceFree(ast.Span{Start: owner.End, End: owner.End}, text)
 	e.edits[len(e.edits)-1].Owner = owner
 }
 

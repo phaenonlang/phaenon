@@ -113,8 +113,8 @@ func TestIsGenerated(t *testing.T) {
 	}
 }
 
-// TestBraces pins the PSR-12 placement of declaration braces and the
-// layout of expression bodies on the edges the goldens do not show.
+// TestBraces pins the PER placement of declaration braces and the layout
+// of expression bodies on the edges the goldens do not show.
 func TestBraces(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{
@@ -138,9 +138,34 @@ func TestBraces(t *testing.T) {
 			"function f(): int /* why */ {\n    return 1;\n}\n",
 		},
 		{
-			"an empty class body",
-			"interface I {}\n",
-			"interface I\n{\n}\n",
+			"an empty class body stays on the header's line",
+			"interface I {}\nfinal class E extends \\Exception {}\n",
+			"interface I {}\nfinal class E extends \\Exception {}\n",
+		},
+		{
+			"an empty body stays on the signature's line",
+			"class A {\n    fun __construct(private int $n) {}\n}\n",
+			"class A\n{\n    public function __construct(private int $n) {}\n}\n",
+		},
+		{
+			"an empty body after a multi-line parameter list",
+			"fun f(\n    int $a,\n): void {}\n",
+			"function f(\n    int $a,\n): void {}\n",
+		},
+		{
+			"an empty body loses the throws clause before it",
+			"fun f(): void throws \\LogicException {}\n",
+			"/**\n * @throws \\LogicException\n */\nfunction f(): void {}\n",
+		},
+		{
+			"an empty body written over lines stays as written",
+			"fun f(): void\n{\n}\nclass B {\n}\n",
+			"function f(): void\n{\n}\nclass B {\n}\n",
+		},
+		{
+			"a body with a comment is not empty",
+			"fun f(): void { /* nothing */ }\n",
+			"function f(): void\n{ /* nothing */ }\n",
 		},
 		{
 			"an enum with a backing type",

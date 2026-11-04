@@ -26,6 +26,11 @@ function addTo(array &$xs, int $n): void
 {
     $xs[] = $n;
 }
+/** @param list<int> $xs */
+function total(array $xs, int $n): int
+{
+    return array_sum($xs) + $n;
+}
 function trace(string $label, string $v): string
 {
     echo "eval $label\n"; return $v;
@@ -33,9 +38,7 @@ function trace(string $label, string $v): string
 
 final class Greeter
 {
-    public function __construct(private string $greeting)
-    {
-    }
+    public function __construct(private string $greeting) {}
     public function greet(string $name, string $punct = '!'): string
     {
         return "$this->greeting, $name$punct";
@@ -90,6 +93,16 @@ echo $v('a', 'b', 'c'), "\n";
 $xs = [1];
 $add = addTo(?, 2);
 $add($xs);
+function totals(): int
+{
+    // A closure over lines: the call moves in with its block.
+    $total = total(
+        ?,
+        3,
+    );
+    return $total([1, 2]);
+}
+echo totals(), "\n";
 var_export($xs);
 echo "\n";
 $greeter = new Greeter('Hello');
@@ -116,4 +129,4 @@ function dashes(Closure $f = str_repeat('-', ?)): string
 echo dashes(), "\n";
 
 echo Labelled::LABEL, Size::Small->value, "\n";
-// phaenon-map v1 partial.phn 1-6=1 7:1 13-15=6 16:7 17-19=7 20:8 21-23=8 24:9 26-28=10 29:11 30-32=11 33:12 35-35=13 36:14 37-38=14 39:15 40-42=15 43:16 44-46=16 47:17 50-50=19 51:20 55-55=23 56:24 60-60=27 61:28 66-66=32 67:33 71-71=36 72:37 113-115=77 116:78
+// phaenon-map v1 partial.phn 1-6=1 7:1 13-15=6 16:7 17-19=7 20:8 21-23=8 24:9 26-28=10 29:11 31-33=12 34:13 35-37=13 38:14 40-40=15 41:16 43-45=17 46:18 47-49=18 50:19 53-53=21 54:22 58-58=25 59:26 63-63=29 64:30 69-69=34 70:35 74-74=38 75:39 97-97=60 98:61 126-128=88 129:89

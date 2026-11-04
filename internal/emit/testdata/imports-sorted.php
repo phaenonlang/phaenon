@@ -35,7 +35,7 @@ final class Summary implements Stringable
     public function warm(): void
     {
         Scope::run(function () {
-            Scope::spawn(fn () => $this->lines->count());
+            Scope::spawn(fn() => $this->lines->count());
         });
     }
 }

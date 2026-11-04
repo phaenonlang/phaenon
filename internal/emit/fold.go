@@ -15,17 +15,17 @@ import (
 // pipe that folds too — as nested calls: the code the pipeline stands for,
 // as it was written before pipes (design/php-versions.md §5.3).
 //
-//	$users |> array_map(fn (User $u) => $u->email, ?) |> array_values(...)
+//	$users |> array_map(fn(User $u) => $u->email, ?) |> array_values(...)
 //	// →
-//	array_values(array_map(fn (User $u) => $u->email, $users))
+//	array_values(array_map(fn(User $u) => $u->email, $users))
 //
 // The run's text is a free edit (lines.go): its lines are the compiler's,
 // held at the run's first source line. It carries the edits made inside
 // the run — erased generics, a lowered partial application, an inner run —
 // rendered where they stand. It goes on one line when that fits in
 // foldWidth columns (an argument that spans lines keeps its lines, moved
-// with it), otherwise one argument per line, PSR-12's multi-line argument
-// list with a trailing comma. A run whose text cannot move without
+// with it), otherwise one argument per line, PER's multi-line argument
+// list with a trailing comma (§2.6). A run whose text cannot move without
 // changing what it says — a comment between its stages or arguments, an
 // edit between them, a multi-line string that would move sideways, an
 // attribute removed inside it — stays a pipeline, its partial applications
