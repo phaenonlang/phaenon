@@ -31,8 +31,11 @@ type project struct {
 	Roots   map[string]string `json:"roots"`
 	Exclude []string          `json:"exclude"`
 	PHP     string            `json:"php"`
-	data    []byte            // the file as read, to place diagnostics
-	path    string            // the file's path, for diagnostics
+	// Fmt is the command of phn fmt's second layer, the project's fixer run
+	// through phn fix (fmt.go); an empty list turns the layer off.
+	Fmt  *[]string `json:"fmt"`
+	data []byte    // the file as read, to place diagnostics
+	path string    // the file's path, for diagnostics
 }
 
 // loadProject reads phaenon.json from the working directory; nil when there is none.
