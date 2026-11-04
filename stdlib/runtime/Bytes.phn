@@ -12,17 +12,14 @@ namespace Phaenon;
  */
 final class Bytes
 {
-    private fun __construct()
-    {
-    }
+    private fun __construct() {}
 
     /**
      * The bytes a string of hex digits spells, either case.
      *
      * @throws \ValueError when $hex is not an even number of hex digits
      */
-    static fun fromHex(string $hex): bytes
-    {
+    static fun fromHex(string $hex): bytes {
         $b = @hex2bin($hex);
         if (false === $b) {
             throw new \ValueError('Bytes::fromHex(): not a hexadecimal string');
@@ -36,8 +33,7 @@ final class Bytes
      *
      * @throws \ValueError when $b64 is not base64 (standard or URL-safe alphabet)
      */
-    static fun fromBase64(string $b64): bytes
-    {
+    static fun fromBase64(string $b64): bytes {
         $b = base64_decode(strtr($b64, '-_', '+/'), true);
         if (false === $b) {
             throw new \ValueError('Bytes::fromBase64(): not a base64 string');
@@ -46,11 +42,8 @@ final class Bytes
         return (bytes) $b;
     }
 
-    /**
-     * The bytes as lower-case hex digits, two per byte.
-     */
-    static fun hex(bytes $b): string
-    {
+    /** The bytes as lower-case hex digits, two per byte. */
+    static fun hex(bytes $b): string {
         return bin2hex($b);
     }
 
@@ -58,8 +51,7 @@ final class Bytes
      * The bytes in base64: the standard alphabet with padding, or the
      * URL-safe one without it.
      */
-    static fun base64(bytes $b, bool $urlSafe = false): string
-    {
+    static fun base64(bytes $b, bool $urlSafe = false): string {
         $s = base64_encode($b);
 
         return $urlSafe ? rtrim(strtr($s, '+/', '-_'), '=') : $s;
@@ -70,8 +62,7 @@ final class Bytes
      *
      * @throws \ValueError when the bytes are not valid UTF-8
      */
-    static fun text(bytes $b): string
-    {
+    static fun text(bytes $b): string {
         if (!mb_check_encoding($b, 'UTF-8')) {
             throw new \ValueError('Bytes::text(): not valid UTF-8');
         }
@@ -79,11 +70,8 @@ final class Bytes
         return (string) $b;
     }
 
-    /**
-     * The bytes decoded as UTF-8 text, every invalid sequence replaced by U+FFFD.
-     */
-    static fun textLossy(bytes $b): string
-    {
+    /** The bytes decoded as UTF-8 text, every invalid sequence replaced by U+FFFD. */
+    static fun textLossy(bytes $b): string {
         $substitute = mb_substitute_character();
         mb_substitute_character(0xFFFD);
         try {
