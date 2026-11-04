@@ -25,6 +25,10 @@ type Options struct {
 	// checker settled on. phn migrate compares a file's types before and
 	// after a rewrite with it.
 	Observe func(f *program.File, e ast.Expr, t types.Type)
+	// Cancelled, when set, is asked before each file: once it reports true,
+	// Check stops and returns what it found so far. phn lsp cancels the
+	// check of a whole project that a newer save makes stale.
+	Cancelled func() bool
 }
 
 // Diagnostic is one finding.
@@ -37,8 +41,20 @@ type Diagnostic struct {
 	Severity Severity
 	Code     string
 	Message  string
-	key      string // the dedupe key, so a rollback can forget the diagnostic
+	// Related are the declarations the finding is about ("declared here"):
+	// the parameter an argument does not fit, the method an override
+	// breaks. phn lsp shows them beside the finding.
+	Related []Related
+	key     string // the dedupe key, so a rollback can forget the diagnostic
+}
 
+// Related is a position a finding refers to, in any file of the program
+// (a stub's included).
+type Related struct {
+	File            string
+	Line, Col       int
+	EndLine, EndCol int
+	Message         string
 }
 
 func (d Diagnostic) String() string {
@@ -114,6 +130,9 @@ func ignoredLines(src []byte, mode lexer.Mode) map[int]bool {
 // file and position.
 func (c *Checker) Check() []Diagnostic {
 	for _, f := range c.p.CheckedFiles() {
+		if c.opts.Cancelled != nil && c.opts.Cancelled() {
+			break
+		}
 		c.file = f
 		c.checkFile(f)
 	}
@@ -143,6 +162,26 @@ func (c *Checker) Check() []Diagnostic {
 
 // report records a diagnostic at a span of the current file.
 func (c *Checker) report(span ast.Span, code Code, format string, args ...any) {
+	c.reportRelated(span, code, nil, format, args...)
+}
+
+// related is a declaration's position for a diagnostic's Related; nil
+// without a file.
+func related(f *program.File, span ast.Span, format string, args ...any) *Related {
+	if f == nil {
+		return nil
+	}
+	line, col := f.Position(span.Start)
+	end := span.End
+	if end > span.Start {
+		end--
+	}
+	endLine, endCol := f.Position(end)
+	return &Related{File: f.Path, Line: line, Col: col, EndLine: endLine, EndCol: endCol + 1, Message: fmt.Sprintf(format, args...)}
+}
+
+// reportRelated is report with the declaration the finding is about.
+func (c *Checker) reportRelated(span ast.Span, code Code, rel *Related, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	line, col := c.file.Position(span.Start)
 	if c.ignored[c.file.Path][line] {
@@ -158,8 +197,12 @@ func (c *Checker) report(span ast.Span, code Code, format string, args ...any) {
 		return
 	}
 	c.seen[key] = true
-	c.diags = append(c.diags, Diagnostic{File: c.file.Path, Line: line, Col: col, EndLine: endLine, EndCol: endCol + 1,
-		Severity: code.Severity, Code: code.ID, Message: msg, key: key})
+	d := Diagnostic{File: c.file.Path, Line: line, Col: col, EndLine: endLine, EndCol: endCol + 1,
+		Severity: code.Severity, Code: code.ID, Message: msg, key: key}
+	if rel != nil {
+		d.Related = []Related{*rel}
+	}
+	c.diags = append(c.diags, d)
 }
 
 // mark returns the number of diagnostics so far; rollback(mark) discards

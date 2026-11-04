@@ -34,6 +34,7 @@ type signature struct {
 	subst      map[string]types.Type
 	recv       types.Type     // receiver, for static/$this
 	decl       *program.Class // declaring class of a method
+	file       *program.File  // the file that declares it, for "declared here"
 	never      bool
 	deprecated bool
 	// known holds argument types computed before the call is checked (the
@@ -46,6 +47,18 @@ type signature struct {
 	// node is the call being checked: a partial application of it is
 	// recorded for the emitter under its arguments.
 	node ast.Expr
+}
+
+// methodFile is the file that declares a method: its trait's when a trait
+// brought it in.
+func methodFile(m *program.Method) *program.File {
+	if m.FromTrait != nil {
+		return m.FromTrait.File
+	}
+	if m.Class != nil {
+		return m.Class.File
+	}
+	return nil
 }
 
 func isStubFile(f *program.File) bool {
@@ -88,7 +101,7 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	if fn.Deprecated && x.c.opts.Deprecations {
 		x.report(n.S, P4006, "function %s() is deprecated%s", fn.Name, fn.DeprecatedNote)
 	}
-	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File), node: e}
+	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File), node: e, file: fn.File}
 	sig.explicit = x.explicitArgs(e.TypeArgs, fn.TypeParams, fn.Name+"()", e.S)
 	if e.Args != nil && e.Args.FirstClassCallable {
 		return x.callableOf(sig)
@@ -1028,7 +1041,7 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 			if meth.Deprecated && x.c.opts.Deprecations {
 				x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", meth.Class.Name, name, meth.DeprecatedNote)
 			}
-			sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File),
+			sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File), file: methodFile(meth),
 				typeParams: meth.TypeParams, recv: m, decl: meth.Class, node: e}
 			sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 			if e.Args != nil && e.Args.FirstClassCallable {
@@ -1179,7 +1192,7 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 		if meth.Deprecated && x.c.opts.Deprecations {
 			x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", meth.Class.Name, name, meth.DeprecatedNote)
 		}
-		sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File),
+		sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File), file: methodFile(meth),
 			typeParams: meth.TypeParams, recv: recv, decl: meth.Class, node: e}
 		sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 		if e.Args != nil && e.Args.FirstClassCallable {
@@ -1386,7 +1399,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 	if !x.canAccess(ctor.Vis, ctor.Class) {
 		x.report(e.S, P2108, "constructor of %s is %s", cl.Name, ctor.Vis)
 	}
-	sig := &signature{name: cl.Name + "::__construct()", params: ctor.Params, ret: types.TVoid, typeParams: ctor.TypeParams, recv: recv, decl: ctor.Class}
+	sig := &signature{name: cl.Name + "::__construct()", params: ctor.Params, ret: types.TVoid, typeParams: ctor.TypeParams, recv: recv, decl: ctor.Class, file: methodFile(ctor)}
 	// Infer the class's own type arguments from the constructor call.
 	if c, ok := recv.(types.Class); ok && len(c.Args) == 0 && len(cl.TypeParams) > 0 {
 		sig.typeParams = append(append([]*program.TypeParam{}, cl.TypeParams...), ctor.TypeParams...)
@@ -1823,7 +1836,8 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 			continue
 		}
 		if !types.IsAcceptable(at, pt, x.p()) {
-			x.report(b.arg.S, P2103, "argument %d ($%s) of %s expects %s, %s given", b.idx+1, b.param.Name, sig.name, x.typeName(pt), x.typeName(at))
+			x.c.reportRelated(b.arg.S, P2103, related(sig.file, b.param.Span, "parameter $%s of %s declared here", b.param.Name, sig.name),
+				"argument %d ($%s) of %s expects %s, %s given", b.idx+1, b.param.Name, sig.name, x.typeName(pt), x.typeName(at))
 		}
 	}
 	for _, b := range bindings {
