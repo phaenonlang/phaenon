@@ -70,7 +70,8 @@ usage:
                                                            project's outputs and carry its changes back to the .phn;
                                                            a change of text the compiler wrote is not carried; then
                                                            rebuild, run the tool again and report what it still
-                                                           changes; --check reports and writes no source
+                                                           changes, with the rule behind each change for php-cs-fixer
+                                                           and Rector; --check reports and writes no source
   phn fmt [--check] [<file>...]                            lay .phn files out: Phaenon's layout (spaces for tabs,
                                                            braces, {}, one-line docblocks, the spacing of type
                                                            parameters and arguments, throws, is, as, concurrently,
