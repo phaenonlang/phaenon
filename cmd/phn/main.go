@@ -39,6 +39,10 @@ func main() {
 		fixCmd(os.Args[2:])
 	case "fmt":
 		fmtCmd(os.Args[2:])
+	case "lsp":
+		lspCmd(os.Args[2:])
+	case "watch":
+		watchCmd(os.Args[2:])
 	case "migrate":
 		migrateCmd(os.Args[2:])
 	case "stdlib":
@@ -72,13 +76,20 @@ usage:
                                                            rebuild, run the tool again and report what it still
                                                            changes, with the rule behind each change for php-cs-fixer
                                                            and Rector; --check reports and writes no source
-  phn fmt [--check] [<file>...]                            lay .phn files out: Phaenon's layout (spaces for tabs,
+  phn fmt [--check] [<file>...] | --stdin                  lay .phn files out: Phaenon's layout (spaces for tabs,
                                                            braces, {}, one-line docblocks, the spacing of type
                                                            parameters and arguments, throws, is, as, concurrently,
                                                            spawn), then the project's fixer through phn fix
                                                            (phaenon.json "fmt", or tools/php-cs-fixer or
                                                            vendor/bin/php-cs-fixer); no files:
-                                                           the roots; --check writes nothing and fails on a change
+                                                           the roots; --check writes nothing and fails on a change;
+                                                           --stdin: the first layer, standard input to output
+  phn lsp                                                  the language server of the project around the working
+                                                           directory, on stdin and stdout: diagnostics, hover, go to
+                                                           definition, symbols, completion, signature help,
+                                                           formatting; the outputs built on save
+  phn watch [--no-build] [--interval D]                    check and build the project each time one of its files
+                                                           changes
   phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] <path>...
                                                            rewrite .php files as .phn; lift generic docblocks and bare
                                                            @throws into syntax, function into fun; write chains of
@@ -130,8 +141,31 @@ that line, covered when any of them is.
 }
 
 func fail(format string, args ...any) {
+	if failPanics {
+		panic(failure(fmt.Sprintf(format, args...)))
+	}
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
+}
+
+// failPanics turns fail into a panic with a failure, which a long-running
+// command (phn lsp, phn watch) recovers from: a file that vanished between
+// listing and reading must not end the server.
+var failPanics bool
+
+// failure is the message of a fail recovered by recoverFailure.
+type failure string
+
+// recoverFailure, deferred, turns a fail's panic into *err; any other panic
+// goes on.
+func recoverFailure(err *error) {
+	switch r := recover().(type) {
+	case nil:
+	case failure:
+		*err = errors.New(string(r))
+	default:
+		panic(r)
+	}
 }
 
 // excludes holds the --exclude paths of build and check: directories (or
@@ -271,6 +305,10 @@ type buildJob struct {
 	// kept, when set, receives every output the build compiles, written or
 	// already current, by output path (phn fix).
 	kept map[string]keptOutput
+	// prog and diags, when set, are the project already checked, with its
+	// findings: phn lsp builds on save from the check it just ran.
+	prog  *program.Program
+	diags []checker.Diagnostic
 }
 
 // keptOutput is a compiled output as the build wrote it, with the source
@@ -302,9 +340,16 @@ func (j buildJob) run() buildResult {
 	}
 	files := collect(j.roots, skip, ".phn")
 	res := buildResult{files: len(files)}
-	diags := append(j.target.Diags, typeCheck(files, j.target.Version, checker.Options{})...)
+	prog := j.prog
+	diags := append([]checker.Diagnostic(nil), j.target.Diags...)
+	if prog == nil {
+		diags = append(diags, typeCheck(files, j.target.Version, checker.Options{})...)
+		prog = loadedProgram
+	} else {
+		diags = append(diags, j.diags...)
+	}
 	if !j.dependency {
-		diags = append(diags, installedDiags(files, loadedProgram)...)
+		diags = append(diags, installedDiags(files, prog)...)
 	}
 	broken := map[string]bool{}
 	for _, d := range diags {
@@ -341,7 +386,7 @@ func (j buildJob) run() buildResult {
 			fail("%v", err)
 		}
 		dst := outputPath(in)
-		opts := emit.Options{SourceName: in, MapSource: mapSource(in, dst), StrictTypes: true, Program: loadedProgram, File: loadedProgram.File(in)}
+		opts := emit.Options{SourceName: in, MapSource: mapSource(in, dst), StrictTypes: true, Program: prog, File: prog.File(in)}
 		php, spans, err := emit.FileVerbatim(src, opts)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -525,6 +570,9 @@ func loadProgram(files []string, target phpversion.Version, checked bool) (*prog
 func newProgram(anchor string, target phpversion.Version) (*program.Program, []checker.Diagnostic) {
 	p := program.New()
 	p.SetTarget(target)
+	if share != nil {
+		p.Parses = share.parses
+	}
 	if err := p.LoadStubs(); err != nil {
 		fail("stdlib: %v", err)
 	}
@@ -540,8 +588,14 @@ func newProgram(anchor string, target phpversion.Version) (*program.Program, []c
 		if err != nil {
 			cacheDir = os.TempDir()
 		}
-		embedded := stdlib.EmbeddedExtensions()
-		if _, err := p.LoadExtensions(php, cacheDir, func(lower string) bool { return embedded[lower] }); err != nil {
+		var err2 error
+		if share != nil {
+			_, err2 = p.AddExtensions(share.extensions(php, cacheDir))
+		} else {
+			embedded := stdlib.EmbeddedExtensions()
+			_, err2 = p.LoadExtensions(php, cacheDir, func(lower string) bool { return embedded[lower] })
+		}
+		if err := err2; err != nil {
 			diags = append(diags, checker.Diagnostic{File: anchor, Line: 1, Col: 1, Severity: checker.Warning, Code: "P4007",
 				Message: "PHP extensions could not be read (" + err.Error() + "); only php-src's extensions are known"})
 		}
@@ -554,20 +608,19 @@ func newProgram(anchor string, target phpversion.Version) (*program.Program, []c
 					php, p.ExtensionsPHP(), target, v)})
 		}
 		var l *program.ComposerLoader
-		if composerDir != "" {
+		switch {
+		case share != nil:
+			l, err = share.composer(filepath.Dir(anchor))
+		case composerDir != "":
 			l, err = program.LoadComposer(composerDir)
-		} else {
+		default:
 			l, err = program.FindComposer(filepath.Dir(anchor))
 		}
 		if err == nil {
 			// The project's own outputs map to its roots, an installed
 			// Phaenon package's to its sources.
-			l.Sources = map[string]string{}
-			for out, src := range installedSources(l.Dir) {
-				l.Sources[out] = src
-			}
-			for out, src := range projectSources {
-				l.Sources[out] = src
+			if share == nil {
+				setSources(l)
 			}
 			p.AddLoader(l)
 		} else {
