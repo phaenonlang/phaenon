@@ -47,8 +47,7 @@ final class Scope
 
     private ?Throwable $failure = null;
 
-    private fun __construct(?Scope $parent, float|int|null $timeout, ?Cancellation $external)
-    {
+    private fun __construct(?Scope $parent, float|int|null $timeout, ?Cancellation $external) {
         $this->own = new DeferredCancellation();
         $parts = [$this->own->getCancellation()];
         if ($parent !== null) {
@@ -70,8 +69,7 @@ final class Scope
      * cancellation cancel the rest and are rethrown here
      * (design/concurrency.md §5).
      */
-    static fun run<R>(Closure(): R $body, float|int|null $timeout = null, ?Cancellation $cancellation = null): R
-    {
+    static fun run<R>(Closure(): R $body, float|int|null $timeout = null, ?Cancellation $cancellation = null): R {
         $scope = new self(self::current(), $timeout, $cancellation);
         self::push($scope);
         try {
@@ -90,8 +88,7 @@ final class Scope
      * Starts a task in the innermost block of the current fiber and returns
      * its handle. The task runs when the body next waits.
      */
-    static fun spawn<T>(Closure(): T $task): Future<T>
-    {
+    static fun spawn<T>(Closure(): T $task): Future<T> {
         $scope = self::current() ?? throw new LogicException('spawn outside of a concurrently block');
         /** @var Future<T> $future */
         $future = async(static function () use ($scope, $task): mixed {
@@ -112,8 +109,7 @@ final class Scope
      * Awaits every handle and returns the results under the same keys. The
      * tasks stay the block's: a failure among them fails the block.
      */
-    static fun all<K of int|string, T>(iterable<K, Future<T>> $tasks): map<K, T>
-    {
+    static fun all<K of int|string, T>(iterable<K, Future<T>> $tasks): map<K, T> {
         return await($tasks, self::cancellation());
     }
 
@@ -122,8 +118,7 @@ final class Scope
      * block of its own, so a failure cancels the other tasks and is thrown
      * here.
      */
-    static fun map<K of int|string, V, U>(iterable<K, V> $items, Closure(V): U $task): map<K, U>
-    {
+    static fun map<K of int|string, V, U>(iterable<K, V> $items, Closure(V): U $task): map<K, U> {
         return concurrently {
             /** @var array<K, Future<U>> $tasks */
             $tasks = [];
@@ -139,27 +134,23 @@ final class Scope
      * The current task's scope cancellation: what to hand an amp API that
      * accepts one, so that the call is interrupted when the block is.
      */
-    static fun cancellation(): Cancellation
-    {
+    static fun cancellation(): Cancellation {
         $scope = self::current();
 
         return $scope === null ? new NullCancellation() : $scope->cancellation;
     }
 
     /** Waits, and wakes early with CancelledException when the scope is cancelled. */
-    static fun sleep(float $seconds): void
-    {
+    static fun sleep(float $seconds): void {
         delay($seconds, cancellation: self::cancellation());
     }
 
     /** Throws CancelledException when the current scope is cancelled: for a long loop without a wait of its own. */
-    static fun checkpoint(): void
-    {
+    static fun checkpoint(): void {
         self::cancellation()->throwIfRequested();
     }
 
-    static fun cancelled(): bool
-    {
+    static fun cancelled(): bool {
         return self::cancellation()->isRequested();
     }
 
@@ -169,8 +160,7 @@ final class Scope
      * Awaits every task in completion order, the ones spawned meanwhile in
      * the next round; the first failure aborts the rest.
      */
-    private fun join(): void
-    {
+    private fun join(): void {
         while ($this->joined < count($this->tasks)) {
             $pending = array_slice($this->tasks, $this->joined);
             $this->joined = count($this->tasks);
@@ -191,8 +181,7 @@ final class Scope
      * task's. A deadline arrives as amp reports it: a CancelledException
      * whose previous exception is the TimeoutException.
      */
-    private fun abort(Throwable $cause): never
-    {
+    private fun abort(Throwable $cause): never {
         $this->fail($cause);
         $this->drain();
         if ($cause instanceof CancelledException && $this->failure !== null) {
@@ -202,8 +191,7 @@ final class Scope
     }
 
     /** Records the scope's first failure and cancels everything in it. */
-    private fun fail(Throwable $e): void
-    {
+    private fun fail(Throwable $e): void {
         if ($this->failure === null) {
             $this->failure = $e;
             $this->own->cancel($e);
@@ -211,8 +199,7 @@ final class Scope
     }
 
     /** Waits for every task to finish, whatever its outcome. */
-    private fun drain(): void
-    {
+    private fun drain(): void {
         for ($i = 0; $i < count($this->tasks); ++$i) {
             try {
                 $this->tasks[$i]->await();
@@ -224,20 +211,17 @@ final class Scope
 
     // ---------------------------------------------------------------- the ambient stack
 
-    private static fun current(): ?Scope
-    {
+    private static fun current(): ?Scope {
         $stack = self::stack();
 
         return $stack === [] ? null : $stack[count($stack) - 1];
     }
 
-    private static fun push(Scope $scope): void
-    {
+    private static fun push(Scope $scope): void {
         self::setStack([...self::stack(), $scope]);
     }
 
-    private static fun pop(Scope $scope): void
-    {
+    private static fun pop(Scope $scope): void {
         $stack = self::stack();
         if ($stack === [] || $stack[count($stack) - 1] !== $scope) {
             throw new LogicException('concurrently blocks closed out of order');
@@ -247,13 +231,11 @@ final class Scope
     }
 
     /** Makes $scope the ambient scope of the task fiber that starts here. */
-    private static fun enter(Scope $scope): void
-    {
+    private static fun enter(Scope $scope): void {
         self::setStack([$scope]);
     }
 
-    private static fun stack(): list<Scope>
-    {
+    private static fun stack(): list<Scope> {
         $fiber = Fiber::getCurrent();
         if ($fiber === null) {
             return self::$main;
@@ -264,8 +246,7 @@ final class Scope
         return $stack;
     }
 
-    private static fun setStack(list<Scope> $stack): void
-    {
+    private static fun setStack(list<Scope> $stack): void {
         $fiber = Fiber::getCurrent();
         if ($fiber === null) {
             self::$main = $stack;

@@ -36,8 +36,7 @@ final class LineMapIntegration implements IntegrationInterface
     /** The .phn files read for the event being processed, as lines; null for one not deployed. */
     private map<string, ?list<string>> $sourceLines = [];
 
-    fun setupOnce(): void
-    {
+    fun setupOnce(): void {
         Scope::addGlobalEventProcessor(static function (Event $event): Event {
             $client = SentrySdk::getCurrentHub()->getClient();
             $integration = $client?->getIntegration(self::class);
@@ -50,8 +49,7 @@ final class LineMapIntegration implements IntegrationInterface
     }
 
     /** Never throws: Sentry drops an event whose processor throws, and no event is lost to the map. */
-    private fun translate(Event $event, Options $options): void
-    {
+    private fun translate(Event $event, Options $options): void {
         try {
             foreach ($event->getExceptions() as $exception) {
                 $stacktrace = $exception->getStacktrace();
@@ -70,8 +68,7 @@ final class LineMapIntegration implements IntegrationInterface
         }
     }
 
-    private fun translateStacktrace(Stacktrace $stacktrace, Options $options): Stacktrace
-    {
+    private fun translateStacktrace(Stacktrace $stacktrace, Options $options): Stacktrace {
         $frames = [];
         $changed = false;
         foreach ($stacktrace->getFrames() as $frame) {
@@ -83,8 +80,7 @@ final class LineMapIntegration implements IntegrationInterface
         return $changed ? new Stacktrace($frames) : $stacktrace;
     }
 
-    private fun translateFrame(Frame $frame, Options $options): Frame
-    {
+    private fun translateFrame(Frame $frame, Options $options): Frame {
         $compiled = $frame->getAbsoluteFilePath();
         if ($compiled === null || $frame->isInternal()) {
             return $frame;
@@ -116,8 +112,7 @@ final class LineMapIntegration implements IntegrationInterface
         return $translated;
     }
 
-    private fun setContext(Frame $translated, Frame $frame, string $source, int $line): void
-    {
+    private fun setContext(Frame $translated, Frame $frame, string $source, int $line): void {
         $lines = $this->sourceLines($source);
         if ($lines === null || $line < 1 || $line > count($lines)) {
             $translated->setPreContext($frame->getPreContext());
@@ -133,8 +128,7 @@ final class LineMapIntegration implements IntegrationInterface
         $translated->setPostContext(array_slice($lines, $line, $radius));
     }
 
-    private fun sourceLines(string $file): ?list<string>
-    {
+    private fun sourceLines(string $file): ?list<string> {
         if (!array_key_exists($file, $this->sourceLines)) {
             $text = @is_file($file) ? @file_get_contents($file) : false;
             $this->sourceLines[$file] = $text === false ? null : array_map(static fn (string $line): string => rtrim($line, "\r"), explode("\n", $text));
@@ -144,8 +138,7 @@ final class LineMapIntegration implements IntegrationInterface
     }
 
     /** Strips the first of Sentry's `prefixes` the path starts with, as the SDK does for the compiled path. */
-    private static fun stripPrefix(string $path, Options $options): string
-    {
+    private static fun stripPrefix(string $path, Options $options): string {
         foreach ($options->getPrefixes() as $prefix) {
             if (str_starts_with($path, $prefix)) {
                 return substr($path, strlen($prefix));
