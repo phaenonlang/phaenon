@@ -281,6 +281,29 @@ func TestFmt(t *testing.T) {
 	}
 }
 
+// A fixer whose change the first layer undoes — @PSR12 expanding an empty
+// body {} — is named: the sources keep Phaenon's layout, the outputs are
+// rebuilt from them, and phn fmt fails.
+func TestFmtNamesAFixerThatUndoesTheLayout(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	tool := fakeToolCommand(t, fakeSpec{Replace: [][2]string{{"private int $n) {}", "private int $n)\n    {\n    }"}}})
+	writeTree(t, root, map[string]string{
+		"phaenon.json": `{"roots": {"src": ".src"}, "fmt": [` + strconvQuote(tool) + `, "fix"]}`,
+	})
+	stdout, stderr, err := run(t, root, bin, "fmt")
+	if err == nil || !strings.Contains(stdout, "1 files laid out again after the fixer") ||
+		!strings.Contains(stderr, "src/Box.phn: the fixer's change undoes Phaenon's layout") {
+		t.Errorf("the conflict was not named (%v):\n%s%s", err, stdout, stderr)
+	}
+	if box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn")); !strings.Contains(string(box), "fun __construct(private int $n) {}") {
+		t.Errorf("Box.phn lost its {}:\n%s", box)
+	}
+	if _, stderr, err := run(t, root, bin, "build", "--check"); err != nil {
+		t.Errorf("the outputs are not the sources' build: %s", stderr)
+	}
+}
+
 func strconvQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)

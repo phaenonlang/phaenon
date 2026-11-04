@@ -48,7 +48,7 @@ func fmtCmd(args []string) {
 		proj.requireRoots("fmt")
 		files = collect(proj.roots(), proj.isOutput, ".phn")
 	}
-	changed := layoutFiles(files, *check)
+	changed := len(layoutFiles(files, *check))
 	if *check {
 		fmt.Printf("%d files checked, %d not in Phaenon's layout\n", len(files), changed)
 	} else {
@@ -62,8 +62,17 @@ func fmtCmd(args []string) {
 		}
 		status, left = runFix(proj, command, *check)
 		if !*check {
-			if again := layoutFiles(files, false); again > 0 {
-				fmt.Printf("%d files changed in Phaenon's layout after the fixer\n", again)
+			if again := layoutFiles(files, false); len(again) > 0 {
+				// The fixer carried a change the first layer undoes: the
+				// sources keep Phaenon's layout, the outputs are built from
+				// them again, and the two layers disagree on every run.
+				fixBuild(proj)
+				for _, path := range again {
+					fmt.Fprintf(os.Stderr, "%s: the fixer's change undoes Phaenon's layout; laid out again\n", path)
+				}
+				fmt.Printf("%d files laid out again after the fixer: its configuration conflicts with Phaenon's layout, "+
+					"as @PSR12 does on every empty body {} (a PER Coding Style set, @PER-CS3x0, keeps it)\n", len(again))
+				left = true
 			}
 		}
 	}
@@ -75,10 +84,10 @@ func fmtCmd(args []string) {
 	}
 }
 
-// layoutFiles applies the first layer to the files and returns how many
-// it changed, or with check, would change.
-func layoutFiles(files []string, check bool) int {
-	changed := 0
+// layoutFiles applies the first layer to the files and returns those it
+// changed, or with check, would change.
+func layoutFiles(files []string, check bool) []string {
+	var changed []string
 	for _, path := range files {
 		src, err := os.ReadFile(path)
 		if err != nil {
@@ -92,7 +101,7 @@ func layoutFiles(files []string, check bool) int {
 		if bytes.Equal(out, src) {
 			continue
 		}
-		changed++
+		changed = append(changed, path)
 		if check {
 			fmt.Fprintf(os.Stderr, "%s: not in Phaenon's layout\n", path)
 			continue
