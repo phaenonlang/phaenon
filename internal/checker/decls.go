@@ -606,10 +606,10 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 		c.report(declSpan(m), P2505, "%s::%s() overrides final method %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
 	}
 	if parent.Static != m.Static {
-		c.report(m.Span, P2502, "%s::%s() and %s::%s() disagree on static", cl.Name, m.Name, parent.Class.Name, parent.Name)
+		c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() and %s::%s() disagree on static", cl.Name, m.Name, parent.Class.Name, parent.Name)
 	}
 	if m.Vis > parent.Vis {
-		c.report(m.Span, P2502, "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, parent.Vis, parent.Class.Name, parent.Name)
+		c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, parent.Vis, parent.Class.Name, parent.Name)
 	}
 	if strings.EqualFold(m.Name, "__construct") && !parent.Abstract && parent.Class.Kind != ast.KindInterface {
 		return // constructors are exempt unless the parent's is abstract
@@ -628,20 +628,20 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 			if n := len(m.Params); n > 0 && m.Params[n-1].Variadic {
 				break
 			}
-			c.report(m.Span, P2502, "%s::%s() has fewer parameters than %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
+			c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() has fewer parameters than %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
 			break
 		}
 		cp := m.Params[i]
 		if pp.HasDefault && !cp.HasDefault && !cp.Variadic {
-			c.report(cp.Span, P2502, "parameter $%s of %s::%s() must be optional like in %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
+			c.reportRelated(cp.Span, P2502, overridden(parent), "parameter $%s of %s::%s() must be optional like in %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
 		}
 		pt, ct := bind(pp.Type, parent.Class), bind(cp.Type, cl)
 		if pt != nil && ct != nil && !types.IsSubtype(types.Erase(pt), types.Erase(ct), c.p) && !types.IsSubtype(pt, ct, c.p) {
-			c.report(cp.Span, P2502, "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
+			c.reportRelated(cp.Span, P2502, overridden(parent), "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
 				cp.Name, cl.Name, m.Name, types.Print(ct), parent.Class.Name, parent.Name, types.Print(pt))
 		}
 		if pp.ByRef != cp.ByRef {
-			c.report(cp.Span, P2502, "parameter $%s of %s::%s() disagrees on by-reference with %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
+			c.reportRelated(cp.Span, P2502, overridden(parent), "parameter $%s of %s::%s() disagrees on by-reference with %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
 		}
 	}
 	for i := len(parent.Params); i < len(m.Params); i++ {
@@ -653,11 +653,11 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 		pr, cr := bind(parent.Return, parent.Class), bind(m.Return, cl)
 		if cr == nil {
 			if _, isVoid := pr.(types.Void); !isVoid && !types.IsMixed(pr) {
-				c.report(m.Span, P2502, "%s::%s() must declare a return type compatible with %s::%s() (%s)", cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
+				c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() must declare a return type compatible with %s::%s() (%s)", cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
 			}
 		} else if !types.IsSubtype(cr, pr, c.p) && !types.IsSubtype(types.Erase(cr), types.Erase(pr), c.p) {
 			if _, parentVoid := pr.(types.Void); !(parentVoid && isVoidLike(cr)) {
-				c.report(m.Span, P2502, "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
+				c.reportRelated(m.Span, P2502, overridden(parent), "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
 					types.Print(cr), cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
 			}
 		}
@@ -670,4 +670,13 @@ func isVoidLike(t types.Type) bool {
 		return true
 	}
 	return false
+}
+
+// overridden is "declared here" for the method an override breaks.
+func overridden(m *program.Method) *Related {
+	span := m.Span
+	if m.Decl != nil && m.Decl.Name != nil {
+		span = m.Decl.Name.S
+	}
+	return related(methodFile(m), span, "%s::%s() declared here", m.Class.Name, m.Name)
 }
