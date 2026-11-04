@@ -76,6 +76,14 @@ func Layout(src []byte, stats *Stats) ([]byte, error) {
 	}
 }
 
+// LayoutBlocks is Layout without the expression bodies: the braces, the
+// empty bodies and the one-line docblocks, which change the layout only.
+// It is phn fmt's share of the canonical layout (design/tooling.md §5.1);
+// turning a block into `=> expr` changes the code and stays migrate's.
+func LayoutBlocks(src []byte) ([]byte, error) {
+	return layoutPass(src, &Stats{}, false)
+}
+
 type layout struct {
 	tokenIndex
 	src   []byte
