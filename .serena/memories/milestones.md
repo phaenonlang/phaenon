@@ -1,7 +1,7 @@
 ---
 type: status
 tags: [phaenon, roadmap, history]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Milestones — history and state
@@ -99,5 +99,24 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
    `phn fmt`. Layer 1 changes nothing in the five dogfood trees. Core's and tq-cli's `cs` are
    `phn fmt` (core `6bf80807`, its hooks passed; tq-cli `e1b3586`) (`../design/tooling.md` §5.4).
    Next: slice 4, `phn lsp`, on a maintainer's go-ahead.
+10. 2026-11-04: **D21, whitespace is spaces** (`../design/functions.md` §5.5): a tab outside a
+    string's content or a comment's text is `P1005`, once per file; `internal/tabs` finds and
+    replaces such tabs (tab stops of four, a heredoc's indentation and its body's together, php
+    the oracle); `phn migrate` (`--keep-layout` too) and `phn fmt`'s first layer replace them. No
+    dogfood file had one. **`phn fix` names the rule** behind each reported change
+    (`../design/tooling.md` §4): php-cs-fixer's and Rector's own JSON reports, php-cs-fixer's
+    candidates narrowed by running each fixer alone.
+11. 2026-11-04: **M6 slice 4, `phn lsp` and `phn watch`** (`internal/lsp`, `cmd/phn/lsp.go`,
+    `cmd/phn/share.go`; `../design/tooling.md` §6.5). A program per check, cheap through
+    `program.ParseCache`, the extensions read once and the Composer maps kept: an edit's re-check
+    takes 50 ms after the pause on core, the project 1.06 s on save (core), 1.26 s (tq-cli).
+    Diagnostics with "declared here" (P2103, P2502), hover in Phaenon's spelling, definition into
+    the stubs, symbols, completion (members, variables, names with imports, `|>` stages),
+    signature help, formatting, the P1005 quick-fix; build on save after saves only, reported as
+    `phaenon/build`. PhpStorm (`../jetbrains`): `phn lsp` for diagnostics only, build on save with a
+    status-bar item, settings; Reformat Code with `phn fmt --stdin` before and after PhpStorm's
+    formatter; spaces in `.phn` (D21). Found on the way: `phn fmt` left a one-statement block's
+    brace on its own line (fixed, golden `format/blocks.phn`). Left in [[open-items]] § M6 —
+    `phn lsp`. Next: slice 5, the VS Code extension, on a maintainer's go-ahead.
 
 ← [[Home]]

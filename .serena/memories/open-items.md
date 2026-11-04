@@ -1,7 +1,7 @@
 ---
 type: backlog
 tags: [phaenon, backlog]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Open and deferred items
@@ -238,8 +238,10 @@ Decisions are in `../design/php-versions.md` §9; these are what the first build
 - **Purity / unused result** — PHPStan `function/method/expr.resultUnused`, `void.pure`,
   `@phpstan-pure`; allow-listed.
 - **Dead code / unused members** — `method/property/constant/classConstant.unused`; allow-listed.
-- **LSP**, `phn fmt` (`.phn` files read as inline HTML to php-cs-fixer and plain editors), a
-  persistent cache for vendor parsing (`checker.md` §10 *Speed*).
+- ~~**LSP**, `phn fmt` (`.phn` files read as inline HTML to php-cs-fixer and plain editors)~~ —
+  done: `phn fmt` 2026-11-04 (slice 3), `phn lsp` 2026-11-04 (slice 4, § M6 — `phn lsp` below).
+  A persistent cache for vendor parsing (`checker.md` §10 *Speed*) is still not needed: the
+  server keeps parsed trees in memory (`program.ParseCache`).
 - **Composer plugin + `phn` as a Composer package** (roadmap D13, decided 2026-11-01): libraries
   ship `.phn` only; the plugin runs `phn build` in every installed package with a `phaenon.json`
   on install/update (`config.allow-plugins` answers the trust question once), the binary pinned
@@ -676,13 +678,15 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
 ## M6 — `phn fix` (slice 3, 2026-11-03)
 
 `../design/tooling.md` §4 (the settlements under "Done in slice 3"). Left:
-- **The fixer's rule is not named** in a report (the draft's `(phpdoc_align)`): `phn fix` sees the
-  outputs, not the tool's log. php-cs-fixer's `--format=json -v` lists the fixers per file and
-  could be read when the tool is known to be php-cs-fixer.
-- **Docblocks and empty bodies the compiler writes are indented with spaces** in a tab-indented
-  source (the expression-body lowering follows the source's indentation, these do not). PSR-12
-  wants spaces, so only a project against PSR-12 sees it: 633 docblocks and 426 empty bodies in
-  the measure's tab configuration.
+- ~~**The fixer's rule is not named** in a report~~ — done 2026-11-04 (`../design/tooling.md` §4):
+  php-cs-fixer's `--format=json -v` and Rector's `--output-format=json`, which `phn fix` asks for;
+  Rector's change lines pick the innermost enclosing node, php-cs-fixer's per-file list is narrowed
+  by running each candidate fixer alone over copies of the outputs. Left: a change no single fixer
+  makes alone (a configured option that differs from the default) keeps "one of …"; several
+  rectors on one node (a class's) likewise.
+- ~~**Docblocks and empty bodies the compiler writes are indented with spaces** in a tab-indented
+  source~~ — gone with D21 (2026-11-04, `../design/functions.md` §5.5): a `.phn` cannot be indented
+  with tabs (P1005); migrate and fmt replace them.
 - **Two kinds of layout the compiler lays out itself stay in the `.phn` as a tool left them**: a
   leading blank line (the header absorbs it) and a class-like brace on the declaration's line. They
   are `phn fmt`'s first layer.
@@ -695,8 +699,8 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
 - **The stdlib's six `.phn` are not in the canonical layout** (written before it): `phn fmt
   stdlib/**/*.phn` would put their method braces up and write `{}`, and the runtime and concurrent
   packages would then be regenerated (`phn stdlib`), since one-line docblocks reach the output.
-- **PhpStorm's Reformat Code** writing the first layer comes with the editor slice (§6.2), on
-  `internal/format/testdata`.
+- ~~**PhpStorm's Reformat Code** writing the first layer~~ — done 2026-11-04 (slice 4,
+  `../design/tooling.md` §6.5): `phn fmt --stdin` before and after PhpStorm's formatter.
 - `phn fmt FILE…` hands the fixer the outputs as arguments, which php-cs-fixer reads as the paths
   to fix; a configured `"fmt"` command must take paths the same way.
 
@@ -718,5 +722,32 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
 - A report is read from stdin only (`phn trace < clover.xml > clover.phn.xml`); there is no
   in-place mode.
 - PhpStorm's coverage view: see § D19.
+
+## M6 — `phn lsp` (slice 4, 2026-11-04)
+
+`../design/tooling.md` §6.5. Left:
+- **The VS Code extension** is slice 5 (§6.3); the server answers its whole list already.
+- **References, rename, workspace symbols, semantic tokens, inlay hints** (§6.1 *Later*).
+- **Completion needs a buffer that parses around the cursor**: the probe closes the statement
+  with up to two brackets and a `;`; an unfinished construct it cannot close gives no member
+  completion (names and variables fall back to the newest version that parsed).
+- **Pipe completion** lists the functions whose first parameter takes the left side; PHP's
+  data-last functions (`array_map`, `implode`, the `preg_` family) that the `pipes` codemod pipes
+  into another parameter are not offered.
+- **"declared here"** is filled for P2103 and P2502 only; other codes that name a declaration
+  (P2101 too few arguments, unknown members) do not carry one yet.
+- **Reformat Code of a heredoc indented with tabs in a `.phn`** trips PhpStorm's highlighter
+  ("Error updating after DocumentEvent", then "Caret model is in its update process"), on the
+  plugin's `main` too: PhpStorm's `PhpHeredocPostFormatProcessor` edits the heredoc's
+  indentation in a way the incremental relex of the `.phn` lexer rejects, while a plain edit there
+  relexes fine. Such a file does not compile since D21, and the server's quick-fix or `phn fmt`
+  replaces the tabs; `PhaenonLayoutTest` leaves `tabs.phn` out of the shared goldens for it.
+- **`PhaenonBuildWidget`** shows two deprecated-API usages in the Plugin Verifier: Kotlin's bridge
+  for `StatusBarWidget.getPresentation(PlatformType)`, a default method of the Kotlin interface;
+  compatibility is unaffected.
+- **Duplicates between PhpStorm's inspections and the checker** show twice (§6.2: the filter is to
+  learn the pairs from the dogfood trees); not measured yet.
+- The server re-reads every project file from disk for each check (the parse cache then compares
+  bytes); fine at 800 files, a stat-based cache if a larger project needs it.
 
 ← [[Home]]

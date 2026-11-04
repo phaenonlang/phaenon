@@ -1,7 +1,7 @@
 ---
 type: reference
 tags: [phaenon, testing]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Test environment
@@ -27,6 +27,7 @@ suites, and the tools they shell out to. Without its variable a suite **skips**,
 | `PHAENON_UPDATE` | `TestGenerics` (emit) | Rewrites the expected `.php` goldens from the current output | `1` |
 | `PHAENON_UPDATE` | `TestGolden` (format) | Rewrites `internal/format/testdata/X.golden.phn` | `1` |
 | `PHAENON_FMT_TREE` | `TestTree` (format) | A tree of `.phn` (a dogfood checkout) that `phn fmt`'s first layer formats in memory: each file must format, and to itself a second time; the files it would change are logged (`-v`) | `/Users/petr/labs/tequila/core` |
+| `PHAENON_PHN` | `PhaenonLayoutTest` (`../jetbrains`) | A `phn` the plugin's Reformat Code runs (`phn fmt --stdin`); with it the layout tests reformat `internal/format/testdata` too. Skipped without | `../phaenon/bin/phn` (`go build -o bin/phn ./cmd/phn`) |
 | `PHAENON_GOLDEN` | `TestGolden` (checker) | Only golden files whose name contains this substring | e.g. `generics` |
 | `PHAENON_COMPOSER_PROJECT` | `internal/program` | A Composer project to exercise the vendor reader | e.g. `/Users/petr/labs/tequila/object-mapper` |
 | `PHAENON_COMPOSER` | `internal/distribution` | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects (a fake `phn`, an `httptest` mirror; Packagist off); needs the `runtime` checkout beside the repository or the main checkout | `$(which composer)` |
@@ -239,3 +240,32 @@ requirements. `phn` is not installed on `PATH`: build it from the repo (`AGENTS.
   scope — joins, cancellation, deadlines — is tested only in `../concurrent` (`composer test`,
   14 tests against the real amp 3.1 / Revolt 1.0; `composer stan` at level max): the compiler's
   goldens see the lowering, not the loop.
+
+## The language server's tests (2026-11-04)
+
+- `internal/lsp` drives a server over pipes against a fake host (stubs only, files under a
+  temporary root): diagnostics on open and change, the project's on save and build on save,
+  PhpStorm's diagnostics-only capabilities, hover, definition (into a stub's cached copy),
+  symbols, completion (members, variables, classes with their import, functions, `|>`
+  stages), signature help, formatting, the P1005 quick-fix, related information, UTF-16
+  positions. `go test -race ./internal/lsp/` is clean.
+- `cmd/phn` `TestLSP` runs the `phn lsp` binary over stdio in a temporary Composer project
+  (diagnostics, nothing built on open, the outputs on save with the broken file withheld), and
+  `TestWatch` the `phn watch` binary (a build at start, another after a change).
+- The numbers in `../design/tooling.md` §6.5 come from a scratch LSP client that opened a core
+  or tq-cli file, edited it, sent each request and saved, timing each; it is not kept.
+
+## Execution suites on 2026-11-04
+
+After D21 (tabs replaced by migrate), with the cached release-branch corpora:
+- `PHP-8.6` under PHP 8.6.0-dev: emit execution 4,853/4,853, printer execution 4,584/4,584.
+- `PHP-8.5` under PHP 8.5.3: emit execution 4,605/4,606, printer execution 4,361/4,361. The one
+  difference is `Zend/tests/gh21603.phpt`, whose original run crashes PHP 8.5.3 itself
+  (`zend_mm_heap corrupted`, a use-after-free in `__unset` fixed after 8.5.3); the test has no tab.
+- Both count apart 9 tests of PHP's heredoc indentation errors written with tabs ("Invalid
+  indentation - tabs and spaces cannot be mixed", "Invalid body indentation level"): the
+  migration's spaces make the indentation consistent or count it in other columns, so PHP reports
+  another error or none.
+- The `master` checkout pairs badly with PHP 8.5.3 for execution: its 8.6 tests other than the
+  placeholder ones (`#[\Override]` on constants, 19) fail in the original run and are not filtered
+  as newer than the oracle. Use `.cache/php-src-8.5` and `.cache/php-src-8.6`.
