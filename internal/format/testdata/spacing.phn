@@ -1,0 +1,29 @@
+
+
+namespace App;
+
+type Pair < K , V >  =  ( K,V );
+
+final class Box < out T of Item , U = int > extends Base < T >
+{
+    fun __construct(private list < T >  $items) {
+    }
+
+    fun first() : ?T  =>   $this->items[0] ?? null;
+
+    fun pairs(map< string,list<int> > $m, Closure ( int , string ... ) :bool $f): (int,string) throws  NotFound | Conflict {
+        $ok = $m is   list< int >;
+        $box = $f as?User;
+        $n = $m  as  int;
+        $made = Box::make < int , string > (1);
+        return concurrently(timeout: 5){
+            $a = spawn   $this->load();
+            return [$a->await(), 1];
+        };
+    }
+
+    /**
+     * The one line.
+     */
+    fun keep(map<string, /* why */ int> $m): void {}
+}
