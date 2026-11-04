@@ -27,9 +27,21 @@ func PrintQualified(t Type) string {
 	return b.String()
 }
 
+// PrintPhaenon prints t as a .phn would write it (design/generics.md §11's
+// spelling): `map<K, V>` for a keyed array, `class<T>` for a class-string,
+// `?X` for X or null, `(int, string)` for a list shape; what Phaenon cannot
+// spell (literals, `int<a, b>`, shapes with keys) stays PHPStan's. The
+// editor's hover prints with it.
+func PrintPhaenon(t Type) string {
+	var b strings.Builder
+	(&printer{b: &b, phaenon: true}).print(t, false)
+	return b.String()
+}
+
 type printer struct {
 	b         *strings.Builder
 	qualified bool
+	phaenon   bool // PrintPhaenon's spelling
 }
 
 func (pr *printer) class(name string) {
@@ -113,7 +125,11 @@ func (pr *printer) print(t Type, nested bool) {
 		b.WriteString(strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(t.V))
 		b.WriteString("'")
 	case ClassString:
-		b.WriteString("class-string")
+		if pr.phaenon {
+			b.WriteString("class")
+		} else {
+			b.WriteString("class-string")
+		}
 		if t.Of != nil {
 			b.WriteString("<")
 			pr.print(t.Of, false)
@@ -135,8 +151,12 @@ func (pr *printer) print(t Type, nested bool) {
 			if t.NonEmpty {
 				b.WriteString("non-empty-")
 			}
-			b.WriteString("array")
 			keyIsAny := Equal(t.Key, TArrayKey)
+			if pr.phaenon && !keyIsAny {
+				b.WriteString("map")
+			} else {
+				b.WriteString("array")
+			}
 			if !keyIsAny || !IsMixed(t.Value) {
 				b.WriteString("<")
 				if !keyIsAny {
@@ -148,6 +168,17 @@ func (pr *printer) print(t Type, nested bool) {
 			}
 		}
 	case Shape:
+		if pr.phaenon && t.List && !t.Unsealed && !shapeOptional(t) {
+			b.WriteString("(")
+			for i, e := range t.Entries {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				pr.print(e.Type, false)
+			}
+			b.WriteString(")")
+			return
+		}
 		if t.List {
 			b.WriteString("list{")
 		} else {
@@ -215,6 +246,15 @@ func (pr *printer) print(t Type, nested bool) {
 			b.WriteString(")")
 		}
 	case This:
+		if pr.phaenon {
+			// A .phn spells the type static; the class says more.
+			if t.Of != nil {
+				pr.print(*t.Of, nested)
+			} else {
+				b.WriteString("static")
+			}
+			return
+		}
 		b.WriteString("$this")
 		if t.Of != nil {
 			b.WriteString("(")
@@ -282,6 +322,13 @@ func (pr *printer) print(t Type, nested bool) {
 	case Bytes:
 		b.WriteString("bytes")
 	case Union:
+		if pr.phaenon {
+			if x, ok := nullable(t); ok {
+				b.WriteString("?")
+				pr.print(x, true)
+				return
+			}
+		}
 		if nested {
 			b.WriteString("(")
 		}
@@ -455,4 +502,35 @@ func Erase(t Type) Type {
 		return MakeIntersection(ms...)
 	}
 	return t
+}
+
+// nullable returns X of a union X|null whose X is one type that `?X` can
+// prefix: not a union, an intersection or mixed.
+func nullable(u Union) (Type, bool) {
+	if len(u.Types) != 2 {
+		return nil, false
+	}
+	var x Type
+	null := false
+	for _, m := range u.Types {
+		if _, ok := m.(Null); ok {
+			null = true
+		} else {
+			x = m
+		}
+	}
+	switch x.(type) {
+	case nil, Union, Intersection, Mixed, Callable:
+		return nil, false
+	}
+	return x, null
+}
+
+func shapeOptional(s Shape) bool {
+	for _, e := range s.Entries {
+		if e.Optional {
+			return true
+		}
+	}
+	return false
 }
