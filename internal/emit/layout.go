@@ -10,8 +10,8 @@ import (
 )
 
 // This file lays out what the compiler rewrites around declarations as
-// PSR-12 and php-cs-fixer's braces_position defaults want it
-// (design/line-map.md §2):
+// PER Coding Style 3.0 and php-cs-fixer's @PER-CS3x0 want it
+// (design/line-map.md §2, roadmap D22):
 //
 //   - the opening brace of a named function or method goes on the line
 //     after its signature, at the indentation of the `function` keyword's
@@ -19,15 +19,18 @@ import (
 //     line), where `) {` share the line;
 //   - the opening brace of a class, interface, trait or enum goes on the
 //     line after its header;
-//   - an empty body `{}` gets its closing brace on a line of its own, and a
-//     body written on one line (`{ return 1; }`) its statements as well;
+//   - an empty body — no statement, member or comment — stays as written:
+//     `{}` on the declaration's line is PER's abbreviation of it, and
+//     Phaenon's;
+//   - a body written on one line (`{ return 1; }`) gets its statements and
+//     its closing brace on lines of their own;
 //   - an expression body `=> expr;` becomes the block it stands for, the
 //     expression's continuation lines moving in with it.
 //
-// Closures and anonymous classes keep their braces on their lines, as
-// PSR-12 has them. A brace already on a line of its own stays as written,
-// and a comment between a signature and its body keeps the layout as it is:
-// it would have nowhere to go.
+// Closures and anonymous classes keep their braces on their lines, as PER
+// has them. A brace already on a line of its own stays as written, and a
+// comment between a signature and its body keeps the layout as it is: it
+// would have nowhere to go.
 
 // function is what the layout needs of a named function or method.
 type function struct {
@@ -73,10 +76,16 @@ func (e *emitter) layoutFunction(fn function) {
 	}
 }
 
-// blockBrace puts a block body's opening brace where PSR-12 wants it.
+// blockBrace puts a block body's opening brace where PER wants it.
 func (e *emitter) blockBrace(fn function, sigEnd, closeParen, open int, declIndent string) {
 	toks := e.tokens()
 	if open >= len(toks) || toks[open].Kind != token.Kind('{') || e.hasComment(sigEnd, toks[open].Start) {
+		if fn.throws != nil {
+			e.removeThrows(fn.throws, declIndent)
+		}
+		return
+	}
+	if e.emptyBody(open, fn.end) {
 		if fn.throws != nil {
 			e.removeThrows(fn.throws, declIndent)
 		}
@@ -124,7 +133,7 @@ func (e *emitter) abstractTail(fn function, sigEnd, tail, semi int, declIndent s
 	e.replace(ast.Span{Start: sigEnd, End: tail}, "")
 }
 
-// exprBody writes an expression body as the PSR-12 block it stands for
+// exprBody writes an expression body as the PER block it stands for
 // (design/functions.md §3, line-map.md §2):
 //
 //	public function name(): string
@@ -244,8 +253,7 @@ func (e *emitter) outIndent(off int) string {
 }
 
 // classBrace puts the opening brace of a class, interface, trait or enum
-// on the line after its header, and the closing brace of an empty body on
-// a line of its own.
+// on the line after its header; an empty body stays as written.
 func (e *emitter) classBrace(d *ast.ClassDecl) {
 	toks := e.tokens()
 	headerEnd := d.Name.S.End
@@ -264,6 +272,9 @@ func (e *emitter) classBrace(d *ast.ClassDecl) {
 	if open >= len(toks) || toks[open].Kind != token.Kind('{') || e.hasComment(headerEnd, toks[open].Start) {
 		return
 	}
+	if e.emptyBody(open, d.S.End) {
+		return
+	}
 	indent := e.outIndent(d.Name.S.Start)
 	braceIndent := e.outIndent(toks[open].Start)
 	if !bytes.ContainsRune(e.src[headerEnd:toks[open].Start], '\n') {
@@ -273,17 +284,14 @@ func (e *emitter) classBrace(d *ast.ClassDecl) {
 	e.oneLineBody(open, d.S.End, braceIndent)
 }
 
-// oneLineBody lays out a body whose braces share a line — the token at
-// open and the last one before end: `{}` gets its closing brace on a line
-// of its own at indent, `{ stmts }` its statements on a line of their own
-// one level in. A comment inside leaves the body as written.
+// oneLineBody lays out a body with statements whose braces share a line —
+// the token at open and the last one before end: `{ stmts }` gets its
+// statements on a line of their own one level in, and the closing brace on
+// the next at indent. A comment inside leaves the body as written.
 func (e *emitter) oneLineBody(open, end int, indent string) {
 	toks := e.tokens()
-	closeBrace := e.tokenAt(end) - 1
-	for closeBrace > open && toks[closeBrace].Kind.IsTrivia() {
-		closeBrace--
-	}
-	if closeBrace <= open || toks[closeBrace].Kind != token.Kind('}') {
+	closeBrace := e.closeBrace(open, end)
+	if closeBrace < 0 {
 		return
 	}
 	inside := ast.Span{Start: toks[open].End, End: toks[closeBrace].Start}
@@ -292,7 +300,6 @@ func (e *emitter) oneLineBody(open, end int, indent string) {
 	}
 	first := e.nextCode(open + 1)
 	if first == closeBrace {
-		e.replaceFree(inside, "\n"+indent)
 		return
 	}
 	last := closeBrace - 1
@@ -305,6 +312,30 @@ func (e *emitter) oneLineBody(open, end int, indent string) {
 	}
 	e.replaceFree(ast.Span{Start: inside.Start, End: toks[first].Start}, "\n"+indent+level)
 	e.replaceFree(ast.Span{Start: toks[last].End, End: inside.End}, "\n"+indent)
+}
+
+// closeBrace is the index of the `}` closing the body whose `{` is the
+// token at open, the declaration ending at end; -1 when there is none.
+func (e *emitter) closeBrace(open, end int) int {
+	toks := e.tokens()
+	i := e.tokenAt(end) - 1
+	for i > open && toks[i].Kind.IsTrivia() {
+		i--
+	}
+	if i <= open || toks[i].Kind != token.Kind('}') {
+		return -1
+	}
+	return i
+}
+
+// emptyBody reports whether the body whose `{` is the token at open, the
+// declaration ending at end, holds nothing but whitespace: PER Coding Style
+// abbreviates such a body as `{}` on the declaration's line (§4.4 for
+// functions and methods, §4 for class-likes), and `phn migrate` and
+// `phn fmt` write it so.
+func (e *emitter) emptyBody(open, end int) bool {
+	closeBrace := e.closeBrace(open, end)
+	return closeBrace > open && e.nextCode(open+1) == closeBrace && !e.hasComment(e.tokens()[open].End, e.tokens()[closeBrace].Start)
 }
 
 // paramsClose is the index of the `)` closing a declaration's parameter

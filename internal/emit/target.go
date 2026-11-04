@@ -87,8 +87,8 @@ func (l *targetLowering) folds(p *ast.Binary) bool {
 
 // asCall reports a pipe the lowering writes as the call it makes: one that
 // folds, except a first-class callable after a pipe that stays a pipe,
-// which PHP 8.5 runs as written — `A |> (fn ($x) => …) |> f(...)` reads
-// better so than as `f(A |> (fn ($x) => …))`.
+// which PHP 8.5 runs as written — `A |> (fn($x) => …) |> f(...)` reads
+// better so than as `f(A |> (fn($x) => …))`.
 func (l *targetLowering) asCall(p *ast.Binary) bool {
 	if !l.folds(p) {
 		return false
@@ -290,7 +290,7 @@ func (l *targetLowering) fillPlaceholders(args *ast.ArgList, rec *program.Partia
 }
 
 // partial lowers a partial application outside a pipe:
-// `f(B, ?)` → `fn (T $p) => f(B, $p)`.
+// `f(B, ?)` → `fn(T $p) => f(B, $p)`.
 func (l *targetLowering) partial(call ast.Expr, args *ast.ArgList) error {
 	rec, err := l.record(args, call)
 	if err != nil {
@@ -300,21 +300,13 @@ func (l *targetLowering) partial(call ast.Expr, args *ast.ArgList) error {
 		return l.e.errorf(call, "this partial application needs PHP 8.6 (target 8.5): %s", rec.Refused)
 	}
 	fb := fallback(rec)
-	span := call.Span()
-	head, tail := closureParts(rec, fb, l.constExpr[call], captured(call, args))
-	if !l.bare[call] {
-		head, tail = "("+head, tail+")"
-	}
-	l.e.insert(span.Start, head)
+	l.e.wrapClosure(call.Span(), closureParts(rec, fb, l.constExpr[call], captured(call, args)), !l.bare[call])
 	l.fillPlaceholders(args, rec, fb)
-	if tail != "" {
-		l.e.insertEnd(span, tail)
-	}
 	return nil
 }
 
 // pipe lowers `A |> f(B, ?, C)` that does not fold to
-// `A |> (fn (T $p) => f(B, $p, C))`, whose closure runs at once, after A,
+// `A |> (fn(T $p) => f(B, $p, C))`, whose closure runs at once, after A,
 // as PHP 8.6 evaluates B and C.
 func (l *targetLowering) pipe(p *ast.Binary, args *ast.ArgList) error {
 	rec, err := l.record(args, p.Right)
@@ -335,45 +327,87 @@ func (l *targetLowering) pipe(p *ast.Binary, args *ast.ArgList) error {
 			placeholder = a
 		}
 	}
-	head, tail := closureParts(rec, false, false, captured(p.Right, args))
-	right := p.Right.Span()
-	l.e.insert(right.Start, "("+head)
+	l.e.wrapClosure(p.Right.Span(), closureParts(rec, false, false, captured(p.Right, args)), true)
 	l.e.replace(placeholder.Placeholder.S, "$"+rec.Params[0].Name)
-	l.e.insertEnd(right, tail+")")
 	return nil
 }
 
-// closureParts writes what goes before and after the call in a lowered
-// closure: `fn (T $p) => ` and nothing, as a rule. A parameter whose type
-// says more than PHP declares (list<int>) needs an inline @var, which
-// PHPStan reads inside a function body and nowhere on a closure, so the
-// closure is then `function (T $p) use ($v) { /** @var list<int> $p */
-// return `…`; }`, capturing by value what the arrow function would. In a
-// constant expression it is the static closure PHP 8.5 accepts there.
-func closureParts(rec *program.Partial, fb, constExpr bool, uses []string) (head, tail string) {
+// closure is the closure a lowered partial application wraps its call in.
+type closure struct {
+	head  string   // `fn(T $p) => `, or `function (T $p) use ($v) {`
+	block bool     // head opens a block, whose statement is the call
+	vars  []string // the block's inline @var docblocks, before the statement
+	ret   bool     // the statement returns the call's value
+}
+
+// closureParts is the closure of a lowered partial application: `fn(T $p)
+// => ` before the call, as a rule. A parameter whose type says more than
+// PHP declares (list<int>) needs an inline @var, which PHPStan reads inside
+// a function body and nowhere on a closure, so the closure is then
+// `function (T $p) use ($v) {` with the @var and `return` the call in its
+// block, capturing by value what the arrow function would. In a constant
+// expression it is the static closure PHP 8.5 accepts there.
+func closureParts(rec *program.Partial, fb, constExpr bool, uses []string) closure {
 	var vars []string
 	for _, p := range rec.Params {
 		if p.Doc != "" && !p.Variadic && !(fb && p.Arg == nil) {
-			vars = append(vars, "/** @var "+p.Doc+" $"+p.Name+" */ ")
+			vars = append(vars, "/** @var "+p.Doc+" $"+p.Name+" */")
 		}
 	}
 	if len(vars) == 0 && !constExpr {
-		return "fn (" + params(rec, fb) + ") => ", ""
+		return closure{head: "fn(" + params(rec, fb) + ") => "}
 	}
 	kw := "function"
 	if constExpr {
 		kw = "static function"
 		uses = nil
 	}
-	head = kw + " (" + params(rec, fb) + ")"
+	head := kw + " (" + params(rec, fb) + ")"
 	if len(uses) > 0 {
 		head += " use ($" + strings.Join(uses, ", $") + ")"
 	}
-	head += " { " + strings.Join(vars, "")
-	if !rec.Void {
-		head += "return "
+	return closure{head: head + " {", block: true, vars: vars, ret: !rec.Void}
+}
+
+// wrapClosure writes c around the call at span, in parentheses when paren
+// says so. An arrow function goes in place; a block is laid out as PER
+// Coding Style §7 has a closure: the brace on the closure's line, the
+// docblocks and the statement one level in on lines of their own, the
+// closing brace on the next line, at the indentation of the closure's.
+// A call that spans lines moves in with the statement.
+func (e *emitter) wrapClosure(span ast.Span, c closure, paren bool) {
+	open, end := "", ""
+	if paren {
+		open, end = "(", ")"
 	}
-	return head, "; }"
+	if !c.block {
+		e.insert(span.Start, open+c.head)
+		if end != "" {
+			e.insertEnd(span, end)
+		}
+		return
+	}
+	indent := e.outIndent(span.Start)
+	level := "    "
+	if strings.Contains(indent, "\t") {
+		level = "\t"
+	}
+	var b strings.Builder
+	b.WriteString(open + c.head + "\n")
+	for _, v := range c.vars {
+		b.WriteString(indent + level + v + "\n")
+	}
+	b.WriteString(indent + level)
+	if c.ret {
+		b.WriteString("return ")
+	}
+	e.insertFree(span.Start, b.String())
+	e.insertEndFree(span, ";\n"+indent+"}"+end)
+	if e.lineOf(span.Start) != e.lineOf(span.End) && !e.multiLineToken(span.Start, span.End) {
+		// From the call's first character on: the closure's own lines are
+		// laid out already (sourceRelative).
+		e.indents = append(e.indents, indentReq{Span: ast.Span{Start: span.Start + 1, End: span.End}, Text: level})
+	}
 }
 
 // captured lists the variables a lowered closure must capture: those the

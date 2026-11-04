@@ -156,12 +156,15 @@ constructors, destructors and generators. These and the pipelines are the only e
 a file's line count (beside docblock lines whose tags were lifted); `--keep-layout` skips the
 layout. Re-running migrate on its own output changes nothing.
 
-The generated file is laid out as PSR-12 wants it wherever the compiler writes or rewrites
-something: the open tag, a marker and `declare(strict_types=1)` on lines of their own (Phaenon is
-strict by default; a file that declares `strict_types` itself keeps its own), the imports it adds,
-the docblocks it writes, expression bodies as blocks, and the opening brace of a function, method
-or class-like on the line after its signature. Plain PHP passes through as written. So
-php-cs-fixer runs on the outputs with the project's own rules and no exceptions for them. Every
+The generated file is laid out as PER Coding Style 3.0 wants it wherever the compiler writes or
+rewrites something: the open tag, a marker and `declare(strict_types=1)` on lines of their own
+(Phaenon is strict by default; a file that declares `strict_types` itself keeps its own), the
+imports it adds, the docblocks it writes, expression bodies as blocks, the opening brace of a
+function, method or class-like on the line after its signature, an empty body as `{}` on the
+declaration's line, and `fn(` in the arrow functions it writes. Plain PHP passes through as
+written. So php-cs-fixer runs on the outputs with a PER set (`@PER-CS3x0`) and no exceptions for
+them; `@PSR12` would expand every `{}`, which is the source's text, and `phn fix` would carry
+that into the `.phn` (design D22). Every
 compiled file ends with a **line map**, a comment the tools that report positions read
 (`design/line-map.md`):
 
@@ -291,7 +294,7 @@ final class Account
 `fun` declares a named function or method, `public` unless a visibility is written; `function`
 stays valid. A named function may have **one expression** for its body, `=> expr;`: returned, or
 only evaluated under `void` and `never`; not on constructors, destructors or generators (`P1004`).
-It compiles to the PSR-12 block it stands for. **`throws A|B`** after the return type names
+It compiles to the block it stands for. **`throws A|B`** after the return type names
 the exceptions the function lets escape; each must be a `Throwable` (`P2319`), and callers are not
 held to it (no checked exceptions). It compiles to a `@throws` tag on a line of the declaration's
 docblock, or of a new one above the declaration. Design: `design/functions.md`.

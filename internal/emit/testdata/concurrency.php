@@ -63,8 +63,8 @@ final class Profiles
     public function load(int $id): string
     {
         return Scope::run(function () use ($id) {
-            $user = Scope::spawn(fn () => $this->users->find($id));
-            $orders = Scope::spawn(fn () => $this->orders->forUser($id));
+            $user = Scope::spawn(fn() => $this->users->find($id));
+            $orders = Scope::spawn(fn() => $this->orders->forUser($id));
 
             return $user->await()->name.':'.count($orders->await());
         });
@@ -77,7 +77,7 @@ final class Profiles
     {
         Scope::run(function () use ($ids) {
             foreach ($ids as $id) {
-                Scope::spawn(fn () => $this->users->touch($id));
+                Scope::spawn(fn() => $this->users->touch($id));
             }
         }, timeout: 5.0);
     }
@@ -89,7 +89,7 @@ final class Profiles
     {
         $total = 0;
         Scope::run(function () use ($ids, &$total) {
-            $tasks = array_map(fn (int $id) => Scope::spawn(fn () => $this->orders->count($id)), $ids);
+            $tasks = array_map(fn (int $id) => Scope::spawn(fn() => $this->orders->count($id)), $ids);
             foreach (Scope::all($tasks) as $n) {
                 $total += $n;
             }
@@ -139,7 +139,7 @@ final class Profiles
                     return $scaled + $this->a;
                 }
             };
-            $count = Scope::spawn(fn () => $this->orders->count($id));
+            $count = Scope::spawn(fn() => $this->orders->count($id));
 
             return $weight->of($count->await());
         });

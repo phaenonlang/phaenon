@@ -62,7 +62,7 @@ internal/docblock     PHPDoc tags and the PHPStan/Psalm type grammar
 internal/types        the type lattice (PHPStan semantics): subtyping, narrowing, printing
 internal/program      program model: project files, Composer vendor code (lazy), stubs + overlay
 internal/checker      the type checker behind `phn check`
-internal/emit         patch-based emitter: PSR-12 layout of what it writes, the line map; generics erasure, is/as lowering
+internal/emit         patch-based emitter: PER Coding Style 3.0 layout of what it writes (D22), the line map; generics erasure, is/as lowering
 internal/linemap      the `// phaenon-map v1 …` comment every compiled file ends with: parse, write, lookups
 internal/format       `phn fmt`'s first layer: Phaenon's layout (spaces for tabs, migrate's braces and docblocks, the spacing of Phaenon's syntax)
 internal/tabs         the tabs Phaenon forbids (D21: outside strings and comments' text), found for P1005 and replaced by migrate and fmt
@@ -132,8 +132,9 @@ removes none: a source deleted here is deleted from the package by hand.
 - Diagnostic codes are stable once published: `P1xxx` syntax and removed constructs, `P2xxx` types
   and flow, `P3xxx` generics, `P4xxx` interop. One mistake, one diagnostic.
 - The emitter edits spans; plain PHP passes through byte for byte. What it writes or rewrites (the
-  header, imports, docblocks, expression bodies, declaration braces) is laid out as PSR-12 wants
-  it, and every compiled file ends with a line map (`../design/line-map.md`): an edit is in place
+  header, imports, docblocks, expression bodies, declaration braces, the closures of lowerings)
+  is laid out as PER Coding Style 3.0 wants it (php-cs-fixer's `@PER-CS3x0`, design D22; an empty
+  body `{}` stays as written), and every compiled file ends with a line map (`../design/line-map.md`): an edit is in place
   (its line breaks stand for the span's) or free (its own lines, holds in the map). The invariant
   is `TestLineMapProperty`: every source byte that reaches the output sits on a line whose forward
   lookup gives its source line. A position reported in compiled PHP goes through the map

@@ -85,7 +85,7 @@ func TestCarry(t *testing.T) {
 	r := strings.NewReplacer(
 		"int $a,int $b", "int $a, int $b", // the source's
 		"$a+$b", "$a + $b", // the source's, in a body the compiler laid out
-		"private int $n)\n    {\n    }", "private int $n) {}", // the compiler's
+		"): int\n    {", "): int {", // the compiler's: an expression body's brace
 		"public function get", "final public function get", // inserted where the source begins
 	)
 	tool := r.Replace(string(old))
@@ -94,15 +94,15 @@ func TestCarry(t *testing.T) {
 	if string(got) != want {
 		t.Errorf("source\n%s\nwant\n%s", got, want)
 	}
-	if len(refused) != 2 || string(old[refused[0].Start:refused[0].End]) != "\n   " || string(old[refused[1].Start:refused[1].End]) != "\n    " {
-		t.Errorf("refused %+v", refused) // the two line breaks of the braces
+	if len(refused) != 1 || string(old[refused[0].Start:refused[0].End]) != "\n   " {
+		t.Errorf("refused %+v", refused) // the line break before the brace
 	}
 	rebuilt, err := emit.File(got, emit.Options{SourceName: "a.phn", StrictTypes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	unmapped := func(s string) string { return s[:strings.LastIndex(strings.TrimSuffix(s, "\n"), "\n")] }
-	if wantOut := strings.Replace(tool, "private int $n) {}", "private int $n)\n    {\n    }", 1); unmapped(string(rebuilt)) != unmapped(wantOut) {
+	if wantOut := strings.Replace(tool, "): int {", "): int\n    {", 1); unmapped(string(rebuilt)) != unmapped(wantOut) {
 		t.Errorf("rebuilt\n%s\nwant\n%s", rebuilt, wantOut)
 	}
 }

@@ -139,7 +139,7 @@ var boxFixes = fakeSpec{
 	Replace: [][2]string{
 		{"int $a,int $b", "int $a, int $b"},
 		{"$a+$b", "$a + $b"},
-		{"private int $n)\n    {\n    }", "private int $n) {}"}, // the compiler's braces
+		{"): int\n    {", "): int {"}, // the compiler's brace of an expression body
 		{"array(1,2)", "[1, 2]"},
 	},
 	Create: []string{".src/New.php"},
@@ -147,20 +147,20 @@ var boxFixes = fakeSpec{
 
 // The changes of the source's text are carried back, the copied file takes
 // them all, and what the tool still changes after the rebuild — the
-// compiler's braces — is reported, with exit status 1.
+// compiler's brace — is reported, with exit status 1.
 func TestFix(t *testing.T) {
 	bin := phnBinary(t)
 	root := fixTree(t)
 	tool := fakeToolCommand(t, boxFixes)
 	stdout, stderr, err := run(t, root, bin, "fix", "--", tool, "fix")
 	if err == nil {
-		t.Error("phn fix passed though the tool still changes the compiler's braces")
+		t.Error("phn fix passed though the tool still changes the compiler's brace")
 	}
-	if want := "php-cs-fixer changed 3 files: 6 changes carried back to 2 sources, 2 in text the compiler wrote, 1 files outside the build\n" +
-		"after the rebuild, php-cs-fixer still changes 2 files: 0 changes in 0 sources, 2 in text the compiler wrote, 1 files outside the build\n"; stdout != want {
+	if want := "php-cs-fixer changed 3 files: 6 changes carried back to 2 sources, 1 in text the compiler wrote, 1 files outside the build\n" +
+		"after the rebuild, php-cs-fixer still changes 2 files: 0 changes in 0 sources, 1 in text the compiler wrote, 1 files outside the build\n"; stdout != want {
 		t.Errorf("stdout:\n%s\nwant\n%s", stdout, want)
 	}
-	if !strings.Contains(stderr, `src/Box.phn:4: php-cs-fixer changes text the compiler wrote: "\n   " → ""`) {
+	if !strings.Contains(stderr, `src/Box.phn:6: php-cs-fixer changes text the compiler wrote: "\n   " → ""`) {
 		t.Errorf("stderr:\n%s", stderr)
 	}
 	box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn"))
@@ -188,7 +188,7 @@ func TestFixCheck(t *testing.T) {
 	if err == nil {
 		t.Error("phn fix --check passed though the tool changes files")
 	}
-	if want := "php-cs-fixer would change 3 files: 6 changes in 2 sources, 2 in text the compiler wrote, 1 files outside the build\n"; stdout != want {
+	if want := "php-cs-fixer would change 3 files: 6 changes in 2 sources, 1 in text the compiler wrote, 1 files outside the build\n"; stdout != want {
 		t.Errorf("stdout:\n%s\nwant\n%s", stdout, want)
 	}
 	for _, want := range []string{
@@ -260,17 +260,17 @@ func strconvQuote(s string) string {
 // file), Rector's rectors by the line of the node each rewrote.
 func TestFixNamesRules(t *testing.T) {
 	bin := phnBinary(t)
-	braces := fakeSpec{Replace: [][2]string{{"private int $n)\n    {\n    }", "private int $n) {}"}}}
+	braces := fakeSpec{Replace: [][2]string{{"): int\n    {", "): int {"}}}
 
 	root := fixTree(t)
 	braces.Rules = []fakeRule{{Name: "braces_position"}}
 	_, stderr, _ := run(t, root, bin, "fix", "--check", "--", fakeToolCommand(t, braces), "fix")
-	if want := `src/Box.phn:4: php-cs-fixer (braces_position) changes text the compiler wrote: "\n   " → ""`; !strings.Contains(stderr, want) {
+	if want := `src/Box.phn:6: php-cs-fixer (braces_position) changes text the compiler wrote: "\n   " → ""`; !strings.Contains(stderr, want) {
 		t.Errorf("one fixer: stderr lacks %s:\n%s", want, stderr)
 	}
-	braces.Rules = []fakeRule{{Name: "single_line_empty_body"}, {Name: "braces_position"}}
+	braces.Rules = []fakeRule{{Name: "statement_indentation"}, {Name: "braces_position"}}
 	_, stderr, _ = run(t, root, bin, "fix", "--check", "--", fakeToolCommand(t, braces), "fix")
-	if want := `php-cs-fixer (one of braces_position, single_line_empty_body) changes`; !strings.Contains(stderr, want) {
+	if want := `php-cs-fixer (one of braces_position, statement_indentation) changes`; !strings.Contains(stderr, want) {
 		t.Errorf("two fixers: stderr lacks %s:\n%s", want, stderr)
 	}
 	// A command that chooses its own format gets no report from phn.
@@ -279,9 +279,9 @@ func TestFixNamesRules(t *testing.T) {
 		t.Errorf("--format=txt: a rule was named:\n%s", stderr)
 	}
 
-	// Rector names the line of the node each rector rewrote: the
-	// constructor's for the one, the class's for the other. The change in
-	// the constructor goes to the constructor's rector, the innermost.
+	// Rector names the line of the node each rector rewrote: the method's
+	// for the one, the class's for the other. The change in the method goes
+	// to the method's rector, the innermost.
 	built, err := os.ReadFile(filepath.Join(root, ".src/Box.php"))
 	if err != nil {
 		t.Fatal(err)
@@ -295,10 +295,10 @@ func TestFixNamesRules(t *testing.T) {
 	}
 	rectors := fakeSpec{Replace: braces.Replace, Rules: []fakeRule{
 		{Name: "ClassRector", Line: lineOf("final class Box")},
-		{Name: "ConstructorRector", Line: lineOf("public function __construct")},
+		{Name: "MethodRector", Line: lineOf("public function add")},
 	}}
 	_, stderr, _ = run(t, root, bin, "fix", "--check", "--", fakeNamedTool(t, "rector", rectors), "process")
-	if want := `src/Box.phn:4: rector (ConstructorRector) changes text the compiler wrote`; !strings.Contains(stderr, want) {
+	if want := `src/Box.phn:6: rector (MethodRector) changes text the compiler wrote`; !strings.Contains(stderr, want) {
 		t.Errorf("rector: stderr lacks %s:\n%s", want, stderr)
 	}
 }

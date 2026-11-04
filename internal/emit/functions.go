@@ -8,13 +8,14 @@ import (
 )
 
 // lowerFunctions compiles the syntax of design/functions.md, none of which
-// needs type information: a `fun` head becomes the PSR-12 `function` head
+// needs type information: a `fun` head becomes the PER `function` head
 // with `public` written out, a class constant or a property or promoted
 // parameter with an asymmetric visibility and no main one gets its implied
 // `public`, a closure in a constant expression becomes the `static
-// function` PHP 8.5 accepts there, an expression body becomes a PSR-12
+// function` PHP 8.5 accepts there, an expression body becomes a PER
 // block and a `throws` clause a @throws tag. The opening braces of named
-// functions, methods and class-likes go where PSR-12 puts them (layout.go).
+// functions, methods and class-likes go where PER Coding Style puts them
+// (layout.go).
 // It runs after the generics lowering, so that a docblock that pass inserts
 // at a declaration's start precedes the rewritten head, and so that the
 // @throws tag joins that docblock when there is one.
@@ -242,7 +243,7 @@ func (e *emitter) mergeThrows(declStart, nameStart int, doc, tag string) {
 	e.replaceFree(ast.Span{Start: from, End: end}, text)
 }
 
-// methodHead rewrites `[modifiers] fun` as `[modifiers] function` in PSR-12
+// methodHead rewrites `[modifiers] fun` as `[modifiers] function` in PER
 // order with `public` written out. A head broken over lines or holding a
 // comment keeps its modifiers as written and has only the keyword replaced,
 // so nothing the programmer wrote is lost. Modifiers already written so
@@ -268,7 +269,7 @@ func (e *emitter) methodHead(n *ast.MethodDecl) {
 	e.replace(n.Head, canonical+"function")
 }
 
-// methodModifiers renders a method's modifiers in PSR-12 order, `public`
+// methodModifiers renders a method's modifiers in PER order (§4.6), `public`
 // written out, each followed by a space.
 func methodModifiers(m ast.Modifier) string {
 	var parts []string
@@ -293,8 +294,8 @@ func methodModifiers(m ast.Modifier) string {
 }
 
 // impliedPublic writes the `public` a `private(set)` property or promoted
-// parameter leaves implied (PHP 8.4 allows the omission; PSR-12 tooling does
-// not): `private(set) int $x` → `public private(set) int $x`.
+// parameter leaves implied (PHP 8.4 allows the omission; php-cs-fixer's
+// modifier_keywords does not): `private(set) int $x` → `public private(set) int $x`.
 func (e *emitter) impliedPublic(m ast.Modifier, mods ast.Span) {
 	if m&(ast.ModPublicSet|ast.ModProtectedSet|ast.ModPrivateSet) == 0 || m&(ast.ModPublic|ast.ModProtected|ast.ModPrivate) != 0 {
 		return
@@ -304,11 +305,11 @@ func (e *emitter) impliedPublic(m ast.Modifier, mods ast.Span) {
 
 // constClosures rewrites the closures of a constant expression — an
 // attribute argument, a constant, a default — as the `static function`
-// closures PHP accepts there: `fn (…) => expr` becomes `static function
+// closures PHP accepts there: `fn(…) => expr` becomes `static function
 // (…) {` with `return expr;` on a line of its own (closureBody), and a
 // `function` closure gets `static`. The closures' own bodies are ordinary
-// code and are left alone; a closure keeps its brace on its line, as
-// PSR-12 has it.
+// code and are left alone; a closure keeps its brace on its line, as PER
+// has it.
 func (e *emitter) constClosures(root ast.Expr) {
 	ast.Inspect(root, func(n ast.Node) bool {
 		switch n := n.(type) {
@@ -316,6 +317,9 @@ func (e *emitter) constClosures(root ast.Expr) {
 			kw := "static function"
 			if n.Static {
 				kw = "function"
+			}
+			if n.Kw.End < len(e.src) && e.src[n.Kw.End] == '(' {
+				kw += " " // PER: `fn(`, but `function (`
 			}
 			e.replace(n.Kw, kw)
 			e.closureBody(n)
@@ -333,7 +337,7 @@ func (e *emitter) constClosures(root ast.Expr) {
 }
 
 // closureBody writes the body of an arrow function lowered to a closure as
-// the block PSR-12 gives a closure: the brace on the closure's line, the
+// the block PER gives a closure (§7): the brace on the closure's line, the
 // statement one level in on a line of its own, the closing brace at the
 // indentation of the closure's line. A multi-line body moves in with it; a
 // comment after the arrow keeps the one-line form, `{ return expr; }`.

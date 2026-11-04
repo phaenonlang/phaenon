@@ -26,6 +26,11 @@ function addTo(array &$xs, int $n): void
 {
     $xs[] = $n;
 }
+/** @param list<int> $xs */
+function total(array $xs, int $n): int
+{
+    return array_sum($xs) + $n;
+}
 function trace(string $label, string $v): string
 {
     echo "eval $label\n"; return $v;
@@ -33,9 +38,7 @@ function trace(string $label, string $v): string
 
 final class Greeter
 {
-    public function __construct(private string $greeting)
-    {
-    }
+    public function __construct(private string $greeting) {}
     public function greet(string $name, string $punct = '!'): string
     {
         return "$this->greeting, $name$punct";
@@ -73,46 +76,66 @@ enum Size: string implements Sizes
 
 // A bound variable is captured when the closure is created.
 $sep = '-';
-$f = fn (string $b) => pair($sep, $b);
+$f = fn(string $b) => pair($sep, $b);
 echo $f('x'), "\n";
 $sep = '+';
 echo $f('y'), "\n";
-$g = fn (string $string) => str_pad($string, 6, '*');
+$g = fn(string $string) => str_pad($string, 6, '*');
 echo $g('abc'), "\n";
 // `...` keeps the remaining parameters, defaults included.
-$h = fn (int $a, string $b = 'b', float $c = 1.5) => three($a, $b, $c);
+$h = fn(int $a, string $b = 'b', float $c = 1.5) => three($a, $b, $c);
 echo $h(1), ' ', $h(2, 'x'), ' ', $h(3, 'y', 2.5), "\n";
-$named = fn (float $c) => three(c: $c, a: 7);
+$named = fn(float $c) => three(c: $c, a: 7);
 echo $named(9.5), "\n";
-$v = fn (string $parts0, string ...$parts) => vari(',', $parts0, ...$parts);
+$v = fn(string $parts0, string ...$parts) => vari(',', $parts0, ...$parts);
 echo $v('a', 'b', 'c'), "\n";
 $xs = [1];
-$add = function (array &$xs) { /** @var list<int> $xs */ addTo($xs, 2); };
+$add = function (array &$xs) {
+    /** @var list<int> $xs */
+    addTo($xs, 2);
+};
 $add($xs);
+function totals(): int
+{
+    // A closure over lines: the call moves in with its block.
+    $total = function (array $xs) {
+        /** @var list<int> $xs */
+        return total(
+            $xs,
+            3,
+        );
+    };
+    return $total([1, 2]);
+}
+echo totals(), "\n";
 var_export($xs);
 echo "\n";
 $greeter = new Greeter('Hello');
-$hi = fn (string $name) => $greeter->greet($name);
+$hi = fn(string $name) => $greeter->greet($name);
 echo $hi('Ada'), "\n";
-$shout = fn (string $s) => Greeter::shout($s, 2);
+$shout = fn(string $s) => Greeter::shout($s, 2);
 echo $shout('hey'), "\n";
-echo (fn (string $string) => strlen($string))('four'), "\n";
+echo (fn(string $string) => strlen($string))('four'), "\n";
 
 // In a pipe, literal bound arguments make the call itself; others run
 // after the left side, as PHP 8.6 runs them.
 echo strtoupper(sprintf('namespace %s', 'ns')), "\n";
 echo str_replace(' ', Paths::SEP, 'a b'), "\n";
-echo trace('left', 'L') |> (fn (string $b) => pair(trace('bound', 'B'), $b)), "\n";
+echo trace('left', 'L') |> (fn(string $b) => pair(trace('bound', 'B'), $b)), "\n";
 echo $greeter->greet('x', '?'), "\n";
 
 // Constant expressions.
-const UPPER = static function (string $string) { return strtoupper($string); };
+const UPPER = static function (string $string) {
+    return strtoupper($string);
+};
 echo (UPPER)('const'), "\n";
-function dashes(Closure $f = static function (int $times) { return str_repeat('-', $times); }): string
+function dashes(Closure $f = static function (int $times) {
+    return str_repeat('-', $times);
+}): string
 {
     $r = $f(3); return is_string($r) ? $r : '';
 }
 echo dashes(), "\n";
 
 echo Labelled::LABEL, Size::Small->value, "\n";
-// phaenon-map v1 partial.phn 1-6=1 7:1 13-15=6 16:7 17-19=7 20:8 21-23=8 24:9 26-28=10 29:11 30-32=11 33:12 35-35=13 36:14 37-38=14 39:15 40-42=15 43:16 44-46=16 47:17 50-50=19 51:20 55-55=23 56:24 60-60=27 61:29 65-65=32 66:33 70-70=36 71:37 112-114=77 115:78
+// phaenon-map v1 partial.phn 1-6=1 7:1 13-15=6 16:7 17-19=7 20:8 21-23=8 24:9 26-28=10 29:11 31-33=12 34:13 35-37=13 38:14 40-40=15 41:16 43-45=17 46:18 47-49=18 50:19 53-53=21 54:22 58-58=25 59:26 63-63=29 64:31 68-68=34 69:35 73-73=38 74:39 94-96=58 97:59 99-99=60 100:61 102-103=62 104:63 107-107=65 108:66 129-130=86 131:87 133-137=88 138:89
