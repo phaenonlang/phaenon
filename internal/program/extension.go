@@ -38,40 +38,81 @@ func (p *Program) ExtensionsPHP() string { return p.extensionsPHP }
 // extension failing to generate or parse is reported through the returned
 // error too, after the others were loaded.
 func (p *Program) LoadExtensions(php, cacheDir string, embedded func(lower string) bool) ([]string, error) {
+	return p.AddExtensions(ReadExtensions(php, cacheDir, embedded))
+}
+
+// Extensions is what ReadExtensions read from php: the stubs of the
+// extensions it has loaded beyond the embedded ones, ready to be declared
+// in any number of programs. Running php is the slow part of building a
+// program (a third of a second), so a process that builds many, such as
+// phn lsp, reads them once.
+type Extensions struct {
+	PHP   string // php's PHP_VERSION
+	files []extensionFile
+	// problems are the extensions that failed to generate; err, that php
+	// could not be run at all.
+	problems []string
+	err      error
+}
+
+type extensionFile struct {
+	path, name string // name is the extension's, as php reports it; "" for the constants
+	src        []byte
+}
+
+// ReadExtensions asks php for its extensions and reads or generates their
+// stubs, as LoadExtensions does, without declaring them.
+func ReadExtensions(php, cacheDir string, embedded func(lower string) bool) *Extensions {
 	exts, phpVersion, err := LoadedExtensions(php)
 	if err != nil {
-		return nil, err
+		return &Extensions{err: err}
 	}
-	p.extensionsPHP = phpVersion
-	var loaded []string
-	var problems []string
-	for _, e := range exts {
-		lower := strings.ToLower(e.Name)
+	e := &Extensions{PHP: phpVersion}
+	for _, x := range exts {
+		lower := strings.ToLower(x.Name)
 		lower = strings.TrimPrefix(lower, "zend ") // "Zend OPcache" is ext/opcache
 		if embedded(lower) {
 			continue
 		}
-		src, err := cachedExtensionStub(php, cacheDir, e, phpVersion)
+		src, err := cachedExtensionStub(php, cacheDir, x, phpVersion)
 		if err != nil {
-			problems = append(problems, e.Name+": "+err.Error())
+			e.problems = append(e.problems, x.Name+": "+err.Error())
 			continue
 		}
 		if len(bytes.TrimSpace(src)) == 0 {
 			continue
 		}
-		if _, err := p.AddFile("<ext>/"+lower+".php", src, lexer.ModePHP, false); err != nil {
-			problems = append(problems, e.Name+": "+err.Error())
+		e.files = append(e.files, extensionFile{path: "<ext>/" + lower + ".php", name: x.Name, src: src})
+	}
+	if src, err := cachedConstants(php, cacheDir, phpVersion); err != nil {
+		e.problems = append(e.problems, "constants: "+err.Error())
+	} else {
+		e.files = append(e.files, extensionFile{path: "<ext>/constants.php", src: src})
+	}
+	return e
+}
+
+// AddExtensions declares the extensions ReadExtensions read, and returns
+// the names it declared and, as LoadExtensions does, what failed.
+func (p *Program) AddExtensions(e *Extensions) ([]string, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
+	p.extensionsPHP = e.PHP
+	problems := append([]string(nil), e.problems...)
+	var loaded []string
+	for _, f := range e.files {
+		if _, err := p.AddFile(f.path, f.src, lexer.ModePHP, false); err != nil {
+			what := f.name
+			if what == "" {
+				what = "constants"
+			}
+			problems = append(problems, what+": "+err.Error())
 			continue
 		}
-		loaded = append(loaded, e.Name)
-	}
-	// The values of the constants php defines: php-src's stubs declare most
-	// of them UNKNOWN (`const PHP_URL_USER = UNKNOWN` with a @var), and a
-	// conditional type decides on the value.
-	if src, err := cachedConstants(php, cacheDir, phpVersion); err != nil {
-		problems = append(problems, "constants: "+err.Error())
-	} else if _, err := p.AddFile("<ext>/constants.php", src, lexer.ModePHP, false); err != nil {
-		problems = append(problems, "constants: "+err.Error())
+		if f.name != "" {
+			loaded = append(loaded, f.name)
+		}
 	}
 	if len(problems) > 0 {
 		return loaded, fmt.Errorf("%s", strings.Join(problems, "; "))
@@ -79,7 +120,6 @@ func (p *Program) LoadExtensions(php, cacheDir string, embedded func(lower strin
 	return loaded, nil
 }
 
-// constantsScript prints every scalar constant php defines, by namespace.
 const constantsScript = `
 $out = [];
 foreach (get_defined_constants(true) as $ext => $cs) {
