@@ -98,15 +98,17 @@ func File(src []byte, opts Options) ([]byte, error) {
 // Verbatim is a run of the output copied from the source byte for byte:
 // source offsets [Src, Src+Len) at output offset Out. An output's verbatim
 // spans are the complement of the emitter's edits and of the indentation it
-// adds; everything between them is text the compiler wrote. phn fix carries
-// a tool's change of the output back to the source through them
-// (design/tooling.md §4).
+// adds, and the source's runs inside a folded pipe's text, which moves its
+// operands (fold.go); everything between them is text the compiler wrote.
+// phn fix carries a tool's change of the output back to the source through
+// them (design/tooling.md §4).
 type Verbatim struct {
 	Src, Out, Len int
 }
 
 // FileVerbatim is File with the output's verbatim spans, in output order,
-// two spans never adjacent on both sides.
+// two spans never adjacent on both sides and never sharing a source byte.
+// A moved span breaks the source order of the others.
 func FileVerbatim(src []byte, opts Options) ([]byte, []Verbatim, error) {
 	f := (*ast.File)(nil)
 	if opts.File != nil && opts.File.AST != nil {
@@ -185,6 +187,17 @@ type edit struct {
 	// Owner is the node whose lowering wrote an insertion at its end, so
 	// that text moved with the node keeps it (renderSpan); zero otherwise.
 	Owner ast.Span
+	// Pieces are the runs of a free edit's text copied from the source
+	// byte for byte, the operands a folded pipe moves: the source's text
+	// where it lands, so phn fix carries a change of it back (Verbatim).
+	Pieces []piece
+}
+
+// piece is a run of an edit's text, at offset Off in it, that holds the
+// source bytes of Span.
+type piece struct {
+	Off int
+	ast.Span
 }
 
 type emitter struct {
@@ -274,7 +287,7 @@ func (e *emitter) apply() ([]byte, *lineWriter) {
 			}
 			w.markMap(ed.Start)
 		case ed.Free:
-			w.free(ed.Text, ed.Start)
+			w.freeWith(ed.Text, ed.Start, ed.Pieces)
 		default:
 			w.inPlace(ed.Text, ed.Span)
 		}

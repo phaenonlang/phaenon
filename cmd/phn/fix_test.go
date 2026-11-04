@@ -213,6 +213,37 @@ func TestFixCheck(t *testing.T) {
 	}
 }
 
+// A folded pipe writes its operands into the call it makes: they are the
+// source's text where they land, and a change of them is carried back.
+func TestFixCarriesAFoldedPipesOperands(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	src := "namespace App;\n\nfinal class Names {\n    /** @param list<string> $names */\n" +
+		"    fun shout(array $names): string => $names\n" +
+		"        |> array_map(fn (string $n): string => $n.'!', ?)\n" +
+		"        |> implode(',', ?);\n}\n"
+	writeTree(t, root, map[string]string{"src/Names.phn": src})
+	if _, stderr, err := run(t, root, bin, "build"); err != nil {
+		t.Fatalf("phn build: %v\n%s", err, stderr)
+	}
+	out, _ := os.ReadFile(filepath.Join(root, ".src/Names.php"))
+	if !strings.Contains(string(out), "return implode(',', array_map(fn (string $n): string => $n.'!', $names));") {
+		t.Fatalf("the pipe did not fold:\n%s", out)
+	}
+	tool := fakeToolCommand(t, fakeSpec{Replace: [][2]string{
+		{"fn (string $n)", "fn(string $n)"},
+		{"$n.'!'", "$n . '!'"},
+	}})
+	stdout, stderr, err := run(t, root, bin, "fix", "--", tool, "fix")
+	if err != nil {
+		t.Errorf("phn fix: %v\n%s%s", err, stdout, stderr)
+	}
+	want := strings.NewReplacer("fn (string $n)", "fn(string $n)", "$n.'!'", "$n . '!'").Replace(src)
+	if got, _ := os.ReadFile(filepath.Join(root, "src/Names.phn")); string(got) != want {
+		t.Errorf("Names.phn:\n%s\nwant\n%s\n%s", got, want, stderr)
+	}
+}
+
 // phn fmt lays the .phn out, then runs the project's fixer through phn fix;
 // --check then finds nothing left. With "fmt": [] only the first layer runs.
 func TestFmt(t *testing.T) {
