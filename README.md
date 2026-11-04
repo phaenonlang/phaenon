@@ -215,6 +215,18 @@ an erased type — is not: the rebuild writes that text anew. `phn fix` then reb
 tool again, carrying what has become the source's, for three rounds at most, and reports what the
 tool still changes; the exit status is 1 then (`design/tooling.md` §4).
 
+`phn fmt` formats the `.phn` in two layers. The first is Phaenon's layout, with no options: a
+function's brace on its declaration's line, a class-like's on its own, `{}` for an empty body,
+one-line docblocks, and the spacing of what only Phaenon has (`class Box<T of Item>`,
+`map<string, list<int>>`, `Closure(int): bool`, `throws A|B`, `$x as? User`, `concurrently (…) {`).
+The second is the project's own PHP style: its php-cs-fixer, run through `phn fix`.
+
+```sh
+phn fmt                 # the roots: Phaenon's layout, then the fixer (phaenon.json "fmt", or tools/php-cs-fixer)
+phn fmt src/Foo.phn     # given files only
+phn fmt --check         # CI: fail when either layer would change a file; nothing written
+```
+
 A library ships its `.phn` sources and no compiled PHP (`roadmap.md` D13): with `phn` and the
 library pinned, the output is reproducible byte for byte, and the Composer plugin below builds it
 where it is installed.
@@ -337,6 +349,7 @@ crossing it, a spawn body mutating an outer variable, and `sleep()`/`usleep()` i
 phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] # type-check and compile .phn → .php; no paths: phaenon.json
 phn check [--format=text|json|github|checkstyle] [--no-deprecations] [--exclude PATH]... path... # type-check .phn (and .php) files
 phn fix [--check] -- command [arg...]                 # run php-cs-fixer, Rector… on the outputs; carry their changes back to the .phn
+phn fmt [--check] [file...]                           # Phaenon's layout, then the project's fixer through phn fix; no files: the roots
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Bytes, Debug/…), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it

@@ -25,6 +25,8 @@ suites, and the tools they shell out to. Without its variable a suite **skips**,
 | `PHAENON_PHPSTAN` | `TestPHPStanParity` (checker), `TestGenerics` (emit) | **Path to a PHPStan binary**; runs it at level max — the parity run with `treatPhpDocTypesAsCertain: false`, Tequila's profile (`../design/checker.md` §9) | `/Users/petr/labs/tequila/object-mapper/tools/phpstan/vendor/bin/phpstan` |
 | `PHN_PHP` | `phn` itself (not a test variable) | The `php` whose loaded extensions are reflected into stubs; default `php` on `PATH` | unset |
 | `PHAENON_UPDATE` | `TestGenerics` (emit) | Rewrites the expected `.php` goldens from the current output | `1` |
+| `PHAENON_UPDATE` | `TestGolden` (format) | Rewrites `internal/format/testdata/X.golden.phn` | `1` |
+| `PHAENON_FMT_TREE` | `TestTree` (format) | A tree of `.phn` (a dogfood checkout) that `phn fmt`'s first layer formats in memory: each file must format, and to itself a second time; the files it would change are logged (`-v`) | `/Users/petr/labs/tequila/core` |
 | `PHAENON_GOLDEN` | `TestGolden` (checker) | Only golden files whose name contains this substring | e.g. `generics` |
 | `PHAENON_COMPOSER_PROJECT` | `internal/program` | A Composer project to exercise the vendor reader | e.g. `/Users/petr/labs/tequila/object-mapper` |
 | `PHAENON_COMPOSER` | `internal/distribution` | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects (a fake `phn`, an `httptest` mirror; Packagist off); needs the `runtime` checkout beside the repository or the main checkout | `$(which composer)` |

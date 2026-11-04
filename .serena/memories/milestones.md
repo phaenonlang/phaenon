@@ -90,6 +90,15 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
    three rounds, report; `--check`). Measured on a copy of core (`../design/tooling.md` §4, "Done in
    slice 3"): with core's php-cs-fixer configuration nothing is refused in the end, so the gate
    passes and `phn fmt` gets both layers. Method modifiers in PSR-12 order became verbatim text
-   for it (outputs byte-identical). Left in [[open-items]] § M6 — `phn fix`. Next: `phn fmt`.
+   for it (outputs byte-identical). Left in [[open-items]] § M6 — `phn fix`.
+9. 2026-11-04: **M6 slice 3, second half: `phn fmt`**. Layer 1 is `internal/format`: migrate's
+   `LayoutBlocks`, no leading blank line, and the spacing of Phaenon's syntax, with goldens in
+   `internal/format/testdata`. Layer 2 is the project's fixer through `runFix`: phaenon.json
+   `"fmt"`, `tools/php-cs-fixer` or `vendor/bin/php-cs-fixer`. `--check` writes nothing. On the
+   measure's copy, core un-formatted through `phn fix` comes back byte for byte from one
+   `phn fmt`. Layer 1 changes nothing in the five dogfood trees. tq-cli's `cs` is `phn fmt`
+   (`e1b3586`). Core's is staged, waiting for its hooks: the bundle tests need the test
+   infrastructure (`../design/tooling.md` §5.4). Next: slice 4, `phn lsp`, on a maintainer's
+   go-ahead.
 
 ← [[Home]]

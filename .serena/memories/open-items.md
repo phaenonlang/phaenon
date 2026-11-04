@@ -689,6 +689,19 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
 - **Types Rector adds to the closures the compiler writes for a pipeline** are refused (3 on core
   with the type-declaration set); they would need the pipeline's stages typed in the source.
 
+## M6 — `phn fmt` (slice 3, 2026-11-04)
+
+`../design/tooling.md` §5.4. Left:
+- **The stdlib's six `.phn` are not in the canonical layout** (written before it): `phn fmt
+  stdlib/**/*.phn` would put their method braces up and write `{}`, and the runtime and concurrent
+  packages would then be regenerated (`phn stdlib`), since one-line docblocks reach the output.
+- **Core's `composer cs` → `phn fmt`** is staged on its dogfood branch, not committed: its
+  pre-commit hook runs the bundle tests, which need `tq test:infra:up`.
+- **PhpStorm's Reformat Code** writing the first layer comes with the editor slice (§6.2), on
+  `internal/format/testdata`.
+- `phn fmt FILE…` hands the fixer the outputs as arguments, which php-cs-fixer reads as the paths
+  to fix; a configured `"fmt"` command must take paths the same way.
+
 ## M6 — CI formats (slice 2, 2026-11-03)
 
 `../design/tooling.md` §7.1 (the settlements under "Done in slice 2"). Left:
