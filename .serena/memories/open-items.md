@@ -723,6 +723,25 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
   in-place mode.
 - PhpStorm's coverage view: see § D19.
 
+## D22 — the compiled layout follows PER (2026-11-04)
+
+`../design/roadmap.md` D22, `../design/tooling.md` §4. Left:
+- ~~**`phn fix` does not carry a change of text a lowering moved**~~ — done 2026-11-04: a free
+  edit carries the source runs of its text (`edit.Pieces`, the fold's `text` runs), the writer
+  records them as moved verbatim spans beside the in-place ones the line map's property checks,
+  and `fix.Carry` applies hunks in the source's order. Core and tq-cli under `@PER-CS3x0`: 0
+  changes in compiler text; one `phn fix` converts either tree with nothing left.
+- **The dogfood trees' cs configurations are `@PSR12`** until Tequila's move to PER ([[dogfood]]
+  § D22 rebuild): cs fails on the outputs, and `phn fmt` / `phn fix` must not run with them.
+- **A closure body kept on one line**: a comment after a lowered arrow (`closureBody`) or after
+  an expression body's arrow keeps the in-place `{ return expr; }`, which PER §7 does not allow
+  for closures; a comment there has nowhere else to go.
+- **PER 3.1** has no php-cs-fixer set yet (3.95 ends at `@PER-CS3x0`); its additions are not
+  compiler text today.
+- ~~**`phn fmt` on a `@PSR12` project** loops between the layers~~ — done 2026-11-04: `phn fmt`
+  names the files the first layer lays out again after the fixer, rebuilds the outputs from
+  them and fails (`../design/tooling.md` §5.3).
+
 ## M6 — `phn lsp` (slice 4, 2026-11-04)
 
 `../design/tooling.md` §6.5. Left:

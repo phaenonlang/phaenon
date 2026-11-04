@@ -255,6 +255,17 @@ requirements. `phn` is not installed on `PATH`: build it from the repo (`AGENTS.
 - The numbers in `../design/tooling.md` §6.5 come from a scratch LSP client that opened a core
   or tq-cli file, edited it, sent each request and saved, timing each; it is not kept.
 
+## The compiled layout against PER (2026-11-04)
+
+Until the dogfood trees' own cs configurations move to PER (D22, [[dogfood]]), the compiled layout
+is checked with a scratch copy of the tree's configuration: its rules with `@PER-CS3x0` for
+`@PSR12`, the finder on `.src`/`.tests` by absolute path, `setUsingCache(false)`, then
+`phn fix --check -- tools/php-cs-fixer/vendor/bin/php-cs-fixer fix --config <copy>` in the tree.
+The report's "in text the compiler wrote" count is the compiler's: 0 in core and tq-cli since
+the fold carries its operands (2026-11-04; 13 and 117 before, all in folded pipes). The emitter goldens get the same check
+one file per scratch project (the goldens share class names): only `pipes.phn` reports compiler
+text, a folded pipe's moved operands.
+
 ## Execution suites on 2026-11-04
 
 After D21 (tabs replaced by migrate), with the cached release-branch corpora:
@@ -266,6 +277,8 @@ After D21 (tabs replaced by migrate), with the cached release-branch corpora:
   indentation - tabs and spaces cannot be mixed", "Invalid body indentation level"): the
   migration's spaces make the indentation consistent or count it in other columns, so PHP reports
   another error or none.
+- After D22 the same day: 8.6 emit 4,852/4,852, printer 4,584/4,584 (one file differed once,
+  passed on the rerun); 8.5 emit 4,605/4,605 (the run above had 4,606 with gh21603 differing), printer 4,361/4,361.
 - The `master` checkout pairs badly with PHP 8.5.3 for execution: its 8.6 tests other than the
   placeholder ones (`#[\Override]` on constants, 19) fail in the original run and are not filtered
   as newer than the oracle. Use `.cache/php-src-8.5` and `.cache/php-src-8.6`.

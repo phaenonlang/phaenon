@@ -1,7 +1,7 @@
 ---
 type: reference
 tags: [phaenon, dogfood, tequila]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Dogfood — the Tequila targets
@@ -310,6 +310,29 @@ push dogfood work without a maintainer's go-ahead.
     cold server can lose it. The commit had changed only line maps.
   - `vendor/bin/phpunit | phn trace` shows failures at `.phn` lines. Left alone as before:
     `.serena/project.yml` (odm, object-mapper), object-mapper's untracked `config/reference.php`.
+- **D22 rebuild (2026-11-04):** the compiled layout is PER Coding Style 3.0's
+  (`../design/roadmap.md` D22). All five trees were rebuilt with it: 640 outputs changed
+  (reflector 11, object-mapper 27, odm 58, core 300, tq-cli 244), each with the token stream of
+  the build before (whitespace and comments aside), so the suites and PHPStan were not rerun.
+  - **The trees' php-cs-fixer configurations are still `@PSR12`**, which expands PER's `{}`: cs
+    now fails on the outputs (files: reflector 11, object-mapper 25, odm 58; `phn fix --check`:
+    core 520 changes in sources and 1 in compiler text, a pipe's `fn(`; tq-cli 259 and 8,
+    `spawn`'s `fn(`). **Do not run `phn fmt` or `phn fix` with these configurations**: they would
+    carry PSR-12's expanded empty bodies into the `.phn`, against the first layer. Adding PER's
+    `single_line_empty_body` to `@PSR12` leaves core 33 changes in its own `.phn` text and both
+    trees their compiler `fn(`, so no bridge configuration makes cs green short of the PER switch.
+  - **The switch to `@PER-CS3x0` comes with Tequila's own migration to PER**, which goes with its
+    migration to Phaenon. Measured in scratch configurations (the tree's rules with `@PER-CS3x0`
+    for `@PSR12`): core 1,820 changes in 250 sources, tq-cli 5,907 in 374 (concatenation spacing,
+    `fn (`, trailing commas, `{}`), which `phn fix` carries, and 13 / 117 in folded pipes, which
+    it carries too since the same day ([[open-items]] § D22).
+  - **Trial run** (2026-11-04): one `phn fix` with the scratch PER configuration converted core
+    (1,833 changes in 252 sources) and tq-cli (6,024 in 377) with nothing left after the rebuild;
+    the first layer still holds on every file, tq-cli's PHPStan passes on the result. Both trials
+    are kept as `git stash` entries "PER 3.0 trial through phn fix (2026-11-04)" in core and in
+    tq-cli (the stash is shared with the `~/labs/tequila/tq-cli` checkout); the branches are as
+    before. A commit on a dogfood branch with the PER sources fails core's pre-commit `check-cs`
+    hook while the configuration is `@PSR12`.
 
 ## Next targets (roadmap §3)
 

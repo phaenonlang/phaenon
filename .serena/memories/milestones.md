@@ -118,5 +118,14 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     formatter; spaces in `.phn` (D21). Found on the way: `phn fmt` left a one-statement block's
     brace on its own line (fixed, golden `format/blocks.phn`). Left in [[open-items]] § M6 —
     `phn lsp`. Next: slice 5, the VS Code extension, on a maintainer's go-ahead.
+12. 2026-11-04: **D22, the compiled PHP follows PER Coding Style 3.0** (`../design/roadmap.md`
+    D22, `../design/line-map.md` §2): an empty body stays as written (`{}` on the declaration's
+    line), the compiler's arrow functions are `fn(`, and its `function` closures (a partial
+    application with an inline `@var`, one in a constant expression) are laid out over lines.
+    Measured with `@PER-CS3x0` through `phn fix --check`: changes of compiler text 534 → 13 in
+    core and 384 → 117 in tq-cli, the rest the programmer's text that folded pipes move. The five
+    dogfood trees' 640 changed outputs keep their token streams; execution suites 8.6 emit
+    4,852/4,852 and 8.5 4,605/4,605. Tequila's own move to PER comes with its migration to
+    Phaenon ([[dogfood]], [[open-items]] § D22). Next: slice 5 on a maintainer's go-ahead.
 
 ← [[Home]]
