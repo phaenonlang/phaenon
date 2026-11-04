@@ -1,0 +1,17 @@
+namespace Blocks;
+
+// phn fmt keeps a block a block (turning one into `=> expr` is migrate's) and
+// puts its brace on the declaration's line, a single `return` included.
+final class Box
+{
+    fun one(): int
+    {
+        return 1;
+    }
+
+    fun two(): list<int>
+    {
+        $x = 2;
+        return [$x];
+    }
+}
