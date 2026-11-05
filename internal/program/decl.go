@@ -161,6 +161,9 @@ type Method struct {
 	// NativeReturn is the declared PHP return type (nil when absent), kept
 	// apart from Return so docblock inheritance can tell them apart.
 	NativeReturn types.Type
+	// InheritedReturn: Return is the documented return type of the method
+	// this one overrides (see Param.Inherited).
+	InheritedReturn bool
 	// Throws: see Function. DeclaredThrows adds the inherited declaration.
 	Throws     types.Type
 	TypeParams []*TypeParam
@@ -191,6 +194,10 @@ type Param struct {
 	Attrs      []*ast.AttrGroup
 	Out        types.Type // @param-out
 	Span       ast.Span
+	// Inherited: Type is the documented type of the parameter the method
+	// overrides (implicit @inheritDoc), which may equal NativeType, as an
+	// inherited `mixed[]` equals `array`.
+	Inherited bool
 }
 
 // Property is a property (declared, promoted, or from a trait).

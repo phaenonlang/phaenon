@@ -184,7 +184,7 @@ final class Suite
  * A boolean assigned from a condition carries it: testing the variable
  * narrows what the condition tested, until either side is reassigned.
  */
-function conditionInVariable(?array $before, ?string $onMain, bool $named, string $inClone): void
+function conditionInVariable(?array<mixed> $before, ?string $onMain, bool $named, string $inClone): void
 {
     $unknown = null === $before || [] === $before;
     $changes = $unknown ? [] : array_keys($before);

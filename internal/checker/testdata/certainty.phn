@@ -13,7 +13,7 @@ function takesString(string $s): void
 {
 }
 
-function parameter(mixed $v): array|bool|null
+function parameter(mixed $v): array<mixed>|bool|null
 {
     return is_array($v) || is_bool($v) ? $v : null;
 }
@@ -89,7 +89,7 @@ function varTags(mixed $m): void
     echo $wide, $wrong, count($bad);
 }
 
-function returned(mixed $m): array
+function returned(mixed $m): array<mixed>
 {
     /** @var array<string, mixed> */
     return parameter($m);

@@ -1,0 +1,137 @@
+// A declared array or iterable names the type of its elements
+// (design/collections.md §2): a bare `array` is P2516 in a .phn, as PHPStan
+// at level max reports it on the output (missingType.iterableValue), and
+// `array<mixed>` is the explicit "any array". An override takes the type of
+// the method it overrides; a closure's parameters are not declarations
+// PHPStan holds to it. Plain PHP with docblocks, so PHPStan judges the file
+// line for line; untyped-arrays-native.phn has the native spellings.
+
+namespace UntypedArrays;
+
+interface Source
+{
+    /** @return list<string> */
+    public function names(): array;
+
+    /** @param array<string, int> $counts */
+    public function take(array $counts): void;
+
+    public function bare(array $rows): void; // want P2516 "$rows"
+}
+
+final class Bare implements Source
+{
+    private array $items = []; // want P2516 "$items"
+
+    private ?array $maybe = null; // want P2516 "$maybe"
+
+    /** @var list<array> */
+    private array $rows = []; // want P2516 "$rows"
+
+    /** @var array<mixed> */
+    private array $any = [];
+
+    /** @var array<int> */
+    private array $ints = [];
+
+    /** @var array{a: int} */
+    private array $shape = ['a' => 1];
+
+    public function __construct(private array $promoted) {} // want P2516 "$promoted"
+
+    public function param(array $x): int // want P2516 "$x"
+    {
+        return count($x) + count($this->items) + count($this->maybe ?? []) + count($this->rows) + count($this->any)
+            + count($this->ints) + $this->shape['a'] + count($this->promoted);
+    }
+
+    public function result(): array // want P2516 "result"
+    {
+        return [];
+    }
+
+    /** @param array<string, array> $byName */
+    public function nested(array $byName): void {} // want P2516 "$byName"
+
+    public function iter(iterable $xs): void {} // want P2516 "$xs"
+
+    /** @param iterable<int> $xs */
+    public function iterTyped(iterable $xs): void {}
+
+    /** @param array $doc */
+    public function docBare(array $doc): void {} // want P2516 "$doc"
+
+    /** @param array<mixed> $doc */
+    public function docMixed(array $doc): void {}
+
+    /** @return array{int, string} */
+    public function docShape(): array
+    {
+        return [1, 'a'];
+    }
+
+    // The interface's docblock types stand for these.
+    public function names(): array
+    {
+        return [];
+    }
+
+    public function take(array $counts): void {}
+
+    // Its parent names no element type either.
+    public function bare(array $rows): void {} // want P2516 "$rows"
+
+    public function closure(): int
+    {
+        $f = fn (array $x): int => count($x);
+        return $f([]);
+    }
+}
+
+function top(array $x): void {} // want P2516 "$x"
+
+/** @param array<string> $x */
+function topTyped(array $x): void {}
+
+// An inherited `mixed[]` is `array<mixed>`, the same type as a bare `array`:
+// the parameter takes it from the interface all the same.
+interface Logger
+{
+    /** @param mixed[] $context */
+    public function log(string $message, array $context = []): void;
+}
+
+final class Quiet implements Logger
+{
+    public function log(string $message, array $context = []): void {}
+}
+
+// The nearest ancestor that documents the type gives it, as Symfony's
+// Kernel takes registerBundles() from a trait that documents nothing.
+interface KernelLike
+{
+    /** @return iterable<object> */
+    public function registerBundles(): iterable;
+}
+
+trait Registers
+{
+    // A trait cannot know its users' interfaces.
+    public function registerBundles(): iterable // want P2516 "registerBundles"
+    {
+        return [];
+    }
+}
+
+abstract class BaseKernel implements KernelLike
+{
+    use Registers;
+}
+
+final class AppKernel extends BaseKernel
+{
+    public function registerBundles(): iterable
+    {
+        return [];
+    }
+}

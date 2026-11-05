@@ -33,7 +33,6 @@ func TestPHPStanParity(t *testing.T) {
 	}
 	// PHPStan rules Phaenon deliberately does not have (yet).
 	allow := map[string]bool{
-		"missingType.iterableValue": true, // M4 decides how arrays are typed
 		"missingType.generics":      true, // M3
 		"function.resultUnused":     true, // purity inference: not a type error
 		"method.resultUnused":       true,

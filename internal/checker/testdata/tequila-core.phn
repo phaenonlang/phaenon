@@ -26,7 +26,7 @@ function voidClosureIsMixed(): void
     retry(fn () => takesInt(1));
 }
 
-function arrayCast(array|object $d, ?array $n): void
+function arrayCast(array<mixed>|object $d, ?array<mixed> $n): void
 {
     sink((array) $d);
     takesInt((array) $d); // want P2103

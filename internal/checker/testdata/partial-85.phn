@@ -3,7 +3,7 @@
 // (design/php-versions.md §5.3).
 
 fun pair(string $a, string $b): string { return $a . $b; }
-fun refd(array &$xs, int $n): void { $xs[] = $n; }
+fun refd(array<mixed> &$xs, int $n): void { $xs[] = $n; }
 fun wantsString(string $s): void {}
 
 final class Box {
