@@ -194,7 +194,8 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     left, so it was checked by stripping the types core (271) and tq-cli (747) wrote: 62% and 67%
     come back as written, most others narrower; against the same trees migrated without it, it
     adds no finding to `phn check` or PHPStan max and removes four in five of the errors the
-    stripping caused. Left in [[open-items]] § M6 — the list-types codemod. Next: the `throws`
-    codemod's measurement ([[open-items]]), then slice 8.
+    stripping caused. Its gaps closed the same day (`a42a407`): 67% and 71% come back as
+    written, 6% and 7% are left. Left in [[open-items]] § M6 — the list-types codemod. Next: the
+    `throws` codemod's measurement ([[open-items]]), then slice 8.
 
 ← [[Home]]

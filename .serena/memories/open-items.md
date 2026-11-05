@@ -473,18 +473,20 @@ plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
 
 ## M6 — the list-types codemod (slice 7, 2026-11-05)
 
-`../design/tooling.md` §8.2. Left, all of them declarations it leaves alone or types wider:
-- **A method used as a callable or named in a string** (`[$this, 'm']`, `'m'` anywhere in the
-  class) keeps its parameters untyped: 35 of tq-cli's stripped ones. Following `array_map([$this,
-  'm'], $xs)` to its arguments would recover them.
-- **Docblock tests are textual**: a docblock that mentions `@return` or `@param` at all leaves the
-  slot alone, a prose-only tag included.
-- **A homogeneous tuple reads as a list** (`(string, string)` as `list<string>`); always correct,
-  less precise.
-- **Static properties** are not followed (`self::$p`), nor compound writes (`$this->p[$k] .= …`),
-  nested element writes or any by-reference use.
-- **A value from a declaration still untyped** keeps the element `mixed` (`list<mixed>`) when the
-  chain is longer than five rounds or cyclic.
+`../design/tooling.md` §8.2. The first version's gaps are closed (compiler `a42a407`): callables
+passed and stored in typed properties, strings that name a method only where PHP takes a
+callable's name, docblocks by their parsed tags, static properties, compound, nested and
+by-reference writes, tuples in element types, closures and templates spelled. More rounds were
+tried and gain nothing: the rounds converge before five. Left:
+- **Overrides** keep the parent's type and are no candidates; 21 of the stripped declarations.
+- **Keys and elements both unknown** (20), values the checker types `mixed`.
+- **A callable whose arguments nothing says** (7): passed to a `callable` parameter without a
+  signature.
+- **A top-level homogeneous tuple reads as a list** (`(string, string)` as `list<string>`); always
+  correct, less precise.
+- **The strip-and-recover harness** was a session's scratch (copy the tree with its vendor links'
+  siblings, strip, migrate, compare with a copy migrated without `--list-types`); a `PHAENON_*`
+  test over a dogfood tree would keep the numbers checkable.
 
 ## M6 — distribution (slice 1, 2026-11-03)
 
