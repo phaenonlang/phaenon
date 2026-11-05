@@ -26,7 +26,10 @@ import (
 // directory of a phaenon.json, separated as PATH is; PHAENON_LISTTYPES_MIN
 // is the share, in percent, of declarations that must come back as written
 // or narrower, 0 by default; PHAENON_LISTTYPES_FINDINGS, when set, lists
-// the findings left with the codemod's types.
+// the findings left with the codemod's types. A type wider than written
+// fails the test, unless it is only shallower: the depth pass's mixed
+// below the levels the code uses, with keys, scalars and objects as
+// written.
 func TestListTypesMeasure(t *testing.T) {
 	trees := os.Getenv("PHAENON_LISTTYPES")
 	if trees == "" {
@@ -158,6 +161,9 @@ func measureListTypes(t *testing.T, tree string, min int) {
 		case types.IsSubtype(now, was, after):
 			kind = "narrower"
 			at += fmt.Sprintf(": %s, written %s", r.Type, types.Print(now))
+		case types.IsSubtype(was, now, after) && mixedBelow(now, was):
+			kind = "shallower"
+			at += fmt.Sprintf(": %s, written %s", r.Type, types.Print(now))
 		case types.IsSubtype(was, now, after):
 			kind = "wider"
 			at += fmt.Sprintf(": %s, written %s", r.Type, types.Print(now))
@@ -175,16 +181,19 @@ func measureListTypes(t *testing.T, tree string, min int) {
 		}
 		return 100 * counts[k] / n
 	}
-	t.Logf("%d declarations stripped: %d as written (%d%%), %d narrower (%d%%), %d wider (%d%%), %d other, %d not recovered (%d%%), %d not found",
-		n, counts["as written"], pct("as written"), counts["narrower"], pct("narrower"), counts["wider"], pct("wider"),
+	t.Logf("%d declarations stripped: %d as written (%d%%), %d narrower (%d%%), %d shallower (%d%%), %d wider (%d%%), %d other, %d not recovered (%d%%), %d not found",
+		n, counts["as written"], pct("as written"), counts["narrower"], pct("narrower"), counts["shallower"], pct("shallower"), counts["wider"], pct("wider"),
 		counts["other"], counts["not recovered"], pct("not recovered"), counts["not found"])
-	for _, k := range []string{"not recovered", "other", "wider", "not found"} {
+	for _, k := range []string{"not recovered", "other", "wider", "shallower", "not found"} {
 		sort.Strings(byKind[k])
 		for _, at := range byKind[k] {
 			t.Logf("  %s: %s", k, at)
 		}
 	}
-	if got := pct("as written") + pct("narrower"); got < min {
+	if counts["wider"] > 0 {
+		t.Errorf("%d declarations come back wider than written: a value the codemod missed", counts["wider"])
+	}
+	if got := pct("as written") + pct("narrower") + pct("shallower"); got < min {
 		t.Errorf("%d%% of the declarations come back as written or narrower, PHAENON_LISTTYPES_MIN is %d%%", got, min)
 	}
 
@@ -287,4 +296,60 @@ func declaredType(p *program.Program, r migrate.StrippedType) types.Type {
 		}
 	}
 	return nil
+}
+
+// mixedBelow reports now as was with, below some level, mixed where was
+// holds arrays: the depth pass's cut, not a value the codemod missed.
+// Keys, scalars and objects must be as written.
+func mixedBelow(now, was types.Type) bool {
+	if types.Print(now) == types.Print(was) {
+		return true
+	}
+	if types.IsMixed(now) {
+		for _, m := range types.Members(was) {
+			switch m.(type) {
+			case types.Array, types.Shape:
+				return true
+			}
+		}
+		return false
+	}
+	nows, wass := types.Members(now), types.Members(was)
+	if len(nows) > 1 || len(wass) > 1 {
+		if len(nows) != len(wass) {
+			return false
+		}
+		used := make([]bool, len(wass))
+		for _, n := range nows {
+			found := false
+			for i, w := range wass {
+				if !used[i] && mixedBelow(n, w) {
+					used[i], found = true, true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		return true
+	}
+	switch n := now.(type) {
+	case types.Array:
+		w, ok := was.(types.Array)
+		return ok && n.List == w.List && types.Print(n.Key) == types.Print(w.Key) && mixedBelow(n.Value, w.Value)
+	case types.Shape:
+		w, ok := was.(types.Shape)
+		if !ok || n.List != w.List || n.Unsealed != w.Unsealed || len(n.Entries) != len(w.Entries) {
+			return false
+		}
+		for i, e := range n.Entries {
+			f := w.Entries[i]
+			if e.Key != f.Key || e.IntKey != f.IntKey || e.IsInt != f.IsInt || e.Optional != f.Optional || !mixedBelow(e.Type, f.Type) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
