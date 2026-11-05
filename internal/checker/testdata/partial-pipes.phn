@@ -4,7 +4,7 @@
 fun needsTwo(int $a, int $b): int { return $a + $b; }
 fun up(string $s): string { return strtoupper($s); }
 fun wantsInt(int $x): void {}
-fun addAll(array &$xs, int $n): void { $xs[] = $n; }
+fun addAll(array<mixed> &$xs, int $n): void { $xs[] = $n; }
 
 final class User {
     public function __construct(public bool $active, public string $name) {}

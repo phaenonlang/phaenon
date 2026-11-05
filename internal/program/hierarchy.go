@@ -308,7 +308,10 @@ func (c *Class) ensureMembers() {
 // of the method it overrides, as PHPStan does (implicit @inheritDoc):
 // parameters are matched by name, and constructors are left alone, since a
 // child's constructor overrides nothing in PHP. The parent's type
-// parameters are mapped through @extends / @implements.
+// parameters are mapped through @extends / @implements. Each parameter and
+// the return take their type from the nearest ancestor that documents it:
+// Symfony's Kernel takes registerBundles() from a trait that documents
+// nothing, and its KernelInterface says iterable<BundleInterface>.
 func (c *Class) inheritDocTypes() {
 	var self []types.Type
 	if t, ok := c.TypeOf().(types.Class); ok {
@@ -319,7 +322,18 @@ func (c *Class) inheritDocTypes() {
 			continue
 		}
 		key := strings.ToLower(m.Name)
+		open := map[*Param]bool{}
+		for _, cp := range m.Params {
+			hasDoc := cp.NativeType == nil && !types.IsMixed(cp.Type) || cp.NativeType != nil && !types.Equal(cp.Type, cp.NativeType) || ownNative(cp.NativeType) || docParam(m.Doc, cp.Name)
+			if !hasDoc {
+				open[cp] = true
+			}
+		}
+		openReturn := !(m.Return != nil && (m.NativeReturn == nil || !types.Equal(m.Return, m.NativeReturn)) || ownNative(m.NativeReturn) || m.Doc != nil && m.Doc.Return != nil)
 		for _, a := range c.Ancestors() {
+			if len(open) == 0 && !openReturn {
+				break
+			}
 			a.ensure()
 			pm, ok := a.methods[key]
 			if !ok || pm.Vis == Private {
@@ -331,22 +345,37 @@ func (c *Class) inheritDocTypes() {
 			}
 			for _, pp := range pm.Params {
 				cp := paramNamed(m.Params, pp.Name)
-				if cp == nil {
-					continue
-				}
-				hasDoc := cp.NativeType == nil && !types.IsMixed(cp.Type) || cp.NativeType != nil && !types.Equal(cp.Type, cp.NativeType) || ownNative(cp.NativeType)
-				if hasDoc || pp.Type == nil || !nativeMatches(cp.NativeType, erasedNative(pp.NativeType, pm, a)) {
+				if cp == nil || !open[cp] || pp.Type == nil || !nativeMatches(cp.NativeType, erasedNative(pp.NativeType, pm, a)) {
 					continue
 				}
 				cp.Type = types.Substitute(pp.Type, subst)
+				if pp.Inherited || docParam(pm.Doc, pp.Name) || ownNative(pp.NativeType) {
+					cp.Inherited = true
+					delete(open, cp)
+				}
 			}
-			hasDocReturn := m.Return != nil && (m.NativeReturn == nil || !types.Equal(m.Return, m.NativeReturn)) || ownNative(m.NativeReturn)
-			if !hasDocReturn && pm.Return != nil && nativeMatches(m.NativeReturn, erasedNative(pm.NativeReturn, pm, a)) {
+			if openReturn && pm.Return != nil && nativeMatches(m.NativeReturn, erasedNative(pm.NativeReturn, pm, a)) {
 				m.Return = types.Substitute(pm.Return, subst)
+				if pm.InheritedReturn || pm.Doc != nil && pm.Doc.Return != nil || ownNative(pm.NativeReturn) {
+					m.InheritedReturn = true
+					openReturn = false
+				}
 			}
-			break
 		}
 	}
+}
+
+// docParam reports whether a docblock gives the named parameter a type.
+func docParam(doc *docblock.Doc, name string) bool {
+	if doc == nil {
+		return false
+	}
+	for _, t := range doc.Params {
+		if t.Name == name && t.Type != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // ownNative reports whether a declared type says more than its PHP erasure

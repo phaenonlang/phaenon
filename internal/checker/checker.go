@@ -31,6 +31,12 @@ type Options struct {
 	// checker settled on. phn migrate compares a file's types before and
 	// after a rewrite with it.
 	Observe func(f *program.File, e ast.Expr, t types.Type)
+	// Elementless, when set, is called with each `array` or `iterable` name
+	// that a declaration's native type leaves without an element type and
+	// P2516 reports: one with no docblock type of its own that takes none
+	// from the method it overrides. phn migrate writes `<mixed>` after it
+	// (design/collections.md §5).
+	Elementless func(f *program.File, t *ast.NamedType)
 	// Cancelled, when set, is asked before each file: once it reports true,
 	// Check stops and returns what it found so far. phn lsp cancels the
 	// check of a whole project that a newer save makes stale.

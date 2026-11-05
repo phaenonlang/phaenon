@@ -7,6 +7,7 @@ namespace Tabs;
 // A comment's text keeps its tab:	here.
 final class Strings
 {
+    /** @return array<mixed> */
     fun values(): array => ["a	b", 'c	d', <<<EOT
         heredoc	text
             	deeper

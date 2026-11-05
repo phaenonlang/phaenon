@@ -6,6 +6,7 @@ function needsTwo(int $a, int $b): int { return $a + $b; }
 function log1(string $s): void { echo $s; }
 function up(string $s): string { return strtoupper($s); }
 function wantsInt(int $x): void {}
+/** @param array<mixed> $xs */
 function addAll(array &$xs, int $n = 0): void { $xs[] = $n; }
 
 final class Style {

@@ -4,7 +4,7 @@
 fun three(int $a, string $b, float $c): string { return "$a$b$c"; }
 fun opt(int $a, string $b = 'x', ?int $c = null): int { return $a; }
 fun vari(int $a, string ...$rest): int { return $a; }
-fun reff(array &$xs, int $n): void { $xs[] = $n; }
+fun reff(array<mixed> &$xs, int $n): void { $xs[] = $n; }
 fun wantsInt(int $x): void {}
 
 /**

@@ -134,7 +134,7 @@ function equality(bytes $a, string $b, bytes $c): void
     takesInt(hash_equals($a, $c)); // want P2103
 }
 
-function comparisons(bytes $a, bytes $b, array $parts): void
+function comparisons(bytes $a, bytes $b, array<mixed> $parts): void
 {
     takesInt(strcmp($a, $b));
     takesInt(strncmp($a, 'abc', 3));

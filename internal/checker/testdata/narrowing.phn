@@ -85,6 +85,7 @@ function objects(Shape $s, ?Square $sq, mixed $m): void
     takesInt($m); // want P2103
 }
 
+/** @param array<mixed> $xs */
 function loops(array $xs): void
 {
     $sum = 0;
@@ -127,6 +128,7 @@ function assertions(mixed $v): void
     takesCircle($v);
 }
 
+/** @param array<mixed> $opts */
 function issets(?string $a, array $opts): void
 {
     if (isset($a)) {
@@ -140,6 +142,7 @@ function issets(?string $a, array $opts): void
     }
 }
 
+/** @param array<mixed> $xs */
 function counts(array $xs, string $s): void
 {
     if (count($xs) === 0) {
@@ -210,6 +213,7 @@ function inArray(string $s): void
     }
 }
 
+/** @param array<mixed> $row */
 function keyExists(array $row): void
 {
     if (array_key_exists('id', $row)) {

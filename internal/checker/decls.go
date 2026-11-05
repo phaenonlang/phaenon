@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/docblock"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
@@ -58,7 +59,7 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 	ctx.checkSignatureTypes(fn.Decl.TypeParams, fn.Decl.Params, fn.Decl.ReturnType)
 	ctx.throwsClause(fn.Decl.Throws)
 	c.declaredName(fn.Decl.Name.S, "function", fn.Decl.Name.Name)
-	c.checkUntyped(f, fn.Decl.Params, fn.Params, fn.Decl.ReturnType, fn.Return, fn.Decl.Name.Name, fn.Decl.S)
+	c.checkUntyped(f, fn.Decl.Params, fn.Params, fn.Decl.ReturnType, fn.Return, fn.Decl.Name.Name, fn.Decl.S, fn.Doc, false)
 	ctx.pushThrows()
 	ctx.body(fn.Params, fn.Decl.Params, ctx.exprBody(fn.Decl.Name.Name, fn.Decl.Arrow, fn.Decl.Body), fn.Decl.Name.S)
 	ctx.bodyThrows(fn.Throws, false, ctx.name, fn.Decl.Name.S, ctx.popThrows())
@@ -83,14 +84,32 @@ func traitUseSpan(cl *program.Class) ast.Span {
 }
 
 // checkUntyped reports missing declared types in Phaenon files (P2516, an
-// error: "mixed is written, never inferred silently", collections.md §7).
-func (c *Checker) checkUntyped(f *program.File, decls []*ast.Param, params []*program.Param, ret ast.TypeExpr, retT types.Type, name string, span ast.Span) {
+// error: "mixed is written, never inferred silently", collections.md §7),
+// and the arrays and iterables they declare without an element type
+// (collections.md §2). doc is the declaration's docblock; inheritedRet
+// reports a return type taken from the method it overrides.
+func (c *Checker) checkUntyped(f *program.File, decls []*ast.Param, params []*program.Param, ret ast.TypeExpr, retT types.Type, name string, span ast.Span, doc *docblock.Doc, inheritedRet bool) {
 	if f.Mode != lexer.ModePhaenon {
 		return
 	}
 	for i, d := range decls {
-		if d.Type == nil && i < len(params) && types.IsMixed(params[i].Type) && params[i].NativeType == nil {
-			c.report(d.S, P2516, "parameter $%s of %s() has no type", params[i].Name, name)
+		if i >= len(params) {
+			break
+		}
+		p := params[i]
+		if d.Type == nil && types.IsMixed(p.Type) && p.NativeType == nil {
+			c.report(d.S, P2516, "parameter $%s of %s() has no type", p.Name, name)
+			continue
+		}
+		tag := paramTag(doc, p.Name)
+		if tag == nil && d.Doc != "" {
+			tag = varTag(docblock.Parse(d.Doc))
+		}
+		if kind := elementless(tag, p.Inherited, d.Type); kind != "" {
+			c.report(d.S, P2516, "parameter $%s of %s(): %s", p.Name, name, noElementMsg(kind))
+			if tag == nil {
+				c.noteElementless(f, d.Type, d.S)
+			}
 		}
 	}
 	switch strings.ToLower(name) {
@@ -99,7 +118,173 @@ func (c *Checker) checkUntyped(f *program.File, decls []*ast.Param, params []*pr
 	}
 	if ret == nil && retT == nil {
 		c.report(span, P2516, "%s() has no return type", name)
+		return
 	}
+	var tag *docblock.TypeNode
+	if doc != nil {
+		tag = doc.Return
+	}
+	if kind := elementless(tag, inheritedRet, ret); kind != "" {
+		c.report(span, P2516, "%s() returns %s", name, noElementMsg(kind))
+		if tag == nil {
+			c.noteElementless(f, ret, span)
+		}
+	}
+}
+
+// elementless names the array or iterable a declaration's type leaves
+// without an element type, "" when there is none. The type is the slot's
+// own docblock tag when it has one; else, when it took its type from the
+// method it overrides (inherited), it names what that method names;
+// else it is the declared syntax.
+func elementless(tag *docblock.TypeNode, inherited bool, native ast.TypeExpr) string {
+	switch {
+	case tag != nil:
+		return noElementDoc(tag)
+	case inherited:
+		return ""
+	}
+	return noElementType(native)
+}
+
+// noteElementless hands Options.Elementless the names in a declared type
+// that noElementType finds, unless an ignore comment silences the finding
+// reported at at: the author chose to leave the type as it is, and PHPStan
+// reports an ignore that no longer matches.
+func (c *Checker) noteElementless(f *program.File, t ast.TypeExpr, at ast.Span) {
+	if c.opts.Elementless == nil {
+		return
+	}
+	if line, _ := c.file.Position(at.Start); c.ignored[c.file.Path][line] {
+		return
+	}
+	ast.Inspect(t, func(n ast.Node) bool {
+		if nt, ok := n.(*ast.NamedType); ok && len(nt.TypeArgs) == 0 && len(nt.Name.Parts) == 1 && nt.Name.Kind == ast.NameUnqualified {
+			if l := strings.ToLower(nt.Name.Parts[0]); l == "array" || l == "iterable" {
+				c.opts.Elementless(f, nt)
+			}
+		}
+		return true
+	})
+}
+
+func noElementMsg(kind string) string {
+	return fmt.Sprintf("%s with no element type (%s<mixed> for any)", kind, kind)
+}
+
+// noElementType finds an array or iterable with no element type in
+// declared syntax: `array`, `?array`, `map<string, array>`, `iterable`, a
+// closure type's parameter.
+func noElementType(t ast.TypeExpr) string {
+	switch t := t.(type) {
+	case *ast.NamedType:
+		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified && len(t.TypeArgs) == 0 {
+			if n := strings.ToLower(t.Name.Parts[0]); n == "array" || n == "iterable" {
+				return n
+			}
+		}
+		for _, a := range t.TypeArgs {
+			if n := noElementType(a); n != "" {
+				return n
+			}
+		}
+	case *ast.NullableType:
+		return noElementType(t.Type)
+	case *ast.UnionType:
+		for _, m := range t.Types {
+			if n := noElementType(m); n != "" {
+				return n
+			}
+		}
+	case *ast.IntersectionType:
+		for _, m := range t.Types {
+			if n := noElementType(m); n != "" {
+				return n
+			}
+		}
+	case *ast.ClosureType:
+		for _, p := range t.Params {
+			if n := noElementType(p.Type); n != "" {
+				return n
+			}
+		}
+		return noElementType(t.Return)
+	case *ast.TupleType:
+		for _, e := range t.Elems {
+			if n := noElementType(e); n != "" {
+				return n
+			}
+		}
+	}
+	return ""
+}
+
+// noElementDoc is noElementType for a docblock type, where `list`, `map`
+// and their non-empty forms may be written bare too.
+func noElementDoc(n *docblock.TypeNode) string {
+	if n == nil {
+		return ""
+	}
+	switch n.Kind {
+	case docblock.KindNamed:
+		if len(n.Args) == 0 {
+			switch l := strings.ToLower(n.Name); l {
+			case "array", "iterable", "list", "map", "non-empty-array", "non-empty-list", "non-empty-map":
+				return l
+			}
+		}
+	case docblock.KindShape:
+		for _, e := range n.Entries {
+			if k := noElementDoc(e.Type); k != "" {
+				return k
+			}
+		}
+	case docblock.KindCallable:
+		for _, p := range n.Params {
+			if k := noElementDoc(p.Type); k != "" {
+				return k
+			}
+		}
+		return noElementDoc(n.Return)
+	case docblock.KindConditional:
+		if k := noElementDoc(n.Then); k != "" {
+			return k
+		}
+		return noElementDoc(n.Else)
+	}
+	for _, a := range n.Args {
+		if k := noElementDoc(a); k != "" {
+			return k
+		}
+	}
+	return ""
+}
+
+// paramTag is the type a docblock's @param gives the named parameter.
+func paramTag(doc *docblock.Doc, name string) *docblock.TypeNode {
+	if doc == nil {
+		return nil
+	}
+	for _, t := range doc.Params {
+		if t.Name == name && t.Type != nil {
+			return t.Type
+		}
+	}
+	return nil
+}
+
+// varTag is the type of a docblock's @var: a property's, or a promoted
+// parameter's own.
+func varTag(doc *docblock.Doc) *docblock.TypeNode {
+	if doc == nil {
+		return nil
+	}
+	for _, v := range doc.Vars {
+		if v.Type != nil {
+			return v.Type
+		}
+	}
+	return nil
 }
 
 // checkClass checks a class declaration: its header, its members and the
@@ -400,10 +585,37 @@ func (c *Checker) checkEnum(cl *program.Class) {
 	}
 }
 
+// propertyTypeExpr is the declared type of the class's property name.
+func propertyTypeExpr(cl *program.Class, name string) ast.TypeExpr {
+	if cl.Decl == nil {
+		return nil
+	}
+	for _, m := range cl.Decl.Members {
+		if pd, ok := m.(*ast.PropertyDecl); ok {
+			for _, it := range pd.Props {
+				if it.Var != nil && it.Var.Name == name {
+					return pd.Type
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 	phaenon := cl.File.Mode == lexer.ModePhaenon
 	if pr.NativeType == nil && phaenon && types.IsMixed(pr.Type) && !pr.Promoted {
 		c.report(pr.Span, P2516, "property %s::$%s has no type", cl.Name, pr.Name)
+	} else if phaenon && pr.NativeType != nil && !pr.Promoted && pr.FromTrait == nil {
+		// A promoted property is its constructor parameter's (checkUntyped).
+		inherited := !types.Equal(pr.Type, pr.NativeType)
+		tag, native := varTag(pr.Doc), propertyTypeExpr(cl, pr.Name)
+		if kind := elementless(tag, inherited, native); kind != "" {
+			c.report(pr.Span, P2516, "property %s::$%s: %s", cl.Name, pr.Name, noElementMsg(kind))
+			if tag == nil {
+				c.noteElementless(cl.File, native, pr.Span)
+			}
+		}
 	}
 	ctx := c.newCtx(cl.File, cl.Scope, cl, pr.Static)
 	ctx.inConst = true
@@ -475,7 +687,7 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	}
 	c.checkOverride(cl, m)
 	c.debugInfoReturn(m.Name, d.ReturnType)
-	c.checkUntyped(cl.File, d.Params, m.Params, d.ReturnType, m.Return, m.Name, m.Span)
+	c.checkUntyped(cl.File, d.Params, m.Params, d.ReturnType, m.Return, m.Name, m.Span, m.Doc, m.InheritedReturn)
 	if phaenon {
 		for _, p := range d.Params {
 			if p.Modifiers != 0 && cl.Kind == ast.KindInterface {
