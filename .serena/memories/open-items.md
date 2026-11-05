@@ -496,10 +496,27 @@ core or tq-cli, and the codemod's types leave no finding of `phn check` or PHPSt
 - Found on the way, fixed: `is_subclass_of()` narrowed a string to `never`, not
   `class-string<Foo>` (`../design/checker.md` §9); tq-cli's two unused imports, which its `main`
   has too (dogfood `49032f0`).
-- **Open: deep spellings.** Eleven of the 130 narrower types are nested deeper than four levels,
-  the deepest any dogfood author wrote (tq-cli's `RegisterCommand::json()` parameter is nine): a
-  literal document passed to a private helper, spelled out whole. Sound and checked, hard to read.
-  A cap at four levels, `mixed` below, would bring them to what authors write.
+- **Open: deep spellings.** The codemod spells a type as deep as the values it saw: tq-cli's
+  `RegisterCommand::json()` parameter is nine levels deep, where its author wrote
+  `map<string, mixed>` for a value handed to `json_encode()`. A depth cap is the wrong lever. At
+  four levels it changes 11 types and leaves them deeper than written. At two it changes nothing
+  that matters in core, whose 18 types deeper than written are two levels deep
+  (`map<string, string|map<string, string>>` for a `map<string, mixed>`), and it leaves tq-cli
+  with 101 findings, because tq-cli's code reads three levels deep. A throwaway probe (2026-11-05)
+  spelled each type only as deep as the code uses it, by cutting each declaration as far as the
+  checker allows. A use reaches a level by indexing, iterating or taking apart, or by handing the
+  value to a type that spells it; scalars and objects are always written.
+  - Core: 24 types change, 18 of them to exactly what was written and 6 to shallower than
+    written (`list<map<string, mixed>>` that nothing reads into becomes `list<mixed>`). None is
+    deeper than two levels.
+  - tq-cli: 63 change, 23 to what was written and 40 to shallower. 32 still need three levels;
+    each is a tuple record or a list of paths that is read through (recorded HTTP calls read at
+    `[0][2]['Authorization']`).
+  - Both trees: 0 findings.
+
+  Prior art: Rector types a parameter read as `$data['key']` `array<string, mixed>`, and TypeScript's
+  infer-from-usage fix types only what is accessed. To decide: this rule, with or without a
+  two-level floor, and whether a type that needs more than two levels gets a note.
 
 ## M6 — distribution (slice 1, 2026-11-03)
 
