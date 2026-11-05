@@ -37,6 +37,9 @@ type Options struct {
 	// from the method it overrides. phn migrate writes `<mixed>` after it
 	// (design/collections.md §5).
 	Elementless func(f *program.File, t *ast.NamedType)
+	// ByRef, when set, is called with each argument passed by reference:
+	// phn migrate's list-types leaves alone a property passed so.
+	ByRef func(f *program.File, e ast.Expr)
 	// Cancelled, when set, is asked before each file: once it reports true,
 	// Check stops and returns what it found so far. phn lsp cancels the
 	// check of a whole project that a newer save makes stale.

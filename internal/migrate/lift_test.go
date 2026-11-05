@@ -84,7 +84,17 @@ func migrateFixture(t *testing.T, in, dst string, src []byte, layout bool, pipes
 	if err != nil {
 		t.Fatal(err)
 	}
-	arrays, _, err := Arrays([]PipeFile{{Path: dst, Src: piped[0]}}, pipeLoad)
+	typed := piped
+	var typeNotes []Note
+	if strings.HasPrefix(filepath.Base(dst), "list-types") {
+		var rep *ArrayTypeReport
+		typed, rep, err = ArrayTypes([]PipeFile{{Path: dst, Src: piped[0]}}, pipeLoad)
+		if err != nil {
+			t.Fatal(err)
+		}
+		typeNotes = append(rep.Notes[dst], rep.Undone...)
+	}
+	arrays, _, err := Arrays([]PipeFile{{Path: dst, Src: typed[0]}}, pipeLoad)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +104,7 @@ func migrateFixture(t *testing.T, in, dst string, src []byte, layout bool, pipes
 	}
 	notes = append(notes, rep.Notes[dst]...)
 	notes = append(notes, rep.Undone...)
+	notes = append(notes, typeNotes...)
 	return got, notes
 }
 
@@ -128,7 +139,8 @@ func TestLift(t *testing.T) {
 			lifted := 0
 			for _, n := range notes {
 				fmt.Fprintf(&b, "%d: %s\n", n.Line, n.Msg)
-				if !strings.Contains(n.Msg, "left as calls") && !strings.Contains(n.Msg, "pipelines undone") {
+				if !strings.Contains(n.Msg, "left as calls") && !strings.Contains(n.Msg, "pipelines undone") &&
+					!strings.Contains(n.Msg, "as array: ") && !strings.Contains(n.Msg, "array types undone") {
 					lifted++
 				}
 			}
@@ -159,6 +171,15 @@ func TestLift(t *testing.T) {
 			again = piped[0]
 			if rep.Pipelines > 0 {
 				t.Errorf("second run wrote %d more pipelines", rep.Pipelines)
+			}
+			if strings.HasPrefix(name, "list-types") {
+				typed, rep, err := ArrayTypes([]PipeFile{{Path: wantFile, Src: again}}, pipeLoad)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if again = typed[0]; rep.Written > 0 {
+					t.Errorf("second run typed %d more arrays", rep.Written)
+				}
 			}
 			arrays, n, err := Arrays([]PipeFile{{Path: wantFile, Src: again}}, pipeLoad)
 			if err != nil {
