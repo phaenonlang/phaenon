@@ -119,22 +119,21 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
     later statement's are "maybe undefined" in the catch, where PHPStan knows them defined;
   - `static::CONST` types as the constant's literal, where PHPStan says the declared type (a
     subclass may override it): lenient, seen while measuring, not yet met in a tree.
-- **The `throws` codemod** (proposed and scoped 2026-11-05): `phn migrate` writes `throws` for a
-  method's own uncaught `throw new X` of a checked exception, on by default with an opt-out.
-  - *Checked or unchecked decides, not where the exception comes from*, as PHPStan's
-    `exceptions.uncheckedExceptionClasses` does: by default `LogicException`, `Error` and their
-    subclasses are unchecked (bugs, a 500), and `phaenon.json` may add more (`JsonException`,
-    `RuntimeException`). A checked exception counts from anywhere, `json_decode()` of input
-    included. Core's `src` has 337 `throw new`; 267 are `LogicException` or
-    `InvalidArgumentException`, about 30 are domain contracts (`AggregateNotFound`,
-    `InvalidCursor`, `BadCredentialsException`, …).
-  - *No promotion to callers*: calls through interfaces would stop it (an interface's
-    implementations are an open set), so the same behaviour would be documented on some paths
-    and not others; and promotion one level at a time is not idempotent.
-  - The PhpStorm plugin hands PhpStorm the same unchecked list, whose "Unhandled X" is
-    transitive whatever Phaenon writes.
-  - Measured on core and tq-cli first, against full promotion for comparison. After the
-    `list-types` codemod.
+- **The `throws` codemod** — measured 2026-11-06, recommended not to build, pending a maintainer's
+  decision (`../design/tooling.md` §8.3):
+  the scoped rule (own uncaught `throw new X` of a checked exception, no promotion) writes
+  `throws \RuntimeException` on 32 of core's and 279 of tq-cli's bodies, both trees' plain
+  failure class; with `RuntimeException` unchecked it writes 1 and 5; promotion through callee
+  declarations would reach 37–48% of bodies from vendor docblocks. A clause silences what the
+  body's callees throw (three `P2403` in tq-cli). The project's-own-exceptions rule writes core's
+  12 domain contracts and tq-cli's 141 `throws UserError`: a possible opt-in later, keyed on the
+  PSR-4 namespaces, if a dogfood asks. `checker.Options.Thrown` and `TestThrowsMeasure`
+  ([[testing]], `PHAENON_THROWS`) stay.
+- **Candidate dogfood: `symfony/symfony`** (2026-11-06). The round trip, PHP → `phn migrate` →
+  `phn build`, with Symfony's own suite green on the output, would exercise the lift and the
+  emitter on a tree with every PHP idiom, and its bare `array` declarations are what `list-types`
+  was built for. A step of its own, after the template (slice 8), measured first: the round trip,
+  then `list-types` on it.
 
 ## M5 — concurrency (2026-11-01)
 
