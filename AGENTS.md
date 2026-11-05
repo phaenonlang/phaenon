@@ -20,6 +20,7 @@ The workspace is `~/labs/phaenon/`; the other repos are siblings, reached as `..
 | **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `\Phaenon\Type`, behind structural `is` / `as`; `\Phaenon\Bytes`, the checked conversions between `bytes` and text; `Phaenon\Debug`: the line map reader (`LineMap`), a Monolog processor and a Sentry integration that point production errors at `.phn` positions (`../design/line-map.md` §4.3); `src/` except `Type.php` is compiled from `stdlib/runtime/**/*.phn` | `composer install`, `composer test`, `composer stan` |
 | **concurrent** | `../concurrent` | `phaenonlang/concurrent` | Composer package `phaenon/concurrent`: `\Phaenon\Concurrent\Scope` behind `concurrently { }` and `spawn`, on amp v3 / Revolt; `src/Scope.php` is compiled from `stdlib/concurrent/Scope.phn` here | `composer install`, `composer test`, `composer stan` |
 | **jetbrains** | `../jetbrains` | `phaenonlang/jetbrains` | PhpStorm plugin: `.phn` read as PHP code without the open tag (Kotlin, Gradle); `phn lsp`'s diagnostics and build on save; Reformat Code ends with `phn fmt --stdin` | `./gradlew test` (`PHAENON_PHN=bin/phn` of this repo for the layout tests), `./gradlew buildPlugin` |
+| **vscode** | `../vscode` | `phaenonlang/vscode` | VS Code extension (TypeScript): the TextMate grammar, `source.php` plus injections for Phaenon's syntax (the PhpStorm plugin's TextMate bundle copies it); one `phn lsp` per project with §6.1's whole list; build, check and watch as tasks; `phn trace` of the selection or the terminal | `npm install`, `npm test` (`PHAENON_TREES` for whole trees), `PHAENON_PHN=../phaenon/bin/phn npm run test:e2e`, `npm run package` (`.vsix`) |
 | **php-src** | `../php-src` | clone of `php/php-src` | **Read-only reference.** The scanner and grammar the lexer and parser port, the `.phpt` corpus of the conformance suite, the source of `stdlib/php-src` | Never modify, build or change its git state |
 
 **Tequila dogfood targets** — the PHP platform behind tequila.dev, the codebase Phaenon must run.
@@ -175,6 +176,6 @@ removes none: a source deleted here is deleted from the package by hand.
   subject`, the scope a package or area (`feat(checker):`, `fix(emit):`, `docs(design):`), `!` for
   a breaking change to the language or the CLI, and a body that says what changed and why. **No
   attribution lines, no `Co-Authored-By`, no "Generated with"** — the repositories will be open
-  source. The same rule holds in `design`, `runtime` and `jetbrains`.
+  source. The same rule holds in `design`, `runtime`, `concurrent`, `jetbrains` and `vscode`.
 - `go.mod`'s module line is `github.com/phaenonlang/phaenon`; GoLand has rewritten it before (vault
   `gotcha-goland-rewrites-go-mod`).
