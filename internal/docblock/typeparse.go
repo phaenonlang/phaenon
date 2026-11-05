@@ -392,6 +392,23 @@ func (p *typeParser) parseAtom() (*TypeNode, error) {
 			return nil, err
 		}
 		p.skipSpace()
+		if p.peek(",") {
+			// A tuple, Phaenon's (A, B) (design/collections.md §2.4): the
+			// positional shape array{A, B}, two elements or more.
+			n := &TypeNode{Kind: KindShape, Name: "array", Entries: []ShapeEntry{{Type: inner}}}
+			for p.accept(",") {
+				elem, err := p.parseType()
+				if err != nil {
+					return nil, err
+				}
+				n.Entries = append(n.Entries, ShapeEntry{Type: elem})
+				p.skipSpace()
+			}
+			if !p.accept(")") {
+				return nil, errorf("expected , or ) in a tuple")
+			}
+			return p.suffix(n)
+		}
 		if !p.accept(")") {
 			return nil, errorf("expected )")
 		}

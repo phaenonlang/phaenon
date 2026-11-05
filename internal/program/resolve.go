@@ -359,6 +359,13 @@ func (r *resolver) keyword(lower string, args []types.Type, node *docblock.TypeN
 		return types.String{Lowercase: true, NonEmpty: lower == "non-empty-lowercase-string"}, true
 	case "truthy-string", "non-falsy-string":
 		return types.String{NonEmpty: true}, true
+	case "class":
+		// Phaenon's class<T>, which a .phn docblock may write as the
+		// signature does (design/collections.md §4); the emitter spells it
+		// class-string<T> for PHPStan.
+		if len(args) == 1 {
+			return types.ClassString{Of: args[0]}, true
+		}
 	case "class-string", "interface-string", "enum-string", "trait-string":
 		if len(args) == 1 {
 			return types.ClassString{Of: args[0]}, true
