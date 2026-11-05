@@ -15,7 +15,9 @@ package migrate
 // so is one whose type would say mixed while its values read it. Every
 // round's rewrite is checked with the files it may change: types may
 // narrow, which is the point, so only findings are compared, and a
-// declaration a new finding falls on is left out of the next round.
+// declaration a new finding falls on is left out of the next round. A
+// last pass cuts each type to the depth the code uses
+// (arraytypes_depth.go).
 
 import (
 	"fmt"
@@ -137,6 +139,9 @@ func ArrayTypes(files []PipeFile, load func(srcs map[string][]byte, checked map[
 		if converged && !wrote {
 			break
 		}
+	}
+	if err := r.shallow(); err != nil {
+		return nil, nil, err
 	}
 	r.notes()
 	for i, f := range files {
@@ -797,6 +802,10 @@ type candidate struct {
 	span      ast.Span // the type to replace: `array`, or what a round wrote; the `?` of a nullable one stays
 	nullable  bool
 	method    string // a return's or a parameter's method
+	// typ is the type a round wrote, exported marks a return other files
+	// may read: typedDecls's.
+	typ      ast.TypeExpr
+	exported bool
 }
 
 // bareArrayDecls lists a file's declarations written as a bare array or
@@ -884,7 +893,7 @@ func typedDecls(f *ast.File, typedAs map[string]string) []candidate {
 		return nil
 	}
 	var out []candidate
-	add := func(key, what, method string, t ast.TypeExpr) {
+	add := func(key, what, method string, t ast.TypeExpr, exported bool) {
 		if _, ok := typedAs[key]; !ok || t == nil {
 			return
 		}
@@ -892,7 +901,7 @@ func typedDecls(f *ast.File, typedAs map[string]string) []candidate {
 		if n, ok := t.(*ast.NullableType); ok {
 			t, nullable = n.Type, true
 		}
-		out = append(out, candidate{key: key, what: what, at: t.Span().Start, span: t.Span(), nullable: nullable, method: method})
+		out = append(out, candidate{key: key, what: what, at: t.Span().Start, span: t.Span(), nullable: nullable, method: method, typ: t, exported: exported})
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
 		cl, ok := n.(*ast.ClassDecl)
@@ -903,13 +912,13 @@ func typedDecls(f *ast.File, typedAs map[string]string) []candidate {
 			switch m := m.(type) {
 			case *ast.PropertyDecl:
 				if len(m.Props) == 1 {
-					add("prop "+cl.Name.Name+"::"+m.Props[0].Var.Name, "property $"+m.Props[0].Var.Name, "", m.Type)
+					add("prop "+cl.Name.Name+"::"+m.Props[0].Var.Name, "property $"+m.Props[0].Var.Name, "", m.Type, false)
 				}
 			case *ast.MethodDecl:
-				add("return "+cl.Name.Name+"::"+m.Name.Name, m.Name.Name+"()'s return", m.Name.Name, m.ReturnType)
+				add("return "+cl.Name.Name+"::"+m.Name.Name, m.Name.Name+"()'s return", m.Name.Name, m.ReturnType, m.Modifiers&ast.ModPrivate == 0)
 				for _, p := range m.Params {
 					if p.Modifiers == 0 {
-						add("param "+cl.Name.Name+"::"+m.Name.Name+"$"+p.Var.Name, "parameter $"+p.Var.Name+" of "+m.Name.Name+"()", m.Name.Name, p.Type)
+						add("param "+cl.Name.Name+"::"+m.Name.Name+"$"+p.Var.Name, "parameter $"+p.Var.Name+" of "+m.Name.Name+"()", m.Name.Name, p.Type, false)
 					}
 				}
 			}
