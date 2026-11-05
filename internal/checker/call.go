@@ -926,7 +926,16 @@ func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) t
 		// A call may change what the receiver's other methods answer.
 		env.invalidateCalls(base)
 	}
+	x.bindThis = x.closureCallThis(e, env)
 	obj := x.expr(e.Object, env, nil)
+	x.bindThis = nil
+	if c, ok := obj.(types.Callable); ok && c.Closure && c.HasSig && c.Return != nil {
+		// Closure::call() returns what the closure returns.
+		if name, ok := identName(e.Name); ok && strings.EqualFold(name, "call") {
+			x.methodCallOn(e, obj, env, expected)
+			return c.Return
+		}
+	}
 	if !e.NullSafe && types.IsNullable(obj) && !types.IsMixed(obj) {
 		if x.shortCircuit[e.Object] {
 			// `$a?->b()->c()`: PHP skips the whole chain when $a is null.

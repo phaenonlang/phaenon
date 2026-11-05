@@ -1,0 +1,41 @@
+namespace ClosureCall;
+
+// Closure::call($object) runs a closure with $this bound to the object and
+// in its class's scope, private members included, as PHPStan types it
+// (Scope::enterClosureCall). A static method may so read a decorator's
+// private property.
+
+final class Signing
+{
+    // Read only by a closure bound from outside the class: PHPStan reports
+    // it too.
+    public function __construct(private string $inner) // want P2407
+    {
+    }
+}
+
+final class Unwrap
+{
+    public static function inner(mixed $serializer): string
+    {
+        if ($serializer instanceof Signing) {
+            return (fn (): string => $this->inner)->call($serializer);
+        }
+
+        return '';
+    }
+
+    public static function viaClosure(Signing $s): int
+    {
+        $n = (function (): int {
+            return \strlen($this->inner);
+        })->call($s);
+
+        return $n;
+    }
+
+    public static function unbound(): string
+    {
+        return (fn (): string => $this->inner)(); // want P2311
+    }
+}
