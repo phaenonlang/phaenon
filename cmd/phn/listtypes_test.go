@@ -29,7 +29,8 @@ import (
 // the findings left with the codemod's types. A type wider than written
 // fails the test, unless it is only shallower: the depth pass's mixed
 // below the levels the code uses, with keys, scalars and objects as
-// written.
+// written. Every declaration that does not come back as written is logged
+// (-v) with the type its authors wrote and the one the codemod gave it.
 func TestListTypesMeasure(t *testing.T) {
 	trees := os.Getenv("PHAENON_LISTTYPES")
 	if trees == "" {
@@ -160,16 +161,16 @@ func measureListTypes(t *testing.T, tree string, min int) {
 			at += ": " + why(r)
 		case types.IsSubtype(now, was, after):
 			kind = "narrower"
-			at += fmt.Sprintf(": %s, written %s", r.Type, types.Print(now))
 		case types.IsSubtype(was, now, after) && mixedBelow(now, was):
 			kind = "shallower"
-			at += fmt.Sprintf(": %s, written %s", r.Type, types.Print(now))
 		case types.IsSubtype(was, now, after):
 			kind = "wider"
-			at += fmt.Sprintf(": %s, written %s", r.Type, types.Print(now))
 		default:
 			kind = "other"
-			at += fmt.Sprintf(": %s, written %s", r.Type, types.Print(now))
+		}
+		switch kind {
+		case "narrower", "shallower", "wider", "other":
+			at += fmt.Sprintf(": written %s, typed %s", r.Type, types.Print(now))
 		}
 		counts[kind]++
 		byKind[kind] = append(byKind[kind], at)
@@ -184,7 +185,7 @@ func measureListTypes(t *testing.T, tree string, min int) {
 	t.Logf("%d declarations stripped: %d as written (%d%%), %d narrower (%d%%), %d shallower (%d%%), %d wider (%d%%), %d other, %d not recovered (%d%%), %d not found",
 		n, counts["as written"], pct("as written"), counts["narrower"], pct("narrower"), counts["shallower"], pct("shallower"), counts["wider"], pct("wider"),
 		counts["other"], counts["not recovered"], pct("not recovered"), counts["not found"])
-	for _, k := range []string{"not recovered", "other", "wider", "shallower", "not found"} {
+	for _, k := range []string{"not recovered", "other", "wider", "shallower", "narrower", "not found"} {
 		sort.Strings(byKind[k])
 		for _, at := range byKind[k] {
 			t.Logf("  %s: %s", k, at)
