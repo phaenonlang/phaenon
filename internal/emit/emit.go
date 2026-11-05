@@ -147,7 +147,7 @@ func compile(src []byte, f *ast.File, opts Options) ([]byte, *lineWriter, error)
 	e.lowerFunctions(f)
 	e.lowerConcurrency(f)
 	if opts.File != nil {
-		e.eraseWrittenBytes()
+		e.translateWrittenDocs()
 	}
 	e.lowerLine(f)
 	if err := e.lowerTarget(f); err != nil {
