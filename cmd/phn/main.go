@@ -984,8 +984,13 @@ func migrateSources(sources func(yield func(path string, src *[]byte))) ([]migra
 }
 
 // migrateLoad builds the program models of a codemod as check builds them,
-// from anchor, with the sources in memory.
+// from anchor, with the sources in memory. A codemod builds one for every
+// check it makes, so they share what phn lsp's programs share: the trees of
+// the files whose text has not changed, the vendor maps, php's extensions.
 func migrateLoad(anchor string, target phpversion.Version) func(map[string][]byte, map[string]bool) (*program.Program, error) {
+	if share == nil {
+		share = newProgramShare()
+	}
 	return func(files map[string][]byte, checked map[string]bool) (*program.Program, error) {
 		p, _ := newProgram(anchor, target)
 		paths := make([]string, 0, len(files))

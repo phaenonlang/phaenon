@@ -183,7 +183,14 @@ type checked struct {
 }
 
 func checkRecorded(srcs map[string][]byte, watch map[string]bool, load func(map[string][]byte, map[string]bool) (*program.Program, error), hooks ...func(*checker.Options)) (*checked, error) {
-	p, err := load(srcs, watch)
+	return checkSome(srcs, watch, watch, load, hooks...)
+}
+
+// checkSome checks the files of checkedFiles, the others loaded for their
+// declarations only, and records the types of the expressions of the ones
+// in watch, which it holds.
+func checkSome(srcs map[string][]byte, checkedFiles, watch map[string]bool, load func(map[string][]byte, map[string]bool) (*program.Program, error), hooks ...func(*checker.Options)) (*checked, error) {
+	p, err := load(srcs, checkedFiles)
 	if err != nil {
 		return nil, err
 	}
