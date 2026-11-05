@@ -1115,7 +1115,61 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 func (x *fnCtx) child(static bool) *fnCtx {
 	c := &fnCtx{c: x.c, file: x.file, class: x.class, static: x.static || static, res: x.res, byRef: map[string]bool{}, thisType: x.thisType, inScope: x.inScope, inBlock: x.inBlock}
 	c.name = "closure"
+	if b := x.bindThis; b != nil {
+		x.bindThis = nil
+		if !static {
+			c.class, c.static, c.thisType = b.class, false, b.this
+		}
+	}
 	return c
+}
+
+// thisBinding is the object Closure::call() binds a closure to.
+type thisBinding struct {
+	class *program.Class
+	this  types.Type
+}
+
+// closureCallThis is what `(fn () => …)->call($object)` binds the
+// closure literal to: $this as the object, in its class's scope, as
+// PHPStan's Scope::enterClosureCall types it. nil for any other call.
+func (x *fnCtx) closureCallThis(e *ast.MethodCall, env *state) *thisBinding {
+	recv := e.Object
+	for {
+		p, ok := recv.(*ast.Paren)
+		if !ok {
+			break
+		}
+		recv = p.Expr
+	}
+	switch f := recv.(type) {
+	case *ast.Closure:
+		if f.Static {
+			return nil
+		}
+	case *ast.ArrowFunc:
+		if f.Static {
+			return nil
+		}
+	default:
+		return nil
+	}
+	name, ok := identName(e.Name)
+	if !ok || !strings.EqualFold(name, "call") || e.Args == nil || len(e.Args.Args) == 0 {
+		return nil
+	}
+	if a := e.Args.Args[0]; a.Name != nil || a.Unpack || a.Value == nil {
+		return nil
+	}
+	ct, ok := x.pathType(e.Args.Args[0].Value, env).(types.Class)
+	if !ok {
+		return nil
+	}
+	cl := x.p().Class(ct.Name)
+	if cl == nil {
+		return nil
+	}
+	return &thisBinding{class: cl, this: ct}
 }
 
 // closureParams builds the parameters of a closure, taking untyped ones
