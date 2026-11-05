@@ -1,0 +1,33 @@
+namespace UnusedImports;
+
+// An import is used when the file mentions its alias outside the use
+// statement: alone, or as the first segment of a qualified name, as
+// `#[ORM\Column]` after `use Doctrine\ORM\Mapping as ORM;` is. The same
+// word after a backslash is another name's segment.
+
+use DateTimeImmutable;
+use DateTimeZone; // want P2013
+use ArrayObject as Bag;
+use SplStack as Stack; // want P2013 "SplStack"
+use Random as Rnd;
+use Countable as Counter; // want P2013 "Countable"
+
+final class Uses
+{
+    /** @return Bag<int, string> */
+    public static function bag(): Bag
+    {
+        return new Bag();
+    }
+
+    public static function pick(Rnd\Engine $engine): int
+    {
+        return new Rnd\Randomizer($engine)->getInt(1, 6);
+    }
+
+    public static function now(): DateTimeImmutable
+    {
+        // Not the import: Vendor\Counter names another class.
+        return new DateTimeImmutable('now');
+    }
+}

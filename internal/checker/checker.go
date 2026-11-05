@@ -337,7 +337,10 @@ func mentions(s, word string) bool {
 		start := i + j
 		end := start + len(w)
 		okStart := start == 0 || !isWordByte(lower[start-1])
-		okEnd := end == len(lower) || !isWordByte(lower[end])
+		// A backslash after the word continues a name the alias begins
+		// (`ORM\Column` after `use Doctrine\ORM\Mapping as ORM`); one
+		// before it makes the word another name's segment.
+		okEnd := end == len(lower) || !isWordByte(lower[end]) || lower[end] == '\\'
 		if okStart && okEnd {
 			return true
 		}
