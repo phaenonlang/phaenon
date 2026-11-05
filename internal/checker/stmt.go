@@ -637,13 +637,24 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 		}
 	}
 	nonEmpty := false
+	empty := ok // an array that holds nothing never runs the body
 	for _, m := range types.Members(it) {
 		switch m := m.(type) {
 		case types.Array:
 			nonEmpty = nonEmpty || m.NonEmpty
+			_, noKey := m.Key.(types.Never)
+			_, noValue := m.Value.(types.Never)
+			empty = empty && (noKey || noValue)
 		case types.Shape:
 			nonEmpty = nonEmpty || len(m.Entries) > 0 && !m.Entries[0].Optional
+			empty = empty && len(m.Entries) == 0 && !m.Unsealed
+		default:
+			empty = false
 		}
+	}
+	var before *state
+	if empty {
+		before = env.clone()
 	}
 	after := x.fixpoint(env, func(head *state) (*state, *state) {
 		exit := head.clone()
@@ -687,6 +698,13 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 				}
 			}
 		}
+	}
+	if empty {
+		// The body is checked, but what it would do never happens: the
+		// state is the one before the loop (PHPStan's foreach over an
+		// array not iterable at least once).
+		x.report(s.Expr.Span(), P2409, "foreach over %s, which holds nothing: the body never runs", x.typeName(it))
+		after = before
 	}
 	*env = *after
 }

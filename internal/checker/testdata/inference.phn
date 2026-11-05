@@ -949,3 +949,19 @@ function reassert(Lazy $client, Reopener $reopen): bool
 
     return true;
 }
+
+// A foreach over an array that holds nothing never runs its body: the body
+// is checked, and what it assigns is not seen after the loop (PHPStan's
+// foreach over an array not iterable at least once).
+function nothingToLoop(): void
+{
+    $none = [];
+    $seen = 'none';
+    $byName = [];
+    foreach ($none as $name => $value) { // want P2409
+        $seen = 1.5;
+        $byName[substr($name, 1)] = $value;
+    }
+    takesInt($seen); // want P2103 "'none' given"
+    takesInt($byName); // want P2103 "list{} given"
+}

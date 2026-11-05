@@ -128,6 +128,9 @@ var (
 	P2406 = Code{"P2406", Warning, "private member never used"}
 	P2407 = Code{"P2407", Warning, "private property never read"}
 	P2408 = Code{"P2408", Warning, "private property never written"}
+	// P2409: PHPStan's foreach.emptyArray; the state after the loop is
+	// the one before it.
+	P2409 = Code{"P2409", Warning, "foreach over an empty array"}
 
 	// P2 — classes
 	P2501 = Code{"P2501", Error, "abstract method not implemented"}
