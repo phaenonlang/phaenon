@@ -1,0 +1,58 @@
+// A constant wildcard in a docblock type stands for the values of the
+// constants it names: Foo::*, Foo::PREFIX_*, Foo::*_SUFFIX, Foo::*PART*,
+// as PHPStan reads them. Symfony's ContainerInterface::get() bounds its
+// $invalidBehavior with self::*_REFERENCE, and its return type turns on it.
+
+namespace ConstWildcards;
+
+function wantsObject(object $o): void
+{
+}
+
+interface Container
+{
+    public const RUNTIME_EXCEPTION_ON_INVALID_REFERENCE = 0;
+    public const EXCEPTION_ON_INVALID_REFERENCE = 1;
+    public const NULL_ON_INVALID_REFERENCE = 2;
+
+    /**
+     * @template C of object
+     * @template B of self::*_REFERENCE
+     *
+     * @param string|class-string<C> $id
+     * @param B                      $invalidBehavior
+     *
+     * @return ($id is class-string<C> ? (B is 0|1 ? C|object : C|object|null) : (B is 0|1 ? object : object|null))
+     */
+    public function get(string $id, int $invalidBehavior = self::EXCEPTION_ON_INVALID_REFERENCE): ?object;
+}
+
+final class Levels
+{
+    public const LOW_LEVEL = 1;
+    public const HIGH_LEVEL = 3;
+    public const OTHER = 'x';
+
+    /** @param self::*_LEVEL $level */
+    public static function suffix(int $level): int
+    {
+        return $level;
+    }
+
+    /** @param self::*IG* $level */
+    public static function middle(int $level): int
+    {
+        return $level;
+    }
+}
+
+function caller(Container $c): void
+{
+    wantsObject($c->get('github.client'));
+    wantsObject($c->get(\stdClass::class));
+    wantsObject($c->get('a', Container::NULL_ON_INVALID_REFERENCE)); // want P2103
+    echo Levels::suffix(Levels::HIGH_LEVEL);
+    echo Levels::suffix(2); // want P2103
+    echo Levels::middle(3);
+    echo Levels::middle(1); // want P2103
+}
