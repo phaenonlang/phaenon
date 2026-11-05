@@ -148,7 +148,19 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     `throws.unusedType` left the parity test's allow-list, and the goldens `throw-analysis.phn`
     and `throws-flow.phn` pass it. The five dogfood trees (669 catches, 96 `throws` clauses) check
     byte for byte as before, as PHPStan at level max finds nothing there either. Left in
-    [[open-items]] § M6 — throw analysis. Next: the second half, unused private members, measured
-    first (§9.2).
+    [[open-items]] § M6 — throw analysis.
+15. 2026-11-05: **M6 slice 6, second half: unused private members** (`internal/checker/unused.go`;
+    `../design/tooling.md` §9.2). PHPStan 2.2.5's rules, read from its source: while the checker
+    types a class it records each member access's receiver type, then a pass over the class and
+    its traits sorts the accesses into calls, reads and writes. `P2406` reports a private method,
+    property or constant nothing uses, `P2407` a private property only written, `P2408` one only
+    read. A private property that carries a non-PHP attribute is left to the framework that
+    reflects on it. Measured first: about 2,100 private methods and 530 constants in the five
+    dogfood trees gave one finding, an object-mapper fixture that only `#[MapToProperty]` reads;
+    with the attribute exemption every tree checks byte for byte as before. The four identifiers
+    left the parity test's allow-list (goldens `unused-private.phn`, `unused-attributes.phn`). It
+    surfaced and fixed a false `P2108`: a trait calling a private method of the class using it. Left in
+    [[open-items]] § M6 — unused private members. Next: slice 7, `list-types` and `map-types`
+    (§11).
 
 ← [[Home]]

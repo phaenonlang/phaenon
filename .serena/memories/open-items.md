@@ -237,8 +237,10 @@ Decisions are in `../design/php-versions.md` §9; these are what the first build
   analysis below.
 - **Purity / unused result** — PHPStan `function/method/expr.resultUnused`, `void.pure`,
   `@phpstan-pure`; allow-listed.
-- **Dead code / unused members** — `method/property/constant/classConstant.unused`; allow-listed.
-  Slice 6's second half, measured first (`../design/tooling.md` §9.2).
+- ~~**Dead code / unused members**~~ — done 2026-11-05 (slice 6, second half): `P2406` for a
+  private method, property or constant nothing uses, `P2407` and `P2408` for a private property
+  only written or only read; the four PHPStan identifiers left the allow-list. What is left: § M6 —
+  unused private members below.
 - ~~**LSP**, `phn fmt` (`.phn` files read as inline HTML to php-cs-fixer and plain editors)~~ —
   done: `phn fmt` 2026-11-04 (slice 3), `phn lsp` 2026-11-04 (slice 4, § M6 — `phn lsp` below).
   A persistent cache for vendor parsing (`checker.md` §10 *Speed*) is still not needed: the
@@ -812,5 +814,19 @@ checker is more lenient there, never stricter. Left:
   sees `Type::…->assert()`, which declares nothing (implicit). A `@throws \TypeError` on
   `assert()` in `../runtime/src/Type.php` would make them agree.
 - **Covariance of an override's `throws`** and checked exceptions: not done by decision (§9.1).
+
+## M6 — unused private members (slice 6, 2026-11-05)
+
+`../design/tooling.md` §9.2. Left:
+- **The attribute exemption is broad**: any attribute other than PHP's own keeps a private
+  property from being reported. PHPStan narrows it per framework through extensions
+  (`ReadWritePropertiesExtension`, phpstan-doctrine) and the `propertyAlwaysReadTags` /
+  `propertyAlwaysWrittenTags` parameters. A list in `phaenon.json` could narrow it the day a
+  framework attribute hides a real finding.
+- **No counterpart for `AlwaysUsedMethodExtension` / `AlwaysUsedClassConstantsExtension`**: no
+  dogfood tree needs one, since their PHPStan configurations register none.
+- **Receivers the checker did not record** (dead code, a few narrowed paths: 1–2% of the accesses
+  in core and tq-cli) stand for anything unless they are `$this`, `self` or `static`. That is
+  lenient.
 
 ← [[Home]]
