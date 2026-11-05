@@ -179,5 +179,13 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     as before, and core (1188) and tq-cli (2052) pass their suites, PHPStan and cs. Next: core's
     findings to zero ([[open-items]] § PHPStan rules deliberately not matched), then the
     `list-types` codemod, checked by stripping and recovering the dogfood's written types.
+17. 2026-11-05: **Core's findings to zero** (compiler `f826351` … `3cbc91e`; `../design/checker.md`
+    §9). The eleven errors core carried since M4 were each an inference PHPStan makes and the
+    checker did not, now built as PHPStan reads them: `preg_match()` subject narrowing, constant
+    wildcards as globs, nested calls inferring their own templates, `Closure::call()`, union
+    receivers as one merged method, benevolent results, catches starting at the first throw
+    point; the unreachable-code and unused-import warnings were two more false positives. Core
+    checks at 0 and builds without `--emit-on-error` ([[dogfood]]); the other trees check as
+    before but for one false warning gone in tq-cli. Next: the `list-types` codemod.
 
 ← [[Home]]

@@ -98,7 +98,7 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - PSR-3 `log($level)` implementations: `P2516` wants a type; `mixed $level` is the spelling (the
   interface leaves it untyped, so `mixed` is what it is). No compiler change; core's test loggers
   got it 2026-10-31.
-- **PHPStan rules deliberately not matched** (the eleven findings left on core, 2026-10-31):
+- ~~**PHPStan rules deliberately not matched** (the eleven findings left on core, 2026-10-31):
   regex analysis (`preg_match('/^[a-z]+$/', $s)` making `$s` a `non-empty-string`);
   `Closure::call($obj)` / `bindTo()` rebinding `$this` inside the closure (and its scope, for
   private members); expression-level throw points in a `try` (a by-reference argument defined
@@ -106,7 +106,25 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   checking arguments against the union of the members' parameter types; phpredis's
   `multi()->set()->del()` chain, on which PHPStan is silent for reasons its stubs do not show;
   `@template B of self::*_REFERENCE` (a constant wildcard as a bound). Each is a small PHPStan
-  extension or scope feature; pick up when a dogfood target makes one matter.
+  extension or scope feature; pick up when a dogfood target makes one matter.~~ — done
+  2026-11-05 (`f826351`, `2e5c40d`, `72a5e13`, `fc80b73`, `2a1297c`, `202661d`, `999e558`,
+  `1fd8505`, `3cbc91e`; `../design/checker.md` §9): core checks at 0, and builds without
+  `--emit-on-error`. phpredis's chain was PHPStan's benevolent unions (its function map's
+  `__benevolent<…>`), now embedded as `stdlib/benevolent.txt`. `bindTo()` is not covered: only
+  `call()` binds `$this` here. Left, all stricter than PHPStan or lenient in a corner:
+  - a benevolent result kept in a variable is an ordinary union (PHPStan keeps it benevolent);
+  - after `(?=a)` and `(a?)\1` the subject does not narrow (PHPStan narrows both; the second
+    unsoundly);
+  - only the try body's first throwing statement adds the variables it binds by reference; a
+    later statement's are "maybe undefined" in the catch, where PHPStan knows them defined;
+  - `static::CONST` types as the constant's literal, where PHPStan says the declared type (a
+    subclass may override it): lenient, seen while measuring, not yet met in a tree.
+- **The `throws` codemod** (proposed 2026-11-05): `phn migrate` writing `throws` for what a body
+  provably lets escape, on by default. It needs the native throwers PHPStan knows first
+  (`json_*` with `JSON_THROW_ON_ERROR`, the `DateTime` constructors, `intdiv`, …; tooling.md §9.1
+  left them out), leaves out `Error` and its subclasses, and is measured on core and tq-cli
+  before it is built: PhpStorm's "Unhandled X" is transitive, so the clauses climb the call
+  graph. Its place in the order waits for a maintainer's go-ahead.
 
 ## M5 — concurrency (2026-11-01)
 
