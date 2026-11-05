@@ -7,6 +7,11 @@ final class Assert
     {
     }
 
+    /** @phpstan-assert false $condition */
+    public static function assertFalse(mixed $condition): void
+    {
+    }
+
     /** @phpstan-assert !null $actual */
     public static function assertNotNull(mixed $actual): void
     {
@@ -910,4 +915,37 @@ final class Store
 function roundTrip(Store $store, \stdClass $doc): string
 {
     return $store->codec->encode($store->codec->decode($store->codec->encode($doc), $doc::class));
+}
+
+interface Lazy
+{
+    public function isInitialized(): bool;
+}
+
+final class Reopener
+{
+    /** @param list<Lazy> $clients */
+    public function __construct(private array $clients)
+    {
+    }
+
+    public function onRequest(): void
+    {
+        foreach ($this->clients as $client) {
+            echo $client->isInitialized() ? 'open' : 'closed';
+        }
+    }
+}
+
+// A call's result one assertion fixed is asserted otherwise once another
+// call changed the object it asks (through a reference it keeps): the later
+// assertion holds from there on, as PHPStan, which takes a docblock
+// assertion as uncertain, reads it. Nothing after it is unreachable.
+function reassert(Lazy $client, Reopener $reopen): bool
+{
+    Assert::assertTrue($client->isInitialized());
+    $reopen->onRequest();
+    Assert::assertFalse($client->isInitialized());
+
+    return true;
 }
