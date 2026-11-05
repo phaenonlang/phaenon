@@ -1,0 +1,21 @@
+namespace Benevolent;
+
+// A method called on the result of a call that PHPStan reads as a
+// benevolent union (its function map's __benevolent<…>, stdlib/
+// benevolent.txt) is checked on the members that are objects:
+// DOMDocument::createElement() says DOMElement|false, and the chain goes
+// through, as phpredis's pipelines do. Kept in a variable, the union is an
+// ordinary one here, where PHPStan keeps it benevolent: stricter.
+
+function element(\DOMDocument $doc): void
+{
+    $doc->createElement('a')->setAttribute('x', 'y');
+    $doc->createElement('b')->nope(); // want P2006
+    $el = $doc->createElement('c');
+    $el->setAttribute('x', 'y'); // want P2105
+}
+
+function notListed(\DOMDocument $doc): void
+{
+    $doc->saveXML()->length; // want P2105
+}

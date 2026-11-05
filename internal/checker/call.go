@@ -10,6 +10,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/docblock"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/types"
+	"github.com/phaenonlang/phaenon/stdlib"
 )
 
 type docblockAssert = docblock.AssertTag
@@ -929,6 +930,9 @@ func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) t
 	x.bindThis = x.closureCallThis(e, env)
 	obj := x.expr(e.Object, env, nil)
 	x.bindThis = nil
+	if objects := objectMembers(obj); objects != nil && x.benevolentResult(e.Object, env) {
+		obj = objects
+	}
 	if c, ok := obj.(types.Callable); ok && c.Closure && c.HasSig && c.Return != nil {
 		// Closure::call() returns what the closure returns.
 		if name, ok := identName(e.Name); ok && strings.EqualFold(name, "call") {
@@ -948,6 +952,61 @@ func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) t
 		}
 	}
 	return x.methodCallOn(e, obj, env, expected)
+}
+
+// objectMembers is the members of a union that are objects, nil when the
+// union has no other members or no such member.
+func objectMembers(t types.Type) types.Type {
+	var objs []types.Type
+	others := false
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Class, types.Object, types.Static, types.This, types.Intersection:
+			objs = append(objs, m)
+		default:
+			others = true
+		}
+	}
+	if len(objs) == 0 || !others {
+		return nil
+	}
+	return types.MakeUnion(objs...)
+}
+
+// benevolentResult reports a call whose result PHPStan reads as a
+// benevolent union (stdlib.Benevolent): a method called on it is checked
+// on the members that are objects, as `$redis->multi()->set(…)->del(…)`
+// in a pipeline and `$doc->createElement('a')->setAttribute(…)` are.
+func (x *fnCtx) benevolentResult(e ast.Expr, env *state) bool {
+	for {
+		p, ok := e.(*ast.Paren)
+		if !ok {
+			break
+		}
+		e = p.Expr
+	}
+	switch c := e.(type) {
+	case *ast.Call:
+		n, ok := c.Callee.(*ast.Name)
+		return ok && stdlib.Benevolent(strings.ToLower(n.Parts[len(n.Parts)-1]))
+	case *ast.MethodCall:
+		name, ok := identName(c.Name)
+		if !ok {
+			return false
+		}
+		name = strings.ToLower(name)
+		for _, cn := range types.ClassNames(x.pathType(c.Object, env)) {
+			cl := x.p().Class(cn)
+			if cl == nil {
+				continue
+			}
+			// The map names the declaring class: Redis::set, DOMNode::appendChild.
+			if m := cl.FindMethod(name); m != nil && stdlib.Benevolent(strings.ToLower(m.Class.Name)+"::"+name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // unionCall checks a call on a union receiver as PHPStan does
