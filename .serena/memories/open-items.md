@@ -473,27 +473,33 @@ plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
 
 ## M6 — the list-types codemod (slice 7, 2026-11-05)
 
-`../design/tooling.md` §8.2. Closed the same day, in two passes: the first version's gaps
-(`a42a407`), then what that left. Overrides are kept unless they return a narrower type; values made
-of the declaration's own get a self round; calls on other receivers, pipes and partial
-applications, block returns, inline `@var` returns, anonymous classes' arguments and class-strings
-are followed. After each round, the files it may change are checked, callers in other files
-among them. The strip-and-recover harness is
-`TestListTypesMeasure` ([[testing]], `PHAENON_LISTTYPES`). Nothing is left unrecovered in core or
-tq-cli. Left:
-- **Wider than written** (core 3%, tq-cli 8%): values the checker knows as `mixed` that the
-  author typed, such as `array_keys()` of a bare public parameter, or elements built from untyped
-  data. Reading a declaration's type from where its values go (the parameter they are passed to)
-  would close some of these; nothing does that yet.
-- **A top-level homogeneous tuple reads as a list** (`(string, string)` as `list<string>`); always
-  correct, less precise.
+`../design/tooling.md` §8.2. Closed the same day, in three passes: the first version's gaps
+(`a42a407`), then what that left, then the types it wrote wider than the authors. Overrides are
+kept unless they return a narrower type; values made of the declaration's own get a self round;
+calls on other receivers, pipes and partial applications, block returns, inline `@var` returns,
+anonymous classes' arguments and class-strings are followed. After each round, the files it may
+change are checked, callers in other files among them, and a later round narrows a type an
+earlier one wrote from a declaration not typed then. The strip-and-recover harness is
+`TestListTypesMeasure` ([[testing]], `PHAENON_LISTTYPES`). Nothing is left unrecovered or wider in
+core or tq-cli, and the codemod's types leave no finding of `phn check` or PHPStan max.
+- ~~**Wider than written** (core 3%, tq-cli 8%)~~ — fixed: 46 of the 76 had been typed before what
+  their values come from (narrowed now), 12 were a self-reading declaration's own `mixed` (the self
+  round's now), 14 an element type's lists and maps merged into `array<mixed>`, and one each a pair
+  read as a list, `$object::class` as `string`, a property read back through a local, and the
+  checker running a `foreach` body over an empty array (`../design/checker.md` §3, `P2409`).
+- ~~**A top-level homogeneous tuple reads as a list**~~ — fixed: the reads decide, taken apart or
+  read at a literal index a tuple, iterated or spread a list.
 - ~~**Cost:** a run checked every file given each round; tq-cli took about 100 s in the harness~~
   — fixed: the programs share parsed trees, a round checks only the files it can change, and a
-  round that keeps all it wrote is the next one's reading. tq-cli takes 13 s, the codemod's part
-  of it 6 s, three plain checks' worth.
+  round that keeps all it wrote is the next one's reading. tq-cli takes 16 s, the codemod's part
+  of it 8 s (36 checks, ten of them narrowing's), five plain checks' worth.
 - Found on the way, fixed: `is_subclass_of()` narrowed a string to `never`, not
-  `class-string<Foo>` (`../design/checker.md` §9). Not fixed: tq-cli has two unused imports
-  (`P2013`, `EstateSpec.phn`, `SigningKeyAddCommand.phn`), real ones in the dogfood tree.
+  `class-string<Foo>` (`../design/checker.md` §9); tq-cli's two unused imports, which its `main`
+  has too (dogfood `49032f0`).
+- **Open: deep spellings.** Eleven of the 130 narrower types are nested deeper than four levels,
+  the deepest any dogfood author wrote (tq-cli's `RegisterCommand::json()` parameter is nine): a
+  literal document passed to a private helper, spelled out whole. Sound and checked, hard to read.
+  A cap at four levels, `mixed` below, would bring them to what authors write.
 
 ## M6 — distribution (slice 1, 2026-11-03)
 

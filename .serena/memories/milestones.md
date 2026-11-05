@@ -204,8 +204,14 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     is now `TestListTypesMeasure` ([[testing]]): 79% and 82% come back as written, 16% and 9%
     narrower, none unrecovered; `phn check` 486 → 5 and 2078 → 76, PHPStan max 535 → 5 and
     1396 → 71 against the trees migrated without it, with none added. On the way:
-    `is_subclass_of()` narrowed a string to `never` (`../design/checker.md` §9). Left in
-    [[open-items]] § M6 — the list-types codemod. Next: the `throws` codemod's measurement
-    ([[open-items]]), then slice 8.
+    `is_subclass_of()` narrowed a string to `never` (`../design/checker.md` §9). Then the 76
+    types written wider than the authors: a later round narrows a type an earlier one wrote from
+    a declaration not typed then, a self-reading declaration's `mixed` waits for the self round,
+    the reads decide between a tuple and a list, an element type's lists and maps are spelled
+    apart, and the checker no longer runs a `foreach` body over an empty array (`P2409`,
+    `../design/checker.md` §3). 84% and 89% come back as written, the rest narrower, none wider;
+    `phn check` 486 → 0 and 2076 → 0, PHPStan max 535 → 0 and 1396 → 0. Left in [[open-items]]
+    § M6 — the list-types codemod. Next: the `throws` codemod's measurement ([[open-items]]),
+    then slice 8.
 
 ← [[Home]]

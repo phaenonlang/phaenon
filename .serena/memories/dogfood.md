@@ -18,8 +18,9 @@ push dogfood work without a maintainer's go-ahead.
 - **Core at zero (2026-11-05):** the checker's last eleven false positives on core fixed (see
   [[open-items]]), six unused imports removed (`bc601a8a`; a seventh, `Constraints as Assert`, was a
   checker false positive), and `build` / `build:check` without `--emit-on-error` (`859cb8bf`).
-  Suite (1188), PHPStan max and cs pass. tq-cli's two remaining warnings are its own; its
-  scripts still pass `--emit-on-error`, which it no longer needs either.
+  Suite (1188), PHPStan max and cs pass. tq-cli compiles without `--emit-on-error` too
+  (`c83d319`), and its last two warnings, unused imports that tq-cli's `main` has as well, are
+  gone (`49032f0`): `phn check` 0 over `src` and `tests`.
 - **Array types (2026-11-05):** `phn migrate --keep-calls` over the `.phn` of every tree, the
   project's `exclude` left out: core `4fcde320` (7 `array<array-key, mixed>` tags lifted), tq-cli
   `3074629` (31 lifted, 4 untyped test parameters written `array<mixed>`); the other trees
