@@ -2650,6 +2650,7 @@ const (
 func (s *speller) union(ts []types.Type) (string, bool) {
 	seen := map[string]bool{}
 	var parts []string
+	var objects []types.Type // what each of parts spells when it is an object, else nil
 	nullable := false
 	classes := s.classNames(ts) // literals that all name classes: a class<…>
 	var arrays []types.Type     // spelled together, as one list, map or tuple
@@ -2683,12 +2684,18 @@ func (s *speller) union(ts []types.Type) (string, bool) {
 			one = classes
 		}
 		if one == "mixed" {
-			parts, seen = []string{"mixed"}, map[string]bool{"mixed": true}
+			parts, seen, objects = []string{"mixed"}, map[string]bool{"mixed": true}, []types.Type{nil}
 			return true
 		}
 		if !seen[one] && !seen["mixed"] {
 			seen[one] = true
 			parts = append(parts, one)
+			switch t.(type) {
+			case types.Class, types.EnumCase, types.Object:
+				objects = append(objects, t)
+			default:
+				objects = append(objects, nil)
+			}
 		}
 		return true
 	}
@@ -2697,6 +2704,7 @@ func (s *speller) union(ts []types.Type) (string, bool) {
 			return "", false
 		}
 	}
+	parts = s.unsubsumed(parts, objects)
 	// Lists and maps among the elements are spelled apart, as a decoded
 	// JSON answer is map<string, mixed>|list<map<string, mixed>>: one
 	// array<…> of both would know neither its keys nor its elements.
@@ -2746,6 +2754,36 @@ func (s *speller) union(ts []types.Type) (string, bool) {
 		return out + "|null", true
 	}
 	return out, true
+}
+
+// unsubsumed drops the parts whose object another part's covers: the
+// lattice's unions are structural, so a value narrowed by instanceof and
+// one that was not join as `DomainEvent|Event`, which is the Event an
+// author writes once DomainEvent extends it. objects holds what each part
+// spells when it is an object, nil otherwise; of two parts that cover each
+// other the first stays.
+func (s *speller) unsubsumed(parts []string, objects []types.Type) []string {
+	if s.prog == nil || len(parts) < 2 {
+		return parts
+	}
+	covered := func(i int) bool {
+		for j, o := range objects {
+			if j == i || o == nil || !types.IsSubtype(objects[i], o, s.prog) {
+				continue
+			}
+			if j < i || !types.IsSubtype(o, objects[i], s.prog) {
+				return true
+			}
+		}
+		return false
+	}
+	var kept []string
+	for i, p := range parts {
+		if objects[i] == nil || !covered(i) {
+			kept = append(kept, p)
+		}
+	}
+	return kept
 }
 
 // listsAndMaps groups array types to be spelled together: the lists

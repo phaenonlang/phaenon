@@ -1,0 +1,52 @@
+namespace App\ListTypesHierarchy;
+
+interface Event {}
+
+interface DomainEvent extends Event
+{
+    fun stamped(): bool;
+}
+
+interface Limiter {}
+
+final class SlidingWindow implements Limiter {}
+
+final class Refused extends \RuntimeException {}
+
+final class Plane {}
+
+final class Outbox
+{
+    // Narrowed by instanceof in one branch and not in the other, the event
+    // joins as DomainEvent|Event, which is the Event an author writes.
+    private map<int, Event> $staged = [];
+
+    fun stage(Event $event): void {
+        if ($event instanceof DomainEvent && !$event->stamped()) {
+            $this->stamp($event);
+        }
+        $this->staged[spl_object_id($event)] = $event;
+    }
+
+    private fun stamp(DomainEvent $event): void {}
+}
+
+final class Limits
+{
+    fun total(): int => $this->count(['export' => new SlidingWindow()])
+        + $this->count(['export' => $this->closed()]);
+
+    // A class and the interface it implements: the interface.
+    private fun count(map<string, Limiter> $limiters): int => count($limiters);
+
+    private fun closed(): Limiter => new class () implements Limiter {
+    };
+}
+
+final class Dialer
+{
+    fun script(): int => $this->dial([new Plane()]) + $this->dial([new Refused('no')]);
+
+    // Classes that neither covers stay a union.
+    private fun dial(list<Plane|Refused> $links): int => count($links);
+}
