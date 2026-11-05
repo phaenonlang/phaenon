@@ -480,8 +480,9 @@ calls on other receivers, pipes and partial applications, block returns, inline 
 anonymous classes' arguments and class-strings are followed. After each round, the files it may
 change are checked, callers in other files among them, and a later round narrows a type an
 earlier one wrote from a declaration not typed then. The strip-and-recover harness is
-`TestListTypesMeasure` ([[testing]], `PHAENON_LISTTYPES`). Nothing is left unrecovered or wider in
-core or tq-cli, and the codemod's types leave no finding of `phn check` or PHPStan max.
+`TestListTypesMeasure` ([[testing]], `PHAENON_LISTTYPES`). Nothing is left unrecovered in core or
+tq-cli, nothing is wider than written but the levels the depth pass cuts because nothing reads them,
+and the codemod's types leave no finding of `phn check` or PHPStan max.
 - ~~**Wider than written** (core 3%, tq-cli 8%)~~ — fixed: 46 of the 76 had been typed before what
   their values come from (narrowed now), 12 were a self-reading declaration's own `mixed` (the self
   round's now), 14 an element type's lists and maps merged into `array<mixed>`, and one each a pair
@@ -496,27 +497,15 @@ core or tq-cli, and the codemod's types leave no finding of `phn check` or PHPSt
 - Found on the way, fixed: `is_subclass_of()` narrowed a string to `never`, not
   `class-string<Foo>` (`../design/checker.md` §9); tq-cli's two unused imports, which its `main`
   has too (dogfood `49032f0`).
-- **Open: deep spellings.** The codemod spells a type as deep as the values it saw: tq-cli's
-  `RegisterCommand::json()` parameter is nine levels deep, where its author wrote
-  `map<string, mixed>` for a value handed to `json_encode()`. A depth cap is the wrong lever. At
-  four levels it changes 11 types and leaves them deeper than written. At two it changes nothing
-  that matters in core, whose 18 types deeper than written are two levels deep
-  (`map<string, string|map<string, string>>` for a `map<string, mixed>`), and it leaves tq-cli
-  with 101 findings, because tq-cli's code reads three levels deep. A throwaway probe (2026-11-05)
-  spelled each type only as deep as the code uses it, by cutting each declaration as far as the
-  checker allows. A use reaches a level by indexing, iterating or taking apart, or by handing the
-  value to a type that spells it; scalars and objects are always written.
-  - Core: 24 types change, 18 of them to exactly what was written and 6 to shallower than
-    written (`list<map<string, mixed>>` that nothing reads into becomes `list<mixed>`). None is
-    deeper than two levels.
-  - tq-cli: 63 change, 23 to what was written and 40 to shallower. 32 still need three levels;
-    each is a tuple record or a list of paths that is read through (recorded HTTP calls read at
-    `[0][2]['Authorization']`).
-  - Both trees: 0 findings.
-
-  Prior art: Rector types a parameter read as `$data['key']` `array<string, mixed>`, and TypeScript's
-  infer-from-usage fix types only what is accessed. To decide: this rule, with or without a
-  two-level floor, and whether a type that needs more than two levels gets a note.
+- ~~**Deep spellings**~~ — fixed: a last pass spells each type only as deep as the code uses it
+  (`../design/tooling.md` §8.2 "How deep", decision T14). The checker decides: each declaration's
+  shallower spellings are tried, the shallowest first, and the first that adds no finding to the
+  files its type reaches is kept. At the cut an array keeps its kind, keys and scalars, and what a
+  declaration holds keeps its kind (`list<map<string, mixed>>`). A depth cap was measured and set
+  aside: at two it left core's over-precise two-level types and gave tq-cli 101 findings. Core
+  comes back with 260 of 289 as written (244 before), none wider. tq-cli comes back with 734 of
+  807 (722); 23 are wider than written, all test fixtures whose deeper levels nothing reads. Both
+  trees: 0 findings of `phn check` and PHPStan max. The pass costs 29 checks and 3 s on tq-cli.
 
 ## M6 — distribution (slice 1, 2026-11-03)
 

@@ -210,8 +210,11 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     the reads decide between a tuple and a list, an element type's lists and maps are spelled
     apart, and the checker no longer runs a `foreach` body over an empty array (`P2409`,
     `../design/checker.md` §3). 84% and 89% come back as written, the rest narrower, none wider;
-    `phn check` 486 → 0 and 2076 → 0, PHPStan max 535 → 0 and 1396 → 0. Left in [[open-items]]
-    § M6 — the list-types codemod. Next: the `throws` codemod's measurement ([[open-items]]),
-    then slice 8.
+    `phn check` 486 → 0 and 2076 → 0, PHPStan max 535 → 0 and 1396 → 0. Then a last pass
+    spells each type only as deep as the code uses it, as the checker finds, rather than at a
+    depth cap: 89% and 90% come back as written, core has none wider, and tq-cli has 23 test
+    fixtures wider, typed deeper than anything reads them; still no finding. Left in
+    [[open-items]] § M6 — the list-types codemod. Next: the `throws` codemod's measurement
+    ([[open-items]]), then slice 8.
 
 ← [[Home]]
