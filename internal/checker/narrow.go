@@ -400,6 +400,22 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 	return then, els
 }
 
+// isCall reports a function, method or static call, parentheses aside.
+func isCall(e ast.Expr) bool {
+	for {
+		p, ok := e.(*ast.Paren)
+		if !ok {
+			break
+		}
+		e = p.Expr
+	}
+	switch e.(type) {
+	case *ast.Call, *ast.MethodCall, *ast.StaticCall:
+		return true
+	}
+	return false
+}
+
 // pregMatchCall reports a call to PHP's preg_match() with a pattern and a
 // subject.
 func pregMatchCall(e ast.Expr) (*ast.Call, bool) {
@@ -1263,6 +1279,13 @@ func (x *fnCtx) applyAsserts(ce callee, env *state) (then, els *state) {
 		if b, ok := t.(types.BoolLit); ok && a.Var != "this" && !a.IfTrue && !a.IfFalse && !a.Negated {
 			// `@phpstan-assert true $condition` (PHPUnit's assertTrue): the
 			// argument is a condition that holds from here on.
+			if key, ok := pathKey(target); ok && isCall(target) {
+				// A call's result an earlier assertion fixed is a docblock
+				// fact, which PHPStan takes as uncertain: the object may
+				// have changed since (another object holding it was
+				// called). Asserted again, this assertion decides it.
+				delete(then.paths, key)
+			}
 			saved := x.c.mark()
 			cthen, cels := x.cond(target, then)
 			x.c.rollback(saved) // the argument was checked when the call was
