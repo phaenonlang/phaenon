@@ -2,6 +2,7 @@ package program
 
 import (
 	"math"
+	"path"
 	"strconv"
 	"strings"
 
@@ -530,16 +531,17 @@ func (r *resolver) docType(n *docblock.TypeNode) types.Type {
 		}
 		return c
 	case docblock.KindConst:
-		// Foo::BAR → the constant's type; Foo::* → union of all; we type
-		// these through the checker's constant evaluation when available.
+		// Foo::BAR → the constant's type; a wildcard — Foo::*,
+		// Foo::PREFIX_*, Foo::*_SUFFIX, Foo::*PART* — the union of the
+		// constants it names, as PHPStan reads it. A constant's name holds
+		// nothing path.Match treats specially but the `*`.
 		className := r.special(r.scope.ResolveClassString(n.Name))
-		if strings.HasSuffix(n.Str, "*") {
-			prefix := strings.TrimSuffix(n.Str, "*")
+		if strings.Contains(n.Str, "*") {
 			if c := r.p.Class(className); c != nil {
 				c.ensure()
 				var ms []types.Type
 				for _, k := range c.Consts {
-					if strings.HasPrefix(k.Name, prefix) {
+					if ok, _ := path.Match(n.Str, k.Name); ok {
 						ms = append(ms, r.p.ConstantType(k))
 					}
 				}
