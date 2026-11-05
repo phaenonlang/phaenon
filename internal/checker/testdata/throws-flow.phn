@@ -1,0 +1,55 @@
+namespace ThrowsFlow;
+
+// The `throws` clause in the throw analysis (design/tooling.md §9.1): a
+// caller's catch reads it, and a body that cannot throw a member is
+// reported unless an override may replace the body.
+
+final class NotFound extends \RuntimeException {}
+
+final class Conflict extends \RuntimeException {}
+
+class Repository {
+    fun find(int $id): string throws NotFound => $id > 0 ? 'x' : throw new NotFound();
+
+    // An override may throw it: the clause is the contract.
+    fun save(string $v): void throws Conflict {}
+
+    private fun check(string $v): void throws Conflict {} // want P2404 "Conflict"
+
+    final fun lock(): void throws Conflict {} // want P2404 "Conflict"
+
+    fun store(string $v): void {
+        $this->check($v);
+        $this->lock();
+    }
+}
+
+final class Cached extends Repository {
+    // Inherited from Repository::find(): only what the declaration itself
+    // writes is held to the body.
+    fun find(int $id): string => 'cached';
+}
+
+fun lookups(Repository $r, Cached $c, mixed $v): void {
+    try {
+        $r->find(1);
+    } catch (Conflict $e) { // want P2403 "never thrown"
+    }
+
+    try {
+        $c->find(1);
+    } catch (NotFound $e) {
+    } catch (Conflict $e) { // want P2403 "never thrown"
+    }
+
+    try {
+        $s = $v as string;
+    } catch (\TypeError $e) {
+    } catch (NotFound $e) { // want P2403 "never thrown"
+    }
+
+    try {
+        $s = $v as? string;
+    } catch (\TypeError $e) { // want P2403 "never thrown"
+    }
+}

@@ -489,6 +489,7 @@ func (r *resolver) buildMethod(c *Class, d *ast.MethodDecl) *Method {
 	m.Params = rr.buildParams(d.Params, m.Doc)
 	m.NativeReturn = rr.native(d.ReturnType)
 	m.Return = rr.buildReturn(d.ReturnType, m.Doc)
+	m.Throws = rr.buildThrows(d.Throws, m.Doc)
 	m.Deprecated, m.DeprecatedNote = deprecation(c.Scope, m.Doc, d.Attrs)
 	if m.Doc != nil {
 		m.Asserts = m.Doc.Asserts

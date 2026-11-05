@@ -855,6 +855,27 @@ func (r *resolver) buildReturn(native ast.TypeExpr, doc *docblock.Doc) types.Typ
 	return r.effective(n, d, "return")
 }
 
+// buildThrows reads what a declaration says it lets escape
+// (design/functions.md §4, tooling.md §9.1): the `throws` clause, else the
+// docblock's @throws tags joined into one union. nil when neither is
+// written; `@throws void`, "throws nothing", is types.TVoid.
+func (r *resolver) buildThrows(clause *ast.Throws, doc *docblock.Doc) types.Type {
+	var ms []types.Type
+	switch {
+	case clause != nil:
+		for _, t := range clause.Types {
+			ms = append(ms, r.native(t))
+		}
+	case doc != nil && len(doc.Throws) > 0:
+		for _, t := range doc.Throws {
+			ms = append(ms, r.docType(t))
+		}
+	default:
+		return nil
+	}
+	return types.MakeUnion(ms...)
+}
+
 // ensure builds a function's signature.
 func (fn *Function) ensure() {
 	if fn.ensured != 0 {
@@ -872,6 +893,7 @@ func (fn *Function) ensure() {
 	r = r.withParams(fn.TypeParams)
 	fn.Params = r.buildParams(fn.Decl.Params, fn.Doc)
 	fn.Return = r.buildReturn(fn.Decl.ReturnType, fn.Doc)
+	fn.Throws = r.buildThrows(fn.Decl.Throws, fn.Doc)
 	if fn.Doc != nil {
 		fn.Asserts = fn.Doc.Asserts
 	}

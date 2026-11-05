@@ -221,10 +221,10 @@ function tryCatch(): int
 {
     try {
         $x = 1;
-    } catch (\RuntimeException $e) {
+    } catch (\RuntimeException $e) { // want P2403 "never thrown"
         takesString($e->getMessage());
         return 0;
-    } catch (\Exception $e) {
+    } catch (\Exception $e) { // want P2403 "never thrown"
         return 0;
     } catch (\RuntimeException $e) { // want P2403, P2403
         return 0;

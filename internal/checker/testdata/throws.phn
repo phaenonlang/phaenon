@@ -30,7 +30,7 @@ final class Store implements Handler
         return $id > 0 ? 'x' : throw new NotFound();
     }
 
-    fun save(string $v): void throws Failure|InvalidArgumentException => print $v;
+    fun save(string $v): void throws Failure|InvalidArgumentException => print $v; // want P2404, P2404
 
     fun undeclared(): void => throw new \LogicException('no clause needed');
 
@@ -40,9 +40,9 @@ final class Store implements Handler
 
     fun missing(): void throws Missing {} // want P2001
 
-    fun refuse(): void throws Refusal {}
+    fun refuse(): void throws Refusal {} // want P2404
 }
 
-fun top(): int throws \LogicException|\DomainException => 1;
+fun top(): int throws \LogicException|\DomainException => 1; // want P2404, P2404
 
 fun caller(Store $s): int => $s->handle(1) + top() + \strlen($s->load(2));
