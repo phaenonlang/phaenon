@@ -195,7 +195,16 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     come back as written, most others narrower; against the same trees migrated without it, it
     adds no finding to `phn check` or PHPStan max and removes four in five of the errors the
     stripping caused. Its gaps closed the same day (`a42a407`): 67% and 71% come back as
-    written, 6% and 7% are left. Left in [[open-items]] § M6 — the list-types codemod. Next: the
-    `throws` codemod's measurement ([[open-items]]), then slice 8.
+    written, 6% and 7% are left. Then what that left: self rounds for values made of their own
+    (recursion, a property filtered into itself, through the checker's `Assume` hook), overrides
+    written only when narrower, receivers, pipes, block returns, class-strings, rounds that let
+    `mixed` through only after the precise ones, and every given file checked each round (one
+    override's wider type had reached its callers' findings unseen). The strip-and-recover check
+    is now `TestListTypesMeasure` ([[testing]]): 79% and 82% come back as written, 16% and 9%
+    narrower, none unrecovered; `phn check` 486 → 5 and 2078 → 76, PHPStan max 535 → 5 and
+    1396 → 71 against the trees migrated without it, with none added. On the way:
+    `is_subclass_of()` narrowed a string to `never` (`../design/checker.md` §9). Left in
+    [[open-items]] § M6 — the list-types codemod. Next: the `throws` codemod's measurement
+    ([[open-items]]), then slice 8.
 
 ← [[Home]]

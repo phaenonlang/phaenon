@@ -473,20 +473,24 @@ plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
 
 ## M6 — the list-types codemod (slice 7, 2026-11-05)
 
-`../design/tooling.md` §8.2. The first version's gaps are closed (compiler `a42a407`): callables
-passed and stored in typed properties, strings that name a method only where PHP takes a
-callable's name, docblocks by their parsed tags, static properties, compound, nested and
-by-reference writes, tuples in element types, closures and templates spelled. More rounds were
-tried and gain nothing: the rounds converge before five. Left:
-- **Overrides** keep the parent's type and are no candidates; 21 of the stripped declarations.
-- **Keys and elements both unknown** (20), values the checker types `mixed`.
-- **A callable whose arguments nothing says** (7): passed to a `callable` parameter without a
-  signature.
+`../design/tooling.md` §8.2. Closed the same day, in two passes: the first version's gaps
+(`a42a407`), then what that left. Overrides are kept unless they return a narrower type; values made
+of the declaration's own get a self round; calls on other receivers, pipes and partial
+applications, block returns, inline `@var` returns, anonymous classes' arguments and class-strings
+are followed. Every file given is checked after each round. The strip-and-recover harness is
+`TestListTypesMeasure` ([[testing]], `PHAENON_LISTTYPES`). Nothing is left unrecovered in core or
+tq-cli. Left:
+- **Wider than written** (core 3%, tq-cli 8%): values the checker knows as `mixed` that the
+  author typed, such as `array_keys()` of a bare public parameter, or elements built from untyped
+  data. Reading a declaration's type from where its values go (the parameter they are passed to)
+  would close some of these; nothing does that yet.
 - **A top-level homogeneous tuple reads as a list** (`(string, string)` as `list<string>`); always
   correct, less precise.
-- **The strip-and-recover harness** was a session's scratch (copy the tree with its vendor links'
-  siblings, strip, migrate, compare with a copy migrated without `--list-types`); a `PHAENON_*`
-  test over a dogfood tree would keep the numbers checkable.
+- **Cost:** a run checks every file given each round. tq-cli takes about 100 s in the harness, a
+  third of it in the rounds that wait for precise types.
+- Found on the way, fixed: `is_subclass_of()` narrowed a string to `never`, not
+  `class-string<Foo>` (`../design/checker.md` §9). Not fixed: tq-cli has two unused imports
+  (`P2013`, `EstateSpec.phn`, `SigningKeyAddCommand.phn`), real ones in the dogfood tree.
 
 ## M6 — distribution (slice 1, 2026-11-03)
 
