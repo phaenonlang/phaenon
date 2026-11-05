@@ -73,7 +73,8 @@ func TestPHPStanParity(t *testing.T) {
 		"enum-magic.phn": {"enum.magicMethod": true},
 		// Properties a mapping attribute marks: PHPStan needs the framework's
 		// extension to know they are read and written (design/tooling.md §9.2).
-		"unused-attributes.phn": {"property.onlyWritten": true, "property.unused": true, "property.onlyRead": true},
+		"unused-attributes.phn":        {"property.onlyWritten": true, "property.unused": true, "property.onlyRead": true},
+		"unused-attributes-listed.phn": {"property.onlyWritten": true, "property.unused": true, "property.onlyRead": true},
 	}
 	files, _ := filepath.Glob(filepath.Join("testdata", "*.phn"))
 	vendorSrc, err := os.ReadFile(filepath.Join("testdata", "vendor", "Acme", "Repo.php"))

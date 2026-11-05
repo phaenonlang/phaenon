@@ -50,6 +50,9 @@ type Host interface {
 	// checking those check reports. diags are the files that do not parse
 	// (P1000) and what could not be read: vendor code, extensions.
 	Program(files []string, read func(path string) ([]byte, error), check func(path string) bool) (p *program.Program, diags []checker.Diagnostic, err error)
+	// Options adds the checker's settings the project states to opts: the
+	// attributes that exempt a private property (P2406–P2408).
+	Options(opts checker.Options) checker.Options
 	// ProjectDiagnostics are the findings about the project as a whole: its
 	// target, its installed packages (P4013, P4014).
 	ProjectDiagnostics(p *program.Program, files []string) []checker.Diagnostic
@@ -596,11 +599,11 @@ func (s *Server) checkText(path string, src []byte, version int) (*fileCheck, er
 	if r.file == nil {
 		return r, nil
 	}
-	c := checker.New(p, checker.Options{Deprecations: true, Observe: func(f *program.File, e ast.Expr, t types.Type) {
+	c := checker.New(p, s.host.Options(checker.Options{Deprecations: true, Observe: func(f *program.File, e ast.Expr, t types.Type) {
 		if f == r.file {
 			r.types[e] = t
 		}
-	}})
+	}}))
 	for _, d := range c.Check() {
 		if d.File == path {
 			r.diags = append(r.diags, d)
@@ -739,7 +742,7 @@ func (s *Server) checkProject(gen int) error {
 	if err != nil {
 		return err
 	}
-	c := checker.New(p, checker.Options{Deprecations: true, Cancelled: func() bool { return s.stale(gen) }})
+	c := checker.New(p, s.host.Options(checker.Options{Deprecations: true, Cancelled: func() bool { return s.stale(gen) }}))
 	diags = append(diags, c.Check()...)
 	if s.stale(gen) {
 		return nil
@@ -768,7 +771,7 @@ func (s *Server) checkProject(gen int) error {
 		if p, diags, err = s.host.Program(files, disk, func(string) bool { return true }); err != nil {
 			return err
 		}
-		diags = append(diags, checker.New(p, checker.Options{Cancelled: func() bool { return s.stale(gen) }}).Check()...)
+		diags = append(diags, checker.New(p, s.host.Options(checker.Options{Cancelled: func() bool { return s.stale(gen) }})).Check()...)
 		if s.stale(gen) {
 			return nil
 		}

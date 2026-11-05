@@ -82,6 +82,8 @@ func (h *fakeHost) Program(files []string, read func(string) ([]byte, error), ch
 	return p, diags, nil
 }
 
+func (h *fakeHost) Options(opts checker.Options) checker.Options { return opts }
+
 func (h *fakeHost) ProjectDiagnostics(*program.Program, []string) []checker.Diagnostic { return nil }
 
 func (h *fakeHost) Build(p *program.Program, diags []checker.Diagnostic) (BuildParams, error) {

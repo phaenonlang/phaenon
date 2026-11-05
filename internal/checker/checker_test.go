@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,11 +29,13 @@ var reWantItem = regexp.MustCompile(`(P\d{4})(?:\s+"([^"]*)")?`)
 //
 //	// target: 8.6
 //	// deprecations: on
+//	// reflected-attributes: ["Acme\\Mapping"]
 //
 // target is the PHP version the file compiles for, the floor (PHP 8.5)
 // without one; deprecations: on reports deprecated constructs and library
-// symbols, as phn check does unless --no-deprecations.
-var reHeader = regexp.MustCompile(`^//\s*(target|deprecations):\s*(\d+\.\d+|on)\s*$`)
+// symbols, as phn check does unless --no-deprecations; reflected-attributes
+// is phaenon.json's unused.reflectedAttributes, a JSON list.
+var reHeader = regexp.MustCompile(`^//\s*(target|deprecations|reflected-attributes):\s*(\d+\.\d+|on|\[.*\])\s*$`)
 
 func goldenSetup(t *testing.T, src []byte) (phpversion.Version, Options) {
 	t.Helper()
@@ -57,6 +60,11 @@ func goldenSetup(t *testing.T, src []byte) (phpversion.Version, Options) {
 				t.Fatalf("golden: deprecations: %q, expected on", m[2])
 			}
 			opts.Deprecations = true
+		case "reflected-attributes":
+			opts.ReflectedAttributes = []string{}
+			if err := json.Unmarshal([]byte(m[2]), &opts.ReflectedAttributes); err != nil {
+				t.Fatalf("golden: reflected-attributes: %v", err)
+			}
 		}
 	}
 	return target, opts

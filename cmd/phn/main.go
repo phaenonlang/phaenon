@@ -343,7 +343,7 @@ func (j buildJob) run() buildResult {
 	prog := j.prog
 	diags := append([]checker.Diagnostic(nil), j.target.Diags...)
 	if prog == nil {
-		diags = append(diags, typeCheck(files, j.target.Version, checker.Options{})...)
+		diags = append(diags, typeCheck(files, j.target.Version, proj.checkerOptions(checker.Options{}))...)
 		prog = loadedProgram
 	} else {
 		diags = append(diags, j.diags...)
@@ -667,7 +667,7 @@ func checkCmd(args []string) {
 		}
 		files = append(files, f)
 	}
-	diags := append(tgt.Diags, typeCheck(files, tgt.Version, checker.Options{Deprecations: !*noDeprecations})...)
+	diags := append(tgt.Diags, typeCheck(files, tgt.Version, proj.checkerOptions(checker.Options{Deprecations: !*noDeprecations}))...)
 	diags = append(diags, installedDiags(files, loadedProgram)...)
 	errors, warnings := 0, 0
 	for _, d := range diags {

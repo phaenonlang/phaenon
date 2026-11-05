@@ -1,0 +1,56 @@
+// reflected-attributes: ["\\UnusedAttributesListed\\Mapping", "UnusedAttributesListed\\Exact"]
+// unused.reflectedAttributes in phaenon.json (design/tooling.md §9.2) names
+// the attributes that mark reflected properties. A listed class, or one that
+// extends or implements a listed class, exempts a private property; any other
+// attribute does not.
+
+namespace UnusedAttributesListed;
+
+interface Mapping
+{
+}
+
+#[\Attribute(\Attribute::TARGET_PROPERTY | \Attribute::TARGET_PARAMETER)]
+final class Column implements Mapping
+{
+}
+
+abstract class Field implements Mapping
+{
+}
+
+#[\Attribute(\Attribute::TARGET_PROPERTY)]
+final class Embedded extends Field
+{
+}
+
+#[\Attribute(\Attribute::TARGET_PROPERTY)]
+final class Exact
+{
+}
+
+#[\Attribute(\Attribute::TARGET_PROPERTY | \Attribute::TARGET_PARAMETER)]
+final class Immutable
+{
+}
+
+final class Entity
+{
+    #[Column]
+    private int $id = 0;
+
+    #[Embedded]
+    private string $address;
+
+    #[Exact]
+    private string $exact;
+
+    #[Immutable] private string $marked = ''; // want P2407 "marked"
+
+    public function __construct(
+        #[Column]
+        private string $name,
+        #[Immutable] private string $note, // want P2407 "note"
+    ) {
+    }
+}
