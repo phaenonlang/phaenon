@@ -119,12 +119,15 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
     later statement's are "maybe undefined" in the catch, where PHPStan knows them defined;
   - `static::CONST` types as the constant's literal, where PHPStan says the declared type (a
     subclass may override it): lenient, seen while measuring, not yet met in a tree.
-- **The `throws` codemod** (proposed 2026-11-05): `phn migrate` writing `throws` for what a body
-  provably lets escape, on by default. It needs the native throwers PHPStan knows first
-  (`json_*` with `JSON_THROW_ON_ERROR`, the `DateTime` constructors, `intdiv`, …; tooling.md §9.1
-  left them out), leaves out `Error` and its subclasses, and is measured on core and tq-cli
-  before it is built: PhpStorm's "Unhandled X" is transitive, so the clauses climb the call
-  graph. Its place in the order waits for a maintainer's go-ahead.
+- **The `throws` codemod** (proposed and scoped 2026-11-05): `phn migrate` writes `throws` for
+  what a body lets escape from the project's own `throw new X`, in the method itself or in the
+  project methods it calls, on by default with an opt-out; `Error` and its subclasses are left
+  out. Not from native functions (`json_encode()` with `JSON_THROW_ON_ERROR`, the `DateTime`
+  constructors, …): their failures are invariants a service answers once, up the stack (a 500),
+  and promoting them through every caller would put a clause on half the code. Measured on core
+  and tq-cli before it is built: how many functions gain a clause, how many types, how deep they
+  climb. PhpStorm's "Unhandled \JsonException" stays its own inspection's, which its list of
+  unchecked exceptions answers. After the `list-types` codemod.
 
 ## M5 — concurrency (2026-11-01)
 
