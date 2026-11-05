@@ -52,6 +52,12 @@ type Options struct {
 	// the unnamed `@var` above it. phn migrate's list-types reads a
 	// method's returns from it.
 	Returned func(f *program.File, s *ast.Return, t types.Type)
+	// Thrown, when set, is called with each function or method declaration
+	// of a checked file (*ast.FunctionDecl, *ast.MethodDecl) and the throw
+	// points that leave its body (design/tooling.md §9.1), before the
+	// body's declaration is held to them. phn migrate's throws codemod
+	// reads what a body throws from them.
+	Thrown func(f *program.File, decl ast.Node, points []ThrowPoint)
 	// Assume, when set, is asked for each expression typed, each
 	// assignment's target and each parameter bound in a checked file: a
 	// type it returns replaces the checker's — the value read, the type

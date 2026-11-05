@@ -22,6 +22,30 @@ import (
 // throws member the body never throws (P2404), and `@throws void` on a
 // body that throws (P2405).
 
+// ThrowPoint is a throw point as Options.Thrown reports it: the classes
+// it may raise (less what earlier catches took; "Throwable" for any), and
+// whether the exceptions are known (explicit) and come from a callee's
+// declaration rather than the body's own throw (call).
+type ThrowPoint struct {
+	Classes  []string
+	Explicit bool
+	Call     bool
+	At       ast.Span
+}
+
+// exported is points as Options.Thrown reports them.
+func exported(points []throwPoint) []ThrowPoint {
+	out := make([]ThrowPoint, 0, len(points))
+	for _, tp := range points {
+		e := ThrowPoint{Explicit: tp.explicit, Call: tp.anyThrowable, At: tp.at}
+		for _, x := range tp.excs {
+			e.Classes = append(e.Classes, x.name)
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 // exc is one exception class a throw point may raise, less the classes an
 // earlier catch took from it ("Throwable" stands for any exception).
 type exc struct {

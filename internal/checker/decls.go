@@ -62,7 +62,11 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 	c.checkUntyped(f, fn.Decl.Params, fn.Params, fn.Decl.ReturnType, fn.Return, fn.Decl.Name.Name, fn.Decl.S, fn.Doc, false)
 	ctx.pushThrows()
 	ctx.body(fn.Params, fn.Decl.Params, ctx.exprBody(fn.Decl.Name.Name, fn.Decl.Arrow, fn.Decl.Body), fn.Decl.Name.S)
-	ctx.bodyThrows(fn.Throws, false, ctx.name, fn.Decl.Name.S, ctx.popThrows())
+	points := ctx.popThrows()
+	if c.opts.Thrown != nil {
+		c.opts.Thrown(f, fn.Decl, exported(points))
+	}
+	ctx.bodyThrows(fn.Throws, false, ctx.name, fn.Decl.Name.S, points)
 }
 
 // declSpan is where method-level diagnostics point: the method name.
@@ -723,7 +727,11 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	// A method an override may replace keeps the members its body does not
 	// throw: its declaration is the contract (design/tooling.md §9.1).
 	overridable := m.Vis != program.Private && !m.Final && !cl.Final && cl.Kind != ast.KindEnum
-	ctx.bodyThrows(m.Throws, overridable, ctx.name, d.Name.S, ctx.popThrows())
+	points := ctx.popThrows()
+	if ctx.c.opts.Thrown != nil {
+		ctx.c.opts.Thrown(ctx.file, d, exported(points))
+	}
+	ctx.bodyThrows(m.Throws, overridable, ctx.name, d.Name.S, points)
 }
 
 // hasOverride reports an #[\Override] attribute among a declaration's.
