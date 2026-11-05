@@ -63,7 +63,7 @@ type lineWriter struct {
 	// moved are the source runs of free edits (edit.Pieces): verbatim, but
 	// on the compiler's lines, so no line of their source holds them.
 	moved []segment
-	mapAt      int // output offset of the map line before __halt_compiler, -1: none
+	mapAt int // output offset of the map line before __halt_compiler, -1: none
 	// inserted bytes, the map line before __halt_compiler, went in at
 	// output offset insertedAt after the segments were written.
 	insertedAt, inserted int
