@@ -471,6 +471,21 @@ plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
     is checked, resolved `X` in that file's scope (`Ci\Validate\NewSecretReads` against the imported
     `Secrets\NewSecretReads`).
 
+## M6 — the list-types codemod (slice 7, 2026-11-05)
+
+`../design/tooling.md` §8.2. Left, all of them declarations it leaves alone or types wider:
+- **A method used as a callable or named in a string** (`[$this, 'm']`, `'m'` anywhere in the
+  class) keeps its parameters untyped: 35 of tq-cli's stripped ones. Following `array_map([$this,
+  'm'], $xs)` to its arguments would recover them.
+- **Docblock tests are textual**: a docblock that mentions `@return` or `@param` at all leaves the
+  slot alone, a prose-only tag included.
+- **A homogeneous tuple reads as a list** (`(string, string)` as `list<string>`); always correct,
+  less precise.
+- **Static properties** are not followed (`self::$p`), nor compound writes (`$this->p[$k] .= …`),
+  nested element writes or any by-reference use.
+- **A value from a declaration still untyped** keeps the element `mixed` (`list<mixed>`) when the
+  chain is longer than five rounds or cyclic.
+
 ## M6 — distribution (slice 1, 2026-11-03)
 
 `../design/tooling.md` §3. Left after slice 1:

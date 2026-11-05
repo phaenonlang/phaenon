@@ -187,5 +187,14 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     point; the unreachable-code and unused-import warnings were two more false positives. Core
     checks at 0 and builds without `--emit-on-error` ([[dogfood]]); the other trees check as
     before but for one false warning gone in tq-cli. Next: the `list-types` codemod.
+18. 2026-11-05: **M6 slice 7: the `list-types` codemod** (compiler `dfbfac1`;
+    `../design/tooling.md` §8.2). `phn migrate --list-types` types a bare `array` from the values
+    the checker recorded: a private property's writes, a private or final method's returns, a
+    private method's arguments, in up to five rounds, each checked. The dogfood has no bare arrays
+    left, so it was checked by stripping the types core (271) and tq-cli (747) wrote: 62% and 67%
+    come back as written, most others narrower; against the same trees migrated without it, it
+    adds no finding to `phn check` or PHPStan max and removes four in five of the errors the
+    stripping caused. Left in [[open-items]] § M6 — the list-types codemod. Next: the `throws`
+    codemod's measurement ([[open-items]]), then slice 8.
 
 ← [[Home]]
