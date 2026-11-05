@@ -127,5 +127,16 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     dogfood trees' 640 changed outputs keep their token streams; execution suites 8.6 emit
     4,852/4,852 and 8.5 4,605/4,605. Tequila's own move to PER comes with its migration to
     Phaenon ([[dogfood]], [[open-items]] § D22). Next: slice 5 on a maintainer's go-ahead.
+13. 2026-11-05: **M6 slice 5, the VS Code extension** (`../vscode`; `../design/tooling.md` §6.6).
+    The grammar is `source.php` plus injections for Phaenon's syntax (`fun`, type parameters and
+    arguments, `throws`, aliases, `is`/`as`, `concurrently`/`spawn`, `bytes`); its golden is
+    written against a pinned PHP grammar, its Phaenon tokens the same under VS Code 1.91.0, 1.110.1
+    and 1.145.0, and the dogfood trees' 1,859 files end with every rule closed (found: a
+    property's `?map<…>` left PHP's ternary rule open). One `phn lsp` per project, each client
+    keeping its project's files; installed code has no server. Commands and a `phaenon` task type
+    for build, check and watch; `phn trace` of the selection or the terminal. Unit, grammar and 14
+    e2e tests in VS Code 1.91.0 and 1.145.0 against a real `phn`. Found on the way: the server read
+    paths relative to a `rootUri` around the project (fixed in `internal/lsp`). The PhpStorm
+    plugin's TextMate bundle copies the grammar. Left in [[open-items]] § M6 — VS Code.
 
 ← [[Home]]

@@ -731,8 +731,9 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
   records them as moved verbatim spans beside the in-place ones the line map's property checks,
   and `fix.Carry` applies hunks in the source's order. Core and tq-cli under `@PER-CS3x0`: 0
   changes in compiler text; one `phn fix` converts either tree with nothing left.
-- **The dogfood trees' cs configurations are `@PSR12`** until Tequila's move to PER ([[dogfood]]
-  § D22 rebuild): cs fails on the outputs, and `phn fmt` / `phn fix` must not run with them.
+- ~~**The dogfood trees' cs configurations are `@PSR12`**~~ — done 2026-11-05: Tequila moved to
+  PER on `main`, and each dogfood branch took the switch through `phn fix` ([[dogfood]] § PER
+  switch).
 - **A closure body kept on one line**: a comment after a lowered arrow (`closureBody`) or after
   an expression body's arrow keeps the in-place `{ return expr; }`, which PER §7 does not allow
   for closures; a comment there has nowhere else to go.
@@ -745,7 +746,7 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
 ## M6 — `phn lsp` (slice 4, 2026-11-04)
 
 `../design/tooling.md` §6.5. Left:
-- **The VS Code extension** is slice 5 (§6.3); the server answers its whole list already.
+- ~~**The VS Code extension**~~ — done 2026-11-05 (slice 5, § M6 — VS Code below).
 - **References, rename, workspace symbols, semantic tokens, inlay hints** (§6.1 *Later*).
 - **Completion needs a buffer that parses around the cursor**: the probe closes the statement
   with up to two brackets and a `;`; an unfinished construct it cannot close gives no member
@@ -768,5 +769,27 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
   learn the pairs from the dogfood trees); not measured yet.
 - The server re-reads every project file from disk for each check (the parse cache then compares
   bytes); fine at 800 files, a stat-based cache if a larger project needs it.
+
+## M6 — VS Code (slice 5, 2026-11-05)
+
+`../design/tooling.md` §6.6. Left:
+- **Debugging `.phn` in VS Code**: a debug adapter in front of Xdebug's that maps positions
+  through the line map (§6.3); vscode-php-debug's path mappings cannot change the extension.
+- **Publication** to the VS Code Marketplace and Open VSX waits for the repositories to be public
+  (T1); until then the `.vsix`.
+- **PhpStorm and installed code**: the plugin's `fileOpened` starts a server at an installed
+  package's own `phaenon.json` (`PhaenonCompiler.root`), where the VS Code client starts none
+  (§6.6: the package checked without its dependencies, or a second copy in the project). Not
+  observed on the dogfood trees, whose path repositories are symlinked checkouts; the plugin should
+  apply the same rule.
+- **The TextMate bundle's injections in IntelliJ** are untested: the bundle only wins in an IDE
+  without the PHP plugin, and IntelliJ's TextMate engine is not the one `vscode-textmate` tests.
+- **The grammar's type-argument heuristic**: a name written against `<` with a `>` ahead on the
+  same line. A type argument list over several lines reads as comparisons, and so would `A<B … >`
+  between constants, which PER spaces.
+- **Installed code is highlighted only**: no hover or definition inside a vendor `.phn`, since no
+  server takes it; definition into one works.
+- **The terminal trace goes through the clipboard**, which keeps its text and loses anything else on
+  it (an image).
 
 ← [[Home]]

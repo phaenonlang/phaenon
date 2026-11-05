@@ -314,25 +314,33 @@ push dogfood work without a maintainer's go-ahead.
   (`../design/roadmap.md` D22). All five trees were rebuilt with it: 640 outputs changed
   (reflector 11, object-mapper 27, odm 58, core 300, tq-cli 244), each with the token stream of
   the build before (whitespace and comments aside), so the suites and PHPStan were not rerun.
-  - **The trees' php-cs-fixer configurations are still `@PSR12`**, which expands PER's `{}`: cs
-    now fails on the outputs (files: reflector 11, object-mapper 25, odm 58; `phn fix --check`:
-    core 520 changes in sources and 1 in compiler text, a pipe's `fn(`; tq-cli 259 and 8,
-    `spawn`'s `fn(`). **Do not run `phn fmt` or `phn fix` with these configurations**: they would
-    carry PSR-12's expanded empty bodies into the `.phn`, against the first layer. Adding PER's
-    `single_line_empty_body` to `@PSR12` leaves core 33 changes in its own `.phn` text and both
-    trees their compiler `fn(`, so no bridge configuration makes cs green short of the PER switch.
-  - **The switch to `@PER-CS3x0` comes with Tequila's own migration to PER**, which goes with its
-    migration to Phaenon. Measured in scratch configurations (the tree's rules with `@PER-CS3x0`
-    for `@PSR12`): core 1,820 changes in 250 sources, tq-cli 5,907 in 374 (concatenation spacing,
-    `fn (`, trailing commas, `{}`), which `phn fix` carries, and 13 / 117 in folded pipes, which
-    it carries too since the same day ([[open-items]] § D22).
-  - **Trial run** (2026-11-04): one `phn fix` with the scratch PER configuration converted core
-    (1,833 changes in 252 sources) and tq-cli (6,024 in 377) with nothing left after the rebuild;
-    the first layer still holds on every file, tq-cli's PHPStan passes on the result. Both trials
-    are kept as `git stash` entries "PER 3.0 trial through phn fix (2026-11-04)" in core and in
-    tq-cli (the stash is shared with the `~/labs/tequila/tq-cli` checkout); the branches are as
-    before. A commit on a dogfood branch with the PER sources fails core's pre-commit `check-cs`
-    hook while the configuration is `@PSR12`.
+  - Until the PER switch below the trees' configurations were `@PSR12`, which expands PER's `{}`,
+    so cs failed on these outputs and no bridge configuration made it green (adding
+    `single_line_empty_body` left core 33 changes in its own `.phn` text and the compiler's `fn(`).
+    `phn fix` carries the folded pipes' operands too since the same day ([[open-items]] § D22).
+- **PER switch (2026-11-05):** Tequila moved to PER Coding Style 3.0 on `main` (reflection #8,
+  object-mapper #13, mongodb-odm #46, core #205, tq-cli #393: `@PER-CS3x0` for `@PSR12`,
+  php-cs-fixer `^3.88`, the first release with the set under that name), and each dogfood branch
+  took the same change through one `phn fix`: the fixer's changes of the outputs carried back into
+  the `.phn`, the compiled `.php` equal to what the fixer wrote, the first layer holding on every
+  file. Each style commit is listed in `.git-blame-ignore-revs` by the `chore` commit after it.
+
+  | Tree | Commits | Sources | Checks |
+  |---|---|---|---|
+  | reflector | `2d2c305` + `0be5003` | 4 | suite 25, PHPStan 10, cs, `phn check` 0 / 0 |
+  | object-mapper | `bea31da` + `e9f450f` | 4 | suite 19, PHPStan 10, cs, `phn check` 2 errors (P2202) / 5 warnings |
+  | mongodb-odm | `b122143` + `52455bd` | 27 | suite 162, PHPStan max, cs, `phn check` 3 / 22 |
+  | core | `2924b9e3` + `e82a917e` | 242, and the 10 rule fixtures | suite 1188, PHPStan max, `phn fmt --check`, `phn check` 11 |
+  | tq-cli | `27f1c69` + `19ee4bf` | 377 | suite 2052, PHPStan 10, `phn fmt --check`, `phn check` 0 / 3 |
+
+  - Kinds of change: concatenation spacing, `fn(`, trailing commas in multi-line argument and
+    parameter lists, `new class` without `()`, `match (`, an attribute on its own line in a
+    multi-line parameter list, a named argument's colon spacing. Core's rule fixtures in
+    `tests/PHPStan/Data` take the fixer's changes directly and equal `main`'s; the rule tests'
+    expected lines moved with them, as on `main`. The trial stashes of 2026-11-04 are dropped.
+  - Still behind `main` on the dogfood branches: the PHP migration sets under their pre-3.88 names
+    (`@PHP80Migration` …), which `main` spells `@PHP8x0Migration` since reflection #10,
+    object-mapper #15, mongodb-odm #48, core #207 and tq-cli #396.
 
 ## Next targets (roadmap §3)
 

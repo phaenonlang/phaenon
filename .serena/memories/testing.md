@@ -28,6 +28,12 @@ suites, and the tools they shell out to. Without its variable a suite **skips**,
 | `PHAENON_UPDATE` | `TestGolden` (format) | Rewrites `internal/format/testdata/X.golden.phn` | `1` |
 | `PHAENON_FMT_TREE` | `TestTree` (format) | A tree of `.phn` (a dogfood checkout) that `phn fmt`'s first layer formats in memory: each file must format, and to itself a second time; the files it would change are logged (`-v`) | `/Users/petr/labs/tequila/core` |
 | `PHAENON_PHN` | `PhaenonLayoutTest` (`../jetbrains`) | A `phn` the plugin's Reformat Code runs (`phn fmt --stdin`); with it the layout tests reformat `internal/format/testdata` too. Skipped without | `../phaenon/bin/phn` (`go build -o bin/phn ./cmd/phn`) |
+| `PHAENON_PHN` | e2e tests (`../vscode`, `npm run test:e2e`) | The `phn` the extension runs in a VS Code from `.vscode-test`, as `PHN_BINARY`. Skipped without | `../phaenon/bin/phn` |
+| `PHAENON_VSCODE_VERSION` | e2e tests (`../vscode`) | The VS Code release to download and run (default: the newest stable); `1.91.0` is the floor | `1.91.0` |
+| `PHAENON_VSCODE` | e2e tests (`../vscode`) | An installed VS Code to run instead of a download | unset |
+| `PHAENON_TREES` | grammar tests (`../vscode`, `npm test`) | Trees whose every `.phn` must tokenize with every rule closed (also `../jetbrains`' `PhaenonRealTreeTest`) | the five dogfood trees, `:`-separated |
+| `PHAENON_PHP_GRAMMAR` | grammar tests (`../vscode`) | One more PHP grammar to hold the grammar's Phaenon tokens against, beside the VS Codes found | a `php.tmLanguage.json` |
+| `PHAENON_UPDATE` | grammar tests (`../vscode`) | Rewrites `test/grammar/constructs.tokens` | `1` |
 | `PHAENON_GOLDEN` | `TestGolden` (checker) | Only golden files whose name contains this substring | e.g. `generics` |
 | `PHAENON_COMPOSER_PROJECT` | `internal/program` | A Composer project to exercise the vendor reader | e.g. `/Users/petr/labs/tequila/object-mapper` |
 | `PHAENON_COMPOSER` | `internal/distribution` | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects (a fake `phn`, an `httptest` mirror; Packagist off); needs the `runtime` checkout beside the repository or the main checkout | `$(which composer)` |
@@ -257,10 +263,11 @@ requirements. `phn` is not installed on `PATH`: build it from the repo (`AGENTS.
 
 ## The compiled layout against PER (2026-11-04)
 
-Until the dogfood trees' own cs configurations move to PER (D22, [[dogfood]]), the compiled layout
-is checked with a scratch copy of the tree's configuration: its rules with `@PER-CS3x0` for
-`@PSR12`, the finder on `.src`/`.tests` by absolute path, `setUsingCache(false)`, then
-`phn fix --check -- tools/php-cs-fixer/vendor/bin/php-cs-fixer fix --config <copy>` in the tree.
+The dogfood trees' own cs configurations are `@PER-CS3x0` since 2026-11-05 ([[dogfood]] § PER
+switch), so `phn fix --check -- tools/php-cs-fixer/vendor/bin/php-cs-fixer fix` in a tree checks
+the compiled layout against PER. Before that it took a scratch copy of the configuration (its rules
+with `@PER-CS3x0` for `@PSR12`, the finder on `.src`/`.tests` by absolute path,
+`setUsingCache(false)`, passed as `--config <copy>`).
 The report's "in text the compiler wrote" count is the compiler's: 0 in core and tq-cli since
 the fold carries its operands (2026-11-04; 13 and 117 before, all in folded pipes). The emitter goldens get the same check
 one file per scratch project (the goldens share class names): only `pipes.phn` reports compiler
