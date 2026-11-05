@@ -891,7 +891,14 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 				return then, els, true
 			}
 			at := x.pathType(arg, env)
-			allowString := len(e.Args.Args) >= 3 && isTrueLit(e.Args.Args[2].Value)
+			// $allow_string: false by default for is_a, true for
+			// is_subclass_of; an argument that is not a literal may be
+			// either, which the class-string reading covers.
+			allowString := name == "is_subclass_of"
+			if len(e.Args.Args) >= 3 {
+				lit, ok := constName(e.Args.Args[2].Value)
+				allowString = !ok || lit != "false"
+			}
 			if allowString {
 				x.narrowPath(then, arg, types.Intersect(at, types.MakeUnion(cls, types.ClassString{Of: cls}), x.p()), true)
 			} else {

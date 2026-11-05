@@ -1,0 +1,53 @@
+namespace IsSubclassOf;
+
+// is_subclass_of() takes a class name by default ($allow_string true), and
+// is_a() only when told: a string the call answers true for is a
+// class-string of the class, and a key of that type keeps it (PHPStan's
+// IsSubclassOfFunctionTypeSpecifyingExtension).
+
+interface Event
+{
+}
+
+final class Created implements Event
+{
+}
+
+/** @param class-string<Event> $class */
+function takesEventClass(string $class): void
+{
+}
+
+function takesInt(int $i): void
+{
+}
+
+/** @param non-empty-array<class-string<Event>, int> $byClass */
+function takesByClass(array $byClass): void
+{
+}
+
+function byDefault(string $name): void
+{
+    if (!is_subclass_of($name, Event::class)) {
+        return;
+    }
+    takesEventClass($name);
+    takesInt($name); // want P2103 "expects int, class-string<"
+    if (Created::class === $name) {
+        return;
+    }
+    $byClass = [];
+    $byClass[$name] = 1;
+    takesByClass($byClass);
+}
+
+function told(string $name, bool $allow): void
+{
+    if (is_a($name, Event::class, true)) {
+        takesEventClass($name);
+    }
+    if (is_subclass_of($name, Event::class, $allow)) {
+        takesEventClass($name);
+    }
+}
