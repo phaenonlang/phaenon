@@ -950,6 +950,92 @@ func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) t
 	return x.methodCallOn(e, obj, env, expected)
 }
 
+// unionCall checks a call on a union receiver as PHPStan does
+// (UnionTypeMethodReflection): when every member declares the method with
+// the same parameters, once, against the union of the members' parameter
+// types, returning the union of their results. RepositoryInterface<User>
+// |RepositoryInterface<object> so takes any object, as one of its members
+// does. It checks nothing and reports false when the members' methods do
+// not line up: a member without the method, a generic one, another
+// parameter list, other exceptions, a @phpstan-self-out.
+func (x *fnCtx) unionCall(e *ast.MethodCall, base types.Type, name string, env *state, expected types.Type) (types.Type, bool) {
+	members := types.Members(base)
+	if len(members) < 2 || e.Args != nil && e.Args.FirstClassCallable {
+		return nil, false
+	}
+	type part struct {
+		recv  types.Type
+		meth  *program.Method
+		subst map[string]types.Type
+	}
+	var parts []part
+	for _, m := range members {
+		ct, ok := m.(types.Class)
+		if !ok {
+			return nil, false
+		}
+		cl := x.p().Class(ct.Name)
+		if cl == nil {
+			return nil, false
+		}
+		meth := cl.FindMethod(name)
+		if meth == nil || len(meth.TypeParams) > 0 || meth.SelfOut != nil || !x.canAccess(meth.Vis, meth.Class) {
+			return nil, false
+		}
+		parts = append(parts, part{m, meth, x.memberSubst(m, meth.Class)})
+	}
+	first := parts[0].meth
+	for _, p := range parts[1:] {
+		sameThrows := p.meth.Throws == nil && first.Throws == nil || p.meth.Throws != nil && first.Throws != nil && types.Equal(p.meth.Throws, first.Throws)
+		if len(p.meth.Params) != len(first.Params) || !sameThrows {
+			return nil, false
+		}
+		for i, pp := range p.meth.Params {
+			fp := first.Params[i]
+			if !strings.EqualFold(pp.Name, fp.Name) || pp.ByRef != fp.ByRef || pp.Variadic != fp.Variadic || pp.HasDefault != fp.HasDefault {
+				return nil, false
+			}
+		}
+	}
+	of := func(p part, t types.Type) types.Type {
+		if t == nil {
+			return types.TMixed
+		}
+		return replaceStatic(types.Substitute(t, p.subst), p.recv)
+	}
+	params := make([]*program.Param, len(first.Params))
+	for i := range first.Params {
+		var ts []types.Type
+		for _, p := range parts {
+			ts = append(ts, of(p, p.meth.Params[i].Type))
+		}
+		cp := *first.Params[i]
+		cp.Type = types.MakeUnion(ts...)
+		params[i] = &cp
+	}
+	var rets []types.Type
+	void := true
+	for _, p := range parts {
+		rets = append(rets, of(p, p.meth.Return))
+		if _, ok := p.meth.Return.(types.Void); !ok {
+			void = false
+		}
+		x.c.libraryMethod(e.Name.Span(), p.meth)
+		if p.meth.Deprecated && x.c.opts.Deprecations {
+			x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", p.meth.Class.Name, name, p.meth.DeprecatedNote)
+		}
+	}
+	sig := &signature{name: first.Class.Name + "::" + first.Name + "()", params: params, ret: types.MakeUnion(rets...), stub: isStubFile(first.Class.File),
+		file: methodFile(first), decl: first.Class, node: e, meth: first}
+	ret := x.checkCall(sig, e.Args, env, e.S, expected)
+	if void {
+		if base, ok := pathKey(e.Object); ok && !(base == "$this" && x.forgetOwnScope(env, first.Class)) {
+			env.invalidateUnder(base)
+		}
+	}
+	return ret, true
+}
+
 // methodCallOn checks the call on a receiver already typed.
 func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expected types.Type) types.Type {
 	x.noteRecv(e, obj)
@@ -1002,83 +1088,87 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 		}
 	}
 	var out []types.Type
-	for _, m := range types.Members(base) {
-		if _, isObj := m.(types.Object); isObj {
-			// `object` declares no methods (PHPStan's method.notFound),
-			// unless method_exists() said so.
-			x.argsOnly(e.Args, env)
-			if !provenMember(env, e.Object, true, name) {
-				x.report(e.Name.Span(), P2006, "unknown method object::%s()", name)
-				out = append(out, types.TError) // reported: the chain goes on silently
-				continue
-			}
-			out = append(out, types.TMixed)
-			continue
-		}
-		classes := x.classesOf(m, e.Object.Span())
-		if len(classes) == 0 {
-			x.argsOnly(e.Args, env)
-			out = append(out, types.TMixed)
-			continue
-		}
-		if _, inter := m.(types.Intersection); inter && len(classes) > 1 {
-			// `A&B`: the method is found on any member; only when none has
-			// it does every member report.
-			var having []*program.Class
-			for _, cl := range classes {
-				if cl.FindMethod(name) != nil || cl.FindMethod("__call") != nil {
-					having = append(having, cl)
-				}
-			}
-			if len(having) > 0 {
-				classes = having
-			}
-		}
-		for _, cl := range classes {
-			meth := cl.FindMethod(name)
-			if meth == nil && cl.Kind == ast.KindTrait {
-				meth = x.traitUserMethod(cl, name)
-			}
-			if meth == nil {
-				if cl.FindMethod("__call") != nil {
-					x.argsOnly(e.Args, env)
-					out = append(out, types.TMixed)
+	if t, ok := x.unionCall(e, base, name, env, expected); ok {
+		out = append(out, t)
+	} else {
+		for _, m := range types.Members(base) {
+			if _, isObj := m.(types.Object); isObj {
+				// `object` declares no methods (PHPStan's method.notFound),
+				// unless method_exists() said so.
+				x.argsOnly(e.Args, env)
+				if !provenMember(env, e.Object, true, name) {
+					x.report(e.Name.Span(), P2006, "unknown method object::%s()", name)
+					out = append(out, types.TError) // reported: the chain goes on silently
 					continue
 				}
-				x.report(e.Name.Span(), P2006, "unknown method %s::%s()", cl.Name, name)
+				out = append(out, types.TMixed)
+				continue
+			}
+			classes := x.classesOf(m, e.Object.Span())
+			if len(classes) == 0 {
 				x.argsOnly(e.Args, env)
-				out = append(out, types.TError)
+				out = append(out, types.TMixed)
 				continue
 			}
-			if !x.canAccess(meth.Vis, meth.Class) {
-				x.report(e.Name.Span(), P2108, "method %s::%s() is %s", meth.Class.Name, name, meth.Vis)
-			}
-			x.c.libraryMethod(e.Name.Span(), meth)
-			if meth.Deprecated && x.c.opts.Deprecations {
-				x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", meth.Class.Name, name, meth.DeprecatedNote)
-			}
-			sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File), file: methodFile(meth),
-				typeParams: meth.TypeParams, recv: m, decl: meth.Class, node: e, meth: meth}
-			sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
-			if e.Args != nil && e.Args.FirstClassCallable {
-				sig.subst = x.memberSubst(m, meth.Class)
-				out = append(out, x.callableOf(sig))
-				continue
-			}
-			ret := x.checkCall(sig, e.Args, env, e.S, expected)
-			if meth.SelfOut != nil {
-				x.narrowPath(env, e.Object, x.bindReceiver(meth.SelfOut, m, meth.Class), false)
-			}
-			if _, isVoid := meth.Return.(types.Void); isVoid {
-				// A void method is called for what it does to its object:
-				// what was known of the members under the receiver may be
-				// gone (PHPStan forgets them as well); the receiver stands.
-				// On $this, the class's static members may have changed too.
-				if base, ok := pathKey(e.Object); ok && !(base == "$this" && x.forgetOwnScope(env, meth.Class)) {
-					env.invalidateUnder(base)
+			if _, inter := m.(types.Intersection); inter && len(classes) > 1 {
+				// `A&B`: the method is found on any member; only when none has
+				// it does every member report.
+				var having []*program.Class
+				for _, cl := range classes {
+					if cl.FindMethod(name) != nil || cl.FindMethod("__call") != nil {
+						having = append(having, cl)
+					}
+				}
+				if len(having) > 0 {
+					classes = having
 				}
 			}
-			out = append(out, ret)
+			for _, cl := range classes {
+				meth := cl.FindMethod(name)
+				if meth == nil && cl.Kind == ast.KindTrait {
+					meth = x.traitUserMethod(cl, name)
+				}
+				if meth == nil {
+					if cl.FindMethod("__call") != nil {
+						x.argsOnly(e.Args, env)
+						out = append(out, types.TMixed)
+						continue
+					}
+					x.report(e.Name.Span(), P2006, "unknown method %s::%s()", cl.Name, name)
+					x.argsOnly(e.Args, env)
+					out = append(out, types.TError)
+					continue
+				}
+				if !x.canAccess(meth.Vis, meth.Class) {
+					x.report(e.Name.Span(), P2108, "method %s::%s() is %s", meth.Class.Name, name, meth.Vis)
+				}
+				x.c.libraryMethod(e.Name.Span(), meth)
+				if meth.Deprecated && x.c.opts.Deprecations {
+					x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", meth.Class.Name, name, meth.DeprecatedNote)
+				}
+				sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File), file: methodFile(meth),
+					typeParams: meth.TypeParams, recv: m, decl: meth.Class, node: e, meth: meth}
+				sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
+				if e.Args != nil && e.Args.FirstClassCallable {
+					sig.subst = x.memberSubst(m, meth.Class)
+					out = append(out, x.callableOf(sig))
+					continue
+				}
+				ret := x.checkCall(sig, e.Args, env, e.S, expected)
+				if meth.SelfOut != nil {
+					x.narrowPath(env, e.Object, x.bindReceiver(meth.SelfOut, m, meth.Class), false)
+				}
+				if _, isVoid := meth.Return.(types.Void); isVoid {
+					// A void method is called for what it does to its object:
+					// what was known of the members under the receiver may be
+					// gone (PHPStan forgets them as well); the receiver stands.
+					// On $this, the class's static members may have changed too.
+					if base, ok := pathKey(e.Object); ok && !(base == "$this" && x.forgetOwnScope(env, meth.Class)) {
+						env.invalidateUnder(base)
+					}
+				}
+				out = append(out, ret)
+			}
 		}
 	}
 	t := types.MakeUnion(out...)
