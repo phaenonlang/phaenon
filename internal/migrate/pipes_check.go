@@ -182,7 +182,7 @@ type checked struct {
 	types map[string]map[ast.Span]types.Type
 }
 
-func checkRecorded(srcs map[string][]byte, watch map[string]bool, load func(map[string][]byte, map[string]bool) (*program.Program, error)) (*checked, error) {
+func checkRecorded(srcs map[string][]byte, watch map[string]bool, load func(map[string][]byte, map[string]bool) (*program.Program, error), hooks ...func(*checker.Options)) (*checked, error) {
 	p, err := load(srcs, watch)
 	if err != nil {
 		return nil, err
@@ -214,7 +214,11 @@ func checkRecorded(srcs map[string][]byte, watch map[string]bool, load func(map[
 		}
 		m[e.Span()] = t
 	}
-	c.diags = checker.New(p, checker.Options{Deprecations: true, Observe: observe}).Check()
+	opts := checker.Options{Deprecations: true, Observe: observe}
+	for _, h := range hooks {
+		h(&opts)
+	}
+	c.diags = checker.New(p, opts).Check()
 	return c, nil
 }
 

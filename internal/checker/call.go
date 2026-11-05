@@ -1879,6 +1879,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		}
 		if b.param.ByRef {
 			x.noteByRef(b.arg.Value)
+			if x.c.opts.ByRef != nil {
+				x.c.opts.ByRef(x.file, b.arg.Value)
+			}
 			if v, ok := b.arg.Value.(*ast.Variable); ok {
 				if x.c.refVars == nil {
 					x.c.refVars = map[*ast.Variable]bool{}

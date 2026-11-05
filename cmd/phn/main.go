@@ -90,7 +90,7 @@ usage:
                                                            formatting; the outputs built on save
   phn watch [--no-build] [--interval D]                    check and build the project each time one of its files
                                                            changes
-  phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] <path>...
+  phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] <path>...
                                                            rewrite .php files as .phn; lift generic docblocks and bare
                                                            @throws into syntax, function into fun; write chains of
                                                            three nested calls or more as |> pipelines unless
@@ -98,6 +98,8 @@ usage:
                                                            types or findings they change; lay the code out (function
                                                            braces up, class-like braces on their own line, one-line
                                                            docblocks, => bodies) unless --keep-layout;
+                                                           --list-types types bare arrays as lists and
+                                                           maps from the values they hold;
                                                            --php writes the target into phaenon.json
   phn stdlib [--out DIR] [--concurrent-out DIR] [--check]
                                                            write the compiled phaenon/runtime sources (Bytes.php,
@@ -731,6 +733,7 @@ func migrateCmd(args []string) {
 	keepLayout := fs.Bool("keep-layout", false, "keep braces, docblocks and bodies as they are (no canonical layout)")
 	keepCalls := fs.Bool("keep-calls", false, "keep nested calls as they are (no pipelines)")
 	pipes := fs.Int("pipes", 3, "write chains of this many nested calls or more as pipelines (2 or more)")
+	listTypes := fs.Bool("list-types", false, "type bare array declarations as list<T> or map<K, V> where every value they hold says so")
 	phpTarget := fs.String("php", "", "write this target (X.Y) into phaenon.json, creating it if needed")
 	fs.Parse(args)
 	if fs.NArg() == 0 && *phpTarget == "" {
@@ -841,6 +844,10 @@ func migrateCmd(args []string) {
 	if minCalls > 0 && len(jobs) > 0 {
 		report = migratePipes(jobs[0].in, target, minCalls, sources)
 	}
+	var typed *migrate.ArrayTypeReport
+	if *listTypes && len(jobs) > 0 {
+		typed = migrateListTypes(jobs[0].in, target, sources)
+	}
 	arrays := 0
 	if !*keepDoc && len(jobs) > 0 {
 		arrays = migrateArrays(jobs[0].in, target, sources)
@@ -879,6 +886,13 @@ func migrateCmd(args []string) {
 	if stats != (migrate.Stats{}) {
 		fmt.Printf("%d @throws lifted, %d bodies written as =>, %d braces moved up, %d class braces moved down, %d empty bodies written as {}, %d docblocks collapsed; %d lines became %d\n",
 			stats.Throws, stats.Arrows, stats.Braces, stats.Down, stats.Empty, stats.Docblocks, linesBefore, linesAfter)
+	}
+	if typed != nil {
+		line := fmt.Sprintf("%d arrays typed as lists and maps, %d left", typed.Written, typed.LeftCount())
+		if r := typed.Reasons(); r != "" {
+			line += " (" + r + ")"
+		}
+		fmt.Println(line)
 	}
 	if arrays > 0 {
 		fmt.Printf("%d arrays and iterables declared without an element type written <mixed>\n", arrays)
@@ -924,6 +938,37 @@ func migrateArrays(anchor string, target phpversion.Version, sources func(yield 
 		*src = out[i]
 	}
 	return n
+}
+
+// migrateListTypes runs the list-types codemod over the prepared files
+// (design/tooling.md §8.2) and replaces each source with its rewrite.
+func migrateListTypes(anchor string, target phpversion.Version, sources func(yield func(path string, src *[]byte))) *migrate.ArrayTypeReport {
+	in, srcs := migrateSources(sources)
+	out, rep, err := migrate.ArrayTypes(in, migrateLoad(anchor, target))
+	if err != nil {
+		fail("phn migrate: %v", err)
+	}
+	for i, src := range srcs {
+		*src = out[i]
+	}
+	for i, n := range rep.Undone {
+		fmt.Fprintf(os.Stderr, "%s: %s\n", rep.UndoneIn[i], n.Msg)
+	}
+	for _, path := range sortedKeys(rep.Notes) {
+		for _, n := range rep.Notes[path] {
+			fmt.Fprintf(os.Stderr, "%s:%d: %s\n", path, n.Line, n.Msg)
+		}
+	}
+	return rep
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // migrateSources lists the prepared files sources yields, and where each

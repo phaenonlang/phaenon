@@ -165,6 +165,12 @@ middle of a line) stay calls. Migrate type-checks the files before and after the
 a file its calls back when its findings, or the type of any expression in it, change; the summary
 counts the chains written as pipelines and those left as calls, by reason.
 
+`--list-types` (opt-in, for code below PHPStan level 6) types a bare `array` declaration from the
+values it holds: a private property's writes, a private or final method's returns, a private
+method's arguments become `list<T>`, `map<K, V>`, `array<V>` or a tuple, in up to five rounds. A
+file whose findings grow gets its arrays back, and every candidate left is reported with the
+reason (`design/tooling.md` §8.2).
+
 Then it lays the code out in the canonical style (`design/functions.md` §5): the opening brace of a
 function, method or closure moves up to the declaration's line, while a class, interface, trait or
 enum keeps its brace on a line of its own (moved back down where an earlier migrate moved it up), a
@@ -395,7 +401,7 @@ phn fmt [--check] [file...]                           # Phaenon's layout, then t
 phn fmt --stdin                                       # Phaenon's layout of standard input, onto standard output
 phn lsp                                               # the language server: diagnostics, hover, definition, completion, build on save
 phn watch [--no-build] [--interval D]                 # check and build the roots each time a file changes
-phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
+phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Bytes, Debug/…), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
 phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them
