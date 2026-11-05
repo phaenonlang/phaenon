@@ -1,7 +1,7 @@
 ---
 type: status
 tags: [phaenon, roadmap, history]
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # Milestones — history and state
@@ -139,5 +139,16 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     paths relative to a `rootUri` around the project (fixed in `internal/lsp`). The PhpStorm
     plugin's TextMate bundle copies the grammar, and its servers follow the same two rules: one
     owner per file, none for installed code. Left in [[open-items]] § M6 — VS Code.
+14. 2026-11-05: **M6 slice 6, first half: throw analysis** (`internal/checker/throws.go`;
+    `../design/tooling.md` §9.1). PHPStan 2.2.5's model, read from its source: explicit and
+    implicit throw points, a call throwing what its callee's `throws` clause or `@throws` declares
+    (inherited by an undeclared override). `P2403` now also reports a catch nothing in its `try`
+    block reaches, `P2404` a `throws` member the body never throws (functions, and methods no
+    override can replace), `P2405` `@throws void` on a body that throws. `catch.neverThrown` and
+    `throws.unusedType` left the parity test's allow-list, and the goldens `throw-analysis.phn`
+    and `throws-flow.phn` pass it. The five dogfood trees (669 catches, 96 `throws` clauses) check
+    byte for byte as before, as PHPStan at level max finds nothing there either. Left in
+    [[open-items]] § M6 — throw analysis. Next: the second half, unused private members, measured
+    first (§9.2).
 
 ← [[Home]]

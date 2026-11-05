@@ -1,7 +1,7 @@
 ---
 type: backlog
 tags: [phaenon, backlog]
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # Open and deferred items
@@ -231,13 +231,14 @@ Decisions are in `../design/php-versions.md` §9; these are what the first build
 
 ## M6 — tooling, analysis rules
 
-- **Throw analysis** — dead `catch` blocks, `@throws` checking (PHPStan `catch.neverThrown`;
-  allow-listed in the parity test). Since D18 (2026-11-02) it should read the `throws` clause
-  (`../design/functions.md` §4.1), and match PHPStan 2's `throws.unusedType`, which level max
-  reports for a clause the body never throws (allow-listed beside `catch.neverThrown`).
+- ~~**Throw analysis**~~ — done 2026-11-05 (slice 6, first half): `P2403` for a catch nothing
+  reaches, `P2404` for a `throws` member the body never throws, `P2405` for `@throws void` on a
+  body that throws; both PHPStan identifiers left the allow-list. What is left: § M6 — throw
+  analysis below.
 - **Purity / unused result** — PHPStan `function/method/expr.resultUnused`, `void.pure`,
   `@phpstan-pure`; allow-listed.
 - **Dead code / unused members** — `method/property/constant/classConstant.unused`; allow-listed.
+  Slice 6's second half, measured first (`../design/tooling.md` §9.2).
 - ~~**LSP**, `phn fmt` (`.phn` files read as inline HTML to php-cs-fixer and plain editors)~~ —
   done: `phn fmt` 2026-11-04 (slice 3), `phn lsp` 2026-11-04 (slice 4, § M6 — `phn lsp` below).
   A persistent cache for vendor parsing (`checker.md` §10 *Speed*) is still not needed: the
@@ -793,5 +794,23 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
   server takes it; definition into one works.
 - **The terminal trace goes through the clipboard**, which keeps its text and loses anything else on
   it (an image).
+
+## M6 — throw analysis (slice 6, 2026-11-05)
+
+`../design/tooling.md` §9.1. Each of these leaves a call implicit where PHPStan knows more, so the
+checker is more lenient there, never stricter. Left:
+- **Native functions' exceptions**: PHPStan reads phpstorm-stubs' `@throws` and has 20 throw-type
+  extensions (`json_decode`/`json_encode` with `JSON_THROW_ON_ERROR`, the `DateTime*` and
+  `Reflection*` constructors, `intdiv`, `DateTime::modify()`, …). php-src stubs carry no
+  `@throws`; the overlay holds only `Throwable`'s getters (`stdlib/overlay/exceptions.php`). Add
+  facts to the overlay when a dogfood catch needs one.
+- **Callables**: a call to a callee taking a callable is implicit. PHPStan adds the throw points of
+  a closure a function calls at once (and of `@param-immediately-invoked-callable`).
+- **A statement's `/** @throws X */`**, **property hooks' `@throws`** (a hooked property is
+  implicit), **`final` properties** (PHP 8.4; not in the program model, so implicit).
+- **`as` in the compiled output**: the checker reads `as` as throwing `TypeError`, while PHPStan
+  sees `Type::…->assert()`, which declares nothing (implicit). A `@throws \TypeError` on
+  `assert()` in `../runtime/src/Type.php` would make them agree.
+- **Covariance of an override's `throws`** and checked exceptions: not done by decision (§9.1).
 
 ← [[Home]]
