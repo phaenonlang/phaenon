@@ -1052,6 +1052,9 @@ func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
 		}
 		t = declared
 	}
+	if returned := x.c.opts.Returned; returned != nil {
+		returned(x.file, s, t)
+	}
 	x.returnTypes = append(x.returnTypes, t)
 	x.blockReturn(s, t)
 	if !x.hasReturn {
@@ -1210,6 +1213,11 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 		t := p.Type
 		if p.Variadic {
 			t = variadicArray(t)
+		}
+		if assume := x.c.opts.Assume; assume != nil && i < len(decls) {
+			if a := assume(x.file, decls[i]); a != nil {
+				t = a
+			}
 		}
 		env.set(p.Name, t)
 		// What PHP holds the parameter to: the erasure of what was written

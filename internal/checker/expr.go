@@ -36,6 +36,11 @@ func localArgs(name string, env *state) bool {
 // contextual typing. It updates env for assignments and other side effects.
 func (x *fnCtx) expr(e ast.Expr, env *state, expected types.Type) types.Type {
 	t := x.exprType(e, env, expected)
+	if assume := x.c.opts.Assume; assume != nil && e != nil {
+		if a := assume(x.file, e); a != nil {
+			t = a
+		}
+	}
 	if observe := x.c.opts.Observe; observe != nil && e != nil {
 		observe(x.file, e, t)
 	}
@@ -192,6 +197,11 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 // exprLenient types an expression without reporting undefined variables
 // or missing offsets (isset/empty/?? operands).
 func (x *fnCtx) exprLenient(e ast.Expr, env *state) types.Type {
+	if assume := x.c.opts.Assume; assume != nil && e != nil {
+		if a := assume(x.file, e); a != nil {
+			return a
+		}
+	}
 	switch e := e.(type) {
 	case *ast.Variable:
 		return x.variable(e, env, true)
@@ -2028,6 +2038,11 @@ func compoundOp(k token.Kind) token.Kind {
 // targetType returns the declared type of an assignment target (property,
 // typed variable), or nil.
 func (x *fnCtx) targetType(target ast.Expr, env *state) types.Type {
+	if assume := x.c.opts.Assume; assume != nil {
+		if a := assume(x.file, target); a != nil {
+			return a
+		}
+	}
 	switch t := target.(type) {
 	case *ast.PropertyFetch:
 		if pr, recv := x.lookupPropertyForWrite(t, env); pr != nil {
