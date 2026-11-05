@@ -178,14 +178,27 @@ func (c *Checker) checkUnusedPrivate(cl *program.Class) {
 	w.report()
 }
 
-// mappedByAttribute reports an attribute other than PHP's own: mapping
-// frameworks (Doctrine, serializers, object mappers) mark so the private
-// properties they read and write through reflection.
+// mappedByAttribute reports an attribute that marks a private property as
+// read and written through reflection, as mapping frameworks (Doctrine,
+// serializers, object mappers) mark them: by default any attribute but PHP's
+// own, and with Options.ReflectedAttributes one of those classes or a class
+// that extends or implements one.
 func (c *Checker) mappedByAttribute(res *program.Resolver, groups []*ast.AttrGroup) bool {
 	for _, g := range groups {
 		for _, a := range g.Attrs {
-			if ac := c.p.Class(res.ClassName(a.Name)); ac == nil || !isStubFile(ac.File) {
-				return true
+			name := res.ClassName(a.Name)
+			ac := c.p.Class(name)
+			if c.opts.ReflectedAttributes == nil {
+				if ac == nil || !isStubFile(ac.File) {
+					return true
+				}
+				continue
+			}
+			for _, listed := range c.opts.ReflectedAttributes {
+				listed = strings.TrimPrefix(listed, "\\")
+				if strings.EqualFold(name, listed) || ac != nil && ac.IsSubclassOf(listed) {
+					return true
+				}
 			}
 		}
 	}

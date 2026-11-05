@@ -52,8 +52,15 @@ removed constructs, `P2xxx` types and flow, `P4xxx` interop (docblocks, vendor).
 Dead code is reported as warnings, as PHPStan reports it at level max: a private method, property
 or constant nothing in its class uses (`P2406`), and a private property only written (`P2407`) or
 only read (`P2408`). A private property that carries a framework's attribute (a mapping, a
-serializer group) is left alone, since the framework reaches it through reflection. Design:
-`design/tooling.md` §9.2.
+serializer group) is left alone, since the framework reaches it through reflection: by default any
+attribute but PHP's own. For a stricter check, `phaenon.json` names the attributes that count,
+their subclasses and implementations included; `[]` lets none count:
+
+```json
+{"roots": {"src": ".src"}, "unused": {"reflectedAttributes": ["Doctrine\\ORM\\Mapping\\MappingAttribute"]}}
+```
+
+Design: `design/tooling.md` §9.2.
 
 ## How it fits into a Composer project
 
@@ -71,7 +78,8 @@ at the same depth, not a nested mirror, so that a compiled file's `__DIR__` sits
 does: `__DIR__.'/../config/services.yaml'` and `\dirname(__DIR__, 3)` keep resolving. Every other
 file under a root (fixtures, YAML) is copied over, so `__DIR__.'/Fixture'` exists there too, and an
 output whose source is gone is removed. `exclude` names the paths the checker leaves alone
-(fixtures another analyser owns); `phn build` compiles them all the same.
+(fixtures another analyser owns); `phn build` compiles them all the same. `unused` narrows which
+attributes spare a private property the dead-code warnings (above).
 
 ```sh
 phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function` → `fun`, nested calls as |> pipelines, canonical layout

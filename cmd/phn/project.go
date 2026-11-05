@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/phaenonlang/phaenon/internal/checker"
 )
 
 // ProjectFile is the project file build and check read from the working
@@ -33,9 +35,29 @@ type project struct {
 	PHP     string            `json:"php"`
 	// Fmt is the command of phn fmt's second layer, the project's fixer run
 	// through phn fix (fmt.go); an empty list turns the layer off.
-	Fmt  *[]string `json:"fmt"`
-	data []byte    // the file as read, to place diagnostics
-	path string    // the file's path, for diagnostics
+	Fmt *[]string `json:"fmt"`
+	// Unused tunes the unused private member findings (P2406–P2408).
+	Unused *unusedSettings `json:"unused"`
+	data   []byte          // the file as read, to place diagnostics
+	path   string          // the file's path, for diagnostics
+}
+
+// unusedSettings is phaenon.json's "unused".
+type unusedSettings struct {
+	// ReflectedAttributes names the attribute classes that mark a private
+	// property as read and written through reflection, their subclasses and
+	// implementations included; without it, any attribute but PHP's own
+	// does, and an empty list lets none (design/tooling.md §9.2).
+	ReflectedAttributes *[]string `json:"reflectedAttributes"`
+}
+
+// checkerOptions are the checker's settings the project file states; a nil
+// project states none.
+func (p *project) checkerOptions(opts checker.Options) checker.Options {
+	if p != nil && p.Unused != nil && p.Unused.ReflectedAttributes != nil {
+		opts.ReflectedAttributes = append([]string{}, *p.Unused.ReflectedAttributes...)
+	}
+	return opts
 }
 
 // loadProject reads phaenon.json from the working directory; nil when there is none.
@@ -81,7 +103,30 @@ func readProject(path string) (*project, error) {
 	for i, e := range p.Exclude {
 		p.Exclude[i] = filepath.Clean(e)
 	}
+	if p.Unused != nil && p.Unused.ReflectedAttributes != nil {
+		for _, name := range *p.Unused.ReflectedAttributes {
+			if !isClassName(strings.TrimPrefix(name, "\\")) {
+				return nil, fmt.Errorf(`%s: "unused": {"reflectedAttributes": [...]} lists attribute classes by their full name, as in "Doctrine\\ORM\\Mapping\\MappingAttribute"; %q is not one`, path, name)
+			}
+		}
+	}
 	return &p, nil
+}
+
+// isClassName reports whether s is a fully qualified class name: identifiers
+// joined by backslashes.
+func isClassName(s string) bool {
+	for _, part := range strings.Split(s, "\\") {
+		if part == "" {
+			return false
+		}
+		for i, r := range part {
+			if !(r == '_' || r >= 0x80 || 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || i > 0 && '0' <= r && r <= '9') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // rebased is the project with its roots and excludes made relative to the

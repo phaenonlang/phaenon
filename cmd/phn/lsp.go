@@ -167,6 +167,12 @@ func (h *projectHost) Program(files []string, read func(string) ([]byte, error),
 	return p, diags, nil
 }
 
+// Options adds the checker's settings from phaenon.json, as read when the
+// host was made.
+func (h *projectHost) Options(opts checker.Options) checker.Options {
+	return h.proj.checkerOptions(opts)
+}
+
 func (h *projectHost) ProjectDiagnostics(p *program.Program, files []string) []checker.Diagnostic {
 	return append(append([]checker.Diagnostic(nil), h.tgt.Diags...), installedDiags(files, p)...)
 }
@@ -240,7 +246,7 @@ func watchRun(host *projectHost, build bool) {
 		if err != nil {
 			return err
 		}
-		diags = append(diags, checker.New(p, checker.Options{Deprecations: true}).Check()...)
+		diags = append(diags, checker.New(p, host.Options(checker.Options{Deprecations: true})).Check()...)
 		diags = append(diags, host.ProjectDiagnostics(p, files)...)
 		loadedProgram = p // printDiag shows the source lines
 		errs, warnings := 0, 0
