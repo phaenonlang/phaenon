@@ -1,0 +1,59 @@
+namespace UnionReceiver;
+
+// A method called on a union receiver takes an argument any member's
+// method takes, as PHPStan merges the members' methods into one
+// (UnionTypeMethodReflection): each parameter's type is the union of the
+// members', the result the union of their results.
+
+final class User
+{
+}
+
+final class Event
+{
+}
+
+/** @template T of object */
+interface Repo
+{
+    /**
+     * @param T $document
+     * @return array<string, mixed>
+     */
+    public function toDatabase(object $document): array;
+}
+
+interface Docs
+{
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return Repo<T>|Repo<object>
+     */
+    public function repoFor(string $class): Repo;
+}
+
+interface TakesInt
+{
+    public function take(int $x): int;
+}
+
+interface TakesString
+{
+    public function take(string $x): string;
+}
+
+/** @return array<string, mixed> */
+function toDatabase(Docs $docs, Event $event): array
+{
+    return $docs->repoFor(User::class)->toDatabase($event);
+}
+
+function take(TakesInt|TakesString $t): int|string
+{
+    $t->take(1);
+    $t->take('s');
+    $t->take(1.5); // want P2103
+
+    return $t->take(2);
+}
