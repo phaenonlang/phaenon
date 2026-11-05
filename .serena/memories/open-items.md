@@ -477,7 +477,8 @@ plugin `77b1d1b`, `b2a79cb`; tq-cli's nine sites `725f47a` ([[dogfood]]). Left:
 (`a42a407`), then what that left. Overrides are kept unless they return a narrower type; values made
 of the declaration's own get a self round; calls on other receivers, pipes and partial
 applications, block returns, inline `@var` returns, anonymous classes' arguments and class-strings
-are followed. Every file given is checked after each round. The strip-and-recover harness is
+are followed. After each round, the files it may change are checked, callers in other files
+among them. The strip-and-recover harness is
 `TestListTypesMeasure` ([[testing]], `PHAENON_LISTTYPES`). Nothing is left unrecovered in core or
 tq-cli. Left:
 - **Wider than written** (core 3%, tq-cli 8%): values the checker knows as `mixed` that the
@@ -486,8 +487,10 @@ tq-cli. Left:
   would close some of these; nothing does that yet.
 - **A top-level homogeneous tuple reads as a list** (`(string, string)` as `list<string>`); always
   correct, less precise.
-- **Cost:** a run checks every file given each round. tq-cli takes about 100 s in the harness, a
-  third of it in the rounds that wait for precise types.
+- ~~**Cost:** a run checked every file given each round; tq-cli took about 100 s in the harness~~
+  — fixed: the programs share parsed trees, a round checks only the files it can change, and a
+  round that keeps all it wrote is the next one's reading. tq-cli takes 13 s, the codemod's part
+  of it 6 s, three plain checks' worth.
 - Found on the way, fixed: `is_subclass_of()` narrowed a string to `never`, not
   `class-string<Foo>` (`../design/checker.md` §9). Not fixed: tq-cli has two unused imports
   (`P2013`, `EstateSpec.phn`, `SigningKeyAddCommand.phn`), real ones in the dogfood tree.

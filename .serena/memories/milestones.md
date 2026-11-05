@@ -198,8 +198,9 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     written, 6% and 7% are left. Then what that left: self rounds for values made of their own
     (recursion, a property filtered into itself, through the checker's `Assume` hook), overrides
     written only when narrower, receivers, pipes, block returns, class-strings, rounds that let
-    `mixed` through only after the precise ones, and every given file checked each round (one
-    override's wider type had reached its callers' findings unseen). The strip-and-recover check
+    `mixed` through only after the precise ones, and the callers in other files checked each
+    round (one override's wider type had reached its callers' findings unseen). A round checks
+    only the files it can change, so tq-cli's run went from 100 s to 13 s. The strip-and-recover check
     is now `TestListTypesMeasure` ([[testing]]): 79% and 82% come back as written, 16% and 9%
     narrower, none unrecovered; `phn check` 486 → 5 and 2078 → 76, PHPStan max 535 → 5 and
     1396 → 71 against the trees migrated without it, with none added. On the way:
