@@ -49,6 +49,12 @@ understood, and `@phpstan-ignore` comments are honoured. Diagnostic codes are st
 removed constructs, `P2xxx` types and flow, `P4xxx` interop (docblocks, vendor). Design:
 `design/checker.md`.
 
+Dead code is reported as warnings, as PHPStan reports it at level max: a private method, property
+or constant nothing in its class uses (`P2406`), and a private property only written (`P2407`) or
+only read (`P2408`). A private property that carries a framework's attribute (a mapping, a
+serializer group) is left alone, since the framework reaches it through reflection. Design:
+`design/tooling.md` §9.2.
+
 ## How it fits into a Composer project
 
 A `.phn` file is PHP without the `<?php` tag. `phn build` compiles each source root into a sibling

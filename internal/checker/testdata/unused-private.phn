@@ -1,0 +1,266 @@
+namespace UnusedPrivate;
+
+// Unused private members (design/tooling.md §9.2): a private method, property
+// or constant nothing in its class uses (P2406), a private property written
+// but never read (P2407) or read but never written (P2408). An access
+// counts when its receiver may be an instance of the class.
+
+final class Formatter
+{
+    public function format(string $s): string
+    {
+        return $s;
+    }
+}
+
+final class Methods
+{
+    private const string PREFIX = 'p';
+
+    private const int UNUSED = 1; // want P2406 "UNUSED"
+
+    private const int IN_DEFAULT = 2;
+
+    private const int IN_CONSTANT = 3;
+
+    private const int ALSO = self::IN_CONSTANT + 1;
+
+    private int $level = self::IN_DEFAULT;
+
+    public function __construct(private Formatter $formatter)
+    {
+    }
+
+    public function run(self $other): string
+    {
+        $a = $this->viaThis();
+        $b = self::viaSelf();
+        $c = static::viaStatic();
+        $d = $other->viaOther();
+        $e = $this->formatter->format('x');
+        $f = array_map($this->viaCallable(...), [1]);
+        $g = array_map([$this, 'viaArray'], [1]);
+        $h = array_map([self::class, 'viaClassString'], [1]);
+        return $a . $b . $c . $d . $e . count($f) . count($g) . count($h) . self::PREFIX . self::ALSO . $this->level;
+    }
+
+    private function viaThis(): string
+    {
+        return '';
+    }
+
+    private static function viaSelf(): string
+    {
+        return '';
+    }
+
+    private static function viaStatic(): string
+    {
+        return '';
+    }
+
+    private function viaOther(): string
+    {
+        return '';
+    }
+
+    private function viaCallable(int $i): int
+    {
+        return $i;
+    }
+
+    private function viaArray(int $i): int
+    {
+        return $i;
+    }
+
+    private static function viaClassString(int $i): int
+    {
+        return $i;
+    }
+
+    // Formatter::format() is another class's method.
+    private function format(): string // want P2406 "format"
+    {
+        return '';
+    }
+
+    private function recursive(int $n): int // want P2406 "recursive"
+    {
+        return $n > 0 ? $this->recursive($n - 1) : 0;
+    }
+
+    private static function neverCalled(): void // want P2406 "neverCalled"
+    {
+    }
+}
+
+final class DynamicCall
+{
+    public function run(string $name): mixed
+    {
+        return $this->$name();
+    }
+
+    // A dynamic name may be any of them.
+    private function maybe(): int
+    {
+        return 1;
+    }
+}
+
+final class Properties
+{
+    private int $unused; // want P2406 "unused"
+
+    private int $defaultOnly = 0; // want P2407 "defaultOnly"
+
+    private int $onlyWritten; // want P2407 "onlyWritten"
+
+    private ?string $onlyRead; // want P2408 "onlyRead"
+
+    /** @var list<int> */
+    private array $appended = []; // want P2407 "appended"
+
+    private int $counter = 0;
+
+    private int $incremented = 0;
+
+    private ?string $cached = null;
+
+    private static int $instances = 0;
+
+    /** @var array<string, int> */
+    private static array $memo = [];
+
+    public function __construct(int $start)
+    {
+        $this->onlyWritten = $start;
+        self::$instances++;
+    }
+
+    public function run(string $key): string
+    {
+        $this->appended[] = 1;
+        $this->counter += 1;
+        $this->incremented++;
+        $this->cached ??= 'x';
+        self::$memo[$key] = 1;
+        return ($this->onlyRead ?? '') . self::$memo[$key];
+    }
+}
+
+final class Promoted
+{
+    public function __construct(
+        private int $readInBody,
+        private int $readInMethod,
+        private int $copiedOnly, // want P2407 "copiedOnly"
+        private int $neverRead, // want P2407 "neverRead"
+    ) {
+        echo $readInBody;
+    }
+
+    public function withMethod(int $v): self
+    {
+        return new self($this->readInBody, $v, $this->copiedOnly, 0);
+    }
+
+    public function method(): int
+    {
+        return $this->readInMethod;
+    }
+}
+
+final class ByReference
+{
+    /** @var array<int|string, string> */
+    private array $matches;
+
+    /** @var list<int> */
+    private array $sorted = [];
+
+    private string $gone = 'x';
+
+    // A by-reference argument is written as well as read; unset() reads.
+    public function run(string $s): string
+    {
+        preg_match('/a/', $s, $this->matches);
+        sort($this->sorted);
+        unset($this->gone);
+        return $this->matches[0] ?? '';
+    }
+}
+
+final class Reflected
+{
+    private int $a = 1;
+
+    private int $b = 2;
+
+    /** @return array<mixed> */
+    public function toArray(): array
+    {
+        return get_object_vars($this);
+    }
+}
+
+trait UsesHelper
+{
+    public function viaTrait(): int
+    {
+        return $this->helper();
+    }
+}
+
+final class WithTrait
+{
+    use UsesHelper;
+
+    private function helper(): int
+    {
+        return 1;
+    }
+}
+
+enum Suit: string
+{
+    case Hearts = 'h';
+
+    private const string SYMBOL = '♥';
+
+    private const string UNUSED = 'x'; // want P2406 "UNUSED"
+
+    public function symbol(): string
+    {
+        return self::SYMBOL . $this->spaced();
+    }
+
+    private function spaced(): string
+    {
+        return ' ';
+    }
+
+    private function idle(): void // want P2406 "idle"
+    {
+    }
+}
+
+function anonymous(): object
+{
+    return new class {
+        public function run(): int
+        {
+            return $this->used();
+        }
+
+        private function used(): int
+        {
+            return 1;
+        }
+
+        private function idle(): void // want P2406 "idle"
+        {
+        }
+    };
+}

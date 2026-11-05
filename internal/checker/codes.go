@@ -124,6 +124,10 @@ var (
 	// (design/tooling.md §9.1).
 	P2404 = Code{"P2404", Warning, "throws names an exception the body never throws"}
 	P2405 = Code{"P2405", Error, "@throws void on a body that throws"}
+	// Unused private members (design/tooling.md §9.2).
+	P2406 = Code{"P2406", Warning, "private member never used"}
+	P2407 = Code{"P2407", Warning, "private property never read"}
+	P2408 = Code{"P2408", Warning, "private property never written"}
 
 	// P2 — classes
 	P2501 = Code{"P2501", Error, "abstract method not implemented"}

@@ -14,7 +14,7 @@ abstract class Base
 {
     public const string NAME = 'base';
     protected const int LEVEL = 1;
-    private const string SECRET = 's';
+    private const string SECRET = 's'; // want P2406 "SECRET"
 }
 
 final class Child extends Base implements HasLimit
@@ -29,7 +29,7 @@ final class Child extends Base implements HasLimit
     protected const int LEVEL = 2;
 
     #[\Override]
-    private const string SECRET = 'c'; // want P2503 "constant App\OverrideConstants\Child::SECRET has #[\Override] but no parent class or interface declares it"
+    private const string SECRET = 'c'; // want P2503 "constant App\OverrideConstants\Child::SECRET has #[\Override] but no parent class or interface declares it", P2406 "Child::SECRET"
 
     #[\Override]
     public const int FRESH = 1; // want P2503

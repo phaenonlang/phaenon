@@ -427,6 +427,9 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 			}
 		} else {
 			ev = x.expr(item.Value, env, expectedValue)
+			if len(e.Items) == 2 && item == e.Items[0] {
+				x.noteRecv(e, ev) // [$this, 'name'] may name a private method
+			}
 			keys = append(keys, types.IntLit(nextInt))
 			shape.Entries = upsert(shape.Entries, types.ShapeEntry{IsInt: true, IntKey: nextInt, Type: ev})
 			nextInt++
@@ -627,6 +630,7 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 		recv = x.expr(e.Class, env, nil)
 		classes = x.classesOf(recv, e.Class.Span())
 	}
+	x.noteRecv(e, recv)
 	name, ok := identName(e.Name)
 	if !ok {
 		x.expr(e.Name, env, nil)
@@ -681,6 +685,7 @@ func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) ty
 			// The member was narrowed: its type is known without re-checking
 			// the object; only a ?-> on a never-null object is still worth a word.
 			obj := x.pathType(e.Object, env)
+			x.noteRecv(e, obj)
 			if e.NullSafe {
 				if !types.IsNullable(obj) && !types.IsMixed(obj) {
 					x.report(e.S, P2307, "?-> on %s, which is never null", x.typeName(obj))
@@ -693,9 +698,10 @@ func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) ty
 		}
 	}
 	obj := x.expr(e.Object, env, nil)
+	x.noteRecv(e, obj)
 	name, ok := identName(e.Name)
 	if !ok {
-		x.expr(e.Name, env, nil)
+		x.noteName(e, x.expr(e.Name, env, nil))
 		x.implicitThrow()
 		x.memberOnMixed(obj, e.Object.Span(), "cannot access a property on mixed")
 		return types.TMixed
@@ -960,9 +966,14 @@ func (x *fnCtx) staticPropertyFetch(e *ast.StaticPropertyFetch, env *state) (typ
 		recv = x.expr(e.Class, env, nil)
 		classes = x.classesOf(recv, e.Class.Span())
 	}
+	if n, ok := e.Class.(*ast.Name); ok && specialClassName(n) == "parent" && len(classes) == 1 {
+		x.noteRecv(e, types.Class{Name: classes[0].Name})
+	} else {
+		x.noteRecv(e, recv)
+	}
 	v, ok := e.Name.(*ast.Variable)
 	if !ok {
-		x.expr(e.Name, env, nil)
+		x.noteName(e, x.expr(e.Name, env, nil))
 		return types.TMixed, nil
 	}
 	if _, named := e.Class.(*ast.Name); !named {
@@ -2098,12 +2109,13 @@ func (x *fnCtx) assignTo(target ast.Expr, vt types.Type, env *state, span ast.Sp
 func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, span ast.Span) {
 	name, ok := identName(t.Name)
 	if !ok {
-		x.expr(t.Object, env, nil)
-		x.expr(t.Name, env, nil)
+		x.noteRecv(t, x.expr(t.Object, env, nil))
+		x.noteName(t, x.expr(t.Name, env, nil))
 		x.implicitThrow()
 		return
 	}
 	obj := x.expr(t.Object, env, nil)
+	x.noteRecv(t, obj)
 	x.propertyThrows(types.StripNull(obj), name)
 	base := types.StripNull(obj)
 	if types.IsNullable(obj) && !types.IsMixed(obj) {

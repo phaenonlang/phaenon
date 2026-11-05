@@ -360,7 +360,7 @@ function nullableTupleElement(): (?Ctx, string)
 final class Box<T>
 {
     /** @param list<T> $items */
-    public function __construct(private array $items)
+    public function __construct(private array $items) // want P2407 "Box::$items"
     {
     }
 
@@ -373,15 +373,15 @@ final class Box<T>
 final class Bag<K of int|string, V>
 {
     /** @param array<K, V> $items */
-    public function __construct(private array $items = [])
+    public function __construct(private array $items = []) // want P2407 "Bag::$items"
     {
     }
 }
 
 final class Holder2
 {
-    private Bag<int, string> $bag;
-    private \ArrayObject<int, string> $exported;
+    private Bag<int, string> $bag; // want P2407 "bag"
+    private \ArrayObject<int, string> $exported; // want P2407 "exported"
 
     public function __construct()
     {
@@ -398,7 +398,7 @@ final class Hasher
     public const int VERSION = 1;
 
     /** @param positive-int $version */
-    public function __construct(private int $version = self::VERSION)
+    public function __construct(private int $version = self::VERSION) // want P2407 "version"
     {
     }
 }

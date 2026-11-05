@@ -219,6 +219,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 		c.checkAttrs(cl, g)
 	}
 	c.checkGenericClass(cl)
+	c.checkUnusedPrivate(cl)
 }
 
 func (c *Checker) checkAttrs(cl *program.Class, g *ast.AttrGroup) {

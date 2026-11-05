@@ -21,7 +21,7 @@ final class Doubled
 
     private(set) int $count = 0;
 
-    fun __construct(private Closure $normalise = fn (string $s): string => \trim($s))
+    fun __construct(private Closure $normalise = fn (string $s): string => \trim($s)) // want P2407 "normalise"
     {
     }
 

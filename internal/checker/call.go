@@ -943,9 +943,10 @@ func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) t
 
 // methodCallOn checks the call on a receiver already typed.
 func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expected types.Type) types.Type {
+	x.noteRecv(e, obj)
 	name, ok := identName(e.Name)
 	if !ok {
-		x.expr(e.Name, env, nil)
+		x.noteName(e, x.expr(e.Name, env, nil))
 		x.memberOnMixed(obj, e.Object.Span(), "cannot call a method on mixed")
 		x.argsOnly(e.Args, env)
 		return types.TMixed
@@ -1088,7 +1089,7 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 	defer x.unresolvedCall(e.S, e.Args)
 	name, ok := identName(e.Name)
 	if !ok {
-		x.expr(e.Name, env, nil)
+		x.noteName(e, x.expr(e.Name, env, nil))
 		x.argsOnly(e.Args, env)
 		return types.TMixed
 	}
@@ -1160,6 +1161,11 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 				classes = append(classes, x.classesOf(m, e.Class.Span())...)
 			}
 		}
+	}
+	if viaParent {
+		x.noteRecv(e, types.Class{Name: classes[0].Name})
+	} else {
+		x.noteRecv(e, recv)
 	}
 	if len(classes) == 0 {
 		x.argsOnly(e.Args, env)
@@ -1714,6 +1720,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			x.pipeParam, x.pipeSig = b.param, sig
 		}
 		if b.param.ByRef {
+			x.noteByRef(b.arg.Value)
 			if at = known(b.arg.Value); at == nil {
 				at = x.exprLenient(b.arg.Value, env)
 			}

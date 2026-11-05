@@ -1,0 +1,36 @@
+namespace UnusedAttributes;
+
+// A private property that carries an attribute from outside PHP is left to
+// what reads the attribute (design/tooling.md §9.2): mapping frameworks read
+// and write such properties through reflection. PHP's own attributes do not
+// count. PHPStan learns the same from framework extensions, which the parity
+// test does not load.
+
+#[\Attribute(\Attribute::TARGET_PROPERTY | \Attribute::TARGET_PARAMETER | \Attribute::TARGET_METHOD)]
+final class MapTo
+{
+    public function __construct(public string $name)
+    {
+    }
+}
+
+final class Source
+{
+    #[MapTo('id')]
+    private int $id = 0;
+
+    #[MapTo('label')]
+    private string $label;
+
+    public function __construct(
+        #[MapTo('snake_case')]
+        private string $snakeCase,
+        #[\SensitiveParameter] private string $secret, // want P2407 "secret"
+    ) {
+    }
+
+    // Methods and constants stay checked.
+    #[MapTo('helper')] private function helper(): void // want P2406 "helper"
+    {
+    }
+}

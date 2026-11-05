@@ -23,7 +23,7 @@ final class Work
 
 final class Blocks
 {
-    private ?Future $kept = null;
+    private ?Future $kept = null; // want P2407 "kept"
 
     fun __construct(private readonly Work $work)
     {

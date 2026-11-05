@@ -77,6 +77,13 @@ type Checker struct {
 	// ignored lists, per file, the lines silenced by @phpstan-ignore /
 	// @phaenon-ignore comments.
 	ignored map[string]map[int]bool
+	// recvs, dynNames and byRefArgs are what the unused-member pass reads
+	// (unused.go): the receiver type of each member access in a class body,
+	// the type of each dynamic member name, and the properties passed by
+	// reference.
+	recvs     map[ast.Node]types.Type
+	dynNames  map[ast.Node]types.Type
+	byRefArgs map[ast.Node]bool
 }
 
 // New creates a checker for the program.
