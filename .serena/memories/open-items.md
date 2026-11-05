@@ -119,15 +119,22 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
     later statement's are "maybe undefined" in the catch, where PHPStan knows them defined;
   - `static::CONST` types as the constant's literal, where PHPStan says the declared type (a
     subclass may override it): lenient, seen while measuring, not yet met in a tree.
-- **The `throws` codemod** (proposed and scoped 2026-11-05): `phn migrate` writes `throws` for
-  what a body lets escape from the project's own `throw new X`, in the method itself or in the
-  project methods it calls, on by default with an opt-out; `Error` and its subclasses are left
-  out. Not from native functions (`json_encode()` with `JSON_THROW_ON_ERROR`, the `DateTime`
-  constructors, …): their failures are invariants a service answers once, up the stack (a 500),
-  and promoting them through every caller would put a clause on half the code. Measured on core
-  and tq-cli before it is built: how many functions gain a clause, how many types, how deep they
-  climb. PhpStorm's "Unhandled \JsonException" stays its own inspection's, which its list of
-  unchecked exceptions answers. After the `list-types` codemod.
+- **The `throws` codemod** (proposed and scoped 2026-11-05): `phn migrate` writes `throws` for a
+  method's own uncaught `throw new X` of a checked exception, on by default with an opt-out.
+  - *Checked or unchecked decides, not where the exception comes from*, as PHPStan's
+    `exceptions.uncheckedExceptionClasses` does: by default `LogicException`, `Error` and their
+    subclasses are unchecked (bugs, a 500), and `phaenon.json` may add more (`JsonException`,
+    `RuntimeException`). A checked exception counts from anywhere, `json_decode()` of input
+    included. Core's `src` has 337 `throw new`; 267 are `LogicException` or
+    `InvalidArgumentException`, about 30 are domain contracts (`AggregateNotFound`,
+    `InvalidCursor`, `BadCredentialsException`, …).
+  - *No promotion to callers*: calls through interfaces would stop it (an interface's
+    implementations are an open set), so the same behaviour would be documented on some paths
+    and not others; and promotion one level at a time is not idempotent.
+  - The PhpStorm plugin hands PhpStorm the same unchecked list, whose "Unhandled X" is
+    transitive whatever Phaenon writes.
+  - Measured on core and tq-cli first, against full promotion for comparison. After the
+    `list-types` codemod.
 
 ## M5 — concurrency (2026-11-01)
 
