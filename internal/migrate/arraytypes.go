@@ -7,12 +7,15 @@ package migrate
 // property's default and writes, a private or final method's returns, a
 // private method's arguments. It runs in rounds, since a method returning
 // a property is known once the property is; a type that says mixed waits
-// for the precise ones, and a declaration whose values are made of its own
-// (a recursion, a property filtered into itself) is typed by a self round,
-// which reads its values with its own reads assumed. Every round's rewrite
-// is checked with every file given: types may narrow, which is the point,
-// so only findings are compared, and a declaration a new finding falls on
-// is left out of the next round.
+// for the precise ones, and a type a round wrote is narrowed by a later
+// one when what its values come from has been typed since (array_keys()
+// of a bare array is a list<int|string>). A declaration whose values are
+// made of its own (a recursion, a property filtered into itself) is typed
+// by a self round, which reads its values with its own reads assumed, and
+// so is one whose type would say mixed while its values read it. Every
+// round's rewrite is checked with the files it may change: types may
+// narrow, which is the point, so only findings are compared, and a
+// declaration a new finding falls on is left out of the next round.
 
 import (
 	"fmt"
@@ -52,8 +55,13 @@ func (r *ArrayTypeReport) LeftCount() int { return (&PipeReport{Left: r.Left}).L
 const (
 	// arrayTypeRounds bounds the rounds of a pass, twice over (those that
 	// write precise types and those that let mixed through): a method
-	// returning a property is known the round after the property is.
-	arrayTypeRounds = 5
+	// returning a property is known the round after the property is, and a
+	// parameter passed down a chain of methods one round per method. A
+	// round ends the pass when it writes nothing, which narrowsAtMost
+	// makes sure of: the bound is a backstop.
+	arrayTypeRounds = 20
+	// narrowsAtMost bounds the times a round narrows one declaration.
+	narrowsAtMost = 3
 	// arrayTypePasses bounds the passes: rounds until none types more, then
 	// a self round, whose types the next pass carries further.
 	arrayTypePasses = 3
@@ -66,7 +74,7 @@ const (
 // for Pipes. It returns each file's source, rewritten or as it was.
 func ArrayTypes(files []PipeFile, load func(srcs map[string][]byte, checked map[string]bool) (*program.Program, error)) ([][]byte, *ArrayTypeReport, error) {
 	r := &arrayRun{load: load, srcs: map[string][]byte{}, watch: map[string]bool{}, checked: map[string]bool{},
-		current: map[string]*arrayTyper{}, dirty: map[string]bool{}, calls: map[string]map[string]bool{},
+		current: map[string]*arrayTyper{}, dirty: map[string]bool{}, calls: map[string]map[string]bool{}, typedAs: map[string]map[string]string{}, narrows: map[string]map[string]int{},
 		left: map[string]map[string]string{}, deny: map[string]map[string]string{},
 		rep: &ArrayTypeReport{Left: map[string]int{}, Notes: map[string][]Note{}}}
 	out := make([][]byte, len(files))
@@ -164,6 +172,11 @@ type arrayRun struct {
 	current map[string]*arrayTyper
 	dirty   map[string]bool
 	calls   map[string]map[string]bool // per file, the method names it may call, lower-cased
+	// typedAs holds, per file, the declarations the rounds typed and the
+	// type each was given, which a later round narrows when its values say
+	// less: what they come from may have been typed since.
+	typedAs map[string]map[string]string
+	narrows map[string]map[string]int // per file, how often a round narrowed each
 }
 
 // typed is what one check records for the codemod beside the expressions'
@@ -231,7 +244,7 @@ func (r *arrayRun) typer(cur *checked, t *typed, path string) *arrayTyper {
 		return nil
 	}
 	return &arrayTyper{prog: cur.prog, file: pf, types: cur.types[path], byRef: t.byRef[pf], callables: t.callables,
-		returned: t.returned, left: map[string]string{}, deny: r.deny[path], lax: r.lax}
+		returned: t.returned, left: map[string]string{}, deny: r.deny[path], lax: r.lax, typedAs: r.typedAs[path], narrows: r.narrows[path]}
 }
 
 // refresh checks the dirty files and returns each watched file's
@@ -256,7 +269,7 @@ func (r *arrayRun) refresh() (map[string]*arrayTyper, error) {
 	typers := map[string]*arrayTyper{}
 	for path, a := range r.current {
 		if r.watch[path] {
-			a.deny, a.lax, a.only = r.deny[path], r.lax, nil
+			a.deny, a.lax, a.only, a.typedAs, a.narrows = r.deny[path], r.lax, nil, r.typedAs[path], r.narrows[path]
 			typers[path] = a
 		}
 	}
@@ -540,7 +553,20 @@ func (r *arrayRun) round(probe *selfProbe) (map[string]*arrayTyper, bool, bool, 
 			continue
 		}
 		r.srcs[path] = src
-		r.rep.Written += len(a.wrote)
+		if r.typedAs[path] == nil {
+			r.typedAs[path] = map[string]string{}
+		}
+		for _, k := range a.wrote {
+			if _, ok := r.typedAs[path][k]; ok {
+				if r.narrows[path] == nil {
+					r.narrows[path] = map[string]int{}
+				}
+				r.narrows[path][k]++
+			} else {
+				r.rep.Written++
+			}
+			r.typedAs[path][k] = a.spelled[k]
+		}
 		r.changed(path, a.exported)
 		kept++
 	}
@@ -657,6 +683,29 @@ func mentionsMixed(spelled string) bool {
 	return strings.Contains(spelled, "mixed")
 }
 
+// mixedDepth is how deep in a spelled type its deepest mixed sits, in
+// the type arguments and tuples around it; -1 when it says none.
+func mixedDepth(spelled string) int {
+	deepest, depth := -1, 0
+	for i := 0; i < len(spelled); i++ {
+		switch spelled[i] {
+		case '<', '(':
+			depth++
+		case '>', ')':
+			depth--
+		case 'm':
+			if strings.HasPrefix(spelled[i:], "mixed") && (i == 0 || !isIdentByte(spelled[i-1])) && (i+5 == len(spelled) || !isIdentByte(spelled[i+5])) {
+				deepest = max(deepest, depth)
+			}
+		}
+	}
+	return deepest
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || c == '\\' || '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+}
+
 // emptyArray reports an array type that holds nothing: [], or one whose
 // key or value type is never.
 func emptyArray(t types.Type) bool {
@@ -745,8 +794,9 @@ func newFindings(before, after []checker.Diagnostic) []checker.Diagnostic {
 type candidate struct {
 	key, what string
 	at        int
-	typ       *ast.NamedType // the `array` to replace
+	span      ast.Span // the type to replace: `array`, or what a round wrote; the `?` of a nullable one stays
 	nullable  bool
+	method    string // a return's or a parameter's method
 }
 
 // bareArrayDecls lists a file's declarations written as a bare array or
@@ -773,18 +823,18 @@ func bareArrayDecls(f *ast.File) []candidate {
 			switch m := m.(type) {
 			case *ast.PropertyDecl:
 				if nt, nullable, ok := bare(m.Type); ok && len(m.Props) == 1 {
-					out = append(out, candidate{key: "prop " + cl.Name.Name + "::" + m.Props[0].Var.Name, what: "property $" + m.Props[0].Var.Name, at: nt.S.Start, typ: nt, nullable: nullable})
+					out = append(out, candidate{key: "prop " + cl.Name.Name + "::" + m.Props[0].Var.Name, what: "property $" + m.Props[0].Var.Name, at: nt.S.Start, span: nt.S, nullable: nullable})
 				}
 			case *ast.MethodDecl:
 				if nt, nullable, ok := bare(m.ReturnType); ok {
-					out = append(out, candidate{key: "return " + cl.Name.Name + "::" + m.Name.Name, what: m.Name.Name + "()'s return", at: nt.S.Start, typ: nt, nullable: nullable})
+					out = append(out, candidate{key: "return " + cl.Name.Name + "::" + m.Name.Name, what: m.Name.Name + "()'s return", at: nt.S.Start, span: nt.S, nullable: nullable, method: m.Name.Name})
 				}
 				for _, p := range m.Params {
 					if p.Modifiers != 0 {
 						continue // promoted: the constructor's callers write it
 					}
 					if nt, nullable, ok := bare(p.Type); ok {
-						out = append(out, candidate{key: "param " + cl.Name.Name + "::" + m.Name.Name + "$" + p.Var.Name, what: "parameter $" + p.Var.Name + " of " + m.Name.Name + "()", at: nt.S.Start, typ: nt, nullable: nullable})
+						out = append(out, candidate{key: "param " + cl.Name.Name + "::" + m.Name.Name + "$" + p.Var.Name, what: "parameter $" + p.Var.Name + " of " + m.Name.Name + "()", at: nt.S.Start, span: nt.S, nullable: nullable, method: m.Name.Name})
 					}
 				}
 			}
@@ -817,6 +867,49 @@ func bareArrayDeclsAll(f *ast.File) []candidate {
 				for _, p := range m.Params {
 					if p.Type != nil {
 						out = append(out, candidate{key: "param " + cl.Name.Name + "::" + m.Name.Name + "$" + p.Var.Name, at: p.Type.Span().Start})
+					}
+				}
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// typedDecls lists the declarations of a file that earlier rounds typed,
+// keys among those of typedAs, as candidates whose type a round may
+// narrow.
+func typedDecls(f *ast.File, typedAs map[string]string) []candidate {
+	if len(typedAs) == 0 {
+		return nil
+	}
+	var out []candidate
+	add := func(key, what, method string, t ast.TypeExpr) {
+		if _, ok := typedAs[key]; !ok || t == nil {
+			return
+		}
+		nullable := false
+		if n, ok := t.(*ast.NullableType); ok {
+			t, nullable = n.Type, true
+		}
+		out = append(out, candidate{key: key, what: what, at: t.Span().Start, span: t.Span(), nullable: nullable, method: method})
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		cl, ok := n.(*ast.ClassDecl)
+		if !ok || cl.Name == nil {
+			return true
+		}
+		for _, m := range cl.Members {
+			switch m := m.(type) {
+			case *ast.PropertyDecl:
+				if len(m.Props) == 1 {
+					add("prop "+cl.Name.Name+"::"+m.Props[0].Var.Name, "property $"+m.Props[0].Var.Name, "", m.Type)
+				}
+			case *ast.MethodDecl:
+				add("return "+cl.Name.Name+"::"+m.Name.Name, m.Name.Name+"()'s return", m.Name.Name, m.ReturnType)
+				for _, p := range m.Params {
+					if p.Modifiers == 0 {
+						add("param "+cl.Name.Name+"::"+m.Name.Name+"$"+p.Var.Name, "parameter $"+p.Var.Name+" of "+m.Name.Name+"()", m.Name.Name, p.Type)
 					}
 				}
 			}
@@ -875,14 +968,23 @@ type arrayTyper struct {
 	// stored holds, for a callable reference assigned to a typed property
 	// (`$this->post = $post ?? self::send(...)`), the property's type.
 	stored map[ast.Expr]types.Type
-	pcl    *program.Class  // the class being read
-	ns     string          // the file's namespace
-	only   map[string]bool // a self round's: the candidates it may type
+	pcl    *program.Class // the class being read
+	// recursive holds, lower-cased, the methods of the class being read
+	// that call themselves through others: what narrowing one gives may
+	// be the other's type nested once more. Nil until a narrowing asks.
+	recursive map[string]bool
+	ns        string          // the file's namespace
+	only      map[string]bool // a self round's: the candidates it may type
 	// lax lets the run write a type that says mixed somewhere, which waits
 	// for the rounds that write precise ones: its values may come from a
 	// declaration a later round types.
 	lax  bool
 	deny map[string]string // candidates a check refused, with the finding
+	// typedAs holds the declarations earlier rounds typed, with the type
+	// written: candidates again, given a narrower type when their values
+	// say less than it.
+	typedAs map[string]string
+	narrows map[string]int // how often a round narrowed each
 
 	// What a run finds, per candidate key.
 	left   map[string]string       // why it was left
@@ -908,7 +1010,8 @@ type arrayTyper struct {
 	params    map[string]ast.Span
 	passes    map[string][]string
 	edits     []edit
-	wrote     []string // the candidates this run typed
+	wrote     []string          // the candidates this run typed
+	spelled   map[string]string // the type it wrote for each
 	// exported holds, of them, the returns of methods other files may
 	// call, with the method's name.
 	exported map[string]string
@@ -921,11 +1024,12 @@ func (a *arrayTyper) use(key string, off int) { a.uses[key] = append(a.uses[key]
 func (a *arrayTyper) run() ([]byte, int) {
 	a.left, a.values, a.unspelled, a.sites = map[string]string{}, map[string][]types.Type{}, map[string]bool{}, map[string][]int{}
 	a.selfReads, a.targets, a.params, a.passes, a.edits, a.wrote = map[string][]ast.Span{}, map[string][]ast.Span{}, map[string]ast.Span{}, map[string][]string{}, nil, nil
+	a.spelled = map[string]string{}
 	a.exported, a.uses, a.spans, a.ownWrites = map[string]string{}, map[string][]int{}, map[string]ast.Span{}, map[string]bool{}
 	ns, imports := fileNames(a.file.AST)
 	a.ns = ns
 	sp := &speller{ns: ns, imports: imports, prog: a.prog}
-	cands := bareArrayDecls(a.file.AST)
+	cands := append(bareArrayDecls(a.file.AST), typedDecls(a.file.AST, a.typedAs)...)
 	byKey := map[string]candidate{}
 	for _, c := range cands {
 		byKey[c.key] = c
@@ -938,6 +1042,7 @@ func (a *arrayTyper) run() ([]byte, int) {
 		pcl := a.programClass(cl)
 		a.pcl = pcl
 		a.stored = storedCallables(cl, pcl)
+		a.recursive = nil // found when a narrowing asks
 		// write types a candidate from its values; inherited, when not
 		// nil, is the type an override takes from the method it overrides,
 		// which it keeps unless its values are of another type.
@@ -954,6 +1059,10 @@ func (a *arrayTyper) run() ([]byte, int) {
 			if a.only != nil && !a.only[key] {
 				return
 			}
+			if was, ok := a.typedAs[key]; ok {
+				a.narrow(cl, c, key, was, values, shape, inherited, exported, sp)
+				return
+			}
 			if why, ok := a.deny[key]; ok {
 				a.left[key] = why
 				return
@@ -963,6 +1072,7 @@ func (a *arrayTyper) run() ([]byte, int) {
 				a.unspelled[key] = true
 				return
 			}
+			sp.uses = a.tupleUses(cl, c)
 			spelled, why := spellArray(values, shape, c.nullable, sp)
 			if inherited != nil {
 				// Written only when it says more than the type it takes:
@@ -982,12 +1092,21 @@ func (a *arrayTyper) run() ([]byte, int) {
 				a.unspelled[key] = true
 				return
 			}
+			if a.only == nil && mentionsMixed(spelled) && a.readsItself(key) {
+				// The mixed may be its own bare array read back, as a
+				// recursion spread into array_push() gives it: the self
+				// round reads its values with that read assumed.
+				a.left[key] = "its values read it, and say mixed"
+				a.unspelled[key] = true
+				return
+			}
 			if !a.lax && a.only == nil && mentionsMixed(spelled) {
 				a.left[key] = "it says mixed, and waits for the declarations its values come from"
 				return
 			}
-			a.edits = append(a.edits, edit{c.typ.S, spelled})
+			a.edits = append(a.edits, edit{c.span, spelled})
 			a.wrote = append(a.wrote, key)
+			a.spelled[key] = spelled
 			if exported != "" {
 				a.exported[key] = exported
 			}
@@ -1073,6 +1192,244 @@ func (a *arrayTyper) run() ([]byte, int) {
 	}
 	l := &lifter{src: a.file.Src, edits: a.edits}
 	return l.apply(), len(a.wrote)
+}
+
+// narrow gives a declaration an earlier round typed as was the type its
+// values spell now, when that one is narrower: a value read from a
+// declaration not typed then, as array_keys() of a bare array is a
+// list<int|string>, is known since. It writes no type that says more
+// than was, or none at all: was stays, and no note is due.
+func (a *arrayTyper) narrow(cl *ast.ClassDecl, c candidate, key, was string, values []types.Type, shape arrayShape, inherited types.Type, exported string, sp *speller) {
+	if _, refused := a.deny[key]; refused || a.ownWrites[key] || a.narrows[key] >= narrowsAtMost {
+		return
+	}
+	// Values read from the declaration itself hold the type written: each
+	// narrowing would nest it once more, as [$this->p] does.
+	if a.readsItself(key) {
+		return
+	}
+	sp.uses = a.tupleUses(cl, c)
+	spelled, why := spellArray(values, shape, c.nullable, sp)
+	if why != "" || spelled == was {
+		return
+	}
+	now, before := a.spelledType(spelled), a.spelledType(was)
+	if now == nil || before == nil || !types.IsSubtype(now, before, a.prog) || types.IsSubtype(before, now, a.prog) {
+		return
+	}
+	// In a recursion through other methods, an unknown found one level
+	// deeper is the recursion unrolled, not news from a value typed since.
+	if c.method != "" && mixedDepth(spelled) > mixedDepth(was) {
+		if a.recursive == nil {
+			a.recursive = a.recursiveMethods(cl)
+		}
+		if a.recursive[strings.ToLower(c.method)] {
+			return
+		}
+	}
+	if inherited != nil {
+		if c.nullable {
+			now = types.MakeUnion(now, types.TNull)
+		}
+		if !types.IsSubtype(now, inherited, a.prog) {
+			return
+		}
+	}
+	a.edits = append(a.edits, edit{c.span, spelled})
+	a.wrote = append(a.wrote, key)
+	a.spelled[key] = spelled
+	if exported != "" {
+		a.exported[key] = exported
+	}
+}
+
+// tupleUses says how a candidate's reads in its class use it and its
+// elements: taken apart or read at a literal index, which a pair is;
+// iterated or spread, which a list is. Iteration wins.
+func (a *arrayTyper) tupleUses(cl *ast.ClassDecl, c candidate) [2]tupleUse {
+	var out [2]tupleUse
+	kind, rest, _ := strings.Cut(c.key, " ")
+	_, member, _ := strings.Cut(rest, "::")
+	region := []ast.Node{cl}
+	var read func(e ast.Expr) bool
+	switch kind {
+	case "prop":
+		read = func(e ast.Expr) bool {
+			switch e := e.(type) {
+			case *ast.PropertyFetch:
+				v, ok := e.Object.(*ast.Variable)
+				id, named := e.Name.(*ast.Ident)
+				return ok && v.Name == "this" && named && id.Name == member
+			case *ast.StaticPropertyFetch:
+				v, ok := e.Name.(*ast.Variable)
+				return ok && v.Name == member && a.ownClass(e.Class)
+			}
+			return false
+		}
+	case "return":
+		read = func(e ast.Expr) bool {
+			switch e := e.(type) {
+			case *ast.MethodCall:
+				v, ok := e.Object.(*ast.Variable)
+				return ok && v.Name == "this" && a.names(e.Name, member)
+			case *ast.StaticCall:
+				return a.ownClass(e.Class) && a.names(e.Name, member)
+			}
+			return false
+		}
+	case "param":
+		method, param, _ := strings.Cut(member, "$")
+		region = nil
+		for _, m := range cl.Members {
+			if md, ok := m.(*ast.MethodDecl); ok && strings.EqualFold(md.Name.Name, method) {
+				for _, st := range md.Body {
+					region = append(region, st)
+				}
+			}
+		}
+		read = func(e ast.Expr) bool {
+			v, ok := e.(*ast.Variable)
+			return ok && v.Name == param
+		}
+	default:
+		return out
+	}
+	// level is 0 for a read of the declaration, 1 for one of its element.
+	level := func(e ast.Expr) int {
+		if read(e) {
+			return 0
+		}
+		if ix, ok := e.(*ast.Index); ok && ix.Index != nil && read(ix.Array) {
+			return 1
+		}
+		return -1
+	}
+	saw := func(l int, u tupleUse) {
+		if l >= 0 && l < len(out) && out[l] != usedAsList {
+			out[l] = u
+		}
+	}
+	for _, r := range region {
+		ast.Inspect(r, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.Assign:
+				if lit, ok := n.Target.(*ast.ArrayLit); ok && n.Op == token.Kind('=') && destructures(lit) {
+					saw(level(n.Value), usedAsTuple)
+				}
+			case *ast.Foreach:
+				l := level(n.Expr)
+				if lit, ok := n.Value.(*ast.ArrayLit); ok && destructures(lit) && l >= 0 {
+					saw(l+1, usedAsTuple)
+				}
+				saw(l, usedAsList)
+			case *ast.Index:
+				if _, ok := n.Index.(*ast.IntLit); ok {
+					saw(level(n.Array), usedAsTuple)
+				}
+			case *ast.ArrayItem:
+				if n.Unpack {
+					saw(level(n.Value), usedAsList)
+				}
+			case *ast.Arg:
+				if n.Unpack {
+					saw(level(n.Value), usedAsList)
+				}
+			}
+			return true
+		})
+	}
+	return out
+}
+
+// destructures reports an array literal that takes positions apart:
+// `[$a, $b]`, list($a, , $c), no key.
+func destructures(lit *ast.ArrayLit) bool {
+	if len(lit.Items) == 0 {
+		return false
+	}
+	for _, it := range lit.Items {
+		if it != nil && it.Key != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// readsItself reports a candidate whose values read it: a property in its
+// writes, a recursive call among a method's returns, a parameter its
+// method passes on to itself.
+func (a *arrayTyper) readsItself(key string) bool {
+	if len(a.selfReads[key]) > 0 {
+		return true
+	}
+	for _, from := range a.passes[key] {
+		if from == key {
+			return true
+		}
+	}
+	return false
+}
+
+// recursiveMethods lists, lower-cased, the methods of a class that reach
+// themselves through calls of its other methods, on $this or the class.
+func (a *arrayTyper) recursiveMethods(cl *ast.ClassDecl) map[string]bool {
+	calls := map[string]map[string]bool{}
+	for _, m := range cl.Members {
+		md, ok := m.(*ast.MethodDecl)
+		if !ok {
+			continue
+		}
+		from := strings.ToLower(md.Name.Name)
+		calls[from] = map[string]bool{}
+		for _, s := range md.Body {
+			ast.Inspect(s, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.MethodCall:
+					if id, ok := n.Name.(*ast.Ident); ok {
+						if call, _ := a.reaches(n.Object); call {
+							calls[from][strings.ToLower(id.Name)] = true
+						}
+					}
+				case *ast.StaticCall:
+					if id, ok := n.Name.(*ast.Ident); ok && a.ownClass(n.Class) {
+						calls[from][strings.ToLower(id.Name)] = true
+					}
+				}
+				return true
+			})
+		}
+	}
+	out := map[string]bool{}
+	for start := range calls {
+		// start is recursive when a method it calls, other than itself,
+		// leads back to it.
+		seen := map[string]bool{}
+		var walk func(m string) bool
+		walk = func(m string) bool {
+			for next := range calls[m] {
+				if next == start {
+					return true
+				}
+				if !seen[next] {
+					seen[next] = true
+					if walk(next) {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		for next := range calls[start] {
+			if next != start && !seen[next] {
+				seen[next] = true
+				if walk(next) {
+					out[start] = true
+					break
+				}
+			}
+		}
+	}
+	return out
 }
 
 // inheritedReturn is the return type a method takes from the one it
@@ -1466,8 +1823,28 @@ func (a *arrayTyper) propertyValues(key string, cl *ast.ClassDecl, p *ast.Proper
 			}
 			return true
 		}
+		written := len(a.sites[key])
 		for _, s := range md.Body {
 			ast.Inspect(s, visit)
+		}
+		if why != "" || len(a.sites[key]) == written {
+			continue
+		}
+		// A method that writes the property may write back what it read
+		// of it through a local (`$files = $this->trees[$t]; …;
+		// $this->trees[$sha] = $files`): its reads are its own values'.
+		seen := map[ast.Span]bool{}
+		for _, sp := range append(append([]ast.Span{}, a.selfReads[key]...), a.targets[key]...) {
+			seen[sp] = true
+		}
+		for _, s := range md.Body {
+			ast.Inspect(s, func(n ast.Node) bool {
+				if x, ok := n.(ast.Expr); ok && isSelf(x) && !seen[x.Span()] {
+					seen[x.Span()] = true
+					a.selfReads[key] = append(a.selfReads[key], x.Span())
+				}
+				return true
+			})
 		}
 	}
 	if why != "" {
@@ -2051,7 +2428,8 @@ func spellArrayAt(values []types.Type, shape arrayShape, nullable, nested bool, 
 	any := len(elems) > 0
 	var tuples [][]types.Type // the positions of each value, while every value is a tuple
 	tupleLen, tuplesOnly := -1, len(elems) == 0
-	literals := false // a position holds a literal: ['a', 'b'] is a list, [$dir, $plugin] a pair
+	literals := false // a position holds a literal or an array: ['a', 'b'] is a list, [$dir, $plugin] a pair
+	records := true   // every position holds an array: rules in a row, a list of whatever types
 	var collect func(t types.Type) string
 	collect = func(t types.Type) string {
 		switch t := t.(type) {
@@ -2104,8 +2482,11 @@ func spellArrayAt(values []types.Type, shape arrayShape, nullable, nested bool, 
 				}
 				elems = append(elems, e.Type)
 				pos = append(pos, e.Type)
-				if isLiteralType(e.Type) {
-					literals = true
+				if isLiteralType(e.Type) || isArrayType(e.Type) {
+					literals = true // records in a row are a list, not a pair
+				}
+				if !isArrayType(e.Type) {
+					records = false
 				}
 			}
 			if !positional || len(pos) < 2 || tupleLen >= 0 && tupleLen != len(pos) {
@@ -2145,8 +2526,18 @@ func spellArrayAt(values []types.Type, shape arrayShape, nullable, nested bool, 
 		// element type, [$dir, $plugin], make a pair.
 		differ := nested && !literals
 		for _, p := range parts[1:] {
-			if p != parts[0] {
+			if p != parts[0] && !records {
+				differ = true // (int, string): a pair
+			}
+		}
+		// How the code reads the values decides, where it tells: taken
+		// apart (`[$commit, $body] = …`) they are pairs, iterated a list.
+		if sp != nil && sp.depth < len(sp.uses) {
+			switch sp.uses[sp.depth] {
+			case usedAsTuple:
 				differ = true
+			case usedAsList:
+				differ = false
 			}
 		}
 		if differ {
@@ -2172,6 +2563,18 @@ func spellArrayAt(values []types.Type, shape arrayShape, nullable, nested bool, 
 		return "array<" + elem + ">", ""
 	}
 	return "map<" + key + ", " + elem + ">", ""
+}
+
+// isArrayType reports an array type, or a union of them.
+func isArrayType(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Array, types.Shape:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // isLiteralType reports a type that is one value: a literal, an enum case.
@@ -2220,7 +2623,20 @@ type speller struct {
 	ns      string
 	imports map[string]string
 	prog    *program.Program // for the class an anonymous one extends; may be nil
+	// uses says how the declaration being spelled is read, at its top and
+	// in its elements, depth the level being spelled.
+	uses  [2]tupleUse
+	depth int
 }
+
+// tupleUse is what the reads of a fixed-length array say it is.
+type tupleUse int
+
+const (
+	usedUnknown tupleUse = iota
+	usedAsTuple          // only taken apart, `[$a, $b] = $x`, or read at a literal index
+	usedAsList           // iterated, or spread
+)
 
 func (s *speller) union(ts []types.Type) (string, bool) {
 	seen := map[string]bool{}
@@ -2272,8 +2688,13 @@ func (s *speller) union(ts []types.Type) (string, bool) {
 			return "", false
 		}
 	}
-	if len(arrays) > 0 {
-		one, why := spellArrayAt(arrays, arrayShape{}, false, true, s)
+	// Lists and maps among the elements are spelled apart, as a decoded
+	// JSON answer is map<string, mixed>|list<map<string, mixed>>: one
+	// array<…> of both would know neither its keys nor its elements.
+	for _, group := range listsAndMaps(arrays) {
+		s.depth++
+		one, why := spellArrayAt(group, arrayShape{}, false, true, s)
+		s.depth--
 		switch {
 		case why == "":
 		case why == "it only ever holds []" || why == "nothing is known of its keys or elements":
@@ -2316,6 +2737,81 @@ func (s *speller) union(ts []types.Type) (string, bool) {
 		return out + "|null", true
 	}
 	return out, true
+}
+
+// listsAndMaps groups array types to be spelled together: the lists
+// (tuples among them) apart from the maps of string keys when there are
+// both, in the order they come; all of them as one group when any is
+// keyed otherwise. An empty array goes with the first group.
+func listsAndMaps(arrays []types.Type) [][]types.Type {
+	if len(arrays) == 0 {
+		return nil
+	}
+	var lists, maps, empty []types.Type
+	listFirst := false
+	for _, t := range arrays {
+		isList, isMap := false, false
+		switch t := t.(type) {
+		case types.Array:
+			switch {
+			case emptyArray(t):
+			case t.List:
+				isList = true
+			case types.IsSubtype(t.Key, types.TString, nil):
+				isMap = true
+			default:
+				return [][]types.Type{arrays}
+			}
+		case types.Shape:
+			switch {
+			case len(t.Entries) == 0:
+			case t.List || shapeIsPositional(t):
+				isList = true
+			case shapeHasStringKeys(t):
+				isMap = true
+			default:
+				return [][]types.Type{arrays}
+			}
+		}
+		switch {
+		case isList:
+			if len(lists) == 0 && len(maps) == 0 {
+				listFirst = true
+			}
+			lists = append(lists, t)
+		case isMap:
+			maps = append(maps, t)
+		default:
+			empty = append(empty, t)
+		}
+	}
+	if len(lists) == 0 || len(maps) == 0 {
+		return [][]types.Type{arrays}
+	}
+	if listFirst {
+		return [][]types.Type{append(lists, empty...), maps}
+	}
+	return [][]types.Type{append(maps, empty...), lists}
+}
+
+// shapeIsPositional reports a shape whose keys are 0, 1, … in order.
+func shapeIsPositional(t types.Shape) bool {
+	for i, e := range t.Entries {
+		if !e.IsInt || e.IntKey != int64(i) || e.Optional {
+			return false
+		}
+	}
+	return true
+}
+
+// shapeHasStringKeys reports a shape whose every key is a string.
+func shapeHasStringKeys(t types.Shape) bool {
+	for _, e := range t.Entries {
+		if e.IsInt {
+			return false
+		}
+	}
+	return true
 }
 
 // classNames spells the string literals among ts as the class-string
@@ -2461,8 +2957,8 @@ func (s *speller) one(t types.Type) (string, bool) {
 		return "Closure(" + strings.Join(params, ", ") + "): " + ret, true
 	case types.ClassString:
 		switch of := t.Of.(type) {
-		case nil:
-			return "class", true
+		case nil, types.Object:
+			return "class", true // $object::class names some class
 		case types.Class:
 			if !strings.Contains(of.Name, "@anonymous") {
 				return "class<" + s.class(of.Name) + ">", true
