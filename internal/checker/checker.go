@@ -47,6 +47,20 @@ type Options struct {
 	// phn migrate's list-types reads what a method referred to as a
 	// callable receives (`array_map([$this, 'm'], $xs)`).
 	CallableArg func(f *program.File, e ast.Expr, param types.Type)
+	// Returned, when set, is called with each return statement that
+	// returns a value and the type it gives its function: the value's, or
+	// the unnamed `@var` above it. phn migrate's list-types reads a
+	// method's returns from it.
+	Returned func(f *program.File, s *ast.Return, t types.Type)
+	// Assume, when set, is asked for each expression typed, each
+	// assignment's target and each parameter bound in a checked file: a
+	// type it returns replaces the checker's — the value read, the type
+	// the target holds, the parameter's type in the body.
+	// phn migrate's list-types reads the values of a declaration that
+	// depend on it — a recursive call, a property filtered into itself —
+	// with its own reads assumed empty, then checks the type they give
+	// (design/tooling.md §8.2).
+	Assume func(f *program.File, n ast.Node) types.Type
 	// Cancelled, when set, is asked before each file: once it reports true,
 	// Check stops and returns what it found so far. phn lsp cancels the
 	// check of a whole project that a newer save makes stale.
