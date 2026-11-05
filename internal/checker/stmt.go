@@ -770,12 +770,67 @@ func sameKind(a, b types.Type) bool {
 
 func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 	bodyEnv := env.clone()
-	x.throwEnvs = append(x.throwEnvs, env.clone())
+	// The catch blocks start from where the body can first throw (calls
+	// throw, as PHPStan's throw points are): after the leading statements
+	// that call nothing, with what the first statement that can throw
+	// binds by reference before it calls anything. The state after every
+	// statement joins in as the body runs (stmts).
+	none := newEnv()
+	none.dead = true
+	x.throwEnvs = append(x.throwEnvs, none)
+	top := len(x.throwEnvs) - 1
 	x.pushThrows()
-	x.stmts(s.Body, bodyEnv)
+	seed := bodyEnv.clone()
+	lead, thrower := 0, false
+	for lead < len(s.Body) && cannotThrow(s.Body[lead]) {
+		points := len(x.throwFrames[len(x.throwFrames)-1])
+		before := bodyEnv.clone()
+		x.stmt(s.Body[lead], bodyEnv)
+		x.throwEnvs[top] = join(x.throwEnvs[top], bodyEnv)
+		lead++
+		if len(x.throwFrames[len(x.throwFrames)-1]) > points {
+			// It throws after all (an operator's TypeError, as the throw
+			// analysis has it): the catches may see the state before it.
+			seed, thrower = before, true
+			break
+		}
+		seed = bodyEnv.clone()
+	}
+	x.stmts(s.Body[lead:], bodyEnv)
 	original := x.popThrows()
-	thrown := x.throwEnvs[len(x.throwEnvs)-1]
+	if lead < len(s.Body) && !thrower {
+		if inner, ok := s.Body[lead].(*ast.Try); ok && x.trySeeds[inner] != nil {
+			seed = x.trySeeds[inner] // its body's first throw point is ours
+		} else {
+			var bound []string
+			x.refsBeforeCall(s.Body[lead], &bound)
+			for _, name := range bound {
+				after, ok := bodyEnv.get(name)
+				if !ok {
+					continue
+				}
+				// Where the call throws, the variable holds what it held
+				// before (null when the binding created it) or what the
+				// callee wrote.
+				if was, ok := seed.get(name); ok && !was.maybe {
+					seed.set(name, types.MakeUnion(was.t, after.t))
+				} else {
+					seed.set(name, types.Nullable(after.t))
+				}
+			}
+		}
+	}
+	if x.trySeeds == nil {
+		x.trySeeds = map[*ast.Try]*state{}
+	}
+	x.trySeeds[s] = seed
+	thrown := join(x.throwEnvs[len(x.throwEnvs)-1], seed)
 	x.throwEnvs = x.throwEnvs[:len(x.throwEnvs)-1]
+	if n := len(x.throwEnvs); n > 0 {
+		// What no catch here takes reaches the enclosing try's catches with
+		// the state it was thrown in.
+		x.throwEnvs[n-1] = join(x.throwEnvs[n-1], thrown)
+	}
 	ends := []*state{bodyEnv}
 	var caught []types.Type
 	var caughtNames []string
@@ -844,6 +899,99 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		return
 	}
 	*env = *joinAll(ends...)
+}
+
+// cannotThrow reports a statement that calls nothing: an expression
+// statement or echo of values, variables, operators other than / and %
+// (DivisionByZeroError), assignments and closures being created.
+func cannotThrow(s ast.Stmt) bool {
+	var es []ast.Expr
+	switch s := s.(type) {
+	case *ast.ExprStmt:
+		es = []ast.Expr{s.Expr}
+	case *ast.Echo:
+		es = s.Exprs
+	case *ast.Nop:
+		return true
+	default:
+		return false
+	}
+	ok := true
+	for _, e := range es {
+		ast.Inspect(e, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.Closure, *ast.ArrowFunc:
+				return false // created, not run
+			case *ast.Call, *ast.MethodCall, *ast.StaticCall, *ast.New, *ast.Throw, *ast.Include, *ast.Eval,
+				*ast.Exit, *ast.Clone, *ast.Yield, *ast.YieldFrom, *ast.Match:
+				ok = false
+			case *ast.InterpolatedString:
+				ok = n.Kind != ast.StringBacktick // a shell command
+			case *ast.Binary:
+				if n.Op == token.Kind('/') || n.Op == token.Kind('%') {
+					ok = false
+				}
+			case *ast.Assign:
+				if n.Op == token.T_DIV_EQUAL || n.Op == token.T_MOD_EQUAL {
+					ok = false
+				}
+			}
+			return ok
+		})
+	}
+	return ok
+}
+
+// refsBeforeCall collects, in evaluation order, the variables an
+// expression statement passes by reference before any call in it runs:
+// PHP creates them as it binds the argument (SEND_REF). It reports whether
+// a call ran, after which it stops.
+func (x *fnCtx) refsBeforeCall(n ast.Node, out *[]string) (called bool) {
+	switch e := n.(type) {
+	case *ast.ExprStmt:
+		return x.refsBeforeCall(e.Expr, out)
+	case *ast.Paren:
+		return x.refsBeforeCall(e.Expr, out)
+	case *ast.Assign:
+		return x.refsBeforeCall(e.Value, out)
+	case *ast.Call:
+		if _, named := e.Callee.(*ast.Name); !named && x.refsBeforeCall(e.Callee, out) {
+			return true
+		}
+		return x.argsBeforeCall(e.Args, out)
+	case *ast.MethodCall:
+		if x.refsBeforeCall(e.Object, out) {
+			return true
+		}
+		return x.argsBeforeCall(e.Args, out)
+	case *ast.StaticCall:
+		return x.argsBeforeCall(e.Args, out)
+	case *ast.New:
+		return x.argsBeforeCall(e.Args, out)
+	case *ast.PropertyFetch:
+		return x.refsBeforeCall(e.Object, out)
+	case *ast.Variable, *ast.StringLit, *ast.IntLit, *ast.FloatLit, *ast.ConstFetch, *ast.ClassConstFetch:
+		return false
+	}
+	return true // anything else may call
+}
+
+func (x *fnCtx) argsBeforeCall(args *ast.ArgList, out *[]string) bool {
+	if args != nil {
+		for _, a := range args.Args {
+			if a.Value == nil {
+				continue
+			}
+			if v, ok := a.Value.(*ast.Variable); ok && x.c.refVars[v] {
+				*out = append(*out, v.Name)
+				continue
+			}
+			if x.refsBeforeCall(a.Value, out) {
+				return true
+			}
+		}
+	}
+	return true // the call runs
 }
 
 func (x *fnCtx) returnStmt(s *ast.Return, env *state) {

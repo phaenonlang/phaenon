@@ -96,6 +96,9 @@ type Checker struct {
 	recvs     map[ast.Node]types.Type
 	dynNames  map[ast.Node]types.Type
 	byRefArgs map[ast.Node]bool
+	// refVars are the variables passed by reference, which a try's catch
+	// blocks see bound (tryStmt).
+	refVars map[*ast.Variable]bool
 }
 
 // New creates a checker for the program.
@@ -432,8 +435,10 @@ type fnCtx struct {
 	// them as its own break or continue.
 	deepJumps []deepJump
 	// throwEnvs collects the environment after every statement inside a
-	// try body, for the catch blocks.
+	// try body, for the catch blocks; trySeeds holds each try's state at
+	// its body's first throw point (tryStmt).
 	throwEnvs []*state
+	trySeeds  map[*ast.Try]*state
 	// argKnown holds a pipe's left side, typed before the stage it feeds
 	// is checked as a call that takes it as an argument; pipeOperand is
 	// that expression while its stage is checked, and pipeParam the

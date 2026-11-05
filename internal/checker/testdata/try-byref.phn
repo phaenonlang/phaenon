@@ -1,0 +1,116 @@
+namespace TryByRef;
+
+// A catch block sees the variables as they were where the try body threw.
+// Calls throw, so a statement throws after PHP has bound the variables it
+// passes by reference to its first call (SEND_REF creates them), and with
+// the variables the statements before it assigned, as PHPStan's throw
+// points see them.
+
+function stack(?int &$handled): \Closure
+{
+    $handled = 0;
+
+    return static function () use (&$handled): void {
+        ++$handled;
+    };
+}
+
+function both(int $first, ?int &$handled): void
+{
+    $handled = $first;
+}
+
+function handle(\Closure $next): void
+{
+    $next();
+    throw new \RuntimeException('busy');
+}
+
+function maybeThrows(): int
+{
+    return random_int(0, 1) === 1 ? throw new \RuntimeException('no') : 1;
+}
+
+function boundFirst(): void
+{
+    try {
+        handle(stack($handled));
+    } catch (\RuntimeException) {
+    }
+    echo $handled;
+}
+
+function calledFirst(): void
+{
+    try {
+        both(maybeThrows(), $handled);
+    } catch (\RuntimeException) {
+    }
+    echo $handled; // want P2009
+}
+
+function assignedBefore(): int
+{
+    try {
+        $x = 1;
+        maybeThrows();
+    } catch (\RuntimeException) {
+        return $x;
+    }
+
+    return $x;
+}
+
+function assignedByTheThrower(): int
+{
+    try {
+        $x = maybeThrows();
+    } catch (\RuntimeException) {
+        return $x; // want P2009
+    }
+
+    return $x;
+}
+
+function nested(): void
+{
+    try {
+        try {
+            $y = 1;
+            maybeThrows();
+        } catch (\LogicException) {
+            $y = 2;
+        }
+    } catch (\RuntimeException) {
+        echo $y;
+    }
+}
+
+/**
+ * @param list<int> $xs
+ * @param-out list<int> $xs
+ */
+function fill(array &$xs): void
+{
+    $xs[] = maybeThrows();
+}
+
+/** @param list<int> $xs */
+function takesList(array $xs): int
+{
+    return \count($xs);
+}
+
+// A variable that exists before it is passed by reference keeps its type
+// where the call throws: no null appears.
+function existing(): int
+{
+    $committed = [];
+    try {
+        fill($committed);
+    } finally {
+        echo 'done';
+    }
+
+    return takesList($committed);
+}

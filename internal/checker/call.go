@@ -1879,6 +1879,12 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		}
 		if b.param.ByRef {
 			x.noteByRef(b.arg.Value)
+			if v, ok := b.arg.Value.(*ast.Variable); ok {
+				if x.c.refVars == nil {
+					x.c.refVars = map[*ast.Variable]bool{}
+				}
+				x.c.refVars[v] = true
+			}
 			if at = known(b.arg.Value); at == nil {
 				at = x.exprLenient(b.arg.Value, env)
 			}
