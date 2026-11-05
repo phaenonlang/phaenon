@@ -37,9 +37,16 @@ type Options struct {
 	// from the method it overrides. phn migrate writes `<mixed>` after it
 	// (design/collections.md §5).
 	Elementless func(f *program.File, t *ast.NamedType)
-	// ByRef, when set, is called with each argument passed by reference:
-	// phn migrate's list-types leaves alone a property passed so.
-	ByRef func(f *program.File, e ast.Expr)
+	// ByRef, when set, is called with each argument passed by reference and
+	// the type the callee writes back: nil when it keeps the argument's
+	// type (php-src's sort without an @param-out reads and writes it).
+	// phn migrate's list-types reads a property's values from them.
+	ByRef func(f *program.File, e ast.Expr, out types.Type)
+	// CallableArg, when set, is called with each argument and the type of
+	// the parameter it is passed to, once the call's templates are known:
+	// phn migrate's list-types reads what a method referred to as a
+	// callable receives (`array_map([$this, 'm'], $xs)`).
+	CallableArg func(f *program.File, e ast.Expr, param types.Type)
 	// Cancelled, when set, is asked before each file: once it reports true,
 	// Check stops and returns what it found so far. phn lsp cancels the
 	// check of a whole project that a newer save makes stale.

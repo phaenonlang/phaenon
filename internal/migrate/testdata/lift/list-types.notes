@@ -1,5 +1,3 @@
-34: left property $sorted as array: it is passed by reference
-38: left property $nothing as array: it only ever holds []
-45: left property $mapped as array: an attribute may have a framework write it
-70: left all()'s return as array: it overrides a method
-85: left parameter $parts of label() as array: its name is written as a string
+60: left property $nothing as array: it only ever holds []
+67: left property $mapped as array: an attribute may have a framework write it
+105: left all()'s return as array: it overrides a method
