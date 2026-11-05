@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"sync"
 )
 
 //go:embed all:php-src
@@ -33,6 +34,25 @@ var suggested embed.FS
 
 //go:embed constants.php
 var constants []byte
+
+//go:embed benevolent.txt
+var benevolentList string
+
+var benevolent = sync.OnceValue(func() map[string]bool {
+	m := map[string]bool{}
+	for _, line := range strings.Split(benevolentList, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			m[line] = true
+		}
+	}
+	return m
+})
+
+// Benevolent reports a function or method (`class::method`, lower-cased)
+// whose result PHPStan reads as a benevolent union: a method may be called
+// on it when one of its members has it, as on phpredis's results in a
+// pipeline or DOMDocument::createElement()'s.
+func Benevolent(name string) bool { return benevolent()[name] }
 
 // Constants returns the values of the constants php-src's stubs leave
 // UNKNOWN, read once from PHP for the embedded extensions.
