@@ -84,7 +84,11 @@ func migrateFixture(t *testing.T, in, dst string, src []byte, layout bool, pipes
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := Finish(piped[0], closeTag, opts)
+	arrays, _, err := Arrays([]PipeFile{{Path: dst, Src: piped[0]}}, pipeLoad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Finish(arrays[0], closeTag, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +159,13 @@ func TestLift(t *testing.T) {
 			again = piped[0]
 			if rep.Pipelines > 0 {
 				t.Errorf("second run wrote %d more pipelines", rep.Pipelines)
+			}
+			arrays, n, err := Arrays([]PipeFile{{Path: wantFile, Src: again}}, pipeLoad)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if again = arrays[0]; n > 0 {
+				t.Errorf("second run wrote %d more array<mixed>", n)
 			}
 			if layout {
 				if again, err = Layout(again, nil); err != nil {

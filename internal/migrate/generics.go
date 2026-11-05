@@ -1111,6 +1111,25 @@ func (l *lifter) nativeText(t ast.TypeExpr) string {
 // render prints a docblock type in Phaenon syntax, or reports that it has
 // no spelling there (shapes, literals, int ranges, callable signatures
 // other than Closure, conditional types).
+// anyKey reports whether a key type is every key PHP has: array-key, or
+// int|string.
+func anyKey(n *docblock.TypeNode) bool {
+	switch n.Kind {
+	case docblock.KindNamed:
+		return strings.EqualFold(n.Name, "array-key") && len(n.Args) == 0
+	case docblock.KindUnion:
+		seen := map[string]bool{}
+		for _, m := range n.Args {
+			if m.Kind != docblock.KindNamed || len(m.Args) > 0 {
+				return false
+			}
+			seen[strings.ToLower(m.Name)] = true
+		}
+		return len(seen) == 2 && seen["int"] && seen["string"]
+	}
+	return false
+}
+
 func render(n *docblock.TypeNode) (string, bool) {
 	switch n.Kind {
 	case docblock.KindNamed:
@@ -1120,7 +1139,19 @@ func render(n *docblock.TypeNode) (string, bool) {
 			name = "static"
 		case "array":
 			if len(n.Args) == 2 {
+				if anyKey(n.Args[0]) {
+					// array<array-key, V> is array<V>: the keys do not
+					// matter (design/collections.md §2).
+					v, ok := render(n.Args[1])
+					return "array<" + v + ">", ok
+				}
 				name = "map"
+			}
+		case "array-key":
+			// The one key type PHP has, written as it is meant (design/
+			// generics.md §11.2).
+			if len(n.Args) == 0 {
+				return "int|string", true
 			}
 		case "class-string":
 			// The one hyphenated name with a Phaenon spelling; the rest stay
@@ -1172,7 +1203,7 @@ func render(n *docblock.TypeNode) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		if n.Args[0].Kind == docblock.KindUnion || n.Args[0].Kind == docblock.KindIntersection {
+		if n.Args[0].Kind == docblock.KindUnion || n.Args[0].Kind == docblock.KindIntersection || anyKey(n.Args[0]) {
 			return inner + "|null", true
 		}
 		return "?" + inner, true

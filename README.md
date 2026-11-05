@@ -45,7 +45,11 @@ through the nearest `vendor/composer` autoload maps, and the php-src stubs embed
 (refined by an overlay for what PHP cannot express: `array_map` returning `array<K, R>`,
 `ReflectionClass<T>`, PHPUnit's assertions). Docblocks are the interop contract: `@param`,
 `@return`, `@var`, `@template`, `@extends`, `@phpstan-assert` and the PHPStan type grammar are
-understood, and `@phpstan-ignore` comments are honoured. Diagnostic codes are stable: `P1xxx`
+understood, and `@phpstan-ignore` comments are honoured. A `.phn` docblock may use Phaenon's own
+spellings, as an array shape often does (`array{by: map<string, int>, pair: (int, int)}`); the
+emitter writes them in PHPStan's. A declared `array` names its element type (`array<V>` for a list
+or keyed array of `V`, `array<mixed>` for any), unless the method it overrides documents one: a
+bare `array` is `P2516`, as PHPStan at level max reports it. Diagnostic codes are stable: `P1xxx`
 removed constructs, `P2xxx` types and flow, `P4xxx` interop (docblocks, vendor). Design:
 `design/checker.md`.
 
@@ -125,7 +129,8 @@ local `php` (`PHN_PHP` names another), which should be as new as the target (`P4
 `phn migrate` strips `<?php`, `declare(strict_types=1)` and a trailing `?>`, then lifts what
 PHPStan code says in comments into the signature: `@template T of Foo` → `<T of Foo>`, `@extends
 Base<T>` → `extends Base<T>`, `@param list<T> $xs` → `list<T> $xs`, `@return T` → `: T`, a
-property's `@var array<K, V>` → `map<K, V>`. It also spells every named function and method `fun`,
+property's `@var array<K, V>` → `map<K, V>`, `@param array<array-key, V> $xs` → `array<V> $xs`, and
+a declared `array` that has no element type and inherits none → `array<mixed>`. It also spells every named function and method `fun`,
 dropping the `public` that Phaenon implies (`public function` → `fun`, `final public static
 function` → `final static fun`), drops a constant's `public` (`public const` → `const`) and `public`
 before an asymmetric visibility (`public private(set)` → `private(set)`); `--keep-public` keeps all three. A tag is lifted only when its type has a Phaenon
