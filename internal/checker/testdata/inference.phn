@@ -872,3 +872,42 @@ function conditionalReturns(string $url, string $s): void
         takesNonNegative(false === $errors ? 0 : $errors['error_count']);
     }
 }
+
+/** @template T of object */
+class Codec
+{
+    /**
+     * @param class-string<T> $className
+     * @return T
+     */
+    public function decode(string $data, string $className): object
+    {
+        throw new \LogicException($data . $className);
+    }
+
+    /** @param T $document */
+    public function encode(object $document): string
+    {
+        return $document::class;
+    }
+}
+
+final class Store
+{
+    /**
+     * A constructor's template kept on a promoted property: a call through
+     * the property infers it, and so does a call nested in another's
+     * arguments, which the outer call's open template must not bind.
+     *
+     * @template T of object
+     * @param Codec<T> $codec
+     */
+    public function __construct(public readonly Codec $codec)
+    {
+    }
+}
+
+function roundTrip(Store $store, \stdClass $doc): string
+{
+    return $store->codec->encode($store->codec->decode($store->codec->encode($doc), $doc::class));
+}

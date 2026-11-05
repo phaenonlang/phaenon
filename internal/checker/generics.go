@@ -443,6 +443,18 @@ func mentionsParam(t types.Type) bool {
 	return found
 }
 
+// mentionsFreshParam reports a type parameter a call is inferring: the
+// fresh names checkCallArgs gives them hold a NUL.
+func mentionsFreshParam(t types.Type) bool {
+	found := false
+	types.Walk(t, func(m types.Type) {
+		if p, ok := m.(types.Param); ok && strings.Contains(p.Name, "\x00") {
+			found = true
+		}
+	})
+	return found
+}
+
 func (x *fnCtx) mentionsClassParam(t types.Type) bool {
 	if x.class == nil {
 		return false

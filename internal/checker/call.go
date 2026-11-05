@@ -1807,8 +1807,11 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			unify(types.Substitute(b.param.Type, rename), at, subst, inferable, x.p())
 		}
 	}
-	// Infer from the expected type too (contextual typing of the return).
-	if len(inferable) > 0 && expected != nil && sig.ret != nil {
+	// Infer from the expected type too (contextual typing of the return),
+	// unless the enclosing call is still inferring it: its open parameter
+	// says nothing yet, and binding ours to it would leave both open
+	// (`$m->toDatabase($m->fromDatabase($doc, $class))`).
+	if len(inferable) > 0 && expected != nil && sig.ret != nil && !mentionsFreshParam(expected) {
 		unify(renameForeign(types.Substitute(types.Substitute(sig.ret, rename), subst)), expected, subst, inferable, x.p())
 	}
 	// Expose the results under the declared names too (new Foo() reads them).
