@@ -51,8 +51,8 @@ type strippedAt struct {
 
 func measureListTypes(t *testing.T, tree string, min int) {
 	t.Chdir(tree)
-	savedExcludes, savedSources := excludes, projectSources
-	t.Cleanup(func() { excludes, projectSources = savedExcludes, savedSources })
+	savedExcludes, savedSources, savedShare := excludes, projectSources, share
+	t.Cleanup(func() { excludes, projectSources, share = savedExcludes, savedSources, savedShare })
 	proj := loadProject()
 	if proj == nil {
 		t.Fatalf("%s: no %s", tree, ProjectFile)

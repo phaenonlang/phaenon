@@ -66,6 +66,7 @@ const (
 // for Pipes. It returns each file's source, rewritten or as it was.
 func ArrayTypes(files []PipeFile, load func(srcs map[string][]byte, checked map[string]bool) (*program.Program, error)) ([][]byte, *ArrayTypeReport, error) {
 	r := &arrayRun{load: load, srcs: map[string][]byte{}, watch: map[string]bool{}, checked: map[string]bool{},
+		current: map[string]*arrayTyper{}, dirty: map[string]bool{}, calls: map[string]map[string]bool{},
 		left: map[string]map[string]string{}, deny: map[string]map[string]string{},
 		rep: &ArrayTypeReport{Left: map[string]int{}, Notes: map[string][]Note{}}}
 	out := make([][]byte, len(files))
@@ -79,6 +80,7 @@ func ArrayTypes(files []PipeFile, load func(srcs map[string][]byte, checked map[
 		r.checked[f.Path] = true
 		if declaresBareArray(tree) {
 			r.watch[f.Path] = true
+			r.dirty[f.Path] = true
 		}
 	}
 	if len(r.watch) == 0 || load == nil {
@@ -136,18 +138,32 @@ func ArrayTypes(files []PipeFile, load func(srcs map[string][]byte, checked map[
 }
 
 // arrayRun is one run of the codemod: the sources as the rounds left them,
-// the files it still types, and what the check refused. Every file given
-// is checked: a method's return reaches the files that call it.
+// the files it still types, and what the check refused.
+//
+// A round changes a few files, and what a file's check finds depends only
+// on its source and the declarations it reads. The declarations the
+// codemod types are private but for a final method's return, which
+// reaches the files that call it. So the first check checks every file
+// given, and a later one only the files a round may have changed: the
+// ones it rewrote, and the ones that name a method whose return it typed.
+// Every other file keeps the reading of its last check.
 type arrayRun struct {
-	load    func(map[string][]byte, map[string]bool) (*program.Program, error)
-	srcs    map[string][]byte
-	watch   map[string]bool // the files whose declarations it types
-	checked map[string]bool // the files given
-	base    *checked        // the findings before any round, which no round may add to
-	left    map[string]map[string]string
-	deny    map[string]map[string]string // per file, candidates a check refused, with the finding
-	rep     *ArrayTypeReport
-	lax     bool // the rounds may write types that say mixed
+	load       func(map[string][]byte, map[string]bool) (*program.Program, error)
+	srcs       map[string][]byte
+	watch      map[string]bool // the files whose declarations it types
+	checked    map[string]bool // the files given
+	base       *checked        // the findings before any round, which no round may add to
+	baseByFile map[string][]checker.Diagnostic
+	left       map[string]map[string]string
+	deny       map[string]map[string]string // per file, candidates a check refused, with the finding
+	rep        *ArrayTypeReport
+	lax        bool // the rounds may write types that say mixed
+	// current holds each watched file's reading of its last check, which
+	// stays right until the file is dirty: rewritten, or naming a return
+	// a round typed.
+	current map[string]*arrayTyper
+	dirty   map[string]bool
+	calls   map[string]map[string]bool // per file, the method names it may call, lower-cased
 }
 
 // typed is what one check records for the codemod beside the expressions'
@@ -158,11 +174,40 @@ type typed struct {
 	returned  map[*ast.Return]types.Type
 }
 
-// check checks the current sources, recording what the codemod reads;
-// assume, when not nil, is the self round's Assume hook.
-func (r *arrayRun) check(assume func(*program.File, ast.Node) types.Type) (*checked, *typed, error) {
+// check checks the current sources of files, recording what the codemod
+// reads of the watched ones; assume, when not nil, is the self round's
+// Assume hook. The first check checks every file given: its findings are
+// the base.
+func (r *arrayRun) check(files map[string]bool, assume func(*program.File, ast.Node) types.Type) (*checked, *typed, error) {
+	if r.base == nil && assume == nil {
+		files = r.checked
+	}
+	cur, t, err := r.checkSources(r.srcs, files, assume)
+	if err == nil && r.base == nil && assume == nil {
+		r.base, r.baseByFile = cur, byFile(cur.diags)
+	}
+	return cur, t, err
+}
+
+// byFile groups findings by their file.
+func byFile(diags []checker.Diagnostic) map[string][]checker.Diagnostic {
+	out := map[string][]checker.Diagnostic{}
+	for _, d := range diags {
+		out[d.File] = append(out[d.File], d)
+	}
+	return out
+}
+
+// checkSources checks files of srcs as check does.
+func (r *arrayRun) checkSources(srcs map[string][]byte, files map[string]bool, assume func(*program.File, ast.Node) types.Type) (*checked, *typed, error) {
+	record := map[string]bool{}
+	for path := range files {
+		if r.watch[path] {
+			record[path] = true
+		}
+	}
 	t := &typed{byRef: map[*program.File][]byRefArg{}, callables: map[ast.Expr]types.Type{}, returned: map[*ast.Return]types.Type{}}
-	cur, err := checkRecorded(r.srcs, r.checked, r.load, func(o *checker.Options) {
+	cur, err := checkSome(srcs, files, record, r.load, func(o *checker.Options) {
 		o.ByRef = func(f *program.File, e ast.Expr, out types.Type) { t.byRef[f] = append(t.byRef[f], byRefArg{e, out}) }
 		o.CallableArg = func(f *program.File, e ast.Expr, param types.Type) {
 			switch e.(type) {
@@ -175,9 +220,6 @@ func (r *arrayRun) check(assume func(*program.File, ast.Node) types.Type) (*chec
 	})
 	if err != nil {
 		return nil, nil, err
-	}
-	if r.base == nil && assume == nil {
-		r.base = cur
 	}
 	return cur, t, nil
 }
@@ -192,23 +234,124 @@ func (r *arrayRun) typer(cur *checked, t *typed, path string) *arrayTyper {
 		returned: t.returned, left: map[string]string{}, deny: r.deny[path], lax: r.lax}
 }
 
+// refresh checks the dirty files and returns each watched file's
+// reading, as of its sources now, ready to run.
+func (r *arrayRun) refresh() (map[string]*arrayTyper, error) {
+	if len(r.dirty) > 0 {
+		cur, t, err := r.check(r.dirty, nil)
+		if err != nil {
+			return nil, err
+		}
+		for path := range r.dirty {
+			delete(r.current, path)
+			if !r.watch[path] {
+				continue
+			}
+			if a := r.typer(cur, t, path); a != nil {
+				r.current[path] = a
+			}
+		}
+		r.dirty = map[string]bool{}
+	}
+	typers := map[string]*arrayTyper{}
+	for path, a := range r.current {
+		if r.watch[path] {
+			a.deny, a.lax, a.only = r.deny[path], r.lax, nil
+			typers[path] = a
+		}
+	}
+	return typers, nil
+}
+
+// changed marks the readings a kept rewrite of path may change: the
+// file's, and those of the watched files that call a method whose return
+// it typed. A file with nothing to type needs no reading.
+func (r *arrayRun) changed(path string, exported map[string]string) {
+	delete(r.calls, path)
+	if r.watch[path] {
+		r.dirty[path] = true
+	}
+	var names []string
+	for _, n := range exported {
+		names = append(names, strings.ToLower(n))
+	}
+	for p := range r.mentioning(names) {
+		if r.watch[p] {
+			r.dirty[p] = true
+		}
+	}
+}
+
+// mentioning lists the files given that may call a method of one of the
+// lower-cased names: every file that calls one, on any object, and some
+// that do not.
+func (r *arrayRun) mentioning(names []string) map[string]bool {
+	out := map[string]bool{}
+	if len(names) == 0 {
+		return out
+	}
+	for path := range r.checked {
+		calls, ok := r.calls[path]
+		if !ok {
+			calls = methodNames(r.srcs[path])
+			r.calls[path] = calls
+		}
+		for _, n := range names {
+			if calls[n] {
+				out[path] = true
+				break
+			}
+		}
+	}
+	return out
+}
+
+// methodNames lists, lower-cased, the names a file may call a method by:
+// those of its method and static calls (a first-class callable among
+// them), and the strings that may name one in a callable (`[$o, 'm']`,
+// `'C::m'`). A call by a name held in a variable types as mixed, which a
+// narrower return does not change.
+func methodNames(src []byte) map[string]bool {
+	out := map[string]bool{}
+	f, err := parser.Parse(src, lexer.ModePhaenon)
+	if err != nil {
+		return out
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.MethodCall:
+			if id, ok := n.Name.(*ast.Ident); ok {
+				out[strings.ToLower(id.Name)] = true
+			}
+		case *ast.StaticCall:
+			if id, ok := n.Name.(*ast.Ident); ok {
+				out[strings.ToLower(id.Name)] = true
+			}
+		case *ast.StringLit:
+			v := strings.ToLower(strings.Trim(n.Raw, `'"`))
+			if i := strings.LastIndex(v, "::"); i >= 0 {
+				v = v[i+2:]
+			}
+			out[v] = true
+		}
+		return true
+	})
+	return out
+}
+
 // analyze reads every watched file as it is, writing nothing.
 func (r *arrayRun) analyze() (map[string]*arrayTyper, error) {
-	cur, t, err := r.check(nil)
+	typers, err := r.refresh()
 	if err != nil {
 		return nil, err
 	}
-	typers := map[string]*arrayTyper{}
-	for path := range r.watch {
-		if a := r.typer(cur, t, path); a != nil {
-			a.run()
-			typers[path] = a
-			// What it could type now waits for the next pass, if any.
-			for _, k := range a.wrote {
-				a.left[k] = "the rounds ended before its values were known"
-			}
-			r.left[path] = a.left
+	for path, a := range typers {
+		a.run()
+		// What it could type now waits for the next pass, if any.
+		for _, k := range a.wrote {
+			a.left[k] = "the rounds ended before its values were known"
 		}
+		r.left[path] = a.left
 	}
 	return typers, nil
 }
@@ -222,14 +365,9 @@ func (r *arrayRun) round(probe *selfProbe) (map[string]*arrayTyper, bool, bool, 
 	typers := map[string]*arrayTyper{}
 	rewritten := map[string][]byte{}
 	if probe == nil {
-		cur, t, err := r.check(nil)
-		if err != nil {
+		var err error
+		if typers, err = r.refresh(); err != nil {
 			return nil, false, false, err
-		}
-		for path := range r.watch {
-			if a := r.typer(cur, t, path); a != nil {
-				typers[path] = a
-			}
 		}
 	} else {
 		for path, a := range probe.typers {
@@ -275,7 +413,22 @@ func (r *arrayRun) round(probe *selfProbe) (map[string]*arrayTyper, bool, bool, 
 	for k, v := range rewritten {
 		next[k] = v
 	}
-	after, err := checkRecorded(next, r.checked, r.load)
+	// What the rewrite may change: the rewritten files, and the files that
+	// name a method whose return it typed.
+	verify := map[string]bool{}
+	var names []string
+	for path := range rewritten {
+		verify[path] = true
+		for _, n := range typers[path].exported {
+			names = append(names, strings.ToLower(n))
+		}
+	}
+	for path := range r.mentioning(names) {
+		verify[path] = true
+	}
+	// It records the watched files too: when the round keeps every
+	// rewrite, this check is the next round's reading of them.
+	after, afterTyped, err := r.checkSources(next, verify, nil)
 	if err != nil {
 		return nil, false, false, err
 	}
@@ -303,8 +456,9 @@ func (r *arrayRun) round(probe *selfProbe) (map[string]*arrayTyper, bool, bool, 
 	}
 	blamed := map[blamedKey]string{} // → the first finding it is blamed for
 	undo := map[string]checker.Diagnostic{}
-	for path := range r.checked {
-		found := newFindings(path, r.base, after)
+	afterByFile := byFile(after.diags)
+	for path := range verify {
+		found := newFindings(r.baseByFile[path], afterByFile[path])
 		if len(found) == 0 {
 			continue
 		}
@@ -355,6 +509,7 @@ func (r *arrayRun) round(probe *selfProbe) (map[string]*arrayTyper, bool, bool, 
 		}
 	}
 	retry := false
+	kept := 0
 	for path, src := range rewritten {
 		a := typers[path]
 		if probe != nil {
@@ -386,6 +541,21 @@ func (r *arrayRun) round(probe *selfProbe) (map[string]*arrayTyper, bool, bool, 
 		}
 		r.srcs[path] = src
 		r.rep.Written += len(a.wrote)
+		r.changed(path, a.exported)
+		kept++
+	}
+	if kept == len(rewritten) {
+		// The sources are the ones the check read: its reading of the files
+		// it checked is current.
+		for path := range verify {
+			if !r.dirty[path] || !r.watch[path] {
+				continue
+			}
+			if a := r.typer(after, afterTyped, path); a != nil {
+				r.current[path] = a
+				delete(r.dirty, path)
+			}
+		}
 	}
 	return typers, true, retry, nil
 }
@@ -430,7 +600,11 @@ func (r *arrayRun) selfRound(typers map[string]*arrayTyper) (bool, error) {
 		return nil
 	}
 	for i := 0; i < selfProbes; i++ {
-		cur, t, err := r.check(assume)
+		files := map[string]bool{}
+		for path := range probe.keys {
+			files[path] = true
+		}
+		cur, t, err := r.check(files, assume)
 		if err != nil {
 			return false, err
 		}
@@ -542,24 +716,20 @@ func (r *arrayRun) notes() {
 	}
 }
 
-// newFindings lists the findings a rewrite added to a file: findings are
-// compared by code and line, since a message may name the narrower type.
-func newFindings(path string, before, after *checked) []checker.Diagnostic {
+// newFindings lists the findings a rewrite added to a file, given the
+// file's findings before and after: findings are compared by code and
+// line, since a message may name the narrower type.
+func newFindings(before, after []checker.Diagnostic) []checker.Diagnostic {
 	type key struct {
 		code string
 		line int
 	}
 	was := map[key]int{}
-	for _, d := range before.diags {
-		if d.File == path {
-			was[key{d.Code, d.Line}]++
-		}
+	for _, d := range before {
+		was[key{d.Code, d.Line}]++
 	}
 	var out []checker.Diagnostic
-	for _, d := range after.diags {
-		if d.File != path {
-			continue
-		}
+	for _, d := range after {
 		k := key{d.Code, d.Line}
 		if was[k] == 0 {
 			out = append(out, d)
@@ -706,6 +876,7 @@ type arrayTyper struct {
 	// (`$this->post = $post ?? self::send(...)`), the property's type.
 	stored map[ast.Expr]types.Type
 	pcl    *program.Class  // the class being read
+	ns     string          // the file's namespace
 	only   map[string]bool // a self round's: the candidates it may type
 	// lax lets the run write a type that says mixed somewhere, which waits
 	// for the rounds that write precise ones: its values may come from a
@@ -752,6 +923,7 @@ func (a *arrayTyper) run() ([]byte, int) {
 	a.selfReads, a.targets, a.params, a.passes, a.edits, a.wrote = map[string][]ast.Span{}, map[string][]ast.Span{}, map[string]ast.Span{}, map[string][]string{}, nil, nil
 	a.exported, a.uses, a.spans, a.ownWrites = map[string]string{}, map[string][]int{}, map[string]ast.Span{}, map[string]bool{}
 	ns, imports := fileNames(a.file.AST)
+	a.ns = ns
 	sp := &speller{ns: ns, imports: imports, prog: a.prog}
 	cands := bareArrayDecls(a.file.AST)
 	byKey := map[string]candidate{}
@@ -1022,11 +1194,15 @@ func (a *arrayTyper) spelledType(spelled string) types.Type {
 	return a.prog.NewResolver(a.file, a.pcl.Scope, a.pcl, ast.Span{}).Native(rt)
 }
 
+// programClass is the program's class of a declaration of the file, found
+// by its name.
 func (a *arrayTyper) programClass(cl *ast.ClassDecl) *program.Class {
-	for _, c := range a.prog.Classes() {
-		if c.Decl == cl {
-			return c
-		}
+	fqn := cl.Name.Name
+	if a.ns != "" {
+		fqn = a.ns + "\\" + fqn
+	}
+	if c := a.prog.Class(fqn); c != nil && c.Decl == cl {
+		return c
 	}
 	return nil
 }
