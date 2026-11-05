@@ -6,12 +6,17 @@ package migrate
 // and the values read from what the checker recorded: a private
 // property's default and writes, a private or final method's returns, a
 // private method's arguments. It runs in rounds, since a method returning
-// a property is known once the property is, and checks each round's
-// rewrite: a file in which a finding appears gets its arrays back. Types
-// may narrow, which is the point, so only findings are compared.
+// a property is known once the property is; a type that says mixed waits
+// for the precise ones, and a declaration whose values are made of its own
+// (a recursion, a property filtered into itself) is typed by a self round,
+// which reads its values with its own reads assumed. Every round's rewrite
+// is checked with every file given: types may narrow, which is the point,
+// so only findings are compared, and a declaration a new finding falls on
+// is left out of the next round.
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -44,150 +49,497 @@ func (r *ArrayTypeReport) Reasons() string {
 // LeftCount is the number of candidates left as they were.
 func (r *ArrayTypeReport) LeftCount() int { return (&PipeReport{Left: r.Left}).LeftCalls() }
 
-const arrayTypeRounds = 5
+const (
+	// arrayTypeRounds bounds the rounds of a pass, twice over (those that
+	// write precise types and those that let mixed through): a method
+	// returning a property is known the round after the property is.
+	arrayTypeRounds = 5
+	// arrayTypePasses bounds the passes: rounds until none types more, then
+	// a self round, whose types the next pass carries further.
+	arrayTypePasses = 3
+	// selfProbes bounds the checks a self round makes to reach the types
+	// its declarations' values settle on.
+	selfProbes = 3
+)
 
 // ArrayTypes runs the codemod over files; load builds the program model as
 // for Pipes. It returns each file's source, rewritten or as it was.
 func ArrayTypes(files []PipeFile, load func(srcs map[string][]byte, checked map[string]bool) (*program.Program, error)) ([][]byte, *ArrayTypeReport, error) {
-	rep := &ArrayTypeReport{Left: map[string]int{}, Notes: map[string][]Note{}}
+	r := &arrayRun{load: load, srcs: map[string][]byte{}, watch: map[string]bool{}, checked: map[string]bool{},
+		left: map[string]map[string]string{}, deny: map[string]map[string]string{},
+		rep: &ArrayTypeReport{Left: map[string]int{}, Notes: map[string][]Note{}}}
 	out := make([][]byte, len(files))
-	srcs := map[string][]byte{}
-	watch := map[string]bool{}
 	for i, f := range files {
 		out[i] = f.Src
-		srcs[f.Path] = f.Src
-		if tree, err := parser.Parse(f.Src, lexer.ModePhaenon); err == nil && declaresBareArray(tree) {
-			watch[f.Path] = true
+		r.srcs[f.Path] = f.Src
+		tree, err := parser.Parse(f.Src, lexer.ModePhaenon)
+		if err != nil {
+			continue
+		}
+		r.checked[f.Path] = true
+		if declaresBareArray(tree) {
+			r.watch[f.Path] = true
 		}
 	}
-	if len(watch) == 0 || load == nil {
-		return out, rep, nil
+	if len(r.watch) == 0 || load == nil {
+		return out, r.rep, nil
 	}
-	var base *checked // the findings before any round, which no round may add to
-	left := map[string]map[string]string{}
-	deny := map[string]map[string]bool{} // per file, candidates a check refused
-	for round := 0; round < arrayTypeRounds; round++ {
-		byRef := map[*program.File][]byRefArg{}
-		callables := map[ast.Expr]types.Type{}
-		cur, err := checkRecorded(srcs, watch, load, func(o *checker.Options) {
-			o.ByRef = func(f *program.File, e ast.Expr, out types.Type) { byRef[f] = append(byRef[f], byRefArg{e, out}) }
-			o.CallableArg = func(f *program.File, e ast.Expr, param types.Type) {
-				switch e.(type) {
-				case *ast.ArrayLit, *ast.MethodCall, *ast.StaticCall:
-					callables[e] = param
-				}
+	for pass := 0; pass < arrayTypePasses; pass++ {
+		var typers map[string]*arrayTyper
+		converged := false // the last round typed nothing: its typers read the sources as they are
+		r.lax = false
+		for round := 0; round < 2*arrayTypeRounds; round++ {
+			t, proposed, retry, err := r.round(nil)
+			if err != nil {
+				return nil, nil, err
 			}
-		})
+			typers = t
+			switch {
+			case !proposed && !r.lax:
+				r.lax = true // no precise type is left to write: the others may say mixed
+				continue
+			case !proposed:
+				converged = true
+			case r.lax:
+				r.lax = false // what they typed may let precise types follow
+			}
+			if converged {
+				break
+			}
+			if retry && round == 2*arrayTypeRounds-1 {
+				round-- // a refused declaration costs a round of its own
+			}
+		}
+		r.lax = true
+		if !converged {
+			t, err := r.analyze()
+			if err != nil {
+				return nil, nil, err
+			}
+			typers = t
+		}
+		// What no round types may depend on itself: a recursive call, a
+		// property filtered into itself, a parameter passed on.
+		wrote, err := r.selfRound(typers)
 		if err != nil {
 			return nil, nil, err
 		}
-		if base == nil {
-			base = cur
-		}
-		rewritten := map[string][]byte{}
-		written := map[string]int{}
-		for path := range watch {
-			pf := cur.prog.File(path)
-			if pf == nil || pf.AST == nil {
-				continue
-			}
-			a := &arrayTyper{prog: cur.prog, file: pf, types: cur.types[path], byRef: byRef[pf], callables: callables, left: map[string]string{}, deny: deny[path]}
-			src, n := a.run()
-			left[path] = a.left
-			if n == 0 {
-				continue
-			}
-			if _, err := parser.Parse(src, lexer.ModePhaenon); err != nil {
-				rep.Left["the rewrite does not parse"] += n
-				rep.Undone = append(rep.Undone, Note{Msg: fmt.Sprintf("%d array types undone: the rewrite does not parse (%v)", n, err)})
-				rep.UndoneIn = append(rep.UndoneIn, path)
-				delete(watch, path)
-				continue
-			}
-			rewritten[path] = src
-			written[path] = n
-		}
-		if len(rewritten) == 0 {
+		if converged && !wrote {
 			break
 		}
-		next := map[string][]byte{}
-		for k, v := range srcs {
-			next[k] = v
+	}
+	r.notes()
+	for i, f := range files {
+		out[i] = r.srcs[f.Path]
+	}
+	return out, r.rep, nil
+}
+
+// arrayRun is one run of the codemod: the sources as the rounds left them,
+// the files it still types, and what the check refused. Every file given
+// is checked: a method's return reaches the files that call it.
+type arrayRun struct {
+	load    func(map[string][]byte, map[string]bool) (*program.Program, error)
+	srcs    map[string][]byte
+	watch   map[string]bool // the files whose declarations it types
+	checked map[string]bool // the files given
+	base    *checked        // the findings before any round, which no round may add to
+	left    map[string]map[string]string
+	deny    map[string]map[string]string // per file, candidates a check refused, with the finding
+	rep     *ArrayTypeReport
+	lax     bool // the rounds may write types that say mixed
+}
+
+// typed is what one check records for the codemod beside the expressions'
+// types.
+type typed struct {
+	byRef     map[*program.File][]byRefArg
+	callables map[ast.Expr]types.Type
+	returned  map[*ast.Return]types.Type
+}
+
+// check checks the current sources, recording what the codemod reads;
+// assume, when not nil, is the self round's Assume hook.
+func (r *arrayRun) check(assume func(*program.File, ast.Node) types.Type) (*checked, *typed, error) {
+	t := &typed{byRef: map[*program.File][]byRefArg{}, callables: map[ast.Expr]types.Type{}, returned: map[*ast.Return]types.Type{}}
+	cur, err := checkRecorded(r.srcs, r.checked, r.load, func(o *checker.Options) {
+		o.ByRef = func(f *program.File, e ast.Expr, out types.Type) { t.byRef[f] = append(t.byRef[f], byRefArg{e, out}) }
+		o.CallableArg = func(f *program.File, e ast.Expr, param types.Type) {
+			switch e.(type) {
+			case *ast.ArrayLit, *ast.MethodCall, *ast.StaticCall:
+				t.callables[e] = param
+			}
 		}
-		for k, v := range rewritten {
-			next[k] = v
+		o.Returned = func(f *program.File, s *ast.Return, rt types.Type) { t.returned[s] = rt }
+		o.Assume = assume
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if r.base == nil && assume == nil {
+		r.base = cur
+	}
+	return cur, t, nil
+}
+
+// typer is the arrayTyper of one watched file in a check.
+func (r *arrayRun) typer(cur *checked, t *typed, path string) *arrayTyper {
+	pf := cur.prog.File(path)
+	if pf == nil || pf.AST == nil {
+		return nil
+	}
+	return &arrayTyper{prog: cur.prog, file: pf, types: cur.types[path], byRef: t.byRef[pf], callables: t.callables,
+		returned: t.returned, left: map[string]string{}, deny: r.deny[path], lax: r.lax}
+}
+
+// analyze reads every watched file as it is, writing nothing.
+func (r *arrayRun) analyze() (map[string]*arrayTyper, error) {
+	cur, t, err := r.check(nil)
+	if err != nil {
+		return nil, err
+	}
+	typers := map[string]*arrayTyper{}
+	for path := range r.watch {
+		if a := r.typer(cur, t, path); a != nil {
+			a.run()
+			typers[path] = a
+			// What it could type now waits for the next pass, if any.
+			for _, k := range a.wrote {
+				a.left[k] = "the rounds ended before its values were known"
+			}
+			r.left[path] = a.left
 		}
-		after, err := checkRecorded(next, watch, load)
+	}
+	return typers, nil
+}
+
+// round types each watched file from what the check of the current
+// sources records, checks the rewrite and keeps what adds no finding. It
+// reports whether it proposed a rewrite, and whether a refused declaration
+// asks for another round. With a probe, only the probe's declarations are
+// typed, from the values of its last check.
+func (r *arrayRun) round(probe *selfProbe) (map[string]*arrayTyper, bool, bool, error) {
+	typers := map[string]*arrayTyper{}
+	rewritten := map[string][]byte{}
+	if probe == nil {
+		cur, t, err := r.check(nil)
 		if err != nil {
-			return nil, nil, err
+			return nil, false, false, err
 		}
-		retry := false
-		for path, src := range rewritten {
-			found := newFindings(path, base, after)
-			if len(found) == 0 {
-				srcs[path] = src
-				rep.Written += written[path]
-				continue
+		for path := range r.watch {
+			if a := r.typer(cur, t, path); a != nil {
+				typers[path] = a
 			}
-			// A finding on a declaration's own line is that declaration's:
-			// the next round leaves it out and keeps the others. A finding
-			// elsewhere gives the file its arrays back.
-			tree, err := parser.Parse(src, lexer.ModePhaenon)
-			if err != nil {
-				delete(watch, path)
-				continue
+		}
+	} else {
+		for path, a := range probe.typers {
+			if r.watch[path] {
+				a.deny, a.left, a.edits, a.wrote = r.deny[path], map[string]string{}, nil, nil
+				typers[path] = a
 			}
-			lines := lineStarts(src)
-			blamed := false
-			for _, c := range bareArrayDeclsAll(tree) {
-				for _, d := range found {
-					if lineAt(lines, c.at) == d.Line {
-						if deny[path] == nil {
-							deny[path] = map[string]bool{}
-						}
-						deny[path][c.key] = true
-						blamed = true
+		}
+	}
+	for path, a := range typers {
+		src, n := a.run()
+		if probe == nil {
+			r.left[path] = a.left
+		} else {
+			if r.left[path] == nil {
+				r.left[path] = map[string]string{}
+			}
+			for k, why := range a.left {
+				if a.only[k] {
+					r.left[path][k] = why
+				}
+			}
+		}
+		if n == 0 {
+			continue
+		}
+		if _, err := parser.Parse(src, lexer.ModePhaenon); err != nil {
+			r.rep.Left["the rewrite does not parse"] += n
+			r.rep.Undone = append(r.rep.Undone, Note{Msg: fmt.Sprintf("%d array types undone: the rewrite does not parse (%v)", n, err)})
+			r.rep.UndoneIn = append(r.rep.UndoneIn, path)
+			delete(r.watch, path)
+			continue
+		}
+		rewritten[path] = src
+	}
+	if len(rewritten) == 0 {
+		return typers, false, false, nil
+	}
+	next := map[string][]byte{}
+	for k, v := range r.srcs {
+		next[k] = v
+	}
+	for k, v := range rewritten {
+		next[k] = v
+	}
+	after, err := checkRecorded(next, r.checked, r.load)
+	if err != nil {
+		return nil, false, false, err
+	}
+	// A finding on the line of a declaration this round typed, or of one
+	// of its values — a write, a return, an argument — is that
+	// declaration's; one on a line that calls a method whose return this
+	// round typed, in any file, is that return's. Blamed declarations are
+	// left out of the next round, which keeps the others. A finding no
+	// declaration of its own file takes gives a rewritten file its arrays
+	// back; one in a file not rewritten, which only a return can reach,
+	// blames this round's returns, or all it typed when it typed none.
+	type blamedKey struct{ path, key string }
+	own := map[string]map[int][]string{}
+	for path, src := range rewritten {
+		own[path] = typers[path].lines(src)
+	}
+	var exported []blamedKey
+	exportedBy := map[string][]blamedKey{} // lower-cased method name → its returns
+	for path := range rewritten {
+		for k, name := range typers[path].exported {
+			bk := blamedKey{path, k}
+			exported = append(exported, bk)
+			exportedBy[strings.ToLower(name)] = append(exportedBy[strings.ToLower(name)], bk)
+		}
+	}
+	blamed := map[blamedKey]string{} // → the first finding it is blamed for
+	undo := map[string]checker.Diagnostic{}
+	for path := range r.checked {
+		found := newFindings(path, r.base, after)
+		if len(found) == 0 {
+			continue
+		}
+		lines := lineStarts(next[path])
+		for _, d := range found {
+			var ks []blamedKey
+			for _, k := range own[path][d.Line] {
+				ks = append(ks, blamedKey{path, k})
+			}
+			if len(ks) == 0 && d.Line >= 1 && d.Line <= len(lines) {
+				end := len(next[path])
+				if d.Line < len(lines) {
+					end = lines[d.Line]
+				}
+				text := strings.ToLower(string(next[path][lines[d.Line-1]:end]))
+				for name, bks := range exportedBy {
+					if strings.Contains(text, name+"(") {
+						ks = append(ks, bks...)
 					}
 				}
 			}
-			if blamed {
-				retry = true
-				continue
+			if len(ks) == 0 {
+				if _, ok := rewritten[path]; ok {
+					if _, seen := undo[path]; !seen {
+						undo[path] = d
+					}
+					continue
+				}
+				if ks = exported; len(ks) == 0 {
+					for p, a := range typers {
+						if _, ok := rewritten[p]; ok {
+							for _, k := range a.wrote {
+								ks = append(ks, blamedKey{p, k})
+							}
+						}
+					}
+				}
 			}
-			rep.Left["the check"] += written[path]
-			rep.Undone = append(rep.Undone, Note{Msg: fmt.Sprintf("%d array types undone: line %d: %s %s", written[path], found[0].Line, found[0].Code, found[0].Message)})
-			rep.UndoneIn = append(rep.UndoneIn, path)
-			delete(watch, path) // its candidates stay as they are
-		}
-		if retry && round == arrayTypeRounds-1 {
-			round-- // a refused declaration costs a round of its own
+			for _, k := range ks {
+				if _, ok := blamed[k]; !ok {
+					rel := ""
+					if k.path != path {
+						rel = " of " + filepath.Base(path)
+					}
+					blamed[k] = fmt.Sprintf("the check: line %d%s: %s %s", d.Line, rel, d.Code, d.Message)
+				}
+			}
 		}
 	}
-	for path, reasons := range left {
-		if !watch[path] {
+	retry := false
+	for path, src := range rewritten {
+		a := typers[path]
+		if probe != nil {
+			delete(probe.typers, path) // read before this rewrite: only a refused file tries again
+		}
+		refused := false
+		for _, k := range a.wrote {
+			if why, ok := blamed[blamedKey{path, k}]; ok {
+				if r.deny[path] == nil {
+					r.deny[path] = map[string]string{}
+				}
+				r.deny[path][k] = why
+				refused = true
+			}
+		}
+		if refused {
+			if probe != nil {
+				probe.typers[path] = a
+			}
+			retry = true
 			continue
 		}
-		pf, err := parser.Parse(srcs[path], lexer.ModePhaenon)
+		if d, ok := undo[path]; ok {
+			r.rep.Left["the check"] += len(a.wrote)
+			r.rep.Undone = append(r.rep.Undone, Note{Msg: fmt.Sprintf("%d array types undone: line %d: %s %s", len(a.wrote), d.Line, d.Code, d.Message)})
+			r.rep.UndoneIn = append(r.rep.UndoneIn, path)
+			delete(r.watch, path) // its candidates stay as they are
+			continue
+		}
+		r.srcs[path] = src
+		r.rep.Written += len(a.wrote)
+	}
+	return typers, true, retry, nil
+}
+
+// selfProbe is a self round's assumption: per file, the declarations
+// whose values depend on themselves and the reads of them — a property in
+// its own writes, a recursive call, a parameter on entry — which the
+// probing checks assume to hold what the last one found, nothing at first.
+type selfProbe struct {
+	keys    map[string]map[string]bool
+	reads   map[string]map[ast.Span]string // file → read → declaration
+	assumed map[string]map[string]types.Type
+	typers  map[string]*arrayTyper // the last probing check's
+}
+
+// selfRound types the declarations whose values depend on themselves, as
+// the least types those values settle on: checks that assume their own
+// reads empty, then what the last check found, until the values settle,
+// and the usual check of the rewrite. It reports whether it kept any.
+func (r *arrayRun) selfRound(typers map[string]*arrayTyper) (bool, error) {
+	probe := &selfProbe{keys: map[string]map[string]bool{}, reads: map[string]map[ast.Span]string{}, assumed: map[string]map[string]types.Type{}}
+	for path, a := range typers {
+		keys, reads := a.selfDependent()
+		if len(keys) == 0 {
+			continue
+		}
+		probe.keys[path], probe.reads[path], probe.assumed[path] = keys, reads, map[string]types.Type{}
+		for k := range keys {
+			probe.assumed[path][k] = types.Shape{List: true}
+		}
+	}
+	if len(probe.keys) == 0 {
+		return false, nil
+	}
+	assume := func(f *program.File, n ast.Node) types.Type {
+		if f == nil {
+			return nil
+		}
+		if k, ok := probe.reads[f.Path][n.Span()]; ok {
+			return probe.assumed[f.Path][k]
+		}
+		return nil
+	}
+	for i := 0; i < selfProbes; i++ {
+		cur, t, err := r.check(assume)
+		if err != nil {
+			return false, err
+		}
+		probe.typers = map[string]*arrayTyper{}
+		settled := true
+		for path, keys := range probe.keys {
+			a := r.typer(cur, t, path)
+			if a == nil {
+				continue
+			}
+			a.only = keys
+			a.run()
+			probe.typers[path] = a
+			for k := range keys {
+				v, ok := a.values[k]
+				if !ok {
+					continue // nothing to assume: its own reads keep the last
+				}
+				u := assumedUnion(v)
+				if was := probe.assumed[path][k]; was == nil || types.Print(was) != types.Print(u) {
+					settled = false
+				}
+				probe.assumed[path][k] = u
+			}
+		}
+		if settled {
+			break
+		}
+	}
+	kept := false
+	for try := 0; try < selfProbes; try++ {
+		before := r.rep.Written
+		_, proposed, retry, err := r.round(probe)
+		if err != nil {
+			return false, err
+		}
+		if r.rep.Written > before {
+			kept = true
+		}
+		if !proposed || !retry {
+			break
+		}
+	}
+	return kept, nil
+}
+
+// mentionsMixed reports a spelled type that says mixed somewhere, array<…>
+// of keys or elements not known among them.
+func mentionsMixed(spelled string) bool {
+	return strings.Contains(spelled, "mixed")
+}
+
+// emptyArray reports an array type that holds nothing: [], or one whose
+// key or value type is never.
+func emptyArray(t types.Type) bool {
+	switch t := t.(type) {
+	case types.Shape:
+		return len(t.Entries) == 0
+	case types.Array:
+		_, k := t.Key.(types.Never)
+		_, v := t.Value.(types.Never)
+		return k || v
+	}
+	return false
+}
+
+// assumedUnion is what a self round assumes a declaration holds: its
+// values but the empty arrays, which add nothing an array reads.
+func assumedUnion(values []types.Type) types.Type {
+	var kept []types.Type
+	for _, v := range values {
+		for _, m := range types.Members(v) {
+			if !emptyArray(m) {
+				kept = append(kept, m)
+			}
+		}
+	}
+	if len(kept) == 0 {
+		return types.Shape{List: true}
+	}
+	return types.MakeUnion(kept...)
+}
+
+// notes reports each candidate left, at its line.
+func (r *arrayRun) notes() {
+	for path, reasons := range r.left {
+		if !r.watch[path] {
+			continue
+		}
+		pf, err := parser.Parse(r.srcs[path], lexer.ModePhaenon)
 		if err != nil {
 			continue
 		}
-		lines := lineStarts(srcs[path])
+		lines := lineStarts(r.srcs[path])
 		for _, c := range bareArrayDecls(pf) {
 			why, ok := reasons[c.key]
+			if refused, denied := r.deny[path][c.key]; denied {
+				why, ok = refused, true // a last round's refusal, which no round read since
+			}
 			if !ok {
 				continue
 			}
-			rep.Left[why]++
-			rep.Notes[path] = append(rep.Notes[path], Note{Line: lineAt(lines, c.at), Msg: fmt.Sprintf("left %s as array: %s", c.what, why)})
+			r.rep.Left[why]++
+			r.rep.Notes[path] = append(r.rep.Notes[path], Note{Line: lineAt(lines, c.at), Msg: fmt.Sprintf("left %s as array: %s", c.what, why)})
 		}
 	}
-	for path := range rep.Notes {
-		sort.Slice(rep.Notes[path], func(i, j int) bool { return rep.Notes[path][i].Line < rep.Notes[path][j].Line })
+	for path := range r.rep.Notes {
+		sort.Slice(r.rep.Notes[path], func(i, j int) bool { return r.rep.Notes[path][i].Line < r.rep.Notes[path][j].Line })
 	}
-	for i, f := range files {
-		out[i] = srcs[f.Path]
-	}
-	return out, rep, nil
 }
 
 // newFindings lists the findings a rewrite added to a file: findings are
@@ -348,45 +700,125 @@ type arrayTyper struct {
 	// callables holds, for an argument that may be a callable (`[$this,
 	// 'm']`, `$this->m(...)`), the type of the parameter it is passed to.
 	callables map[ast.Expr]types.Type
+	// returned holds the type each return gives its function.
+	returned map[*ast.Return]types.Type
 	// stored holds, for a callable reference assigned to a typed property
 	// (`$this->post = $post ?? self::send(...)`), the property's type.
 	stored map[ast.Expr]types.Type
-	left   map[string]string // candidate key → why it was left
-	deny   map[string]bool   // candidates a check refused
-	edits  []edit
+	pcl    *program.Class  // the class being read
+	only   map[string]bool // a self round's: the candidates it may type
+	// lax lets the run write a type that says mixed somewhere, which waits
+	// for the rounds that write precise ones: its values may come from a
+	// declaration a later round types.
+	lax  bool
+	deny map[string]string // candidates a check refused, with the finding
+
+	// What a run finds, per candidate key.
+	left   map[string]string       // why it was left
+	values map[string][]types.Type // the values it holds, as far as they are known
+	// unspelled marks a candidate whose values are all known, left because
+	// no type of them can be written: one a self round may yet type.
+	unspelled map[string]bool
+	sites     map[string][]int // where its values come from: writes, returns, arguments
+	// uses holds where a candidate is read — a property's fetches, a
+	// method's calls — and spans a parameter's method: what its type
+	// changes, beside its values.
+	uses  map[string][]int
+	spans map[string]ast.Span
+	// selfReads holds the reads of a candidate in its own values (a
+	// property in its writes, a recursive call), params a parameter's
+	// declaration, and passes the parameters whose values reach it (a
+	// call inside a method passing that method's parameters on).
+	selfReads map[string][]ast.Span
+	// ownWrites marks a property a by-reference call writes back to with
+	// a type made of its own: only a self round can read its values.
+	ownWrites map[string]bool
+	targets   map[string][]ast.Span // the property its writes write: assumed with its reads
+	params    map[string]ast.Span
+	passes    map[string][]string
+	edits     []edit
+	wrote     []string // the candidates this run typed
+	// exported holds, of them, the returns of methods other files may
+	// call, with the method's name.
+	exported map[string]string
 }
 
+func (a *arrayTyper) site(key string, off int) { a.sites[key] = append(a.sites[key], off) }
+
+func (a *arrayTyper) use(key string, off int) { a.uses[key] = append(a.uses[key], off) }
+
 func (a *arrayTyper) run() ([]byte, int) {
+	a.left, a.values, a.unspelled, a.sites = map[string]string{}, map[string][]types.Type{}, map[string]bool{}, map[string][]int{}
+	a.selfReads, a.targets, a.params, a.passes, a.edits, a.wrote = map[string][]ast.Span{}, map[string][]ast.Span{}, map[string]ast.Span{}, map[string][]string{}, nil, nil
+	a.exported, a.uses, a.spans, a.ownWrites = map[string]string{}, map[string][]int{}, map[string]ast.Span{}, map[string]bool{}
 	ns, imports := fileNames(a.file.AST)
+	sp := &speller{ns: ns, imports: imports, prog: a.prog}
 	cands := bareArrayDecls(a.file.AST)
 	byKey := map[string]candidate{}
 	for _, c := range cands {
 		byKey[c.key] = c
 	}
-	written := 0
 	ast.Inspect(a.file.AST, func(n ast.Node) bool {
 		cl, ok := n.(*ast.ClassDecl)
 		if !ok || cl.Name == nil {
 			return true
 		}
 		pcl := a.programClass(cl)
+		a.pcl = pcl
 		a.stored = storedCallables(cl, pcl)
-		write := func(key string, values []types.Type, keys arrayShape) {
+		// write types a candidate from its values; inherited, when not
+		// nil, is the type an override takes from the method it overrides,
+		// which it keeps unless its values are of another type.
+		write := func(key string, values []types.Type, shape arrayShape, inherited types.Type, exported string) {
 			c, ok := byKey[key]
 			if !ok {
 				return
 			}
-			if a.deny[key] {
-				a.left[key] = "the check"
+			known := append([]types.Type{}, values...)
+			if len(shape.elems) > 0 {
+				known = append(known, types.Array{Key: types.MakeUnion(shape.keys...), Value: types.MakeUnion(shape.elems...), List: !shape.keyed})
+			}
+			a.values[key] = known
+			if a.only != nil && !a.only[key] {
 				return
 			}
-			spelled, why := spellArray(values, keys, c.nullable, ns, imports)
-			if why != "" {
+			if why, ok := a.deny[key]; ok {
 				a.left[key] = why
 				return
 			}
+			if a.ownWrites[key] {
+				a.left[key] = "a by-reference call writes back to it a type made of its own"
+				a.unspelled[key] = true
+				return
+			}
+			spelled, why := spellArray(values, shape, c.nullable, sp)
+			if inherited != nil {
+				// Written only when it says more than the type it takes:
+				// another type, and one of it.
+				own, _ := spellArray([]types.Type{inherited}, arrayShape{}, c.nullable, sp)
+				st := a.spelledType(spelled)
+				if st != nil && c.nullable {
+					st = types.MakeUnion(st, types.TNull)
+				}
+				if why != "" || spelled == own || st == nil || !types.IsSubtype(st, inherited, a.prog) {
+					a.left[key] = "it takes the type of the method it overrides"
+					return
+				}
+			}
+			if why != "" {
+				a.left[key] = why
+				a.unspelled[key] = true
+				return
+			}
+			if !a.lax && a.only == nil && mentionsMixed(spelled) {
+				a.left[key] = "it says mixed, and waits for the declarations its values come from"
+				return
+			}
 			a.edits = append(a.edits, edit{c.typ.S, spelled})
-			written++
+			a.wrote = append(a.wrote, key)
+			if exported != "" {
+				a.exported[key] = exported
+			}
 		}
 		for _, m := range cl.Members {
 			switch m := m.(type) {
@@ -402,30 +834,39 @@ func (a *arrayTyper) run() ([]byte, int) {
 					a.left[key] = why
 					continue
 				}
-				values, shape, why := a.propertyValues(cl, m)
+				values, shape, why := a.propertyValues(key, cl, m)
 				if why != "" {
 					a.left[key] = why
 					continue
 				}
-				write(key, values, shape)
+				write(key, values, shape, nil, "")
 			case *ast.MethodDecl:
 				priv := m.Modifiers&ast.ModPrivate != 0
 				final := priv || m.Modifiers&ast.ModFinal != 0 || cl.Modifiers&ast.ModFinal != 0
-				override := pcl != nil && a.overrides(pcl, m.Name.Name)
 				rkey := "return " + cl.Name.Name + "::" + m.Name.Name
 				if _, ok := byKey[rkey]; ok {
+					a.callsOf(rkey, cl, m.Name.Name)
 					switch {
 					case !final:
 						a.left[rkey] = "the method may be overridden"
-					case override:
-						a.left[rkey] = "it overrides a method"
 					case docReturns(m.Doc):
 						a.left[rkey] = "a docblock types it"
 					default:
-						if values, why := a.returnValues(m); why != "" {
+						// An override takes its parent's type (collections.md §2):
+						// it is written only when it returns one of another, which
+						// the check holds to the parent's.
+						inherited := a.inheritedReturn(pcl, m.Name.Name)
+						if values, why := a.returnValues(rkey, m); why != "" {
+							if inherited != nil {
+								why = "it takes the type of the method it overrides"
+							}
 							a.left[rkey] = why
 						} else {
-							write(rkey, values, arrayShape{})
+							exported := ""
+							if !priv {
+								exported = m.Name.Name
+							}
+							write(rkey, values, arrayShape{}, inherited, exported)
 						}
 					}
 				}
@@ -434,6 +875,8 @@ func (a *arrayTyper) run() ([]byte, int) {
 					if _, ok := byKey[pkey]; !ok {
 						continue
 					}
+					a.params[pkey] = p.S
+					a.spans[pkey] = m.S
 					switch {
 					case !priv:
 						a.left[pkey] = "the method is not private"
@@ -445,7 +888,7 @@ func (a *arrayTyper) run() ([]byte, int) {
 						if values, why := a.argValues(cl, m, i, p); why != "" {
 							a.left[pkey] = why
 						} else {
-							write(pkey, values, arrayShape{})
+							write(pkey, values, arrayShape{}, nil, "")
 						}
 					}
 				}
@@ -453,11 +896,130 @@ func (a *arrayTyper) run() ([]byte, int) {
 		}
 		return true
 	})
-	if written == 0 {
+	if len(a.wrote) == 0 {
 		return a.file.Src, 0
 	}
 	l := &lifter{src: a.file.Src, edits: a.edits}
-	return l.apply(), written
+	return l.apply(), len(a.wrote)
+}
+
+// inheritedReturn is the return type a method takes from the one it
+// overrides, nil when it overrides none.
+func (a *arrayTyper) inheritedReturn(cl *program.Class, name string) types.Type {
+	if cl == nil {
+		return nil
+	}
+	for _, anc := range cl.Ancestors() {
+		if m := anc.FindMethod(name); m != nil && m.Vis != program.Private {
+			if m.Return != nil {
+				return m.Return
+			}
+			return types.TMixed
+		}
+	}
+	return nil
+}
+
+// selfDependent lists the candidates a self round may type — left because
+// no type of their values can be written, and reading themselves — and
+// the reads to assume, each with the candidate it reads.
+func (a *arrayTyper) selfDependent() (map[string]bool, map[ast.Span]string) {
+	keys := map[string]bool{}
+	reads := map[ast.Span]string{}
+	for k := range a.unspelled {
+		if len(a.selfReads[k]) > 0 {
+			keys[k] = true
+			// Its writes' targets too: what a value written is inferred
+			// from is the type the property is assumed to hold.
+			for _, s := range append(a.selfReads[k], a.targets[k]...) {
+				reads[s] = k
+			}
+		}
+	}
+	// A parameter reads itself when what a method passes it comes back to
+	// it through the parameters it is passed on to: a recursion, direct or
+	// through another method.
+	var reaches func(from, to string, seen map[string]bool) bool
+	reaches = func(from, to string, seen map[string]bool) bool {
+		for _, next := range a.passes[from] {
+			if next == to {
+				return true
+			}
+			if !seen[next] {
+				seen[next] = true
+				if reaches(next, to, seen) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for k := range a.unspelled {
+		if span, ok := a.params[k]; ok && reaches(k, k, map[string]bool{}) {
+			keys[k] = true
+			reads[span] = k
+		}
+	}
+	return keys, reads
+}
+
+// lines maps the lines of the candidates this run typed to them: the
+// declaration's line in the rewrite, the lines its values come from and
+// the lines that read it, a parameter's whole method (the rewrite changes
+// no line).
+func (a *arrayTyper) lines(rewritten []byte) map[int][]string {
+	out := map[int][]string{}
+	tree, err := parser.Parse(rewritten, lexer.ModePhaenon)
+	if err != nil {
+		return out
+	}
+	at := map[string]int{}
+	for _, c := range bareArrayDeclsAll(tree) {
+		at[c.key] = c.at
+	}
+	newLines, oldLines := lineStarts(rewritten), lineStarts(a.file.Src)
+	for _, k := range a.wrote {
+		lines := map[int]bool{}
+		if off, ok := at[k]; ok {
+			lines[lineAt(newLines, off)] = true
+		}
+		for _, off := range append(append([]int{}, a.sites[k]...), a.uses[k]...) {
+			lines[lineAt(oldLines, off)] = true
+		}
+		if sp, ok := a.spans[k]; ok {
+			for l := lineAt(oldLines, sp.Start); l <= lineAt(oldLines, sp.End); l++ {
+				lines[l] = true
+			}
+		}
+		for l := range lines {
+			out[l] = append(out[l], k)
+		}
+	}
+	return out
+}
+
+// spelledType is the type a spelling the codemod writes at a class stands
+// for, read as the checker reads the declaration; nil when it cannot tell.
+func (a *arrayTyper) spelledType(spelled string) types.Type {
+	if a.pcl == nil {
+		return nil
+	}
+	tree, err := parser.Parse([]byte("fun f(): "+spelled+" {}"), lexer.ModePhaenon)
+	if err != nil {
+		return nil
+	}
+	var rt ast.TypeExpr
+	ast.Inspect(tree, func(n ast.Node) bool {
+		if fd, ok := n.(*ast.FunctionDecl); ok {
+			rt = fd.ReturnType
+			return false
+		}
+		return true
+	})
+	if rt == nil {
+		return nil
+	}
+	return a.prog.NewResolver(a.file, a.pcl.Scope, a.pcl, ast.Span{}).Native(rt)
 }
 
 func (a *arrayTyper) programClass(cl *ast.ClassDecl) *program.Class {
@@ -467,17 +1029,6 @@ func (a *arrayTyper) programClass(cl *ast.ClassDecl) *program.Class {
 		}
 	}
 	return nil
-}
-
-// overrides reports a method an ancestor declares too, whose type it
-// takes (collections.md §2).
-func (a *arrayTyper) overrides(cl *program.Class, name string) bool {
-	for _, anc := range cl.Ancestors() {
-		if m := anc.FindMethod(name); m != nil && m.Vis != program.Private {
-			return true
-		}
-	}
-	return false
 }
 
 // propertyLeft says why a property is not considered at all.
@@ -517,7 +1068,7 @@ type arrayShape struct {
 // propertyValues collects the values a private property can hold: its
 // default, what is assigned to it and to its elements (an element of an
 // element too), and what a callee passed it by reference writes back.
-func (a *arrayTyper) propertyValues(cl *ast.ClassDecl, p *ast.PropertyDecl) ([]types.Type, arrayShape, string) {
+func (a *arrayTyper) propertyValues(key string, cl *ast.ClassDecl, p *ast.PropertyDecl) ([]types.Type, arrayShape, string) {
 	name := p.Props[0].Var.Name
 	static := p.Modifiers&ast.ModStatic != 0
 	// isSelf reports the property itself: $this->p, or self::$p,
@@ -556,16 +1107,27 @@ func (a *arrayTyper) propertyValues(cl *ast.ClassDecl, p *ast.PropertyDecl) ([]t
 		}
 		values = append(values, t)
 	}
+	// reads records the property's reads in a value written to it, which a
+	// self round assumes.
+	reads := func(e ast.Expr) {
+		ast.Inspect(e, func(n ast.Node) bool {
+			if x, ok := n.(ast.Expr); ok && isSelf(x) {
+				a.selfReads[key] = append(a.selfReads[key], x.Span())
+			}
+			return true
+		})
+	}
 	for _, r := range a.byRef {
 		if isSelf(r.e) {
+			a.site(key, r.e.Span().Start)
 			// What the callee writes back, sort()'s list<V>: a value of
 			// its own, unless its elements are unknown, which happens when
-			// V comes from this property while it is still untyped; then
-			// it says only whether a list stays a list.
+			// it is made of this property's type while the property is
+			// untyped — array_shift()'s `($array is list ? list<V> :
+			// array<V>)`. A self round reads it with the type assumed.
 			if arr, ok := r.out.(types.Array); ok && types.IsMixed(arr.Value) {
-				if !arr.List {
-					shape.keyed = true
-				}
+				a.selfReads[key] = append(a.selfReads[key], r.e.Span())
+				a.ownWrites[key] = true
 			} else if r.out != nil {
 				values = append(values, r.out)
 			}
@@ -603,110 +1165,133 @@ func (a *arrayTyper) propertyValues(cl *ast.ClassDecl, p *ast.PropertyDecl) ([]t
 		if !ok {
 			continue
 		}
-		for _, s := range md.Body {
-			ast.Inspect(s, func(n ast.Node) bool {
-				if why != "" {
-					return false
+		var visit func(n ast.Node) bool
+		visit = func(n ast.Node) bool {
+			if why != "" {
+				return false
+			}
+			if x, ok := n.(ast.Expr); ok && isSelf(x) {
+				a.use(key, x.Span().Start)
+			}
+			switch n := n.(type) {
+			case *ast.ClassDecl:
+				// Another class's $this, but for an anonymous class's
+				// arguments, which this one's code passes.
+				if n.Args != nil {
+					ast.Inspect(n.Args, visit)
 				}
-				switch n := n.(type) {
-				case *ast.ClassDecl:
-					return false // another class's $this
-				case *ast.PropertyFetch:
-					if id, ok := n.Name.(*ast.Ident); ok && id.Name == name && !static {
-						if v, ok := n.Object.(*ast.Variable); !ok || v.Name != "this" {
+				return false
+			case *ast.PropertyFetch:
+				// Another object's property of the name is this one only
+				// on an object of this class: one of another class, by its
+				// type, has its own.
+				if id, ok := n.Name.(*ast.Ident); ok && id.Name == name && !static {
+					if v, ok := n.Object.(*ast.Variable); !ok || v.Name != "this" {
+						if reaches, maybe := a.reaches(n.Object); reaches || maybe {
 							why = "another object's property of that name is used"
 						}
 					}
-				case *ast.Foreach:
-					if n.ByRef && isSelf(n.Expr) {
-						why = "a foreach takes its elements by reference"
-					}
-				case *ast.Unset:
-					for _, v := range n.Vars {
-						if ix, ok := v.(*ast.Index); ok && isSelf(ix.Array) {
-							shape.keyed = true
-						} else if isSelf(v) {
-							why = "it is unset"
-						}
-					}
-				case *ast.Assign:
-					if n.ByRef && (isSelf(n.Value) || isSelf(n.Target)) {
-						why = "a reference is taken"
-						return false
-					}
-					// A compound assignment (`.=`, `+=`, `??=`) holds what the
-					// whole expression gives, as the checker typed it.
-					valueOf := func() (types.Type, bool) {
-						// `??=` writes its right side, if it writes at all.
-						if n.Op == token.Kind('=') || n.Op == token.T_COALESCE_EQUAL {
-							t, ok := a.types[n.Value.Span()]
-							return t, ok
-						}
-						t, ok := a.types[n.S]
-						return t, ok
-					}
-					if isSelf(n.Target) {
-						t, ok := valueOf()
-						if !ok {
-							why = "a value written to it is not typed"
-							return false
-						}
-						values = append(values, t)
-						return true
-					}
-					ix, ok := n.Target.(*ast.Index)
-					if !ok {
-						return true
-					}
-					if isSelf(ix.Array) {
-						t, ok := valueOf()
-						if !ok {
-							why = "an element written to it is not typed"
-							return false
-						}
-						if why = element(ix.Index, t); why != "" {
-							return false
-						}
-						return true
-					}
-					// `$this->p[$a][$b] = …`: the element written is an array
-					// with that key, deeper ones are not followed.
-					if outer, ok := ix.Array.(*ast.Index); ok {
-						if isSelf(outer.Array) && n.Op == token.Kind('=') {
-							t, ok := a.types[n.Value.Span()]
-							if !ok {
-								why = "a nested element written to it is not typed"
-								return false
-							}
-							inner := types.Array{Key: types.TInt, Value: t, List: ix.Index == nil}
-							if ix.Index != nil {
-								k, ok := a.types[ix.Index.Span()]
-								if !ok {
-									why = "a nested key written to it is not typed"
-									return false
-								}
-								inner.Key = k
-							}
-							if why = element(outer.Index, inner); why != "" {
-								return false
-							}
-							return true
-						}
-						for e := ast.Expr(outer); ; {
-							in, ok := e.(*ast.Index)
-							if !ok {
-								break
-							}
-							if isSelf(in.Array) {
-								why = "an element is written deeper than one level"
-								return false
-							}
-							e = in.Array
-						}
+				}
+			case *ast.Foreach:
+				if n.ByRef && isSelf(n.Expr) {
+					why = "a foreach takes its elements by reference"
+				}
+			case *ast.Unset:
+				for _, v := range n.Vars {
+					if ix, ok := v.(*ast.Index); ok && isSelf(ix.Array) {
+						shape.keyed = true
+					} else if isSelf(v) {
+						why = "it is unset"
 					}
 				}
-				return true
-			})
+			case *ast.Assign:
+				if n.ByRef && (isSelf(n.Value) || isSelf(n.Target)) {
+					why = "a reference is taken"
+					return false
+				}
+				// A compound assignment (`.=`, `+=`, `??=`) holds what the
+				// whole expression gives, as the checker typed it.
+				valueOf := func() (types.Type, bool) {
+					// `??=` writes its right side, if it writes at all.
+					if n.Op == token.Kind('=') || n.Op == token.T_COALESCE_EQUAL {
+						t, ok := a.types[n.Value.Span()]
+						return t, ok
+					}
+					t, ok := a.types[n.S]
+					return t, ok
+				}
+				if isSelf(n.Target) {
+					t, ok := valueOf()
+					if !ok {
+						why = "a value written to it is not typed"
+						return false
+					}
+					a.site(key, n.S.Start)
+					reads(n.Value)
+					a.targets[key] = append(a.targets[key], n.Target.Span())
+					values = append(values, t)
+					return true
+				}
+				ix, ok := n.Target.(*ast.Index)
+				if !ok {
+					return true
+				}
+				if isSelf(ix.Array) {
+					t, ok := valueOf()
+					if !ok {
+						why = "an element written to it is not typed"
+						return false
+					}
+					a.site(key, n.S.Start)
+					reads(n.Value)
+					a.targets[key] = append(a.targets[key], ix.Array.Span())
+					if why = element(ix.Index, t); why != "" {
+						return false
+					}
+					return true
+				}
+				// `$this->p[$a][$b] = …`: the element written is an array
+				// with that key, deeper ones are not followed.
+				if outer, ok := ix.Array.(*ast.Index); ok {
+					if isSelf(outer.Array) && n.Op == token.Kind('=') {
+						t, ok := a.types[n.Value.Span()]
+						if !ok {
+							why = "a nested element written to it is not typed"
+							return false
+						}
+						a.site(key, n.S.Start)
+						reads(n.Value)
+						inner := types.Array{Key: types.TInt, Value: t, List: ix.Index == nil}
+						if ix.Index != nil {
+							k, ok := a.types[ix.Index.Span()]
+							if !ok {
+								why = "a nested key written to it is not typed"
+								return false
+							}
+							inner.Key = k
+						}
+						if why = element(outer.Index, inner); why != "" {
+							return false
+						}
+						return true
+					}
+					for e := ast.Expr(outer); ; {
+						in, ok := e.(*ast.Index)
+						if !ok {
+							break
+						}
+						if isSelf(in.Array) {
+							why = "an element is written deeper than one level"
+							return false
+						}
+						e = in.Array
+					}
+				}
+			}
+			return true
+		}
+		for _, s := range md.Body {
+			ast.Inspect(s, visit)
 		}
 	}
 	if why != "" {
@@ -715,17 +1300,31 @@ func (a *arrayTyper) propertyValues(cl *ast.ClassDecl, p *ast.PropertyDecl) ([]t
 	return values, shape, ""
 }
 
-// returnValues collects what a method returns.
-func (a *arrayTyper) returnValues(m *ast.MethodDecl) ([]types.Type, string) {
+// returnValues collects what a method returns, and its recursive calls,
+// which a self round assumes.
+func (a *arrayTyper) returnValues(key string, m *ast.MethodDecl) ([]types.Type, string) {
 	var values []types.Type
 	why := ""
 	for _, s := range m.Body {
+		ast.Inspect(s, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.MethodCall:
+				if v, ok := n.Object.(*ast.Variable); ok && v.Name == "this" && a.names(n.Name, m.Name.Name) && !n.Args.Closure() {
+					a.selfReads[key] = append(a.selfReads[key], n.S)
+				}
+			case *ast.StaticCall:
+				if a.ownClass(n.Class) && a.names(n.Name, m.Name.Name) && !n.Args.Closure() {
+					a.selfReads[key] = append(a.selfReads[key], n.S)
+				}
+			}
+			return true
+		})
 		ast.Inspect(s, func(n ast.Node) bool {
 			if why != "" {
 				return false
 			}
 			switch n := n.(type) {
-			case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl, *ast.FunctionDecl:
+			case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl, *ast.FunctionDecl, *ast.Spawn, *ast.Concurrently:
 				return false // their returns are theirs
 			case *ast.Yield, *ast.YieldFrom:
 				why = "it is a generator"
@@ -734,11 +1333,17 @@ func (a *arrayTyper) returnValues(m *ast.MethodDecl) ([]types.Type, string) {
 					why = "a return has no value"
 					return false
 				}
-				t, ok := a.types[n.Expr.Span()]
+				// What the return gives the method: an unnamed @var above it
+				// types the value.
+				t, ok := a.returned[n]
+				if !ok {
+					t, ok = a.types[n.Expr.Span()]
+				}
 				if !ok {
 					why = "a returned value is not typed"
 					return false
 				}
+				a.site(key, n.S.Start)
 				values = append(values, t)
 			}
 			return true
@@ -753,15 +1358,82 @@ func (a *arrayTyper) returnValues(m *ast.MethodDecl) ([]types.Type, string) {
 	return values, ""
 }
 
+// callsOf records the calls of a class's method in the class as uses of
+// key.
+func (a *arrayTyper) callsOf(key string, cl *ast.ClassDecl, name string) {
+	ast.Inspect(cl, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.MethodCall:
+			if a.names(n.Name, name) {
+				a.use(key, n.S.Start)
+			}
+		case *ast.StaticCall:
+			if a.names(n.Name, name) {
+				a.use(key, n.S.Start)
+			}
+		}
+		return true
+	})
+}
+
+// names reports a method name written as the identifier name.
+func (a *arrayTyper) names(e ast.Expr, name string) bool {
+	id, ok := e.(*ast.Ident)
+	return ok && strings.EqualFold(id.Name, name)
+}
+
+// ownClass reports self, static or the class's own name before `::`.
+func (a *arrayTyper) ownClass(e ast.Expr) bool {
+	cn, ok := e.(*ast.Name)
+	if !ok || a.pcl == nil {
+		return false
+	}
+	last := cn.Parts[len(cn.Parts)-1]
+	short := a.pcl.Name[strings.LastIndex(a.pcl.Name, "\\")+1:]
+	return len(cn.Parts) == 1 && (strings.EqualFold(last, "self") || strings.EqualFold(last, "static")) || strings.EqualFold(last, short)
+}
+
+// reaches says whether a call on obj calls this class's own method of
+// the name: on $this, or on an object whose type is the class or one of
+// its subclasses. maybe reports an object whose type does not tell: a
+// parent type, a type not known.
+func (a *arrayTyper) reaches(obj ast.Expr) (call, maybe bool) {
+	if v, ok := obj.(*ast.Variable); ok && v.Name == "this" {
+		return true, false
+	}
+	t, ok := a.types[obj.Span()]
+	if !ok || a.pcl == nil {
+		return false, true
+	}
+	call = false
+	for _, m := range types.Members(types.StripNull(t)) {
+		c, ok := m.(types.Class)
+		if !ok {
+			return false, true
+		}
+		switch cc := a.prog.Class(c.Name); {
+		case cc == nil:
+			return false, true
+		case cc.IsSubclassOf(a.pcl.Name):
+			call = true
+		case a.pcl.IsSubclassOf(cc.Name):
+			return false, true // an object of a parent type may be of this class
+		}
+	}
+	return call, false
+}
+
 // argValues collects the arguments a private method's parameter receives
-// from its class: at each call, and where the method is passed as a
-// callable (`array_map([$this, 'm'], $xs)`, `$this->m(...)`), from the
-// type of the callable the parameter it is passed to expects.
+// from its class: at each call, piped in (`$x |> $this->m(...)`), and
+// where the method is passed as a callable (`array_map([$this, 'm'],
+// $xs)`), from the type of the callable the parameter it is passed to
+// expects.
 func (a *arrayTyper) argValues(cl *ast.ClassDecl, m *ast.MethodDecl, idx int, p *ast.Param) ([]types.Type, string) {
 	if p.Variadic || p.ByRef {
 		return nil, "a variadic or by-reference parameter"
 	}
 	name := m.Name.Name
+	key := "param " + cl.Name.Name + "::" + name + "$" + p.Var.Name
 	var values []types.Type
 	calls := 0
 	why := ""
@@ -791,28 +1463,80 @@ func (a *arrayTyper) argValues(cl *ast.ClassDecl, m *ast.MethodDecl, idx int, p 
 			return
 		}
 		calls++
+		a.site(key, e.Span().Start)
 		if idx < len(c.Params) {
 			values = append(values, c.Params[idx].Type)
 			return
 		}
 		fromDefault()
 	}
-	arg := func(args *ast.ArgList) {
+	// in is the member being read: an argument passed inside one of the
+	// class's methods may carry that method's parameters on.
+	var in *ast.MethodDecl
+	passes := func(e ast.Expr) {
+		if in == nil {
+			return
+		}
+		mentions := false
+		ast.Inspect(e, func(n ast.Node) bool {
+			if v, ok := n.(*ast.Variable); ok && v.Name != "this" {
+				mentions = true
+			}
+			return !mentions
+		})
+		if mentions {
+			for _, q := range in.Params {
+				a.passes[key] = append(a.passes[key], "param "+cl.Name.Name+"::"+in.Name.Name+"$"+q.Var.Name)
+			}
+		}
+	}
+	// arg reads what a call passes the parameter. piped, when not nil, is
+	// what a pipe gives the call: a first-class callable's first
+	// parameter, a partial application's first placeholder.
+	arg := func(args *ast.ArgList, piped ast.Expr) {
 		calls++
 		var found ast.Expr
-		for i, ar := range args.Args {
-			if ar.Unpack {
-				why = "a call spreads its arguments"
-				return
+		if args.FirstClassCallable {
+			if idx == 0 {
+				found = piped
 			}
-			if ar.Name != nil && ar.Name.Name == p.Var.Name || ar.Name == nil && i == idx {
-				found = ar.Value
+		} else {
+			taken := false // the piped value has its placeholder
+			for i, ar := range args.Args {
+				if ar.Unpack {
+					why = "a call spreads its arguments"
+					return
+				}
+				mine := ar.Name != nil && ar.Name.Name == p.Var.Name || ar.Name == nil && i == idx
+				if ar.Placeholder != nil {
+					// `...` stands for this parameter and the ones after it.
+					covers := mine || ar.Name == nil && ar.Placeholder.Variadic && i < idx
+					switch {
+					case piped == nil:
+						why = "it is applied partially"
+						return
+					case !taken:
+						taken = true
+						if mine {
+							found = piped
+						}
+					case covers:
+						why = "it is applied partially"
+						return
+					}
+					continue
+				}
+				if mine {
+					found = ar.Value
+				}
 			}
 		}
 		if found == nil {
 			fromDefault()
 			return
 		}
+		a.site(key, found.Span().Start)
+		passes(found)
 		t, ok := a.types[found.Span()]
 		if !ok {
 			if isEmptyArray(found) {
@@ -823,57 +1547,106 @@ func (a *arrayTyper) argValues(cl *ast.ClassDecl, m *ast.MethodDecl, idx int, p 
 		}
 		values = append(values, t)
 	}
+	// call reads a call to a method of the name, args nil for a dynamic
+	// name; obj is its object, nil for a static call.
+	piped := map[ast.Expr]ast.Expr{} // a pipe's stage → what it is given
+	call := func(e ast.Expr, obj ast.Expr, class ast.Expr, nameExpr ast.Expr, args *ast.ArgList) {
+		id, static := nameExpr.(*ast.Ident)
+		if static && !strings.EqualFold(id.Name, name) {
+			return // another method
+		}
+		// Whose method it calls: this class's, another's, or one that
+		// cannot be told.
+		reaches, maybe := false, false
+		switch {
+		case obj != nil:
+			reaches, maybe = a.reaches(obj)
+		default:
+			if _, ok := class.(*ast.Name); ok {
+				reaches = a.ownClass(class) // not parent::, not another class's
+			} else {
+				maybe = true // $class::m()
+			}
+		}
+		switch {
+		case maybe:
+			why = "a call on an object of another type may reach it"
+			return
+		case !reaches:
+			return
+		case !static:
+			why = "a dynamic method call may reach it"
+			return
+		case args == nil:
+			return
+		}
+		if left, ok := piped[e]; ok {
+			arg(args, left)
+			return
+		}
+		if args.FirstClassCallable {
+			asCallable(e)
+			return
+		}
+		arg(args, nil)
+	}
 	// The strings that name it inside a callable array are accounted for
 	// there; another string reaches it only where PHP takes a callable's
 	// name, which callableStrings lists. A key or a git argument that
 	// happens to spell it does not.
 	named := map[*ast.StringLit]bool{}
-	reaching := callableStrings(cl)
+	fqn := cl.Name.Name
+	if a.pcl != nil {
+		fqn = a.pcl.Name
+	}
+	reaching := callableStrings(cl, fqn)
+	var visit func(n ast.Node) bool
+	visit = func(n ast.Node) bool {
+		if why != "" {
+			return false
+		}
+		switch n := n.(type) {
+		case *ast.ClassDecl:
+			if n.Args != nil {
+				ast.Inspect(n.Args, visit) // an anonymous class's arguments are this class's code
+			}
+			return false
+		case *ast.Binary:
+			if n.Op == token.T_PIPE {
+				stage := n.Right
+				for {
+					pe, ok := stage.(*ast.Paren)
+					if !ok {
+						break
+					}
+					stage = pe.Expr
+				}
+				piped[stage] = n.Left
+			}
+		case *ast.ArrayLit:
+			if lit, ok := callableArray(n, name); ok {
+				named[lit] = true
+				asCallable(n)
+			} else if len(n.Items) == 2 && n.Items[0] != nil && n.Items[1] != nil && n.Items[1].Key == nil && selfRef(n.Items[0].Value) {
+				if _, lit := n.Items[1].Value.(*ast.StringLit); !lit {
+					why = "a callable array names a method by a value"
+				}
+			}
+		case *ast.MethodCall:
+			call(n, n.Object, nil, n.Name, n.Args)
+		case *ast.StaticCall:
+			call(n, nil, n.Class, n.Name, n.Args)
+		case *ast.StringLit:
+			v := strings.Trim(n.Raw, `'"`)
+			if !named[n] && reaching[n] && (strings.EqualFold(v, name) || strings.HasSuffix(strings.ToLower(v), "::"+strings.ToLower(name))) {
+				why = "its name is written as a string"
+			}
+		}
+		return true
+	}
 	for _, mem := range cl.Members {
-		ast.Inspect(mem, func(n ast.Node) bool {
-			if why != "" {
-				return false
-			}
-			switch n := n.(type) {
-			case *ast.ClassDecl:
-				return false
-			case *ast.ArrayLit:
-				if lit, ok := callableArray(n, name); ok {
-					named[lit] = true
-					asCallable(n)
-				} else if len(n.Items) == 2 && n.Items[0] != nil && n.Items[1] != nil && n.Items[1].Key == nil && selfRef(n.Items[0].Value) {
-					if _, lit := n.Items[1].Value.(*ast.StringLit); !lit {
-						why = "a callable array names a method by a value"
-					}
-				}
-			case *ast.MethodCall:
-				if id, ok := n.Name.(*ast.Ident); ok && strings.EqualFold(id.Name, name) {
-					if n.Args != nil && n.Args.FirstClassCallable {
-						asCallable(n)
-					} else if n.Args != nil {
-						arg(n.Args)
-					}
-				} else if !ok {
-					why = "a dynamic method call may reach it"
-				}
-			case *ast.StaticCall:
-				if id, ok := n.Name.(*ast.Ident); ok && strings.EqualFold(id.Name, name) {
-					if n.Args != nil && n.Args.FirstClassCallable {
-						asCallable(n)
-					} else if n.Args != nil {
-						arg(n.Args)
-					}
-				} else if !ok {
-					why = "a dynamic method call may reach it"
-				}
-			case *ast.StringLit:
-				v := strings.Trim(n.Raw, `'"`)
-				if !named[n] && reaching[n] && (strings.EqualFold(v, name) || strings.HasSuffix(strings.ToLower(v), "::"+strings.ToLower(name))) {
-					why = "its name is written as a string"
-				}
-			}
-			return true
-		})
+		in, _ = mem.(*ast.MethodDecl)
+		ast.Inspect(mem, visit)
 	}
 	if why != "" {
 		return nil, why
@@ -945,11 +1718,12 @@ func storedCallables(cl *ast.ClassDecl, pcl *program.Class) map[ast.Expr]types.T
 	return out
 }
 
-// callableStrings lists the strings of a class that PHP may take as a
-// method's name: an item of a two-item array (a callable array, of this
-// class or another), a `'Class::method'` string, and an argument of a
-// function that calls or looks up a callable by name.
-func callableStrings(cl *ast.ClassDecl) map[*ast.StringLit]bool {
+// callableStrings lists the strings of a class that PHP may take as one of
+// its methods' names: the second item of a two-item array whose first may
+// be the class (a callable array: not `['git', 'status']`), a
+// `'Class::method'` string, and an argument of a function that calls or
+// looks up a callable by name. fqn is the class's name.
+func callableStrings(cl *ast.ClassDecl, fqn string) map[*ast.StringLit]bool {
 	out := map[*ast.StringLit]bool{}
 	byName := map[string]bool{"call_user_func": true, "call_user_func_array": true, "forward_static_call": true,
 		"forward_static_call_array": true, "is_callable": true, "method_exists": true, "register_shutdown_function": true,
@@ -958,14 +1732,20 @@ func callableStrings(cl *ast.ClassDecl) map[*ast.StringLit]bool {
 	ast.Inspect(cl, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.ArrayLit:
-			if len(n.Items) == 2 {
-				for _, it := range n.Items {
-					if it != nil && it.Key == nil {
-						if lit, ok := it.Value.(*ast.StringLit); ok {
-							out[lit] = true
-						}
+			if len(n.Items) == 2 && n.Items[0] != nil && n.Items[1] != nil && n.Items[0].Key == nil && n.Items[1].Key == nil {
+				lit, ok := n.Items[1].Value.(*ast.StringLit)
+				if !ok {
+					break
+				}
+				// A class named as a string must be this one.
+				if first, ok := n.Items[0].Value.(*ast.StringLit); ok {
+					v := strings.TrimPrefix(strings.Trim(first.Raw, `'"`), "\\")
+					short := fqn[strings.LastIndex(fqn, "\\")+1:]
+					if !strings.EqualFold(v, fqn) && !strings.EqualFold(v, short) {
+						break
 					}
 				}
+				out[lit] = true
 			}
 		case *ast.StringLit:
 			if strings.Contains(n.Raw, "::") {
@@ -1080,16 +1860,15 @@ func fileNames(f *ast.File) (string, map[string]string) {
 // otherwise, array<V> when the keys are any int|string. An element type
 // of more than three members is written mixed: a document's
 // map<string, mixed> reads better than every type it holds.
-func spellArray(values []types.Type, shape arrayShape, nullable bool, ns string, imports map[string]string) (string, string) {
-	return spellArrayAt(values, shape, nullable, false, ns, imports)
+func spellArray(values []types.Type, shape arrayShape, nullable bool, sp *speller) (string, string) {
+	return spellArrayAt(values, shape, nullable, false, sp)
 }
 
 // spellArrayAt is spellArray for a declaration (nested false) or for an
 // element type: a declaration's same-typed positions read as a list, an
 // element's computed ones as a tuple, as the dogfood writes list<(string,
 // string)> but list<Binary> for five values a method returns.
-func spellArrayAt(values []types.Type, shape arrayShape, nullable, nested bool, ns string, imports map[string]string) (string, string) {
-	sp := &speller{ns: ns, imports: imports}
+func spellArrayAt(values []types.Type, shape arrayShape, nullable, nested bool, sp *speller) (string, string) {
 	list := !shape.keyed
 	keys := append([]types.Type{}, shape.keys...)
 	elems := append([]types.Type{}, shape.elems...)
@@ -1112,6 +1891,10 @@ func spellArrayAt(values []types.Type, shape arrayShape, nullable, nested bool, 
 			}
 		case types.Never:
 		case types.Array:
+			if emptyArray(t) {
+				tuplesOnly = false // an array of nothing, as array_filter([]) gives
+				return ""
+			}
 			any, tuplesOnly = true, false
 			if t.List {
 				keys = append(keys, types.TInt) // what a list's keys are, should it be a map
@@ -1260,13 +2043,15 @@ func members(spelled string) int {
 type speller struct {
 	ns      string
 	imports map[string]string
+	prog    *program.Program // for the class an anonymous one extends; may be nil
 }
 
 func (s *speller) union(ts []types.Type) (string, bool) {
 	seen := map[string]bool{}
 	var parts []string
 	nullable := false
-	var arrays []types.Type // spelled together, as one list, map or tuple
+	classes := s.classNames(ts) // literals that all name classes: a class<…>
+	var arrays []types.Type     // spelled together, as one list, map or tuple
 	var add func(t types.Type) bool
 	add = func(t types.Type) bool {
 		if u, ok := t.(types.Union); ok {
@@ -1293,6 +2078,9 @@ func (s *speller) union(ts []types.Type) (string, bool) {
 		if !ok {
 			return false
 		}
+		if _, lit := t.(types.StringLit); lit && classes != "" {
+			one = classes
+		}
 		if one == "mixed" {
 			parts, seen = []string{"mixed"}, map[string]bool{"mixed": true}
 			return true
@@ -1309,7 +2097,7 @@ func (s *speller) union(ts []types.Type) (string, bool) {
 		}
 	}
 	if len(arrays) > 0 {
-		one, why := spellArrayAt(arrays, arrayShape{}, false, true, s.ns, s.imports)
+		one, why := spellArrayAt(arrays, arrayShape{}, false, true, s)
 		switch {
 		case why == "":
 		case why == "it only ever holds []" || why == "nothing is known of its keys or elements":
@@ -1354,6 +2142,48 @@ func (s *speller) union(ts []types.Type) (string, bool) {
 	return out, true
 }
 
+// classNames spells the string literals among ts as the class-string
+// they are when every one names a class, as Foo::class does: class<Foo>
+// for one class, class for several; "" when one names none, or another
+// string is among them.
+func (s *speller) classNames(ts []types.Type) string {
+	if s.prog == nil {
+		return ""
+	}
+	var names []string
+	other := false
+	var walk func(t types.Type)
+	walk = func(t types.Type) {
+		switch t := t.(type) {
+		case types.Union:
+			for _, m := range t.Types {
+				walk(m)
+			}
+		case types.StringLit:
+			// Spelled as declared, as Foo::class gives it: 'error' is a
+			// word, not the class Error.
+			if cl := s.prog.Class(t.V); cl == nil || cl.Name != strings.TrimPrefix(t.V, "\\") {
+				other = true
+			}
+			names = append(names, t.V)
+		case types.String:
+			other = true
+		}
+	}
+	for _, t := range ts {
+		walk(t)
+	}
+	if other || len(names) == 0 {
+		return ""
+	}
+	for _, n := range names[1:] {
+		if !strings.EqualFold(n, names[0]) {
+			return "class"
+		}
+	}
+	return "class<" + s.class(s.prog.Class(names[0]).Name) + ">"
+}
+
 func (s *speller) one(t types.Type) (string, bool) {
 	switch t := t.(type) {
 	case types.Mixed:
@@ -1375,7 +2205,21 @@ func (s *speller) one(t types.Type) (string, bool) {
 		return "object", true
 	case types.Class:
 		if strings.Contains(t.Name, "@anonymous") {
-			return "", false // an anonymous class has no name to write
+			// An anonymous class has no name to write: the class it extends,
+			// or the one interface it implements, stands for it.
+			if s.prog == nil {
+				return "", false
+			}
+			cl := s.prog.Class(t.Name)
+			switch {
+			case cl == nil:
+				return "", false
+			case cl.Parent != "":
+				return s.one(types.Class{Name: cl.Parent})
+			case len(cl.Interfaces) == 1:
+				return s.one(types.Class{Name: cl.Interfaces[0]})
+			}
+			return "", false
 		}
 		name := s.class(t.Name)
 		var args []string
@@ -1440,8 +2284,17 @@ func (s *speller) one(t types.Type) (string, bool) {
 		}
 		return "Closure(" + strings.Join(params, ", ") + "): " + ret, true
 	case types.ClassString:
-		if c, ok := t.Of.(types.Class); ok && len(c.Args) == 0 {
-			return "class<" + s.class(c.Name) + ">", true
+		switch of := t.Of.(type) {
+		case nil:
+			return "class", true
+		case types.Class:
+			if !strings.Contains(of.Name, "@anonymous") {
+				return "class<" + s.class(of.Name) + ">", true
+			}
+		case types.Param:
+			if !strings.Contains(of.Name, "\x00") {
+				return "class<" + of.Name + ">", true
+			}
 		}
 		return "string", true
 	}
