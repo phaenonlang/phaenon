@@ -679,7 +679,25 @@ func (x *fnCtx) canAccess(vis program.Visibility, decl *program.Class) bool {
 		}
 		return x.class.IsSubclassOf(decl.Name) || decl.IsSubclassOf(x.class.Name)
 	default:
-		return x.class != nil && strings.EqualFold(x.class.Name, decl.Name)
+		if x.class == nil {
+			return false
+		}
+		if strings.EqualFold(x.class.Name, decl.Name) {
+			return true
+		}
+		if x.class.Kind == ast.KindTrait {
+			// A trait's body runs in its users' scope, their private
+			// members included.
+			if decl.Kind == ast.KindTrait {
+				return true
+			}
+			for _, u := range x.p().TraitUsers(x.class.Name) {
+				if strings.EqualFold(u.Name, decl.Name) {
+					return true
+				}
+			}
+		}
+		return false
 	}
 }
 

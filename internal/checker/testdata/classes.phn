@@ -194,3 +194,23 @@ final class ResolvesTraits
         return $this->inc() . $this->incName();
     }
 }
+
+// A trait's body runs in its user's scope: it may call the user's private
+// methods.
+trait Welcomes
+{
+    public function greet(): string
+    {
+        return $this->name();
+    }
+}
+
+final class Welcomer
+{
+    use Welcomes;
+
+    private function name(): string
+    {
+        return 'g';
+    }
+}
