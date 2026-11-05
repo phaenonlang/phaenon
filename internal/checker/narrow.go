@@ -108,6 +108,9 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 	then, els = env.clone(), env.clone()
 	x.narrowPath(then, e, types.Truthy(t), true)
 	x.narrowPath(els, e, types.Falsy(t), false)
+	if c, ok := pregMatchCall(e); ok {
+		x.pregNarrow(c, then)
+	}
 	x.alwaysCheck(e, t)
 	// A fixed outcome makes the other branch unreachable (so `true ? 1 : 'a'` is 1).
 	if !types.IsMixed(t) {
@@ -376,6 +379,16 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 	}
 	narrowBy(e.Left, lt, rt)
 	narrowBy(e.Right, rt, lt)
+	// `1 === preg_match(…)`: the subject matched (with !==, in the branch
+	// the swap below makes the else branch).
+	for _, side := range []struct {
+		call  ast.Expr
+		other types.Type
+	}{{e.Left, rt}, {e.Right, lt}} {
+		if c, ok := pregMatchCall(side.call); ok && types.Equal(side.other, types.Int{Lo: 1, Hi: 1}) {
+			x.pregNarrow(c, then)
+		}
+	}
 	// `$x === []` / `$x !== []`
 	if isEmptyArrayLit(e.Right) {
 		x.narrowPath(then, e.Left, emptyArray(lt), false)
@@ -385,6 +398,54 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 		return els, then
 	}
 	return then, els
+}
+
+// pregMatchCall reports a call to PHP's preg_match() with a pattern and a
+// subject.
+func pregMatchCall(e ast.Expr) (*ast.Call, bool) {
+	for {
+		p, ok := e.(*ast.Paren)
+		if !ok {
+			break
+		}
+		e = p.Expr
+	}
+	c, ok := e.(*ast.Call)
+	if !ok || c.Args == nil || c.Args.FirstClassCallable || len(c.Args.Args) < 2 {
+		return nil, false
+	}
+	n, ok := c.Callee.(*ast.Name)
+	if !ok || len(n.Parts) != 1 || !strings.EqualFold(n.Parts[0], "preg_match") {
+		return nil, false
+	}
+	for _, a := range c.Args.Args[:2] {
+		if a.Name != nil || a.Unpack || a.Value == nil {
+			return nil, false
+		}
+	}
+	return c, true
+}
+
+// pregNarrow gives the subject of a preg_match() that matched, in then,
+// the type PHPStan gives it: a non-empty-string, when it is a string and
+// every match of its constant pattern consumes a character (regex.go).
+func (x *fnCtx) pregNarrow(c *ast.Call, then *state) {
+	subject := c.Args.Args[1].Value
+	st := x.pathType(subject, then)
+	if types.IsMixed(st) || !types.IsSubtype(st, types.TString, x.p()) {
+		return
+	}
+	patterns := types.Members(x.pathType(c.Args.Args[0].Value, then))
+	if len(patterns) == 0 {
+		return
+	}
+	for _, m := range patterns {
+		lit, ok := m.(types.StringLit)
+		if !ok || !regexConsumes(lit.V) {
+			return
+		}
+	}
+	x.narrowPath(then, subject, types.Intersect(st, types.String{NonEmpty: true}, x.p()), false)
 }
 
 // coalesceCompared narrows the left operand of a `??` compared strictly

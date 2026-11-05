@@ -1,0 +1,95 @@
+// A successful preg_match() makes its subject a non-empty-string when the
+// pattern cannot match the empty string, as PHPStan reads a constant
+// pattern (RegexGroupParser::parseGroups): some part of every match
+// consumes a character. Anchors, lookarounds, backreferences and optional
+// parts consume none, and PHPStan narrows nothing for a pattern with \K,
+// which resets the match. (PHPStan narrows after `(?=a)` and `(a?)\1`; the
+// first is sound, the second is not, and the checker takes neither.)
+
+namespace PregSubject;
+
+/** @param non-empty-string $s */
+function takesNonEmpty(string $s): void
+{
+}
+
+final class Patterns
+{
+    private const string SLUG = '/\A[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?\z/';
+
+    public static function identical(string $s): void
+    {
+        if (1 === preg_match(self::SLUG, $s)) {
+            takesNonEmpty($s);
+        }
+    }
+
+    public static function notIdentical(string $s): void
+    {
+        if (preg_match('/^[a-z][a-z0-9_-]{0,31}$/', $s) !== 1) {
+            throw new \InvalidArgumentException('no slug');
+        }
+        takesNonEmpty($s);
+    }
+
+    public static function truthy(string $s): void
+    {
+        if (preg_match('/\A[a-z0-9-]{1,32}\z/', $s)) {
+            takesNonEmpty($s);
+        }
+    }
+
+    /** @return non-empty-string */
+    public static function ternary(mixed $via, string $default): string
+    {
+        return \is_string($via) && 1 === preg_match('~^(?:get|head)$~i', $via) ? $via : ($default !== '' ? $default : 'get');
+    }
+
+    /** @param list<string> $matches */
+    public static function withMatches(string $s, array $matches): void
+    {
+        if (1 === preg_match('/^(\d+)-(\w+)$/', $s, $matches)) {
+            takesNonEmpty($s);
+        }
+    }
+
+    public static function alternatives(string $s): void
+    {
+        if (1 === preg_match('/^(?:ab|c|[x-z]+)$/', $s)) {
+            takesNonEmpty($s);
+        }
+        if (1 === preg_match('/\Q.\E/', $s)) {
+            takesNonEmpty($s);
+        }
+    }
+
+    // Patterns that can match the empty string narrow nothing.
+    public static function mayBeEmpty(string $s): void
+    {
+        if (1 === preg_match('/^[a-z]*$/', $s)) {
+            takesNonEmpty($s); // want P2103
+        }
+        if (1 === preg_match('/^(?:a|)$/', $s)) {
+            takesNonEmpty($s); // want P2103
+        }
+        if (1 === preg_match('/(?=a)/', $s)) {
+            takesNonEmpty($s); // want P2103
+        }
+        if (1 === preg_match('/(a?)\1/', $s)) {
+            takesNonEmpty($s); // want P2103
+        }
+        if (1 === preg_match('/a\K/', $s)) {
+            takesNonEmpty($s); // want P2103
+        }
+        if (0 === preg_match('/a/', $s)) {
+            takesNonEmpty($s); // want P2103
+        }
+    }
+
+    public static function unknownPattern(string $pattern, string $s): void
+    {
+        if (1 === preg_match($pattern, $s)) {
+            takesNonEmpty($s); // want P2103
+        }
+    }
+}
