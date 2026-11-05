@@ -338,9 +338,12 @@ push dogfood work without a maintainer's go-ahead.
     multi-line parameter list, a named argument's colon spacing. Core's rule fixtures in
     `tests/PHPStan/Data` take the fixer's changes directly and equal `main`'s; the rule tests'
     expected lines moved with them, as on `main`. The trial stashes of 2026-11-04 are dropped.
-  - Still behind `main` on the dogfood branches: the PHP migration sets under their pre-3.88 names
-    (`@PHP80Migration` …), which `main` spells `@PHP8x0Migration` since reflection #10,
-    object-mapper #15, mongodb-odm #48, core #207 and tq-cli #396.
+  - The PHP migration sets under their 3.88 names (`@PHP8x0Migration` for `@PHP80Migration` …),
+    as on `main` since reflection #10, object-mapper #15, mongodb-odm #48, core #207 and tq-cli
+    #396, came the same day: reflector `df6e317`, object-mapper `8c421c4`, mongodb-odm `f0d5742`,
+    core `9e6a1ac3`, tq-cli `4b208f8` (object-mapper's and core's Serena notes too, as on `main`).
+    The same rules under new names: cs changes nothing in any tree, and the commit hooks' PHPStan
+    and suites pass (tq-cli's worktree has no hooks).
 
 ## Next targets (roadmap §3)
 

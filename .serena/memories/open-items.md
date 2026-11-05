@@ -777,11 +777,13 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
   through the line map (§6.3); vscode-php-debug's path mappings cannot change the extension.
 - **Publication** to the VS Code Marketplace and Open VSX waits for the repositories to be public
   (T1); until then the `.vsix`.
-- **PhpStorm and installed code**: the plugin's `fileOpened` starts a server at an installed
-  package's own `phaenon.json` (`PhaenonCompiler.root`), where the VS Code client starts none
-  (§6.6: the package checked without its dependencies, or a second copy in the project). Not
-  observed on the dogfood trees, whose path repositories are symlinked checkouts; the plugin should
-  apply the same rule.
+- ~~**PhpStorm and installed code**~~ — done 2026-11-05: the plugin's `fileOpened` started a server
+  at an installed package's own `phaenon.json`, and every server took every `.phn`, a nested
+  project's too. `PhaenonLspServerSupportProvider.serverRoot` now applies the VS Code client's two
+  rules: no server for installed code (`PhaenonCompiler.isVendorCode`), and each descriptor's
+  `isSupportedFile` takes its own project's files (`PhaenonLspTest`). A path repository's
+  checkout opened through the project's `vendor/` symlink is installed code too; opened as a
+  project of its own, it gets its server.
 - **The TextMate bundle's injections in IntelliJ** are untested: the bundle only wins in an IDE
   without the PHP plugin, and IntelliJ's TextMate engine is not the one `vscode-textmate` tests.
 - **The grammar's type-argument heuristic**: a name written against `<` with a `>` ahead on the

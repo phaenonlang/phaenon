@@ -137,6 +137,7 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     for build, check and watch; `phn trace` of the selection or the terminal. Unit, grammar and 14
     e2e tests in VS Code 1.91.0 and 1.145.0 against a real `phn`. Found on the way: the server read
     paths relative to a `rootUri` around the project (fixed in `internal/lsp`). The PhpStorm
-    plugin's TextMate bundle copies the grammar. Left in [[open-items]] § M6 — VS Code.
+    plugin's TextMate bundle copies the grammar, and its servers follow the same two rules: one
+    owner per file, none for installed code. Left in [[open-items]] § M6 — VS Code.
 
 ← [[Home]]
