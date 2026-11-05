@@ -1,0 +1,41 @@
+namespace App\Arrays;
+
+interface Source
+{
+    fun names(): list<string>;
+}
+
+final class Arrays implements Source
+{
+    private array<mixed> $any = [];
+
+    private array<string> $strings = [];
+
+    private map<string, int> $counts = [];
+
+    private list<int|string> $keys = [];
+
+    private array<mixed> $legacy = [];
+
+    private array<mixed> $bare = [];
+
+    /** @param $config - the configuration, as given */
+    fun __construct(array<mixed> $config, ?array<int> $maybe, private array<mixed> $promoted) {
+        $this->any = $config;
+        $this->keys = array_keys($maybe ?? []);
+    }
+
+    /** @return array<array-key, mixed> everything */
+    fun all(): array<mixed>
+        => $this->any + $this->strings + $this->counts + $this->legacy + $this->bare + $this->promoted;
+
+    fun untyped(array<mixed> $x, ?iterable<mixed> $it): array<mixed> => $x + $this->keys + [$it];
+
+    // The interface's @return stands for this one.
+    fun names(): array => [];
+
+    /** @phpstan-ignore missingType.iterableValue */
+    fun ignored(array $config): void {}
+
+    fun has(int|string $key): bool => isset($this->any[$key]);
+}

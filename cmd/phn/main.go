@@ -833,12 +833,17 @@ func migrateCmd(args []string) {
 		jobs = append(jobs, j)
 	}
 	var report *migrate.PipeReport
+	sources := func(yield func(path string, src *[]byte)) {
+		for _, j := range jobs {
+			yield(j.dst, &j.phn)
+		}
+	}
 	if minCalls > 0 && len(jobs) > 0 {
-		report = migratePipes(jobs[0].in, target, minCalls, func(yield func(path string, src *[]byte)) {
-			for _, j := range jobs {
-				yield(j.dst, &j.phn)
-			}
-		})
+		report = migratePipes(jobs[0].in, target, minCalls, sources)
+	}
+	arrays := 0
+	if !*keepDoc && len(jobs) > 0 {
+		arrays = migrateArrays(jobs[0].in, target, sources)
 	}
 	migrated, lifted, kept := 0, 0, 0
 	linesBefore, linesAfter := 0, 0
@@ -875,6 +880,9 @@ func migrateCmd(args []string) {
 		fmt.Printf("%d @throws lifted, %d bodies written as =>, %d braces moved up, %d class braces moved down, %d empty bodies written as {}, %d docblocks collapsed; %d lines became %d\n",
 			stats.Throws, stats.Arrows, stats.Braces, stats.Down, stats.Empty, stats.Docblocks, linesBefore, linesAfter)
 	}
+	if arrays > 0 {
+		fmt.Printf("%d arrays and iterables declared without an element type written <mixed>\n", arrays)
+	}
 	if report != nil {
 		line := fmt.Sprintf("%d chains as pipelines, %d left as calls", report.Pipelines, report.LeftCalls())
 		if r := report.Reasons(); r != "" {
@@ -889,13 +897,51 @@ func migrateCmd(args []string) {
 // with its rewrite. The program models are built as check builds them,
 // from anchor, with the sources in memory.
 func migratePipes(anchor string, target phpversion.Version, minCalls int, sources func(yield func(path string, src *[]byte))) *migrate.PipeReport {
+	in, srcs := migrateSources(sources)
+	out, rep, err := migrate.Pipes(in, migrate.PipeOptions{MinCalls: minCalls, Load: migrateLoad(anchor, target)})
+	if err != nil {
+		fail("phn migrate: %v", err)
+	}
+	for i, src := range srcs {
+		*src = out[i]
+	}
+	for i, n := range rep.Undone {
+		fmt.Fprintf(os.Stderr, "%s: %s\n", rep.UndoneIn[i], n.Msg)
+	}
+	return rep
+}
+
+// migrateArrays writes `<mixed>` after the arrays and iterables the
+// prepared files declare without an element type (design/collections.md
+// §5), and replaces each source with its rewrite; it returns how many.
+func migrateArrays(anchor string, target phpversion.Version, sources func(yield func(path string, src *[]byte))) int {
+	in, srcs := migrateSources(sources)
+	out, n, err := migrate.Arrays(in, migrateLoad(anchor, target))
+	if err != nil {
+		fail("phn migrate: %v", err)
+	}
+	for i, src := range srcs {
+		*src = out[i]
+	}
+	return n
+}
+
+// migrateSources lists the prepared files sources yields, and where each
+// one's source is kept.
+func migrateSources(sources func(yield func(path string, src *[]byte))) ([]migrate.PipeFile, []*[]byte) {
 	var in []migrate.PipeFile
 	var srcs []*[]byte
 	sources(func(path string, src *[]byte) {
 		in = append(in, migrate.PipeFile{Path: path, Src: *src})
 		srcs = append(srcs, src)
 	})
-	load := func(files map[string][]byte, checked map[string]bool) (*program.Program, error) {
+	return in, srcs
+}
+
+// migrateLoad builds the program models of a codemod as check builds them,
+// from anchor, with the sources in memory.
+func migrateLoad(anchor string, target phpversion.Version) func(map[string][]byte, map[string]bool) (*program.Program, error) {
+	return func(files map[string][]byte, checked map[string]bool) (*program.Program, error) {
 		p, _ := newProgram(anchor, target)
 		paths := make([]string, 0, len(files))
 		for path := range files {
@@ -909,17 +955,6 @@ func migratePipes(anchor string, target phpversion.Version, minCalls int, source
 		}
 		return p, nil
 	}
-	out, rep, err := migrate.Pipes(in, migrate.PipeOptions{MinCalls: minCalls, Load: load})
-	if err != nil {
-		fail("phn migrate: %v", err)
-	}
-	for i, src := range srcs {
-		*src = out[i]
-	}
-	for i, n := range rep.Undone {
-		fmt.Fprintf(os.Stderr, "%s: %s\n", rep.UndoneIn[i], n.Msg)
-	}
-	return rep
 }
 
 // modelFile returns the file at path in the program model, nil without one.
