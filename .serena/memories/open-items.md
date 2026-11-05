@@ -818,11 +818,13 @@ checker is more lenient there, never stricter. Left:
 ## M6 — unused private members (slice 6, 2026-11-05)
 
 `../design/tooling.md` §9.2. Left:
-- **The attribute exemption is broad**: any attribute other than PHP's own keeps a private
+- ~~**The attribute exemption is broad**: any attribute other than PHP's own keeps a private
   property from being reported. PHPStan narrows it per framework through extensions
   (`ReadWritePropertiesExtension`, phpstan-doctrine) and the `propertyAlwaysReadTags` /
-  `propertyAlwaysWrittenTags` parameters. A list in `phaenon.json` could narrow it the day a
-  framework attribute hides a real finding.
+  `propertyAlwaysWrittenTags` parameters.~~ — done 2026-11-05, 279a4f2: `phaenon.json`'s
+  `unused.reflectedAttributes` narrows it to the listed attribute classes, their subclasses and
+  implementations included, for a project that opts in. Without the key the broad default stands;
+  `[]` exempts nothing.
 - **No counterpart for `AlwaysUsedMethodExtension` / `AlwaysUsedClassConstantsExtension`**: no
   dogfood tree needs one, since their PHPStan configurations register none.
 - **Receivers the checker did not record** (dead code, a few narrowed paths: 1–2% of the accesses

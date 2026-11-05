@@ -159,7 +159,9 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     dogfood trees gave one finding, an object-mapper fixture that only `#[MapToProperty]` reads;
     with the attribute exemption every tree checks byte for byte as before. The four identifiers
     left the parity test's allow-list (goldens `unused-private.phn`, `unused-attributes.phn`). It
-    surfaced and fixed a false `P2108`: a trait calling a private method of the class using it. Left in
+    surfaced and fixed a false `P2108`: a trait calling a private method of the class using it.
+    `unused.reflectedAttributes` in `phaenon.json` narrows the exemption for a project that opts
+    in (goldens `unused-attributes-strict.phn`, `unused-attributes-listed.phn`). Left in
     [[open-items]] § M6 — unused private members. Next: slice 7, `list-types` and `map-types`
     (§11).
 
