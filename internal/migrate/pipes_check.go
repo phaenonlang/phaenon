@@ -191,12 +191,13 @@ func checkRecorded(srcs map[string][]byte, watch map[string]bool, load func(map[
 	// The checker also types expressions of other files while it checks
 	// one — a callee's default, a constant's value — in that file's scope:
 	// only a file's own nodes, typed while it is checked, are recorded.
-	owned := map[ast.Expr]string{}
+	owned := map[ast.Node]string{}
 	for path := range watch {
 		if f := p.File(path); f != nil && f.AST != nil {
 			ast.Inspect(f.AST, func(n ast.Node) bool {
-				if e, ok := n.(ast.Expr); ok {
-					owned[e] = path
+				switch n.(type) {
+				case ast.Expr, *ast.Param:
+					owned[n] = path
 				}
 				return true
 			})
@@ -217,6 +218,16 @@ func checkRecorded(srcs map[string][]byte, watch map[string]bool, load func(map[
 	opts := checker.Options{Deprecations: true, Observe: observe}
 	for _, h := range hooks {
 		h(&opts)
+	}
+	// Assume is asked of the watched files' own nodes only, as Observe
+	// records them.
+	if assume := opts.Assume; assume != nil {
+		opts.Assume = func(f *program.File, n ast.Node) types.Type {
+			if path, ok := owned[n]; !ok || f == nil || f.Path != path {
+				return nil
+			}
+			return assume(f, n)
+		}
 	}
 	c.diags = checker.New(p, opts).Check()
 	return c, nil
