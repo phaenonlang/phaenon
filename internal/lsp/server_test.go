@@ -125,6 +125,13 @@ type client struct {
 
 func start(t *testing.T, files map[string]string, opts map[string]any) *client {
 	t.Helper()
+	return startAt(t, files, opts, func(root string) string { return root })
+}
+
+// startAt starts a server whose client names rootOf(the project's root) as
+// its rootUri.
+func startAt(t *testing.T, files map[string]string, opts map[string]any, rootOf func(string) string) *client {
+	t.Helper()
 	host := newFakeHost(t, files)
 	srv := New(host, io.Discard)
 	srv.Debounce = 10 * time.Millisecond
@@ -149,7 +156,7 @@ func start(t *testing.T, files map[string]string, opts map[string]any) *client {
 	if opts == nil {
 		opts = map[string]any{}
 	}
-	c.call("initialize", map[string]any{"rootUri": uriOf(host.root), "initializationOptions": opts,
+	c.call("initialize", map[string]any{"rootUri": uriOf(rootOf(host.root)), "initializationOptions": opts,
 		"capabilities": map[string]any{"textDocument": map[string]any{"completion": map[string]any{"completionItem": map[string]any{"snippetSupport": true}}}}})
 	c.notify("initialized", map[string]any{})
 	t.Cleanup(func() {
@@ -311,6 +318,18 @@ func TestDiagnosticsOnOpenAndChange(t *testing.T) {
 		"contentChanges": []any{map[string]any{"text": shopSrc}}})
 	if got := codes(c.diagnostics("src/Shop.phn", 3)); len(got) != 1 || got[0] != "P2202" {
 		t.Errorf("Shop against the unsaved User: %v", got)
+	}
+}
+
+// A client may name a directory around the project as its root, the
+// workspace the project is a part of. The paths stay the project's: read
+// under that directory, the open file would be a second copy of its own,
+// declared twice (P2511).
+func TestAClientRootAroundTheProject(t *testing.T) {
+	c := startAt(t, map[string]string{"src/User.phn": userSrc, "src/Shop.phn": shopSrc}, nil, filepath.Dir)
+	c.open("src/Shop.phn", shopSrc)
+	if d := c.diagnostics("src/Shop.phn", 1); len(d) != 0 {
+		t.Fatalf("diagnostics of a clean file: %s", jsonOf(d))
 	}
 }
 

@@ -86,7 +86,8 @@ type Server struct {
 	wantBuild   bool // a save asked for a build no check has done yet
 	// clientRoot is the project's root as the client spells it (rootUri),
 	// which may differ from the Host's through a symbolic link: URIs sent
-	// to the client use it.
+	// to the client use it. A rootUri naming another directory, such as
+	// the workspace around the project, is not kept (sameDir).
 	clientRoot string
 	requestID  int
 	wg         sync.WaitGroup
@@ -324,7 +325,7 @@ func (s *Server) initialize(p InitializeParams) any {
 		}
 	}
 	s.snippets = p.Capabilities.TextDocument.Completion.CompletionItem.SnippetSupport
-	if root, ok := pathOf(p.RootURI); ok && p.RootURI != "" {
+	if root, ok := pathOf(p.RootURI); ok && p.RootURI != "" && sameDir(root, s.host.Root()) {
 		s.clientRoot = root
 	}
 	s.watch = p.Capabilities.Workspace.DidChangeWatchedFiles.DynamicRegistration
@@ -405,6 +406,17 @@ func (s *Server) path(uri string) (string, bool) {
 		}
 	}
 	return abs, true
+}
+
+// sameDir is whether two paths name one directory, spelled alike or
+// through symbolic links.
+func sameDir(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
 }
 
 // under is path relative to root, when it lies under it.
