@@ -1,7 +1,7 @@
 ---
 type: status
 tags: [phaenon, roadmap, history]
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # Milestones — history and state
@@ -213,8 +213,12 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     `phn check` 486 → 0 and 2076 → 0, PHPStan max 535 → 0 and 1396 → 0. Then a last pass
     spells each type only as deep as the code uses it, as the checker finds, rather than at a
     depth cap: 89% and 90% come back as written, core has none wider, and tq-cli has 23 test
-    fixtures wider, typed deeper than anything reads them; still no finding. Left in
-    [[open-items]] § M6 — the list-types codemod. Next: the `throws` codemod's measurement
-    ([[open-items]]), then slice 8.
+    fixtures wider, typed deeper than anything reads them; still no finding. On 2026-11-06 the
+    102 declarations not back as written were audited one by one: 84 are the authors' types
+    wider than the values or deeper than the code reads, 2 a class the union's other member
+    covers (`DomainEvent|Event`, fixed in `51b3d88`: core 262 of 289 as written), none a checker
+    gap by PHPStan max; 15 wait on style rules and one on a design question (a tuple accepts
+    a longer one), a maintainer's decision. Left in [[open-items]] § M6 — the list-types codemod. Next: the
+    `throws` codemod's measurement ([[open-items]]), then slice 8.
 
 ← [[Home]]

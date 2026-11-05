@@ -1,7 +1,7 @@
 ---
 type: backlog
 tags: [phaenon, backlog]
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # Open and deferred items
@@ -506,6 +506,49 @@ and the codemod's types leave no finding of `phn check` or PHPStan max.
   807 (722); 23 are shallower than written (the cut's `mixed`, counted apart from wider, which
   fails the harness), all test fixtures whose deeper levels nothing reads. Both
   trees: 0 findings of `phn check` and PHPStan max. The pass costs 29 checks and 3 s on tq-cli.
+- ~~**The 102 declarations not back as written** (core 29 narrower; tq-cli 50 narrower, 23
+  shallower)~~ — audited 2026-11-06, each read at its values and uses (compiler `51b3d88`,
+  `6d0286e`). 84 are the codemod right: 64 authors' types wider than the values (`map<string,
+  mixed>` option bags and documents of scalars, `array<…>` for lists, `array<mixed>` for typed
+  YAML nodes, `string` for class names, `\Throwable` for exceptions), 20 deeper than the code
+  reads (T14: 19 of tq-cli's fake-HTTP route tables, whose bodies go to `json_encode()`, and one
+  recorded call's payload). 2 were a
+  codemod bug, fixed: a class another member of the union covers was spelled
+  (`map<int, DomainEvent|Event>`; the lattice's unions know no hierarchy). None is a checker gap:
+  both trees stripped, recovered and compiled give 0 findings of PHPStan max. 15 are style and 1 a
+  design question, open below. Core now comes back with 262 of 289 as written, tq-cli 734 of 807.
+  `TestListTypesMeasure -v` logs every declaration not back as written.
+- **Style rules the audit found, a maintainer's decision** (none written; each with the
+  declarations it would bring back as written):
+  - *a parameter handed whole to typed destinations takes their type* (7: `list<int|float>
+    $delays` for `new Http(…)`, `list<FakePlane|\Throwable> $links` for `FakeDialer`, where the
+    codemod writes today's callers' `list<int>`, `list<FakePlane>`); needs the destination's
+    declared type from the checker, not measured;
+  - *a union of two or more scalar or object types is tried as `mixed`* (T14's cut one level
+    wider): measured in scratch, 24 back (core 272, tq-cli 747) and 3 made wider than written
+    (`list<int|string>` of `array_keys()`, two `map<string, string|bool>` console parameters);
+    0.3 s per tree;
+  - *an override's narrower return only where the class's callers see it* (1, Symfony's
+    `getSupportedTypes()` as `map<string, false>`);
+  - *a shape whose fields are all `null` holds `mixed`* (2, core's empty watermarks; core's
+    `map<class<Aggregate>, null>` set has computed keys and stays);
+  - *a level a declared type spells is not cut* (3 of the 23 shallower: `CloudRoots::scope()`'s
+    `list<(CloudTree, list<string>)>`, a closure's `map<string, string> $headers`);
+  - *a value handed to a `list<…>` parameter reads as a list* (2 tuples, `(Member, Member)`,
+    `(string, string, string, int)`): it changes the tuple rule;
+  - measured and not worth it: *below a map an unread array level is `mixed` whole*, 4 back for 4
+    lost (core's `map<string, map<string, mixed>>` schema components, tq-cli's
+    `map<string, list<string>>`).
+- **A tuple accepts a longer one**: `../design/collections.md` §2.4 calls a tuple fixed-length and
+  sealed, but the lattice takes `list{string, string, string, mixed}` as a
+  `list{string, string, string}` and `['a', 'b', 'c']` as a `(string, string)`, as PHPStan does
+  (`internal/types/subtype.go`; both pass PHPStan max and `phn check`). tq-cli's
+  `ReconcilerTest::secretWrites()` takes its recorded 4-tuples as 3-tuples. No decision records
+  it; whether a tuple is exact is the design's.
+- **Spellings back as written but spelled otherwise** (26 in tq-cli): `false|string` where authors
+  and PHP's stubs write `string|false` (14 environment maps, 2 other orders), `map<string,
+  mixed>|null` for `?map<string, mixed>` in a tuple (6), the class's name where authors wrote
+  `self` (2), and `array<…>` for `map<int|string, …>` as `../design/collections.md` §2 has it (2).
 
 ## M6 — distribution (slice 1, 2026-11-03)
 
