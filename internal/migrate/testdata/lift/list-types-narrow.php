@@ -87,7 +87,8 @@ final class Templates
 final class Routes
 {
     // An answer is a map or a list of records, spelled apart; the records
-    // in a row are a list, whatever their fields.
+    // in a row are a list, whatever their fields. names() reads the
+    // records, which the type spells as deep as they are.
     private function routes(): array
     {
         return [
@@ -102,6 +103,19 @@ final class Routes
         [$status] = $this->routes()[$key];
 
         return $status;
+    }
+
+    public function names(string $key): string
+    {
+        [, $answer] = $this->routes()[$key];
+        $names = [];
+        if (array_is_list($answer)) {
+            foreach ($answer as $record) {
+                $names[] = $record['name'];
+            }
+        }
+
+        return implode(',', $names);
     }
 }
 

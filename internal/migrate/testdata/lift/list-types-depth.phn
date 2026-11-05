@@ -1,0 +1,86 @@
+namespace App\ListTypesDepth;
+
+final class Report
+{
+    fun render(string $name): string
+        => $this->json(['name' => $name, 'meta' => ['tags' => ['a', 'b'], 'owner' => ['id' => 'x', 'roles' => ['admin']]]]);
+
+    // A document handed to json_encode(): no use reaches into it, and its
+    // first level holds strings beside maps, so it holds mixed.
+    private fun json(map<string, mixed> $value): string => json_encode($value, JSON_THROW_ON_ERROR);
+}
+
+final class Rows
+{
+    // Rows nobody reads into: they hold mixed, and what the method
+    // returns still says they are maps.
+    private fun rows(): list<map<string, mixed>> => [['id' => 1, 'tags' => ['a']], ['id' => 2, 'tags' => []]];
+
+    fun count(): int => count($this->rows());
+}
+
+final class Recorder
+{
+    // Read three levels deep, through a destructuring: spelled three
+    // levels deep.
+    private list<(string, map<string, string>)> $calls = [];
+
+    fun get(string $url): void
+        => $this->calls[] = [$url, ['Accept' => 'application/json', 'Authorization' => 'Bearer x']];
+
+    fun authorized(): bool {
+        foreach ($this->calls as [, $headers]) {
+            if ($headers['Authorization'] === '') {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+final class Shapes
+{
+    // Paths handed one at a time to a parameter that spells them: they are
+    // spelled, though no index reaches into them.
+    private fun shapes(): map<string, list<list<string>>>
+        => ['web' => [['services', 'web', 'image'], ['services', 'web', 'tag']]];
+
+    fun leaves(map<string, mixed> $tree): int {
+        $n = 0;
+        foreach ($this->shapes() as $paths) {
+            foreach ($paths as $path) {
+                $n += Tree::holds($tree, $path) ? 1 : 0;
+            }
+        }
+
+        return $n;
+    }
+}
+
+final class Tree
+{
+    static fun holds(map<string, mixed> $tree, list<string> $path): bool
+        => $path !== [] && array_key_exists($path[0], $tree);
+}
+
+final class Catalogue
+{
+    // A return another class reads: its reads count.
+    fun sections(): map<string, list<map<string, string>>> => ['main' => [['title' => 'A'], ['title' => 'B']]];
+
+    // The same, only counted: its lists hold mixed.
+    fun drafts(): map<string, list<mixed>> => ['main' => [['title' => 'C']]];
+}
+
+final class Page
+{
+    fun titles(Catalogue $catalogue): string {
+        $out = '';
+        foreach ($catalogue->sections()['main'] as $entry) {
+            $out .= $entry['title'];
+        }
+
+        return $out . count($catalogue->drafts()['main']);
+    }
+}
