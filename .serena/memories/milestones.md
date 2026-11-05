@@ -164,5 +164,20 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     in (goldens `unused-attributes-strict.phn`, `unused-attributes-listed.phn`). Left in
     [[open-items]] § M6 — unused private members. Next: slice 7, `list-types` and `map-types`
     (§11).
+16. 2026-11-05: **M6 slice 7, first step: how arrays are typed** (compiler `0dd8753`,
+    `34b1e97`, `8de619d`; `../design/collections.md` §2, §4–§7). Measuring slice 7's codemods
+    first found almost nothing to rewrite: PHPStan at level max had made every tree document its
+    arrays, and the lift had turned that into syntax. It found instead what was left in
+    docblocks, and a hole: a bare `array` passed `phn check` while its output failed PHPStan max.
+    Decided and built: `array<V>` for an array whose keys do not matter; a bare `array` names no
+    element type, so it is `P2516` unless an override inherits one (`missingType.iterableValue`
+    left the parity allow-list); shapes stay docblocks, so Phaenon's spellings in a `.phn`
+    docblock are translated for PHPStan. The inheritance of docblock types now takes each slot
+    from the nearest ancestor that documents it. The lift writes `array<array-key, V>` as
+    `array<V>`, and `array<mixed>` for what has no element type. Dogfood: core's 7 and tq-cli's
+    31 tags lifted, tq-cli's 4 untyped test parameters written ([[dogfood]]); every tree checks
+    as before, and core (1188) and tq-cli (2052) pass their suites, PHPStan and cs. Next: core's
+    findings to zero ([[open-items]] § PHPStan rules deliberately not matched), then the
+    `list-types` codemod, checked by stripping and recovering the dogfood's written types.
 
 ← [[Home]]

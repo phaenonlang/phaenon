@@ -15,6 +15,11 @@ Tequila repos have their own rules (`~/labs/tequila/platform/CLAUDE.md`): Conven
 squash-merged PRs, release-please. Do not apply Phaenon's commit style there, and do not merge or
 push dogfood work without a maintainer's go-ahead.
 
+- **Array types (2026-11-05):** `phn migrate --keep-calls` over the `.phn` of every tree, the
+  project's `exclude` left out: core `4fcde320` (7 `array<array-key, mixed>` tags lifted), tq-cli
+  `3074629` (31 lifted, 4 untyped test parameters written `array<mixed>`); the other trees
+  unchanged, as their bare arrays sit under `@phpstan-ignore missingType.iterableValue`. Core's
+  suite needs `tq test:infra:up` (a MongoDB replica set on 27017) and OrbStack running.
 - **Pipes (2026-11-03):** the `pipes` codemod is applied to every tree and committed with a
   blame-ignore entry: core 72 pipelines (`eb69b190`, `e111c0d6`), tq-cli 594 (`32c98c1`,
   `904a342`), mongodb-odm 4 (`27486f7`, `41ddb00`); reflector and object-mapper unchanged. The

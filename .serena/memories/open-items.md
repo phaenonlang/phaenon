@@ -53,12 +53,14 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 - ~~**`array-key` as native syntax**~~ — decided 2026-10-29 (`generics.md` §11.2): hyphenated
   PHPStan names stay docblock vocabulary; `array-key` is written `int|string`, M4 decides `map`'s
   key bound.
-- **Array shapes as native syntax** — docblocks and alias bodies only today; a shape cannot be
-  tested at runtime (emitter error).
-- **Phaenon vocabulary inside user docblocks** in `.phn` (`@var map<int, T>`) passes through
+- ~~**Array shapes as native syntax** — docblocks and alias bodies only today; a shape cannot be
+  tested at runtime (emitter error).~~ — decided 2026-11-05 (`../design/collections.md` §6): no
+  native syntax; shapes stay docblock vocabulary.
+- ~~**Phaenon vocabulary inside user docblocks** in `.phn` (`@var map<int, T>`) passes through
   untranslated, so PHPStan on the output does not know `map`. Decide: translate, or forbid docblock
-  types in `.phn`.
-- **Shapes vs classes** (`checker.md` §10) — whether shapes survive as a language feature.
+  types in `.phn`.~~ — done 2026-11-05, `0dd8753`: translated (`collections.md` §4); tuples parse.
+- ~~**Shapes vs classes** (`checker.md` §10) — whether shapes survive as a language feature.~~ —
+  decided 2026-11-05: they survive, as docblocks.
 
 ## M4 — left after the first slice (2026-10-30)
 
