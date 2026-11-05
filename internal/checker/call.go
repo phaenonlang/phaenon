@@ -1879,9 +1879,6 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		}
 		if b.param.ByRef {
 			x.noteByRef(b.arg.Value)
-			if x.c.opts.ByRef != nil {
-				x.c.opts.ByRef(x.file, b.arg.Value)
-			}
 			if v, ok := b.arg.Value.(*ast.Variable); ok {
 				if x.c.refVars == nil {
 					x.c.refVars = map[*ast.Variable]bool{}
@@ -2010,6 +2007,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		}
 		pt := paramType(b.param)
 		pt = finalizeParams(pt, tps)
+		if x.c.opts.CallableArg != nil && b.arg.Value != nil {
+			x.c.opts.CallableArg(x.file, b.arg.Value, pt)
+		}
 		at := types.Substitute(argTypes[i], freshOnly(subst)) // generic callables as resolved
 		if at == nil {
 			continue
@@ -2095,6 +2095,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			out = types.Substitute(types.Substitute(b.param.Type, rename), subst)
 			defined := argTypes[i] != nil && !x.maybeUndefined(b.arg.Value, env)
 			if sig.stub && defined {
+				if x.c.opts.ByRef != nil {
+					x.c.opts.ByRef(x.file, b.arg.Value, nil)
+				}
 				continue // php-src reads and writes the reference (sort, end, ksort): the type stays
 			}
 			if types.IsMixed(out) && defined && !types.IsMixed(argTypes[i]) {
@@ -2104,6 +2107,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			// record($seen)` with `?Context &$seen` leaves ?Context, as PHPStan does.
 		}
 		x.assignTo(b.arg.Value, finalizeParams(out, tps), env, b.arg.S)
+		if x.c.opts.ByRef != nil {
+			x.c.opts.ByRef(x.file, b.arg.Value, finalizeParams(out, tps))
+		}
 		if v, ok := b.arg.Value.(*ast.Variable); ok {
 			// What a by-reference parameter writes is known from a docblock
 			// (@param-out, or the @param of an untyped reference): PHP

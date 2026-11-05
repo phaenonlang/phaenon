@@ -17,6 +17,7 @@ import (
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/checker"
+	"github.com/phaenonlang/phaenon/internal/docblock"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/program"
@@ -66,9 +67,16 @@ func ArrayTypes(files []PipeFile, load func(srcs map[string][]byte, checked map[
 	left := map[string]map[string]string{}
 	deny := map[string]map[string]bool{} // per file, candidates a check refused
 	for round := 0; round < arrayTypeRounds; round++ {
-		byRef := map[*program.File][]ast.Expr{}
+		byRef := map[*program.File][]byRefArg{}
+		callables := map[ast.Expr]types.Type{}
 		cur, err := checkRecorded(srcs, watch, load, func(o *checker.Options) {
-			o.ByRef = func(f *program.File, e ast.Expr) { byRef[f] = append(byRef[f], e) }
+			o.ByRef = func(f *program.File, e ast.Expr, out types.Type) { byRef[f] = append(byRef[f], byRefArg{e, out}) }
+			o.CallableArg = func(f *program.File, e ast.Expr, param types.Type) {
+				switch e.(type) {
+				case *ast.ArrayLit, *ast.MethodCall, *ast.StaticCall:
+					callables[e] = param
+				}
+			}
 		})
 		if err != nil {
 			return nil, nil, err
@@ -83,7 +91,7 @@ func ArrayTypes(files []PipeFile, load func(srcs map[string][]byte, checked map[
 			if pf == nil || pf.AST == nil {
 				continue
 			}
-			a := &arrayTyper{prog: cur.prog, file: pf, types: cur.types[path], byRef: byRef[pf], left: map[string]string{}, deny: deny[path]}
+			a := &arrayTyper{prog: cur.prog, file: pf, types: cur.types[path], byRef: byRef[pf], callables: callables, left: map[string]string{}, deny: deny[path]}
 			src, n := a.run()
 			left[path] = a.left
 			if n == 0 {
@@ -296,15 +304,56 @@ func bareArrayDeclsAll(f *ast.File) []candidate {
 	return out
 }
 
+// byRefArg is an argument passed by reference and what the callee writes
+// back to it, nil when it keeps the argument's type.
+type byRefArg struct {
+	e   ast.Expr
+	out types.Type
+}
+
+// docReturns, docParams and docVars report whether a docblock gives the
+// slot a type: its @return, the @param of the named parameter, a @var.
+func docReturns(doc string) bool { return doc != "" && docblock.Parse(doc).Return != nil }
+
+func docParams(doc, name string) bool {
+	if doc == "" {
+		return false
+	}
+	for _, t := range docblock.Parse(doc).Params {
+		if t.Name == name && t.Type != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func docVars(doc string) bool {
+	if doc == "" {
+		return false
+	}
+	for _, v := range docblock.Parse(doc).Vars {
+		if v.Type != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // arrayTyper is one round over one file.
 type arrayTyper struct {
 	prog  *program.Program
 	file  *program.File
 	types map[ast.Span]types.Type
-	byRef []ast.Expr
-	left  map[string]string // candidate key → why it was left
-	deny  map[string]bool   // candidates a check refused
-	edits []edit
+	byRef []byRefArg
+	// callables holds, for an argument that may be a callable (`[$this,
+	// 'm']`, `$this->m(...)`), the type of the parameter it is passed to.
+	callables map[ast.Expr]types.Type
+	// stored holds, for a callable reference assigned to a typed property
+	// (`$this->post = $post ?? self::send(...)`), the property's type.
+	stored map[ast.Expr]types.Type
+	left   map[string]string // candidate key → why it was left
+	deny   map[string]bool   // candidates a check refused
+	edits  []edit
 }
 
 func (a *arrayTyper) run() ([]byte, int) {
@@ -321,6 +370,7 @@ func (a *arrayTyper) run() ([]byte, int) {
 			return true
 		}
 		pcl := a.programClass(cl)
+		a.stored = storedCallables(cl, pcl)
 		write := func(key string, values []types.Type, keys arrayShape) {
 			c, ok := byKey[key]
 			if !ok {
@@ -369,7 +419,7 @@ func (a *arrayTyper) run() ([]byte, int) {
 						a.left[rkey] = "the method may be overridden"
 					case override:
 						a.left[rkey] = "it overrides a method"
-					case m.Doc != "" && strings.Contains(m.Doc, "@return"):
+					case docReturns(m.Doc):
 						a.left[rkey] = "a docblock types it"
 					default:
 						if values, why := a.returnValues(m); why != "" {
@@ -389,7 +439,7 @@ func (a *arrayTyper) run() ([]byte, int) {
 						a.left[pkey] = "the method is not private"
 					case usesTrait(cl):
 						a.left[pkey] = "a trait may call it"
-					case m.Doc != "" && strings.Contains(m.Doc, "@param"):
+					case docParams(m.Doc, p.Var.Name):
 						a.left[pkey] = "a docblock types it"
 					default:
 						if values, why := a.argValues(cl, m, i, p); why != "" {
@@ -435,11 +485,9 @@ func (a *arrayTyper) propertyLeft(cl *ast.ClassDecl, p *ast.PropertyDecl) string
 	switch {
 	case p.Modifiers&ast.ModPrivate == 0:
 		return "the property is not private"
-	case p.Modifiers&ast.ModStatic != 0:
-		return "a static property"
 	case usesTrait(cl):
 		return "a trait may write it"
-	case p.Doc != "" && strings.Contains(p.Doc, "@var"):
+	case docVars(p.Doc):
 		return "a docblock types it"
 	case len(p.Attrs) > 0:
 		return "an attribute may have a framework write it"
@@ -466,10 +514,31 @@ type arrayShape struct {
 	keys, elems []types.Type
 }
 
-// propertyValues collects the values a private property can hold.
+// propertyValues collects the values a private property can hold: its
+// default, what is assigned to it and to its elements (an element of an
+// element too), and what a callee passed it by reference writes back.
 func (a *arrayTyper) propertyValues(cl *ast.ClassDecl, p *ast.PropertyDecl) ([]types.Type, arrayShape, string) {
 	name := p.Props[0].Var.Name
-	isThis := func(e ast.Expr) bool {
+	static := p.Modifiers&ast.ModStatic != 0
+	// isSelf reports the property itself: $this->p, or self::$p,
+	// static::$p and the class's own name for a static one.
+	isSelf := func(e ast.Expr) bool {
+		if static {
+			sp, ok := e.(*ast.StaticPropertyFetch)
+			if !ok {
+				return false
+			}
+			v, ok := sp.Name.(*ast.Variable)
+			if !ok || v.Name != name {
+				return false
+			}
+			cn, ok := sp.Class.(*ast.Name)
+			if !ok || len(cn.Parts) != 1 {
+				return false
+			}
+			c := strings.ToLower(cn.Parts[0])
+			return c == "self" || c == "static" || strings.EqualFold(cn.Parts[0], cl.Name.Name)
+		}
 		pf, ok := e.(*ast.PropertyFetch)
 		if !ok {
 			return false
@@ -487,17 +556,46 @@ func (a *arrayTyper) propertyValues(cl *ast.ClassDecl, p *ast.PropertyDecl) ([]t
 		}
 		values = append(values, t)
 	}
-	for _, e := range a.byRef {
-		for {
-			if ix, ok := e.(*ast.Index); ok {
-				e = ix.Array
-				continue
+	for _, r := range a.byRef {
+		if isSelf(r.e) {
+			// What the callee writes back, sort()'s list<V>: a value of
+			// its own, unless its elements are unknown, which happens when
+			// V comes from this property while it is still untyped; then
+			// it says only whether a list stays a list.
+			if arr, ok := r.out.(types.Array); ok && types.IsMixed(arr.Value) {
+				if !arr.List {
+					shape.keyed = true
+				}
+			} else if r.out != nil {
+				values = append(values, r.out)
 			}
-			break
+			continue
 		}
-		if isThis(e) {
-			return nil, shape, "it is passed by reference"
+		for e := r.e; ; {
+			ix, ok := e.(*ast.Index)
+			if !ok {
+				break
+			}
+			if isSelf(ix.Array) {
+				return nil, shape, "an element is passed by reference"
+			}
+			e = ix.Array
 		}
+	}
+	// element records an element written: its key (nil: appended) and value.
+	element := func(key ast.Expr, value types.Type) string {
+		shape.elems = append(shape.elems, value)
+		if key == nil {
+			shape.keys = append(shape.keys, types.TInt)
+			return ""
+		}
+		k, ok := a.types[key.Span()]
+		if !ok {
+			return "a key written to it is not typed"
+		}
+		shape.keyed = true
+		shape.keys = append(shape.keys, k)
+		return ""
 	}
 	why := ""
 	for _, m := range cl.Members {
@@ -514,34 +612,41 @@ func (a *arrayTyper) propertyValues(cl *ast.ClassDecl, p *ast.PropertyDecl) ([]t
 				case *ast.ClassDecl:
 					return false // another class's $this
 				case *ast.PropertyFetch:
-					if id, ok := n.Name.(*ast.Ident); ok && id.Name == name {
+					if id, ok := n.Name.(*ast.Ident); ok && id.Name == name && !static {
 						if v, ok := n.Object.(*ast.Variable); !ok || v.Name != "this" {
 							why = "another object's property of that name is used"
 						}
 					}
 				case *ast.Foreach:
-					if n.ByRef && isThis(n.Expr) {
+					if n.ByRef && isSelf(n.Expr) {
 						why = "a foreach takes its elements by reference"
 					}
 				case *ast.Unset:
 					for _, v := range n.Vars {
-						if ix, ok := v.(*ast.Index); ok && isThis(ix.Array) {
+						if ix, ok := v.(*ast.Index); ok && isSelf(ix.Array) {
 							shape.keyed = true
-						} else if isThis(v) {
+						} else if isSelf(v) {
 							why = "it is unset"
 						}
 					}
 				case *ast.Assign:
-					if n.ByRef && (isThis(n.Value) || isThis(n.Target)) {
+					if n.ByRef && (isSelf(n.Value) || isSelf(n.Target)) {
 						why = "a reference is taken"
 						return false
 					}
-					if isThis(n.Target) {
-						if n.Op != token.Kind('=') {
-							why = "a compound assignment writes it"
-							return false
+					// A compound assignment (`.=`, `+=`, `??=`) holds what the
+					// whole expression gives, as the checker typed it.
+					valueOf := func() (types.Type, bool) {
+						// `??=` writes its right side, if it writes at all.
+						if n.Op == token.Kind('=') || n.Op == token.T_COALESCE_EQUAL {
+							t, ok := a.types[n.Value.Span()]
+							return t, ok
 						}
-						t, ok := a.types[n.Value.Span()]
+						t, ok := a.types[n.S]
+						return t, ok
+					}
+					if isSelf(n.Target) {
+						t, ok := valueOf()
 						if !ok {
 							why = "a value written to it is not typed"
 							return false
@@ -549,37 +654,54 @@ func (a *arrayTyper) propertyValues(cl *ast.ClassDecl, p *ast.PropertyDecl) ([]t
 						values = append(values, t)
 						return true
 					}
-					if ix, ok := n.Target.(*ast.Index); ok && isThis(ix.Array) {
-						if n.Op != token.Kind('=') {
-							why = "a compound assignment writes an element"
-							return false
-						}
-						t, ok := a.types[n.Value.Span()]
+					ix, ok := n.Target.(*ast.Index)
+					if !ok {
+						return true
+					}
+					if isSelf(ix.Array) {
+						t, ok := valueOf()
 						if !ok {
 							why = "an element written to it is not typed"
 							return false
 						}
-						shape.elems = append(shape.elems, t)
-						if ix.Index == nil {
-							shape.keys = append(shape.keys, types.TInt)
-							return true
-						}
-						k, ok := a.types[ix.Index.Span()]
-						if !ok {
-							why = "a key written to it is not typed"
+						if why = element(ix.Index, t); why != "" {
 							return false
 						}
-						shape.keyed = true
-						shape.keys = append(shape.keys, k)
 						return true
 					}
-					if ix, ok := n.Target.(*ast.Index); ok {
-						// `$this->p[$a][$b] = …`: an element of an element.
-						for inner, ok := ix.Array.(*ast.Index); ok; inner, ok = inner.Array.(*ast.Index) {
-							if isThis(inner.Array) {
-								why = "a nested element is written"
+					// `$this->p[$a][$b] = …`: the element written is an array
+					// with that key, deeper ones are not followed.
+					if outer, ok := ix.Array.(*ast.Index); ok {
+						if isSelf(outer.Array) && n.Op == token.Kind('=') {
+							t, ok := a.types[n.Value.Span()]
+							if !ok {
+								why = "a nested element written to it is not typed"
 								return false
 							}
+							inner := types.Array{Key: types.TInt, Value: t, List: ix.Index == nil}
+							if ix.Index != nil {
+								k, ok := a.types[ix.Index.Span()]
+								if !ok {
+									why = "a nested key written to it is not typed"
+									return false
+								}
+								inner.Key = k
+							}
+							if why = element(outer.Index, inner); why != "" {
+								return false
+							}
+							return true
+						}
+						for e := ast.Expr(outer); ; {
+							in, ok := e.(*ast.Index)
+							if !ok {
+								break
+							}
+							if isSelf(in.Array) {
+								why = "an element is written deeper than one level"
+								return false
+							}
+							e = in.Array
 						}
 					}
 				}
@@ -632,7 +754,9 @@ func (a *arrayTyper) returnValues(m *ast.MethodDecl) ([]types.Type, string) {
 }
 
 // argValues collects the arguments a private method's parameter receives
-// from the calls in its class, and its default.
+// from its class: at each call, and where the method is passed as a
+// callable (`array_map([$this, 'm'], $xs)`, `$this->m(...)`), from the
+// type of the callable the parameter it is passed to expects.
 func (a *arrayTyper) argValues(cl *ast.ClassDecl, m *ast.MethodDecl, idx int, p *ast.Param) ([]types.Type, string) {
 	if p.Variadic || p.ByRef {
 		return nil, "a variadic or by-reference parameter"
@@ -641,11 +765,39 @@ func (a *arrayTyper) argValues(cl *ast.ClassDecl, m *ast.MethodDecl, idx int, p 
 	var values []types.Type
 	calls := 0
 	why := ""
-	arg := func(args *ast.ArgList) {
-		if args == nil || args.FirstClassCallable {
-			why = "it is used as a callable"
+	fromDefault := func() bool {
+		if p.Default == nil {
+			why = "a call leaves it out"
+			return false
+		}
+		if t, ok := a.types[p.Default.Span()]; ok {
+			values = append(values, t)
+		} else if !isEmptyArray(p.Default) {
+			why = "its default is not typed"
+			return false
+		}
+		return true
+	}
+	// asCallable reads what the method receives when e, a reference to it,
+	// is passed as a callable.
+	asCallable := func(e ast.Expr) {
+		expected, ok := a.callables[e]
+		if !ok {
+			expected = a.stored[e]
+		}
+		c, ok := types.StripNull(expected).(types.Callable)
+		if !ok || !c.HasSig {
+			why = "it is used as a callable whose arguments are not known"
 			return
 		}
+		calls++
+		if idx < len(c.Params) {
+			values = append(values, c.Params[idx].Type)
+			return
+		}
+		fromDefault()
+	}
+	arg := func(args *ast.ArgList) {
 		calls++
 		var found ast.Expr
 		for i, ar := range args.Args {
@@ -658,11 +810,8 @@ func (a *arrayTyper) argValues(cl *ast.ClassDecl, m *ast.MethodDecl, idx int, p 
 			}
 		}
 		if found == nil {
-			if p.Default == nil {
-				why = "a call leaves it out"
-				return
-			}
-			found = p.Default
+			fromDefault()
+			return
 		}
 		t, ok := a.types[found.Span()]
 		if !ok {
@@ -674,6 +823,12 @@ func (a *arrayTyper) argValues(cl *ast.ClassDecl, m *ast.MethodDecl, idx int, p 
 		}
 		values = append(values, t)
 	}
+	// The strings that name it inside a callable array are accounted for
+	// there; another string reaches it only where PHP takes a callable's
+	// name, which callableStrings lists. A key or a git argument that
+	// happens to spell it does not.
+	named := map[*ast.StringLit]bool{}
+	reaching := callableStrings(cl)
 	for _, mem := range cl.Members {
 		ast.Inspect(mem, func(n ast.Node) bool {
 			if why != "" {
@@ -682,20 +837,38 @@ func (a *arrayTyper) argValues(cl *ast.ClassDecl, m *ast.MethodDecl, idx int, p 
 			switch n := n.(type) {
 			case *ast.ClassDecl:
 				return false
+			case *ast.ArrayLit:
+				if lit, ok := callableArray(n, name); ok {
+					named[lit] = true
+					asCallable(n)
+				} else if len(n.Items) == 2 && n.Items[0] != nil && n.Items[1] != nil && n.Items[1].Key == nil && selfRef(n.Items[0].Value) {
+					if _, lit := n.Items[1].Value.(*ast.StringLit); !lit {
+						why = "a callable array names a method by a value"
+					}
+				}
 			case *ast.MethodCall:
 				if id, ok := n.Name.(*ast.Ident); ok && strings.EqualFold(id.Name, name) {
-					arg(n.Args)
+					if n.Args != nil && n.Args.FirstClassCallable {
+						asCallable(n)
+					} else if n.Args != nil {
+						arg(n.Args)
+					}
 				} else if !ok {
 					why = "a dynamic method call may reach it"
 				}
 			case *ast.StaticCall:
 				if id, ok := n.Name.(*ast.Ident); ok && strings.EqualFold(id.Name, name) {
-					arg(n.Args)
+					if n.Args != nil && n.Args.FirstClassCallable {
+						asCallable(n)
+					} else if n.Args != nil {
+						arg(n.Args)
+					}
 				} else if !ok {
 					why = "a dynamic method call may reach it"
 				}
 			case *ast.StringLit:
-				if strings.EqualFold(strings.Trim(n.Raw, `'"`), name) {
+				v := strings.Trim(n.Raw, `'"`)
+				if !named[n] && reaching[n] && (strings.EqualFold(v, name) || strings.HasSuffix(strings.ToLower(v), "::"+strings.ToLower(name))) {
 					why = "its name is written as a string"
 				}
 			}
@@ -709,6 +882,151 @@ func (a *arrayTyper) argValues(cl *ast.ClassDecl, m *ast.MethodDecl, idx int, p 
 		return nil, "nothing calls it"
 	}
 	return values, ""
+}
+
+// storedCallables finds the callable references a class assigns to its
+// typed properties, as the value or an operand of `??` and `?:`, with the
+// property's declared type: what the method so referred to receives is
+// what that type's callable is called with.
+func storedCallables(cl *ast.ClassDecl, pcl *program.Class) map[ast.Expr]types.Type {
+	out := map[ast.Expr]types.Type{}
+	if pcl == nil {
+		return out
+	}
+	var leaves func(e ast.Expr, t types.Type)
+	leaves = func(e ast.Expr, t types.Type) {
+		switch v := e.(type) {
+		case *ast.Paren:
+			leaves(v.Expr, t)
+		case *ast.Binary:
+			if v.Op == token.T_COALESCE {
+				leaves(v.Left, t)
+				leaves(v.Right, t)
+			}
+		case *ast.Ternary:
+			if v.Then != nil {
+				leaves(v.Then, t)
+			} else {
+				leaves(v.Cond, t)
+			}
+			leaves(v.Else, t)
+		case *ast.ArrayLit, *ast.MethodCall, *ast.StaticCall:
+			out[e] = t
+		}
+	}
+	ast.Inspect(cl, func(n ast.Node) bool {
+		as, ok := n.(*ast.Assign)
+		if !ok || as.Op != token.Kind('=') {
+			return true
+		}
+		var name string
+		switch t := as.Target.(type) {
+		case *ast.PropertyFetch:
+			v, ok1 := t.Object.(*ast.Variable)
+			id, ok2 := t.Name.(*ast.Ident)
+			if !ok1 || !ok2 || v.Name != "this" {
+				return true
+			}
+			name = id.Name
+		case *ast.StaticPropertyFetch:
+			v, ok := t.Name.(*ast.Variable)
+			if !ok {
+				return true
+			}
+			name = v.Name
+		default:
+			return true
+		}
+		if pr := pcl.FindProperty(name); pr != nil && pr.Type != nil {
+			leaves(as.Value, pr.Type)
+		}
+		return true
+	})
+	return out
+}
+
+// callableStrings lists the strings of a class that PHP may take as a
+// method's name: an item of a two-item array (a callable array, of this
+// class or another), a `'Class::method'` string, and an argument of a
+// function that calls or looks up a callable by name.
+func callableStrings(cl *ast.ClassDecl) map[*ast.StringLit]bool {
+	out := map[*ast.StringLit]bool{}
+	byName := map[string]bool{"call_user_func": true, "call_user_func_array": true, "forward_static_call": true,
+		"forward_static_call_array": true, "is_callable": true, "method_exists": true, "register_shutdown_function": true,
+		"fromcallable": true, "array_map": true, "array_filter": true, "usort": true, "uasort": true, "uksort": true,
+		"array_walk": true, "array_reduce": true, "iterator_apply": true}
+	ast.Inspect(cl, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.ArrayLit:
+			if len(n.Items) == 2 {
+				for _, it := range n.Items {
+					if it != nil && it.Key == nil {
+						if lit, ok := it.Value.(*ast.StringLit); ok {
+							out[lit] = true
+						}
+					}
+				}
+			}
+		case *ast.StringLit:
+			if strings.Contains(n.Raw, "::") {
+				out[n] = true
+			}
+		case *ast.Call:
+			if fn, ok := n.Callee.(*ast.Name); ok && byName[strings.ToLower(fn.Parts[len(fn.Parts)-1])] && n.Args != nil {
+				for _, a := range n.Args.Args {
+					if lit, ok := a.Value.(*ast.StringLit); ok {
+						out[lit] = true
+					}
+				}
+			}
+		case *ast.StaticCall:
+			if id, ok := n.Name.(*ast.Ident); ok && strings.EqualFold(id.Name, "fromCallable") && n.Args != nil {
+				for _, a := range n.Args.Args {
+					if lit, ok := a.Value.(*ast.StringLit); ok {
+						out[lit] = true
+					}
+				}
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// selfRef reports `$this`, `self::class` or `static::class`.
+func selfRef(e ast.Expr) bool {
+	switch r := e.(type) {
+	case *ast.Variable:
+		return r.Name == "this"
+	case *ast.ClassConstFetch:
+		cn, ok := r.Class.(*ast.Name)
+		id, ok2 := r.Name.(*ast.Ident)
+		return ok && ok2 && len(cn.Parts) == 1 && strings.EqualFold(id.Name, "class") &&
+			(strings.EqualFold(cn.Parts[0], "self") || strings.EqualFold(cn.Parts[0], "static"))
+	}
+	return false
+}
+
+// callableArray reports `[$this, 'name']`, `[self::class, 'name']` or
+// `[static::class, 'name']`, and the string that names the method.
+func callableArray(al *ast.ArrayLit, name string) (*ast.StringLit, bool) {
+	if len(al.Items) != 2 || al.Items[0] == nil || al.Items[1] == nil || al.Items[0].Key != nil || al.Items[1].Key != nil {
+		return nil, false
+	}
+	lit, ok := al.Items[1].Value.(*ast.StringLit)
+	if !ok || !strings.EqualFold(strings.Trim(lit.Raw, `'"`), name) {
+		return nil, false
+	}
+	switch r := al.Items[0].Value.(type) {
+	case *ast.Variable:
+		return lit, r.Name == "this"
+	case *ast.ClassConstFetch:
+		cn, ok := r.Class.(*ast.Name)
+		id, ok2 := r.Name.(*ast.Ident)
+		return lit, ok && ok2 && len(cn.Parts) == 1 && strings.EqualFold(id.Name, "class") &&
+			(strings.EqualFold(cn.Parts[0], "self") || strings.EqualFold(cn.Parts[0], "static"))
+	}
+	return nil, false
 }
 
 func isEmptyArray(e ast.Expr) bool {
@@ -757,12 +1075,20 @@ func fileNames(f *ast.File) (string, map[string]string) {
 
 // spellArray writes the type of the values in Phaenon's syntax, or says
 // why it cannot: a tuple (A, B) when every value is one of the same length
-// whose positions differ in type,
+// whose positions differ in type or are computed rather than literal,
 // list<T> when every value is a list and no key is written, map<K, V>
 // otherwise, array<V> when the keys are any int|string. An element type
 // of more than three members is written mixed: a document's
 // map<string, mixed> reads better than every type it holds.
 func spellArray(values []types.Type, shape arrayShape, nullable bool, ns string, imports map[string]string) (string, string) {
+	return spellArrayAt(values, shape, nullable, false, ns, imports)
+}
+
+// spellArrayAt is spellArray for a declaration (nested false) or for an
+// element type: a declaration's same-typed positions read as a list, an
+// element's computed ones as a tuple, as the dogfood writes list<(string,
+// string)> but list<Binary> for five values a method returns.
+func spellArrayAt(values []types.Type, shape arrayShape, nullable, nested bool, ns string, imports map[string]string) (string, string) {
 	sp := &speller{ns: ns, imports: imports}
 	list := !shape.keyed
 	keys := append([]types.Type{}, shape.keys...)
@@ -770,6 +1096,7 @@ func spellArray(values []types.Type, shape arrayShape, nullable bool, ns string,
 	any := len(elems) > 0
 	var tuples [][]types.Type // the positions of each value, while every value is a tuple
 	tupleLen, tuplesOnly := -1, len(elems) == 0
+	literals := false // a position holds a literal: ['a', 'b'] is a list, [$dir, $plugin] a pair
 	var collect func(t types.Type) string
 	collect = func(t types.Type) string {
 		switch t := t.(type) {
@@ -818,6 +1145,9 @@ func spellArray(values []types.Type, shape arrayShape, nullable bool, ns string,
 				}
 				elems = append(elems, e.Type)
 				pos = append(pos, e.Type)
+				if isLiteralType(e.Type) {
+					literals = true
+				}
 			}
 			if !positional || len(pos) < 2 || tupleLen >= 0 && tupleLen != len(pos) {
 				tuplesOnly = false
@@ -851,12 +1181,17 @@ func spellArray(values []types.Type, shape arrayShape, nullable bool, ns string,
 			}
 			parts = append(parts, one)
 		}
-		// Positions of one type read as a list, which a literal like
-		// ['a', 'b'] usually is; a tuple says what differs by position.
+		// Positions of one type read as a list when they hold literals, as
+		// ['a', 'b'] does, or at a declaration's top; computed ones in an
+		// element type, [$dir, $plugin], make a pair.
+		differ := nested && !literals
 		for _, p := range parts[1:] {
 			if p != parts[0] {
-				return "(" + strings.Join(parts, ", ") + ")", ""
+				differ = true
 			}
+		}
+		if differ {
+			return "(" + strings.Join(parts, ", ") + ")", ""
 		}
 	}
 	elem, ok := sp.union(elems)
@@ -878,6 +1213,24 @@ func spellArray(values []types.Type, shape arrayShape, nullable bool, ns string,
 		return "array<" + elem + ">", ""
 	}
 	return "map<" + key + ", " + elem + ">", ""
+}
+
+// isLiteralType reports a type that is one value: a literal, an enum case.
+func isLiteralType(t types.Type) bool {
+	switch t := t.(type) {
+	case types.StringLit, types.FloatLit, types.BoolLit, types.EnumCase, types.Null:
+		return true
+	case types.Int:
+		return t.Lo == t.Hi
+	case types.Union:
+		for _, m := range t.Types {
+			if !isLiteralType(m) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // members counts the members of a spelled union at its top level.
@@ -956,7 +1309,7 @@ func (s *speller) union(ts []types.Type) (string, bool) {
 		}
 	}
 	if len(arrays) > 0 {
-		one, why := spellArray(arrays, arrayShape{}, false, s.ns, s.imports)
+		one, why := spellArrayAt(arrays, arrayShape{}, false, true, s.ns, s.imports)
 		switch {
 		case why == "":
 		case why == "it only ever holds []" || why == "nothing is known of its keys or elements":
@@ -1042,6 +1395,50 @@ func (s *speller) one(t types.Type) (string, bool) {
 		return name, true
 	case types.EnumCase:
 		return s.class(t.Class), true
+	case types.Resource:
+		return "resource", true
+	case types.Param:
+		// A template by its name: one the declaration's scope does not
+		// have fails the check, which leaves the declaration alone.
+		if strings.Contains(t.Name, "\x00") {
+			return "", false
+		}
+		return t.Name, true
+	case types.Callable:
+		if !t.HasSig {
+			if t.Closure {
+				return "\\Closure", true
+			}
+			return "callable", true
+		}
+		if !t.Closure {
+			return "", false // a callable(…) signature has no native spelling
+		}
+		var params []string
+		for _, p := range t.Params {
+			one, ok := s.union([]types.Type{p.Type})
+			if !ok || p.ByRef {
+				return "", false
+			}
+			switch {
+			case p.Variadic:
+				one += "..."
+			case p.Optional:
+				one += "="
+			}
+			params = append(params, one)
+		}
+		ret := "mixed"
+		if t.Return != nil {
+			if _, void := t.Return.(types.Void); void {
+				ret = "void"
+			} else if r, ok := s.union([]types.Type{t.Return}); ok {
+				ret = r
+			} else {
+				return "", false
+			}
+		}
+		return "Closure(" + strings.Join(params, ", ") + "): " + ret, true
 	case types.ClassString:
 		if c, ok := t.Of.(types.Class); ok && len(c.Args) == 0 {
 			return "class<" + s.class(c.Name) + ">", true

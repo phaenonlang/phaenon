@@ -22,6 +22,29 @@ interface Source
     public function all(): array;
 }
 
+final class Printer
+{
+    /** @var \Closure(list<string>): string */
+    private \Closure $format;
+
+    // A method stored as a callable in a typed property receives what the
+    // property's type says.
+    public function __construct(?\Closure $format = null)
+    {
+        $this->format = $format ?? $this->spaced(...);
+    }
+
+    public function print(): string
+    {
+        return ($this->format)(['a', 'b']);
+    }
+
+    private function spaced(array $words): string
+    {
+        return implode(' ', $words);
+    }
+}
+
 final class Registry implements Source
 {
     private array $names = [];
@@ -45,6 +68,14 @@ final class Registry implements Source
     #[Mapped]
     private array $mapped = [];
 
+    private static array $memo = [];
+
+    private array $log = [];
+
+    private array $grid = [];
+
+    private array $found = [];
+
     public function add(User $user): void
     {
         $this->names[] = $user->name;
@@ -58,6 +89,11 @@ final class Registry implements Source
         $this->cache = [1, 2];
         $this->bags[] = new Bag();
         $this->mapped[] = $user;
+        self::$memo[$user->name] = strlen($user->name);
+        $this->log[$user->name] = '';
+        $this->log[$user->name] .= 'added';
+        $this->grid[strlen($user->name)][] = $user->name;
+        preg_match('/^(\w+)$/', $user->name, $this->found);
     }
 
     // A final class: its methods are final. This one returns a property
@@ -88,6 +124,17 @@ final class Registry implements Source
         return implode(',', $parts);
     }
 
+    private function sumAll(array $xs): int
+    {
+        return array_sum($xs);
+    }
+
+    /** @param $parts the parts, joined by dashes */
+    private function dashed(array $parts): string
+    {
+        return implode('-', $parts);
+    }
+
     // A pair whose positions differ is a tuple.
     private function entry(User $user): array
     {
@@ -104,9 +151,12 @@ final class Registry implements Source
     {
         $sum = $this->total([1, 2, 3]) + $this->total([4]);
         $labels = array_map([$this, 'label'], [['a'], ['b']]);
+        $sums = array_map($this->sumAll(...), [[1, 2], [3]]);
 
         return $sum . implode(';', $labels) . implode(',', self::keys()) . count($this->byName)
             . count($this->lengths) . count($this->removed) . count($this->pairs) . count($this->cache ?? [])
-            . count($this->bags) . count($this->mapped) . $this->entry(new User('a'))[1] . count($this->document());
+            . count($this->bags) . count($this->mapped) . $this->entry(new User('a'))[1] . count($this->document())
+            . array_sum($sums) . $this->dashed(['a', 'b']) . count(self::$memo) . count($this->log) . count($this->grid)
+            . count($this->found);
     }
 }
