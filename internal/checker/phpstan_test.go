@@ -45,8 +45,6 @@ func TestPHPStanParity(t *testing.T) {
 		"constant.unused":           true,
 		"classConstant.unused":      true,
 		"phpstan.dumpType":          true,
-		"catch.neverThrown":         true, // throw analysis is not in M2
-		"throws.unusedType":         true, // the same: a `throws` clause is not checked against the body (functions.md §4)
 		"return.unusedType":         true, // unused-type analysis is tooling (M6)
 		"parameterByRef.unusedType": true,
 	}

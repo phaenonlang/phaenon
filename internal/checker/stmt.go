@@ -613,6 +613,9 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 		x.removed(s.S, "the alternative foreach syntax", "braces")
 	}
 	it := x.expr(s.Expr, env, nil)
+	if mayBeObject(it) {
+		x.implicitThrow() // the iterator's methods run
+	}
 	k, v, ok := types.IterableKV(it, x.p())
 	if !ok || mayNotIterate(it) {
 		x.report(s.Expr.Span(), P2303, "foreach over %s", x.typeName(it))
@@ -768,26 +771,37 @@ func sameKind(a, b types.Type) bool {
 func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 	bodyEnv := env.clone()
 	x.throwEnvs = append(x.throwEnvs, env.clone())
+	x.pushThrows()
 	x.stmts(s.Body, bodyEnv)
+	original := x.popThrows()
 	thrown := x.throwEnvs[len(x.throwEnvs)-1]
 	x.throwEnvs = x.throwEnvs[:len(x.throwEnvs)-1]
 	ends := []*state{bodyEnv}
 	var caught []types.Type
+	var caughtNames []string
+	points := original
 	for _, c := range s.Catches {
 		cEnv := thrown.clone()
 		var ts []types.Type
+		var names []string // "" where the type is unknown or no Throwable
+		var spans []ast.Span
 		for _, n := range c.Types {
 			saved := x.nameOnly
 			x.nameOnly = true // a catch of a class PHP lacks never matches, and fails nothing
 			name, ok := x.resolveClassName(n, n.S)
 			x.nameOnly = saved
+			spans = append(spans, n.S)
 			if !ok {
 				ts = append(ts, types.TObject)
+				names = append(names, "")
 				continue
 			}
 			t := types.Class{Name: name}
 			if !x.p().IsSubclassOf(name, "Throwable") {
 				x.report(n.S, P2318, "%s is not a Throwable", name)
+				names = append(names, "")
+			} else {
+				names = append(names, name)
 			}
 			for _, prev := range caught {
 				if types.IsSubtype(t, prev, x.p()) {
@@ -796,6 +810,12 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 			}
 			ts = append(ts, t)
 		}
+		points = x.catchClause(names, spans, points, original, caughtNames)
+		for _, n := range names {
+			if n != "" {
+				caughtNames = append(caughtNames, n)
+			}
+		}
 		caught = append(caught, ts...)
 		if c.Var != nil {
 			cEnv.set(c.Var.Name, types.MakeUnion(ts...))
@@ -803,6 +823,7 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		x.stmts(c.Body, cEnv)
 		ends = append(ends, cEnv)
 	}
+	x.addThrows(points...) // what no catch takes leaves the try statement
 	if s.HasFinally {
 		fEnv := joinAll(append(append([]*state{}, ends...), thrown)...)
 		fEnv.dead = false
@@ -1460,12 +1481,16 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 		ends = append(ends, armEnv)
 	}
 	if !hasDefault {
+		_, done := remaining.(types.Never)
 		if isTrue {
 			ends = append(ends, cur)
 		} else if !types.IsMixed(subject) {
-			if _, done := remaining.(types.Never); !done {
+			if !done {
 				x.report(e.S, P2304, "match does not handle %s", x.typeName(remaining))
 			}
+		}
+		if isTrue || types.IsMixed(subject) || !done {
+			x.explicitThrow(types.NewClass("UnhandledMatchError"), false, e.S)
 		}
 	}
 	*env = *joinAll(ends...)

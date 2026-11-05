@@ -126,9 +126,11 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 		return types.IntLit(1)
 	case *ast.Include:
 		x.expr(e.Expr, env, nil)
+		x.implicitThrow()
 		return types.TMixed
 	case *ast.Eval:
 		x.expr(e.Expr, env, nil)
+		x.implicitThrow()
 		x.removed(e.S, "eval()", "nothing — generate code at build time instead")
 		return types.TMixed
 	case *ast.Closure:
@@ -136,25 +138,36 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 	case *ast.ArrowFunc:
 		return x.arrowFunc(e, env, expected)
 	case *ast.Concurrently:
+		// It rethrows the first failure of its tasks.
+		defer x.implicitThrow()
 		return x.concurrently(e, env, true)
 	case *ast.Spawn:
 		return x.spawn(e, env)
 	case *ast.Match:
 		return x.match(e, env, expected)
 	case *ast.Yield:
+		defer x.implicitThrow() // the generator's consumer may throw into it
 		return x.yield(e, env)
 	case *ast.YieldFrom:
+		defer x.implicitThrow()
 		return x.yieldFrom(e, env)
 	case *ast.Throw:
+		saved := x.throwOperand
+		x.throwOperand = unparen(e.Expr)
 		t := x.expr(e.Expr, env, nil)
+		x.throwOperand = saved
 		if !types.IsMixed(t) && !types.IsSubtype(t, types.NewClass("Throwable"), x.p()) {
 			x.report(e.Expr.Span(), P2317, "cannot throw %s: not a Throwable", x.typeName(t))
 		}
+		x.explicitThrow(t, false, e.S)
 		env.dead = true
 		return types.TNever
 	case *ast.IsExpr:
 		return x.isType(e, env)
 	case *ast.AsExpr:
+		if !e.Nullable {
+			defer x.explicitThrow(types.NewClass("TypeError"), false, e.S) // `as?` gives null instead
+		}
 		return x.asExpr(e, env)
 	case *ast.Name:
 		// The parser leaves constants as bare names. A type parameter's
@@ -295,6 +308,9 @@ func (x *fnCtx) interpolated(e *ast.InterpolatedString, env *state) types.Type {
 }
 
 func (x *fnCtx) checkStringable(t types.Type, span ast.Span) {
+	if mayBeObject(t) {
+		x.implicitThrow() // __toString() runs
+	}
 	for _, m := range types.Members(t) {
 		switch m := m.(type) {
 		case types.Mixed:
@@ -664,10 +680,14 @@ func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) ty
 		if t, ok := env.getPath(key); ok {
 			// The member was narrowed: its type is known without re-checking
 			// the object; only a ?-> on a never-null object is still worth a word.
+			obj := x.pathType(e.Object, env)
 			if e.NullSafe {
-				if obj := x.pathType(e.Object, env); !types.IsNullable(obj) && !types.IsMixed(obj) {
+				if !types.IsNullable(obj) && !types.IsMixed(obj) {
 					x.report(e.S, P2307, "?-> on %s, which is never null", x.typeName(obj))
 				}
+			}
+			if name, ok := identName(e.Name); ok {
+				x.propertyThrows(types.StripNull(obj), name)
 			}
 			return t
 		}
@@ -676,9 +696,11 @@ func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) ty
 	name, ok := identName(e.Name)
 	if !ok {
 		x.expr(e.Name, env, nil)
+		x.implicitThrow()
 		x.memberOnMixed(obj, e.Object.Span(), "cannot access a property on mixed")
 		return types.TMixed
 	}
+	x.propertyThrows(types.StripNull(obj), name)
 	if !e.NullSafe && types.IsNullable(obj) && !types.IsMixed(obj) {
 		if x.shortCircuit[e.Object] {
 			// `$a?->b->c`: PHP skips the whole chain when $a is null, and b
@@ -1007,6 +1029,9 @@ func shapeValueTypes(m types.Shape) []types.Type {
 func (x *fnCtx) index(e *ast.Index, env *state) types.Type {
 	if key, ok := pathKey(e); ok {
 		if t, ok := env.getPath(key); ok {
+			if mayBeObject(x.pathType(e.Array, env)) {
+				x.implicitThrow() // offsetGet() runs
+			}
 			return t
 		}
 	}
@@ -1023,6 +1048,9 @@ func (x *fnCtx) index(e *ast.Index, env *state) types.Type {
 
 // indexType types base[index].
 func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient bool) types.Type {
+	if mayBeObject(base) {
+		x.implicitThrow() // an ArrayAccess's offsetGet() or offsetExists() runs
+	}
 	if e.Index == nil {
 		return types.TMixed
 	}
@@ -1482,6 +1510,9 @@ func hasBytes(t types.Type) bool {
 }
 
 func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Type {
+	if (op == token.Kind('/') || op == token.Kind('%')) && mayBeZero(r) {
+		x.explicitThrow(types.NewClass("DivisionByZeroError"), false, e.Span())
+	}
 	span := e.Span()
 	switch op {
 	case token.Kind('.'):
@@ -2069,9 +2100,11 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 	if !ok {
 		x.expr(t.Object, env, nil)
 		x.expr(t.Name, env, nil)
+		x.implicitThrow()
 		return
 	}
 	obj := x.expr(t.Object, env, nil)
+	x.propertyThrows(types.StripNull(obj), name)
 	base := types.StripNull(obj)
 	if types.IsNullable(obj) && !types.IsMixed(obj) {
 		x.report(t.Object.Span(), P2105, "cannot assign property $%s on %s (possibly null)", name, x.typeName(obj))
@@ -2150,6 +2183,9 @@ func (x *fnCtx) isConstructorOf(cl *program.Class) bool { return false }
 // assignIndex handles $a[k] = v and $a[] = v, updating the array's type.
 func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Span) {
 	base := x.exprLenient(t.Array, env)
+	if mayBeObject(base) {
+		x.implicitThrow() // offsetSet() runs
+	}
 	var keyT, keyRaw types.Type
 	if t.Index != nil {
 		raw, key := x.keyExpr(t.Index, env)

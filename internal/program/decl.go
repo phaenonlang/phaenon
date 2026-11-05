@@ -117,9 +117,13 @@ type Class struct {
 
 // Function is a named function.
 type Function struct {
-	Name       string // fully qualified
-	Params     []*Param
-	Return     types.Type
+	Name   string // fully qualified
+	Params []*Param
+	Return types.Type
+	// Throws is what the declaration says it lets escape: its `throws`
+	// clause, else its @throws tags; nil when it declares nothing, TVoid
+	// for `@throws void` (design/tooling.md §9.1).
+	Throws     types.Type
 	ByRef      bool
 	TypeParams []*TypeParam
 	Doc        *docblock.Doc
@@ -157,9 +161,11 @@ type Method struct {
 	// NativeReturn is the declared PHP return type (nil when absent), kept
 	// apart from Return so docblock inheritance can tell them apart.
 	NativeReturn types.Type
-	TypeParams   []*TypeParam
-	Doc          *docblock.Doc
-	Deprecated   bool
+	// Throws: see Function. DeclaredThrows adds the inherited declaration.
+	Throws     types.Type
+	TypeParams []*TypeParam
+	Doc        *docblock.Doc
+	Deprecated bool
 	// DeprecatedNote: see Function.
 	DeprecatedNote string
 	Asserts        []docblock.AssertTag

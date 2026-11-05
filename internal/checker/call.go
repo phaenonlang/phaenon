@@ -47,6 +47,10 @@ type signature struct {
 	// node is the call being checked: a partial application of it is
 	// recorded for the emitter under its arguments.
 	node ast.Expr
+	// fn or meth is the callee, whose declaration says what the call
+	// throws (throws.go); neither for a callable of unknown origin.
+	fn   *program.Function
+	meth *program.Method
 }
 
 // methodFile is the file that declares a method: its trait's when a trait
@@ -68,6 +72,7 @@ func isStubFile(f *program.File) bool {
 // ------------------------------------------------------------------ function calls
 
 func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
+	defer x.unresolvedCall(e.S, e.Args)
 	n, isName := e.Callee.(*ast.Name)
 	if !isName {
 		return x.dynamicCall(e, env, expected)
@@ -101,7 +106,7 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	if fn.Deprecated && x.c.opts.Deprecations {
 		x.report(n.S, P4006, "function %s() is deprecated%s", fn.Name, fn.DeprecatedNote)
 	}
-	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File), node: e, file: fn.File}
+	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File), node: e, file: fn.File, fn: fn}
 	sig.explicit = x.explicitArgs(e.TypeArgs, fn.TypeParams, fn.Name+"()", e.S)
 	if e.Args != nil && e.Args.FirstClassCallable {
 		return x.callableOf(sig)
@@ -834,7 +839,7 @@ func (x *fnCtx) dynamicCall(e *ast.Call, env *state, expected types.Type) types.
 			handled := false
 			for _, cl := range x.classesOf(m, e.Callee.Span()) {
 				if inv := cl.FindMethod("__invoke"); inv != nil {
-					sig := &signature{name: cl.Name + "::__invoke()", params: inv.Params, ret: inv.Return, typeParams: inv.TypeParams, recv: m, decl: inv.Class, node: e}
+					sig := &signature{name: cl.Name + "::__invoke()", params: inv.Params, ret: inv.Return, typeParams: inv.TypeParams, recv: m, decl: inv.Class, node: e, meth: inv}
 					out = append(out, x.checkCall(sig, e.Args, env, e.S, expected))
 					handled = true
 				} else if strings.EqualFold(cl.Name, "Closure") {
@@ -911,6 +916,7 @@ func (x *fnCtx) argsOnly(args *ast.ArgList, env *state) {
 // ------------------------------------------------------------------ method calls
 
 func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) types.Type {
+	defer x.unresolvedCall(e.S, e.Args)
 	if key, ok := pathKey(e); ok {
 		if t, ok := env.getPath(key); ok {
 			return t // narrowed earlier (assertInstanceOf, instanceof, === null)
@@ -1042,7 +1048,7 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 				x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", meth.Class.Name, name, meth.DeprecatedNote)
 			}
 			sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File), file: methodFile(meth),
-				typeParams: meth.TypeParams, recv: m, decl: meth.Class, node: e}
+				typeParams: meth.TypeParams, recv: m, decl: meth.Class, node: e, meth: meth}
 			sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 			if e.Args != nil && e.Args.FirstClassCallable {
 				sig.subst = x.memberSubst(m, meth.Class)
@@ -1079,6 +1085,7 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 }
 
 func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) types.Type {
+	defer x.unresolvedCall(e.S, e.Args)
 	name, ok := identName(e.Name)
 	if !ok {
 		x.expr(e.Name, env, nil)
@@ -1193,7 +1200,7 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 			x.report(e.Name.Span(), P4006, "method %s::%s() is deprecated%s", meth.Class.Name, name, meth.DeprecatedNote)
 		}
 		sig := &signature{name: meth.Class.Name + "::" + meth.Name + "()", params: meth.Params, ret: meth.Return, stub: isStubFile(meth.Class.File), file: methodFile(meth),
-			typeParams: meth.TypeParams, recv: recv, decl: meth.Class, node: e}
+			typeParams: meth.TypeParams, recv: recv, decl: meth.Class, node: e, meth: meth}
 		sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 		if e.Args != nil && e.Args.FirstClassCallable {
 			sig.subst = x.memberSubst(recv, meth.Class)
@@ -1283,6 +1290,7 @@ func (x *fnCtx) traitUserMethod(trait *program.Class, name string) *program.Meth
 // ------------------------------------------------------------------ new
 
 func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type {
+	defer x.unresolvedCall(e.S, nil)
 	if e.Anon != nil {
 		cl := x.p().DeclareAnonymous(x.file, x.res.Scope(), e.Anon)
 		x.c.checkClass(cl)
@@ -1291,7 +1299,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 			args = e.Anon.Args // `new class (...) extends …`
 		}
 		if ctor := cl.FindMethod("__construct"); ctor != nil {
-			sig := &signature{name: "class@anonymous::__construct()", params: ctor.Params, ret: types.TVoid, decl: ctor.Class}
+			sig := &signature{name: "class@anonymous::__construct()", params: ctor.Params, ret: types.TVoid, decl: ctor.Class, node: e, meth: ctor}
 			x.checkCall(sig, args, env, e.S, nil)
 		} else {
 			x.argsOnly(args, env)
@@ -1390,6 +1398,9 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 		}
 	}
 	if ctor == nil {
+		if !viaString {
+			x.markResolved(e.S) // a class without a constructor throws nothing
+		}
 		if e.Args != nil && len(e.Args.Args) > 0 && !(viaString && !cl.IsInstantiable()) {
 			x.report(e.Args.S, P2102, "class %s has no constructor but %d arguments are given", cl.Name, len(e.Args.Args))
 		}
@@ -1399,7 +1410,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 	if !x.canAccess(ctor.Vis, ctor.Class) {
 		x.report(e.S, P2108, "constructor of %s is %s", cl.Name, ctor.Vis)
 	}
-	sig := &signature{name: cl.Name + "::__construct()", params: ctor.Params, ret: types.TVoid, typeParams: ctor.TypeParams, recv: recv, decl: ctor.Class, file: methodFile(ctor)}
+	sig := &signature{name: cl.Name + "::__construct()", params: ctor.Params, ret: types.TVoid, typeParams: ctor.TypeParams, recv: recv, decl: ctor.Class, file: methodFile(ctor), node: e, meth: ctor}
 	// Infer the class's own type arguments from the constructor call.
 	if c, ok := recv.(types.Class); ok && len(c.Args) == 0 && len(cl.TypeParams) > 0 {
 		sig.typeParams = append(append([]*program.TypeParam{}, cl.TypeParams...), ctor.TypeParams...)
@@ -1465,6 +1476,12 @@ func namesClass(t types.Type, name string) bool {
 // checkCall matches arguments to parameters, infers template arguments,
 // checks types and returns the (substituted) return type.
 func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span ast.Span, expected types.Type) types.Type {
+	ret := x.checkCallArgs(sig, args, env, span, expected)
+	x.recordCall(sig, args, span, ret)
+	return ret
+}
+
+func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, span ast.Span, expected types.Type) types.Type {
 	// A partial application binds its arguments now and leaves the
 	// placeholders' parameters to the closure it creates.
 	partial := args.Partial()

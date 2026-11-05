@@ -1,0 +1,222 @@
+namespace ThrowAnalysis;
+
+// Throw analysis (design/tooling.md §9.1): a catch no throw point of its
+// try block reaches (P2403), a @throws member the body never throws
+// (P2404), and @throws void on a body that throws (P2405). A callee that
+// declares nothing may throw anything, so a call to it reaches every
+// catch.
+
+final class NotFound extends \RuntimeException
+{
+}
+
+final class Conflict extends \RuntimeException
+{
+}
+
+interface Refusal extends \Throwable
+{
+}
+
+class Gone extends \RuntimeException implements Refusal
+{
+}
+
+final class Plain
+{
+    public string $name = '';
+}
+
+class Open
+{
+    public string $name = '';
+
+    /** @throws Conflict */
+    public function contract(): void
+    {
+    }
+
+    /** @throws Conflict */
+    private function helper(): void // want P2404 "Conflict"
+    {
+    }
+
+    public function useHelper(): void
+    {
+        $this->helper();
+    }
+}
+
+final class Closed
+{
+    /** @throws Conflict */
+    public function save(): void // want P2404 "Conflict"
+    {
+    }
+
+    /** @throws Conflict */
+    public function delegate(): void
+    {
+        undeclared();
+    }
+}
+
+/** @throws NotFound */
+function find(int $id): string
+{
+    if ($id < 0) {
+        throw new NotFound();
+    }
+    return 'x';
+}
+
+/** @throws void */
+function pure(int $a): int
+{
+    return $a + 1;
+}
+
+function undeclared(): void
+{
+}
+
+/** @throws NotFound|Conflict */
+function narrower(int $id): string // want P2404 "Conflict"
+{
+    return find($id);
+}
+
+/** @throws void */
+function promisesNothing(int $id): string
+{
+    return find($id); // want P2405 "NotFound"
+}
+
+/** @throws void */
+function throwsAnyway(): void
+{
+    throw new Conflict(); // want P2405 "Conflict"
+}
+
+/** @throws void */
+function callsUndeclared(): void
+{
+    undeclared();
+}
+
+function catches(int $id, Plain $plain, Open $open, int $n): void
+{
+    try {
+        $x = $id + 1;
+    } catch (\RuntimeException $e) { // want P2403 "never thrown"
+    }
+
+    try {
+        find($id);
+    } catch (NotFound $e) {
+    } catch (Conflict $e) { // want P2403 "never thrown"
+    }
+
+    try {
+        find($id);
+    } catch (Conflict $e) { // want P2403 "never thrown"
+    }
+
+    try {
+        undeclared();
+    } catch (Conflict $e) {
+    }
+
+    try {
+        pure($id);
+    } catch (\Throwable $e) { // want P2403 "never thrown"
+    }
+
+    try {
+        throw new NotFound();
+    } catch (NotFound $e) {
+    } catch (\Throwable $e) { // want P2403 "never thrown"
+    }
+
+    // A declaration says what a callee throws, not that it throws nothing
+    // else.
+    try {
+        find($id);
+    } catch (NotFound $e) {
+    } catch (\Throwable $e) {
+    }
+
+    // NotFound is final and does not implement Refusal.
+    try {
+        find($id);
+    } catch (Refusal $e) { // want P2403 "never thrown"
+    }
+
+    try {
+        throw new Gone();
+    } catch (Refusal $e) {
+    }
+
+    // A class without a constructor, a property no hook can reach.
+    try {
+        $p = new Plain();
+        $name = $plain->name;
+    } catch (Conflict $e) { // want P2403 "never thrown"
+    }
+
+    // A subclass of Open may hook $name.
+    try {
+        $name = $open->name;
+    } catch (Conflict $e) {
+    }
+
+    try {
+        $q = $id / $n;
+    } catch (\DivisionByZeroError $e) {
+    }
+
+    try {
+        $q = $id / 2;
+    } catch (\DivisionByZeroError $e) { // want P2403 "never thrown"
+    }
+
+    try {
+        $label = match ($id) { // want P2304
+            1 => 'one',
+            2 => 'two',
+        };
+    } catch (\UnhandledMatchError $e) {
+    }
+
+    // A native function without arguments throws nothing; one with them
+    // may throw anything.
+    try {
+        $t = time();
+    } catch (\RuntimeException $e) { // want P2403 "never thrown"
+    }
+
+    try {
+        $l = strlen($plain->name);
+    } catch (\RuntimeException $e) {
+    }
+
+    // Throwable's getters throw nothing.
+    try {
+        find($id);
+    } catch (NotFound $e) {
+        try {
+            $message = $e->getMessage();
+        } catch (Conflict $c) { // want P2403 "never thrown"
+        }
+    }
+
+    // What a catch body throws leaves the try statement.
+    try {
+        try {
+            find($id);
+        } catch (NotFound $e) {
+            throw new Conflict();
+        }
+    } catch (Conflict $e) {
+    }
+}

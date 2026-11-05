@@ -343,13 +343,20 @@ type fnCtx struct {
 	constClosure    bool // a closure inside a constant expression: static, capturing nothing (P2531)
 	nameOnly        bool // resolving a class name PHP does not load: X::class, instanceof X, catch (X)
 	inFinally       int  // depth of finally blocks around the statement being checked
-	returnType      types.Type
-	hasReturn       bool // a declared return type exists
-	name            string
-	generator       bool
-	res             *program.Resolver
-	byRef           map[string]bool
-	arrow           bool
+	// throwFrames collect the throw points of the try blocks and the body
+	// being checked, innermost last (design/tooling.md §9.1, throws.go);
+	// resolvedCalls are the calls whose callee gave their point, and
+	// throwOperand is the expression a throw is evaluating.
+	throwFrames   [][]throwPoint
+	resolvedCalls map[ast.Span]bool
+	throwOperand  ast.Expr
+	returnType    types.Type
+	hasReturn     bool // a declared return type exists
+	name          string
+	generator     bool
+	res           *program.Resolver
+	byRef         map[string]bool
+	arrow         bool
 	// inBlock is set inside a concurrently block, nested closures included:
 	// where spawn is legal (P2601) and sleeps are not (P2605).
 	inBlock bool

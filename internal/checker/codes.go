@@ -120,6 +120,10 @@ var (
 	P2401 = Code{"P2401", Warning, "unreachable code"}
 	P2402 = Code{"P2402", Error, "condition always has the same result"}
 	P2403 = Code{"P2403", Warning, "dead catch"}
+	// P2404, P2405: a throws clause or @throws tag held to its body
+	// (design/tooling.md §9.1).
+	P2404 = Code{"P2404", Warning, "throws names an exception the body never throws"}
+	P2405 = Code{"P2405", Error, "@throws void on a body that throws"}
 
 	// P2 — classes
 	P2501 = Code{"P2501", Error, "abstract method not implemented"}

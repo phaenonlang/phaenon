@@ -166,3 +166,17 @@ func orMixed(t types.Type) types.Type {
 	}
 	return t
 }
+
+// DeclaredThrows is what a call of m is known to throw: m's own
+// declaration, else the one it inherits from the method it overrides, as
+// PHPStan inherits @throws with the rest of a docblock. nil when nothing
+// declares it (design/tooling.md §9.1).
+func (m *Method) DeclaredThrows() types.Type {
+	for seen := 0; m != nil && seen < 64; seen++ {
+		if m.Throws != nil {
+			return m.Throws
+		}
+		m = m.Overridden()
+	}
+	return nil
+}

@@ -297,7 +297,10 @@ only evaluated under `void` and `never`; not on constructors, destructors or gen
 It compiles to the block it stands for. **`throws A|B`** after the return type names
 the exceptions the function lets escape; each must be a `Throwable` (`P2319`), and callers are not
 held to it (no checked exceptions). It compiles to a `@throws` tag on a line of the declaration's
-docblock, or of a new one above the declaration. Design: `design/functions.md`.
+docblock, or of a new one above the declaration. The throw analysis reads it, as it reads
+`@throws`: a catch nothing in its `try` block can reach (`P2403`), a member the body never throws
+(`P2404`, on what no override can replace), and `@throws void` on a body that throws (`P2405`).
+Design: `design/functions.md`, `design/tooling.md` §9.1.
 
 ## Generics
 
