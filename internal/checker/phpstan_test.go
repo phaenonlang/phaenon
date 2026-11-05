@@ -39,11 +39,6 @@ func TestPHPStanParity(t *testing.T) {
 		"method.resultUnused":       true,
 		"expr.resultUnused":         true,
 		"void.pure":                 true,
-		"method.unused":             true, // dead-code analysis is tooling (M6)
-		"property.unused":           true,
-		"property.onlyWritten":      true,
-		"constant.unused":           true,
-		"classConstant.unused":      true,
 		"phpstan.dumpType":          true,
 		"return.unusedType":         true, // unused-type analysis is tooling (M6)
 		"parameterByRef.unusedType": true,
@@ -76,6 +71,9 @@ func TestPHPStanParity(t *testing.T) {
 		// PHPStan 2.2 predates __debugInfo() on enums (PHP 8.6) and refuses
 		// it on every version.
 		"enum-magic.phn": {"enum.magicMethod": true},
+		// Properties a mapping attribute marks: PHPStan needs the framework's
+		// extension to know they are read and written (design/tooling.md §9.2).
+		"unused-attributes.phn": {"property.onlyWritten": true, "property.unused": true, "property.onlyRead": true},
 	}
 	files, _ := filepath.Glob(filepath.Join("testdata", "*.phn"))
 	vendorSrc, err := os.ReadFile(filepath.Join("testdata", "vendor", "Acme", "Repo.php"))

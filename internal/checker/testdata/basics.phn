@@ -20,7 +20,7 @@ final class User
         $this->id = 2; // want P2206
     }
 
-    private function secret(): int
+    private function secret(): int // want P2406 "secret"
     {
         return 1;
     }

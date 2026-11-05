@@ -48,7 +48,7 @@ final class Service
      * @param $r the reflector to use
      * @param $c the class to describe
      */
-    public function __construct<U of object>(private readonly Reflector $r, class<U> $c)
+    public function __construct<U of object>(private readonly Reflector $r, class<U> $c) // want P2407 "$r"
     {
         takesString($c);
     }
