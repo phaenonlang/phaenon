@@ -504,7 +504,8 @@ and the codemod's types leave no finding of `phn check` or PHPStan max.
   declaration holds keeps its kind (`list<map<string, mixed>>`). A depth cap was measured and set
   aside: at two it left core's over-precise two-level types and gave tq-cli 101 findings. Core
   comes back with 260 of 289 as written (244 before), none wider. tq-cli comes back with 734 of
-  807 (722); 23 are wider than written, all test fixtures whose deeper levels nothing reads. Both
+  807 (722); 23 are shallower than written (the cut's `mixed`, counted apart from wider, which
+  fails the harness), all test fixtures whose deeper levels nothing reads. Both
   trees: 0 findings of `phn check` and PHPStan max. The pass costs 29 checks and 3 s on tq-cli.
 
 ## M6 — distribution (slice 1, 2026-11-03)
