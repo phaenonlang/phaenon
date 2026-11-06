@@ -82,7 +82,7 @@ stdlib/gen            generator of stdlib/php-src (the newest release branch's s
 internal/distribution tests of the phaenon/phn Composer plugin under a real Composer (PHAENON_COMPOSER)
 composer/             the phaenon/phn Composer plugin (PHP): the pinned binary, vendor/bin/phn, the builds at the autoload dump; composer.json at the root, .gitattributes keeps the dist to it
 tools/release         the release assets: reproducible builds for five platforms and the playground's phn.wasm.gz + wasm_exec.js, their checksums in composer/checksums.json
-.github/workflows     the release PR pins the checksums, the tag publishes the binaries (design/tooling.md §3.2)
+.github/workflows     CI; the PR semantics gate (.github/scripts); release-please's release PR, pinned by release-checksums.yml, published when merged (design/tooling.md §3.2)
 ```
 
 ## Build and test
@@ -104,6 +104,9 @@ PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go generate ./stdlib        # refresh
 PHAENON_COMPOSER=$(which composer) go test ./internal/distribution     # the Composer plugin under a real Composer
 GOOS=js GOARCH=wasm go build -o bin/phn.wasm ./cmd/phn-wasm            # the playground's compiler (tests: internal/playground)
 ```
+
+CI (`.github/workflows/ci.yml`) runs `gofmt -l`, `go vet` (native and wasm) and `go test ./...` with
+PHP 8.5 and Composer on the runner; the suites gated by a variable above skip there (vault `testing`).
 
 `phn` itself: `phn build|check|fix|fmt|lsp|watch|migrate|stdlib|trace|lex|print` — run `phn` without arguments for usage; the
 README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`, or, through the `phaenon/phn` plugin, this checkout's `bin/phn` (`go build -o bin/phn ./cmd/phn`; `PHN_BINARY` names another). `phn stdlib` writes the
@@ -182,5 +185,9 @@ removes none: a source deleted here is deleted from the package by hand.
   a breaking change to the language or the CLI, and a body that says what changed and why. **No
   attribution lines, no `Co-Authored-By`, no "Generated with"** — the repositories will be open
   source. The same rule holds in `design`, `runtime`, `concurrent`, `jetbrains` and `vscode`.
+- **A PR is squash-merged, so its title becomes the commit on `main` that release-please reads** to
+  version the next release and write `CHANGELOG.md`: the title is a Conventional Commit header whose
+  release impact (`!` or a `BREAKING CHANGE:` footer, then `feat`, then `fix` and `revert`, then the
+  rest) equals the highest of the PR's commits, which `pr-semantics.yml` checks.
 - `go.mod`'s module line is `github.com/phaenonlang/phaenon`; GoLand has rewritten it before (vault
   `gotcha-goland-rewrites-go-mod`).
