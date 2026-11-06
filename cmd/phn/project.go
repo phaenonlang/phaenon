@@ -156,11 +156,16 @@ func (p *project) requireRoots(cmd string) {
 	}
 }
 
-// roots lists the source roots in a stable order.
+// roots lists the source roots present in this tree, in a stable order. A
+// root the project file names but the tree lacks is left out rather than
+// failed on: a dist archive, or an image's build context, leaves out tests/
+// and is still the same project.
 func (p *project) roots() []string {
 	roots := make([]string, 0, len(p.Roots))
 	for src := range p.Roots {
-		roots = append(roots, src)
+		if st, err := os.Stat(src); err == nil && st.IsDir() {
+			roots = append(roots, src)
+		}
 	}
 	sort.Strings(roots)
 	return roots

@@ -254,7 +254,9 @@ func build(args []string) {
 	roots := fs.Args()
 	if len(roots) == 0 {
 		proj.requireRoots("build")
-		roots = proj.roots()
+		if roots = proj.roots(); len(roots) == 0 {
+			fail("phn build: none of the roots %s names is in this directory", ProjectFile)
+		}
 	}
 	tgt := projectTarget(proj, roots)
 	if tgt.Unsupported {
@@ -650,7 +652,9 @@ func checkCmd(args []string) {
 	roots := fs.Args()
 	if len(roots) == 0 {
 		proj.requireRoots("check")
-		roots = proj.roots()
+		if roots = proj.roots(); len(roots) == 0 {
+			fail("phn check: none of the roots %s names is in this directory", ProjectFile)
+		}
 	}
 	tgt := projectTarget(proj, roots)
 	if proj != nil {
