@@ -42,7 +42,14 @@ final readonly class Point
     }
 }
 
-function read(Settings $s, Point $p): int
+// The default is the initialisation: no constructor needs to assign it
+// (P2515 otherwise).
+final class Limits
 {
-    return $s->retries + \count($s->tags) + $p->x + $p->y;
+    public readonly int $max = 10;
+}
+
+function read(Settings $s, Point $p, Limits $l): int
+{
+    return $s->retries + \count($s->tags) + $p->x + $p->y + $l->max;
 }

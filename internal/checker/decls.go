@@ -409,6 +409,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 	}
 	c.checkGenericClass(cl)
 	c.checkUnusedPrivate(cl)
+	c.initClasses = append(c.initClasses, cl)
 }
 
 func (c *Checker) checkAttrs(cl *program.Class, g *ast.AttrGroup) {
@@ -723,7 +724,9 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	}
 	scopeParams(ctx, m.Return)
 	ctx.pushThrows()
-	ctx.body(m.Params, d.Params, ctx.exprBody(m.Name, d.Arrow, d.Body), d.Name.S)
+	ctx.trackInits, ctx.trackReturns = true, true
+	end := ctx.body(m.Params, d.Params, ctx.exprBody(m.Name, d.Arrow, d.Body), d.Name.S)
+	c.recordInits(d, append(ctx.returnEnvs, end))
 	// A method an override may replace keeps the members its body does not
 	// throw: its declaration is the contract (design/tooling.md §9.1).
 	overridable := m.Vis != program.Private && !m.Final && !cl.Final && cl.Kind != ast.KindEnum
