@@ -22,8 +22,8 @@ import (
 )
 
 // phpSrc returns the php-src tree whose .phpt files are the corpus, or
-// skips: a checkout, or a release branch extracted with git archive (the
-// vault's testing note).
+// skips: a checkout, or a release branch extracted with git archive
+// (AGENTS.md, "Build and test").
 func phpSrc(t *testing.T) string {
 	dir := os.Getenv("PHAENON_PHP_SRC")
 	if dir == "" {
