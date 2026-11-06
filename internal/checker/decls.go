@@ -803,14 +803,67 @@ func (c *Checker) checkPropertyOverrides(cl *program.Class) {
 		return
 	}
 	for _, pr := range cl.Props {
-		if pr.Class != cl || pr.Magic || !hasOverride(pr.Attrs) || c.parentProperty(cl, pr.Name) != nil {
+		if pr.Class != cl || pr.Magic {
 			continue
 		}
 		span := pr.Span
 		if pr.File != cl.File && cl.Decl.Name != nil {
 			span = cl.Decl.Name.S // copied from a trait declared elsewhere
 		}
-		c.report(span, P2503, "property %s::$%s has #[\\Override] but no parent class or interface declares it", cl.Name, pr.Name)
+		parent := c.parentProperty(cl, pr.Name)
+		if parent == nil {
+			if hasOverride(pr.Attrs) {
+				c.report(span, P2503, "property %s::$%s has #[\\Override] but no parent class or interface declares it", cl.Name, pr.Name)
+			}
+			continue
+		}
+		c.checkPropertyRedeclaration(cl, pr, parent, span)
+	}
+}
+
+// checkPropertyRedeclaration holds a property that redeclares a parent
+// class's to the rules PHP checks when it links the class: the same
+// static-ness, the same readonly-ness, a visibility no narrower, and the
+// same native type, or none when the parent declares none (Exception::$code
+// is untyped, so a subclass cannot promote a typed, readonly $code). The
+// first rule broken is reported, in PHP's order and words. An interface's
+// property is not held here: a class implements it, with hooks of its own,
+// and hooked properties follow rules of their own.
+func (c *Checker) checkPropertyRedeclaration(cl *program.Class, pr, parent *program.Property, span ast.Span) {
+	if parent.Class.Kind == ast.KindInterface || len(pr.Hooks) > 0 || len(parent.Hooks) > 0 {
+		return
+	}
+	rel := related(parent.File, parent.Span, "%s::$%s declared here", parent.Class.Name, parent.Name)
+	staticWord := func(static bool) string {
+		if static {
+			return "static"
+		}
+		return "non-static"
+	}
+	readonlyWord := func(readonly bool) string {
+		if readonly {
+			return "readonly"
+		}
+		return "non-readonly"
+	}
+	switch {
+	case pr.Static != parent.Static:
+		c.reportRelated(span, P2502, rel, "cannot redeclare %s %s::$%s as %s %s::$%s", staticWord(parent.Static), parent.Class.Name, parent.Name, staticWord(pr.Static), cl.Name, pr.Name)
+	case pr.Readonly != parent.Readonly:
+		c.reportRelated(span, P2502, rel, "cannot redeclare %s property %s::$%s as %s %s::$%s", readonlyWord(parent.Readonly), parent.Class.Name, parent.Name, readonlyWord(pr.Readonly), cl.Name, pr.Name)
+	case pr.Vis > parent.Vis:
+		c.reportRelated(span, P2502, rel, "access level to %s::$%s must be %s (as in class %s) or weaker", cl.Name, pr.Name, parent.Vis, parent.Class.Name)
+	case parent.NativeType == nil && pr.NativeType != nil:
+		c.reportRelated(span, P2502, rel, "type of %s::$%s must be omitted to match the parent definition in class %s", cl.Name, pr.Name, parent.Class.Name)
+	case mentionsParam(parent.Type):
+		// Redeclaring a generic property is P3007's finding.
+	case parent.NativeType != nil:
+		// PHP compares what reaches it: the native types, Phaenon's generics
+		// erased.
+		want := types.Erase(parent.NativeType)
+		if pr.NativeType == nil || !types.Equal(want, types.Erase(pr.NativeType)) {
+			c.reportRelated(span, P2502, rel, "type of %s::$%s must be %s (as in class %s)", cl.Name, pr.Name, types.Print(want), parent.Class.Name)
+		}
 	}
 }
 
