@@ -1654,8 +1654,27 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 	var ends []*state
 	hasDefault := false
 	cur := env.clone()
+	// In `match (true)`, a condition and the arm it opens run only when the
+	// conditions before it failed, and the arm only when its condition
+	// held: version guards as in if/elseif/else (guards.go).
+	var negatives, failed []libraryGuard // before the arm; every condition, for default
+	if isTrue {
+		for _, arm := range e.Arms {
+			for _, cond := range arm.Conds {
+				_, negative := x.guardOf(cond)
+				failed = append(failed, negative)
+			}
+		}
+	}
 	for _, arm := range e.Arms {
 		armEnv := cur.clone()
+		var guards []libraryGuard
+		switch {
+		case isTrue && arm.Conds == nil:
+			guards = failed // default runs when every condition failed, wherever it is written
+		case isTrue:
+			guards = append(guards, negatives...)
+		}
 		if arm.Conds == nil {
 			hasDefault = true
 			if !isTrue {
@@ -1667,9 +1686,17 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 		} else if isTrue {
 			var thens []*state
 			for _, cond := range arm.Conds {
+				pop := x.c.pushGuards(negatives...)
 				t, f := x.cond(cond, cur)
+				pop()
 				thens = append(thens, t)
 				cur = f
+				_, negative := x.guardOf(cond)
+				negatives = append(negatives, negative)
+			}
+			if len(arm.Conds) == 1 {
+				positive, _ := x.guardOf(arm.Conds[0])
+				guards = append(guards, positive)
 			}
 			armEnv = joinAll(thens...)
 		} else {
@@ -1705,7 +1732,9 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 				}
 			}
 		}
+		pop := x.c.pushGuards(guards...)
 		results = append(results, x.expr(arm.Body, armEnv, expected))
+		pop()
 		ends = append(ends, armEnv)
 	}
 	if !hasDefault {

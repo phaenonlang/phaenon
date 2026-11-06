@@ -28,13 +28,21 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		switch e.Op {
 		case token.T_BOOLEAN_AND, token.T_LOGICAL_AND:
 			t1, f1 := x.cond(e.Left, env)
+			// The right operand runs only where the left holds, a version
+			// guard's included (guards.go).
+			positive, _ := x.guardOf(e.Left)
+			pop := x.c.pushGuard(positive)
 			t2, f2 := x.cond(e.Right, t1)
+			pop()
 			*env = *join(t2, join(f1, f2))
 			x.condValueType = types.TBool
 			return t2, join(f1, f2)
 		case token.T_BOOLEAN_OR, token.T_LOGICAL_OR:
 			t1, f1 := x.cond(e.Left, env)
+			_, negative := x.guardOf(e.Left)
+			pop := x.c.pushGuard(negative)
 			t2, f2 := x.cond(e.Right, f1)
+			pop()
 			*env = *join(join(t1, t2), f2)
 			x.condValueType = types.TBool
 			return join(t1, t2), f2

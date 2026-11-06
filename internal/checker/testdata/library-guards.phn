@@ -70,3 +70,68 @@ function tooOld(int $n): int
     }
     return $n;
 }
+
+// Guards in expressions: the ternary's arms, the right operand of && and
+// ||, and the arms of match (true) after their conditions.
+function ternary(int $n): int
+{
+    return \PHP_VERSION_ID >= 80600 ? clamp($n, 1, 10) : max(1, min(10, $n));
+}
+
+function ternaryNegated(int $n): int
+{
+    return !\function_exists('clamp') ? max(1, min(10, $n)) : clamp($n, 1, 10);
+}
+
+function ternaryWrongArm(int $n): int
+{
+    return \function_exists('clamp') ? $n : clamp($n, 1, 10); // want P4011
+}
+
+function conjunction(int $n): bool
+{
+    return \function_exists('clamp') && clamp($n, 1, 10) === $n;
+}
+
+function disjunction(int $n): bool
+{
+    return \PHP_VERSION_ID < 80600 || clamp($n, 1, 10) === $n;
+}
+
+function conjunctionInCondition(int $n): int
+{
+    if (\function_exists('clamp') && clamp($n, 1, 10) === $n) {
+        return clamp($n, 0, 5);
+    }
+    return $n;
+}
+
+function disjunctionWrongSide(int $n): bool
+{
+    return \function_exists('clamp') || clamp($n, 1, 10) === $n; // want P4011
+}
+
+function matched(int $n): int
+{
+    return match (true) {
+        \PHP_VERSION_ID >= 80600 => clamp($n, 1, 10),
+        default => max(1, min(10, $n)),
+    };
+}
+
+function matchedLaterArm(int $seconds): string
+{
+    return match (true) {
+        !\class_exists(Duration::class) => 'seconds',
+        $seconds > 60 => \get_class(Duration::fromSeconds($seconds)),
+        default => \get_class(Duration::fromSeconds(0)),
+    };
+}
+
+function matchedWrongArm(int $n): int
+{
+    return match (true) {
+        \function_exists('clamp') => $n,
+        default => clamp($n, 1, 10), // want P4011
+    };
+}
