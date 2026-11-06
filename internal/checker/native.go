@@ -37,10 +37,22 @@ func (x *fnCtx) nativeOf(e ast.Expr, env *state) types.Type {
 			return nil
 		}
 		return x.nativeMember(e.Object, e.NullSafe, env, func(cl *program.Class) (native, refined types.Type, decl *program.Class) {
-			if pr := cl.FindProperty(name); pr != nil {
-				return pr.NativeType, pr.Type, pr.Class
+			prs, _, _ := x.classProperties(cl, name)
+			if len(prs) == 0 {
+				return nil, nil, nil
 			}
-			return nil, nil, nil
+			// In a trait body, every user's declaration: PHP guarantees
+			// one of their native types, whichever class runs the body.
+			var natives, refineds []types.Type
+			for _, pr := range prs {
+				n := pr.NativeType
+				if n == nil {
+					n = types.TMixed
+				}
+				natives = append(natives, n)
+				refineds = append(refineds, pr.Type)
+			}
+			return types.MakeUnion(natives...), types.MakeUnion(refineds...), prs[0].Class
 		})
 	case *ast.MethodCall:
 		name, ok := identName(e.Name)

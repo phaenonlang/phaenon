@@ -70,6 +70,11 @@ func TestPHPStanParity(t *testing.T) {
 		// PHPStan 2.2 predates __debugInfo() on enums (PHP 8.6) and refuses
 		// it on every version.
 		"enum-magic.phn": {"enum.magicMethod": true},
+		// A trait's body serves every user: a comparison that one user's
+		// declaration alone decides is not impossible in the trait
+		// (design/checker.md §9, "A trait sees its users"), where PHPStan,
+		// analysing once per user, reports it in that user's context.
+		"trait-properties.phn": {"identical.alwaysFalse": true},
 		// Properties a mapping attribute marks: PHPStan needs the framework's
 		// extension to know they are read and written (design/tooling.md §9.2).
 		"unused-attributes.phn":        {"property.onlyWritten": true, "property.unused": true, "property.onlyRead": true},
@@ -177,6 +182,9 @@ func TestPHPStanParity(t *testing.T) {
 			}
 			flagged := map[int]bool{}
 			for file, f := range report.Files {
+				// A trait's body is analysed once per user, its findings
+				// filed under "X.php (in context of class User)".
+				file, _, _ = strings.Cut(file, " (in context of ")
 				if filepath.Base(file) != phpName {
 					continue
 				}

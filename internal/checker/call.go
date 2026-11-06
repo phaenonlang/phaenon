@@ -1451,6 +1451,42 @@ func (x *fnCtx) traitUserMethod(trait *program.Class, name string) *program.Meth
 	return nil
 }
 
+// traitUserProperties finds a property a trait body uses on $this among the
+// classes using the trait: the users' declarations, the users that lack it
+// (they neither declare it nor allow dynamic properties), and whether a
+// user serves it dynamically (__get, stdClass). Unlike a method, where the
+// first user decides, every user counts: PHPStan analyses the body once per
+// user, so a read is typed by each user's declaration and a write must suit
+// each. A user that is itself a trait passes the question on to its users.
+func (x *fnCtx) traitUserProperties(trait *program.Class, name string) (found []*program.Property, missing []*program.Class, dynamic bool) {
+	seen := map[string]bool{}
+	var walk func(t *program.Class)
+	walk = func(t *program.Class) {
+		if seen[strings.ToLower(t.Name)] {
+			return
+		}
+		seen[strings.ToLower(t.Name)] = true
+		for _, u := range x.p().TraitUsers(t.Name) {
+			u.Signature()
+			if pr := u.FindProperty(name); pr != nil {
+				found = append(found, pr)
+				continue
+			}
+			if u.Kind == ast.KindTrait {
+				walk(u)
+				continue
+			}
+			if allowsDynamic(u) {
+				dynamic = true
+			} else {
+				missing = append(missing, u)
+			}
+		}
+	}
+	walk(trait)
+	return found, missing, dynamic
+}
+
 // ------------------------------------------------------------------ new
 
 func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type {

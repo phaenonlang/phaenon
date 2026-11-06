@@ -900,28 +900,31 @@ func (x *fnCtx) propertyType(obj types.Type, name string, e *ast.PropertyFetch, 
 			}
 		}
 		for _, cl := range classes {
-			pr := cl.FindProperty(name)
-			if pr == nil {
-				if allowsDynamic(cl) {
-					out = append(out, types.TMixed)
+			prs, lacking, dynamic := x.classProperties(cl, name)
+			if lacking != nil {
+				if !lenient {
+					x.report(span, P2005, "unknown property %s::$%s", lacking.Name, name)
+				}
+				if len(prs) == 0 && !dynamic {
+					out = append(out, types.TError)
 					continue
 				}
-				if !lenient {
-					x.report(span, P2005, "unknown property %s::$%s", cl.Name, name)
+			}
+			if dynamic {
+				out = append(out, types.TMixed)
+			}
+			for _, pr := range prs {
+				if pr.Static {
+					x.report(span, P2210, "static property %s::$%s accessed through an instance", pr.Class.Name, name)
 				}
-				out = append(out, types.TError)
-				continue
+				if !x.canAccess(pr.Vis, pr.Class) {
+					x.report(span, P2108, "property %s::$%s is %s", pr.Class.Name, name, pr.Vis)
+				}
+				if pr.Deprecated && x.c.opts.Deprecations {
+					x.report(span, P4006, "property %s::$%s is deprecated", pr.Class.Name, name)
+				}
+				out = append(out, x.bindReceiver(pr.Type, m, pr.Class))
 			}
-			if pr.Static {
-				x.report(span, P2210, "static property %s::$%s accessed through an instance", pr.Class.Name, name)
-			}
-			if !x.canAccess(pr.Vis, pr.Class) {
-				x.report(span, P2108, "property %s::$%s is %s", pr.Class.Name, name, pr.Vis)
-			}
-			if pr.Deprecated && x.c.opts.Deprecations {
-				x.report(span, P4006, "property %s::$%s is deprecated", pr.Class.Name, name)
-			}
-			out = append(out, x.bindReceiver(pr.Type, m, pr.Class))
 		}
 	}
 	if len(out) == 0 {
@@ -935,6 +938,33 @@ func (x *fnCtx) propertyType(obj types.Type, name string, e *ast.PropertyFetch, 
 		}
 	}
 	return t
+}
+
+// classProperties is what a property name means on class cl: its
+// declaration, or, for a trait the property is not declared in, the
+// declarations of the trait's users (traitUserProperties), since a trait's
+// body runs in each of them. lacking is the class to name as not having
+// the property, nil when every class has it; dynamic says a class serves
+// it anyway (__get, stdClass, #[AllowDynamicProperties]). A trait no user
+// declares the property in is the class lacking it, as before traits were
+// looked through.
+func (x *fnCtx) classProperties(cl *program.Class, name string) (prs []*program.Property, lacking *program.Class, dynamic bool) {
+	if pr := cl.FindProperty(name); pr != nil {
+		return []*program.Property{pr}, nil, false
+	}
+	if cl.Kind == ast.KindTrait {
+		found, missing, dyn := x.traitUserProperties(cl, name)
+		if len(found) > 0 || dyn {
+			if len(missing) > 0 {
+				lacking = missing[0]
+			}
+			return found, lacking, dyn
+		}
+	}
+	if allowsDynamic(cl) {
+		return nil, nil, true
+	}
+	return nil, cl, false
 }
 
 // allowsDynamic reports whether unknown properties are fine on the class.
@@ -2077,8 +2107,8 @@ func (x *fnCtx) lookupPropertyForWrite(t *ast.PropertyFetch, env *state) (*progr
 	obj := x.expr(t.Object, env.clone(), nil)
 	x.c.rollback(savedDiags)
 	for _, cl := range x.classesOf(types.StripNull(obj), t.Object.Span()) {
-		if pr := cl.FindProperty(name); pr != nil {
-			return pr, obj
+		if prs, _, _ := x.classProperties(cl, name); len(prs) > 0 {
+			return prs[0], obj
 		}
 	}
 	return nil, obj
@@ -2150,45 +2180,49 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 		}
 	}
 	for _, cl := range x.classesOf(base, t.Object.Span()) {
-		pr := cl.FindProperty(name)
-		if pr == nil {
-			if !allowsDynamic(cl) && !x.isConstructorOf(cl) {
-				x.report(t.Name.Span(), P2005, "unknown property %s::$%s", cl.Name, name)
-			}
-			continue
+		prs, lacking, _ := x.classProperties(cl, name)
+		if lacking != nil && !x.isConstructorOf(lacking) {
+			x.report(t.Name.Span(), P2005, "unknown property %s::$%s", lacking.Name, name)
 		}
-		if pr.Static {
-			x.report(t.Name.Span(), P2210, "static property %s::$%s accessed through an instance", pr.Class.Name, name)
-		}
-		switch {
-		case pr.Readonly:
-			// Readonly properties are initialised once, in the declaring
-			// class's constructor (or __clone); PHP rejects everything else.
-			if !x.inClassScope(pr.Class) || !x.inInitialiser() {
-				x.report(t.Name.Span(), P2206, "readonly property %s::$%s can only be assigned in the constructor of %s", pr.Class.Name, name, pr.Class.Name)
-			} else if pr.HasDefault && strings.EqualFold(x.method.Name, "__construct") && x.c.target().AtLeast(phpversion.PHP86) {
-				// PHP 8.6: the default initialised it before the constructor
-				// ran; only __clone may reinitialise it.
-				x.report(t.Name.Span(), P2206, "readonly property %s::$%s is initialised by its default: the constructor cannot assign it", pr.Class.Name, name)
-			}
-		case !x.canAccess(pr.SetVis, pr.Class):
-			if pr.SetVis != pr.Vis {
-				x.report(t.Name.Span(), P2207, "property %s::$%s is %s(set)", pr.Class.Name, name, pr.SetVis)
-			} else {
-				x.report(t.Name.Span(), P2108, "property %s::$%s is %s", pr.Class.Name, name, pr.Vis)
-			}
-		}
-		if pr.Virtual && !hasSetHook(pr) {
-			x.report(t.Name.Span(), P2206, "virtual property %s::$%s has no set hook", pr.Class.Name, name)
-		}
-		declared := x.bindReceiver(pr.Type, base, pr.Class)
-		if !types.IsAcceptable(vt, declared, x.p()) {
-			x.report(span, P2201, "property %s::$%s (%s) does not accept %s", pr.Class.Name, name, x.typeName(declared), x.typeName(vt))
+		for _, pr := range prs {
+			x.assignDeclared(t, pr, name, base, vt, span)
 		}
 	}
 	if key, ok := pathKey(t); ok {
 		env.invalidatePrefix(key)
 		env.setPath(key, vt)
+	}
+}
+
+// assignDeclared checks an assignment of vt to the declared property pr.
+func (x *fnCtx) assignDeclared(t *ast.PropertyFetch, pr *program.Property, name string, base, vt types.Type, span ast.Span) {
+	if pr.Static {
+		x.report(t.Name.Span(), P2210, "static property %s::$%s accessed through an instance", pr.Class.Name, name)
+	}
+	switch {
+	case pr.Readonly:
+		// Readonly properties are initialised once, in the declaring
+		// class's constructor (or __clone); PHP rejects everything else.
+		if !x.inClassScope(pr.Class) || !x.inInitialiser() {
+			x.report(t.Name.Span(), P2206, "readonly property %s::$%s can only be assigned in the constructor of %s", pr.Class.Name, name, pr.Class.Name)
+		} else if pr.HasDefault && strings.EqualFold(x.method.Name, "__construct") && x.c.target().AtLeast(phpversion.PHP86) {
+			// PHP 8.6: the default initialised it before the constructor
+			// ran; only __clone may reinitialise it.
+			x.report(t.Name.Span(), P2206, "readonly property %s::$%s is initialised by its default: the constructor cannot assign it", pr.Class.Name, name)
+		}
+	case !x.canAccess(pr.SetVis, pr.Class):
+		if pr.SetVis != pr.Vis {
+			x.report(t.Name.Span(), P2207, "property %s::$%s is %s(set)", pr.Class.Name, name, pr.SetVis)
+		} else {
+			x.report(t.Name.Span(), P2108, "property %s::$%s is %s", pr.Class.Name, name, pr.Vis)
+		}
+	}
+	if pr.Virtual && !hasSetHook(pr) {
+		x.report(t.Name.Span(), P2206, "virtual property %s::$%s has no set hook", pr.Class.Name, name)
+	}
+	declared := x.bindReceiver(pr.Type, base, pr.Class)
+	if !types.IsAcceptable(vt, declared, x.p()) {
+		x.report(span, P2201, "property %s::$%s (%s) does not accept %s", pr.Class.Name, name, x.typeName(declared), x.typeName(vt))
 	}
 }
 
@@ -2202,7 +2236,22 @@ func hasSetHook(pr *program.Property) bool {
 }
 
 func (x *fnCtx) inClassScope(cl *program.Class) bool {
-	return x.class != nil && strings.EqualFold(x.class.Name, cl.Name)
+	if x.class == nil {
+		return false
+	}
+	if strings.EqualFold(x.class.Name, cl.Name) {
+		return true
+	}
+	if x.class.Kind == ast.KindTrait {
+		// A trait's body runs in the scope of each class using it: its
+		// constructor initialises the user's readonly properties.
+		for _, u := range x.p().TraitUsers(x.class.Name) {
+			if strings.EqualFold(u.Name, cl.Name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (x *fnCtx) isConstructorOf(cl *program.Class) bool { return false }
