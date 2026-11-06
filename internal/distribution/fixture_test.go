@@ -108,13 +108,18 @@ func (w *world) fakeBytes() []byte {
 }
 
 // pin writes the package copy's composer/checksums.json for the platform the
-// test runs on, as the release tooling would.
+// test runs on, as the release tooling would: beside it the playground's
+// assets, whose keys name no platform, so that every install shows the
+// plugin passing them over.
 func (w *world) pin(version, sha string) {
 	w.t.Helper()
+	other := strings.Repeat("0", 64)
 	checksums := map[string]any{
 		"version": version,
 		"assets": map[string]any{
 			platformKey(): map[string]string{"file": assetFile(), "sha256": sha},
+			"wasm":        map[string]string{"file": "phn.wasm.gz", "sha256": other},
+			"wasm-exec":   map[string]string{"file": "wasm_exec.js", "sha256": other},
 		},
 	}
 	writeJSON(w.t, filepath.Join(w.plugin, "composer", "checksums.json"), checksums)

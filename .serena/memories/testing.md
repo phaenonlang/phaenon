@@ -263,6 +263,21 @@ requirements. `phn` is not installed on `PATH`: build it from the repo (`AGENTS.
 - The numbers in `../design/tooling.md` §6.5 come from a scratch LSP client that opened a core
   or tq-cli file, edited it, sent each request and saved, timing each; it is not kept.
 
+## The playground (2026-11-06)
+
+- `internal/playground` tests the page's contract natively: the defaults and options of
+  `CompilePage`, the JSON the page parses, a panic made in each stage (`stageHook`). Two tests
+  hold it against the rest: `TestEmitGoldens` compiles every emitter golden for its targets and
+  wants the golden byte for byte, and `TestMatchesPhn` builds `cmd/phn` and runs `phn check
+  --format=json` and `phn build [--emit-on-error]` on the same files in a temporary directory
+  (≈8 s; `-short` skips it), leaving out the warnings about what the playground lacks (P4005,
+  P4007, P4010, P4012).
+- The wasm itself (`GOOS=js GOARCH=wasm go vet ./cmd/phn-wasm`) was smoke-tested with Node 26
+  as a page loads it: `wasm_exec.js` run as a script (`vm.runInThisContext`, so it installs its
+  own `fs` stub as in a browser), the `.gz` inflated with `DecompressionStream`,
+  `go.run(instance)` not awaited, then `globalThis.phaenon.compile`. The script is not kept
+  (`../design/tooling.md` §3.6 has the timings).
+
 ## The compiled layout against PER (2026-11-04)
 
 The dogfood trees' own cs configurations are `@PER-CS3x0` since 2026-11-05 ([[dogfood]] § PER

@@ -1,8 +1,8 @@
 # The release PR pins the binaries (design/tooling.md §3.2): a pull request
-# from a release/vX.Y.Z branch builds the five binaries and commits their
-# SHA-256s into composer/checksums.json, so that the tag the PR leads to
-# carries them, and composer.lock, pinning the phaenon/phn package, pins
-# the binaries too. composer.json's runtime constraints move to the
+# from a release/vX.Y.Z branch builds the five binaries and the playground's
+# phn.wasm.gz and wasm_exec.js (§3.6), and commits their SHA-256s into
+# composer/checksums.json, so that the tag the PR leads to carries them, and
+# composer.lock, pinning the phaenon/phn package, pins the binaries too. composer.json's runtime constraints move to the
 # release's minor version with them (lockstep, §3.4).
 name: release checksums
 
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Build the binaries and write their checksums
+      - name: Build the release assets and write their checksums
         run: go run ./tools/release -version "${GITHUB_HEAD_REF#release/v}" -out dist
       - name: Commit the checksums
         run: |
