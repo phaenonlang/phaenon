@@ -1,0 +1,151 @@
+// A trait's body runs in each class using it: a property it uses on $this
+// and does not declare is looked up in its users, as PHPStan analyses a
+// trait once per user (design/checker.md §9, "A trait sees its users").
+
+final class Logger
+{
+    public function log(string $line): void
+    {
+        echo $line;
+    }
+}
+
+// Reads and writes of properties the using class declares: typed by its
+// declaration, narrowed as the user's own body would be.
+trait Counts
+{
+    public function bump(): int
+    {
+        $this->count = $this->count + 1;
+        return $this->count;
+    }
+
+    public function reset(): void
+    {
+        $this->count = 'zero'; // want P2201 "Counter::$count (int)"
+    }
+
+    public function note(string $line): void
+    {
+        if ($this->logger !== null) {
+            $this->logger->log($line);
+        }
+        $this->logger->log($line); // want P2105
+    }
+
+    public function missing(): int
+    {
+        return $this->nobody; // want P2005 "Counts::$nobody"
+    }
+}
+
+final class Counter
+{
+    use Counts;
+
+    private int $count = 0;
+    private ?Logger $logger = null;
+
+    public function attach(Logger $logger): void
+    {
+        $this->logger = $logger;
+    }
+}
+
+// Two users declaring the property with different types: a read is either
+// type, a write must suit both.
+trait Labels
+{
+    public function label(): string
+    {
+        return $this->label; // want P2202
+    }
+
+    public function shout(): string
+    {
+        return strtoupper($this->label); // want P2103
+    }
+
+    // Never null in Plain, where PHPStan calls the comparison always false;
+    // the trait's code serves Optional too, so it is not reported.
+    public function initial(): string
+    {
+        if ($this->label === null) {
+            return '';
+        }
+        return $this->label;
+    }
+
+    public function clear(): void
+    {
+        $this->label = null; // want P2201 "Plain::$label (string)"
+    }
+}
+
+final class Plain
+{
+    use Labels;
+
+    private string $label = 'plain';
+}
+
+final class Optional
+{
+    use Labels;
+
+    private ?string $label = null;
+
+    public function set(string $label): void
+    {
+        $this->label = $label;
+    }
+}
+
+// One user declares it, the other does not: PHP reads an undefined
+// property in the second.
+trait Sizes
+{
+    public function size(): int
+    {
+        return $this->size; // want P2005 "Unsized::$size"
+    }
+}
+
+final class Sized
+{
+    use Sizes;
+
+    private int $size = 1;
+}
+
+final class Unsized
+{
+    use Sizes;
+}
+
+// A trait's constructor runs in its user's scope, and initialises the
+// user's readonly property.
+trait Named
+{
+    public function __construct(string $name)
+    {
+        $this->name = $name;
+    }
+
+    public function rename(string $name): void
+    {
+        $this->name = $name; // want P2206
+    }
+}
+
+final class Person
+{
+    use Named;
+
+    public readonly string $name;
+}
+
+function traitProperties(Person $p): string
+{
+    return $p->name;
+}

@@ -377,16 +377,17 @@ func (x *fnCtx) propertyThrows(obj types.Type, name string) {
 			return
 		}
 		cl.Signature()
-		pr := cl.FindProperty(name)
-		if pr == nil || pr.Magic || len(pr.Hooks) > 0 {
+		prs, lacking, dynamic := x.classProperties(cl, name)
+		if len(prs) == 0 || lacking != nil || dynamic {
 			x.implicitThrow()
 			return
 		}
-		if pr.Vis == program.Private || pr.Class != nil && pr.Class.Final {
-			continue
+		for _, pr := range prs {
+			if pr.Magic || len(pr.Hooks) > 0 || pr.Vis != program.Private && (pr.Class == nil || !pr.Class.Final) {
+				x.implicitThrow()
+				return
+			}
 		}
-		x.implicitThrow()
-		return
 	}
 }
 
