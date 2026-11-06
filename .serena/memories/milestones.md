@@ -218,7 +218,14 @@ Rewritten 2026-11-01 when M4 closed, updated the same day when M5 closed. Whoeve
     wider than the values or deeper than the code reads, 2 a class the union's other member
     covers (`DomainEvent|Event`, fixed in `51b3d88`: core 262 of 289 as written), none a checker
     gap by PHPStan max; 15 wait on style rules and one on a design question (a tuple accepts
-    a longer one), a maintainer's decision. Left in [[open-items]] § M6 — the list-types codemod. Next: the
-    `throws` codemod's measurement ([[open-items]]), then slice 8.
+    a longer one), a maintainer's decision. Left in [[open-items]] § M6 — the list-types codemod.
+19. 2026-11-06: **Tuples are exact; the `throws` codemod measured, not built; phaenon.dev
+    built as PRs.** A tuple admits no longer value (`types.IsTuple`, `../design/collections.md`
+    §9; the checker is stricter than PHPStan there), the audit's design question. The `throws`
+    codemod's three rules were measured on core and tq-cli through a new `checker.Options.Thrown`
+    hook (`../design/tooling.md` §8.3): recommended not to build, pending a decision. phaenon.dev,
+    the plugin's binary mirror, is a Tequila Sites site with IAM-gated downloads, three Tequila
+    PRs open ([[open-items]] § M6 — distribution). Next: slice 8 once the mirror is deployed,
+    on a maintainer's go-ahead.
 
 ← [[Home]]

@@ -539,12 +539,11 @@ and the codemod's types leave no finding of `phn check` or PHPStan max.
   - measured and not worth it: *below a map an unread array level is `mixed` whole*, 4 back for 4
     lost (core's `map<string, map<string, mixed>>` schema components, tq-cli's
     `map<string, list<string>>`).
-- **A tuple accepts a longer one**: `../design/collections.md` §2.4 calls a tuple fixed-length and
-  sealed, but the lattice takes `list{string, string, string, mixed}` as a
-  `list{string, string, string}` and `['a', 'b', 'c']` as a `(string, string)`, as PHPStan does
-  (`internal/types/subtype.go`; both pass PHPStan max and `phn check`). tq-cli's
-  `ReconcilerTest::secretWrites()` takes its recorded 4-tuples as 3-tuples. No decision records
-  it; whether a tuple is exact is the design's.
+- ~~**A tuple accepts a longer one**~~ — decided 2026-11-06: a tuple is exact, as Python's
+  (`../design/collections.md` §2.4, §9; `types.IsTuple`). The lattice had taken
+  `list{string, string, string, mixed}` as a `list{string, string, string}`, as PHPStan does; the
+  checker is stricter now, which parity allows. tq-cli's `ReconcilerTest::secretWrites()` names
+  its recorded calls' four positions (dogfood `bdef458`); no other tree changed.
 - **Spellings back as written but spelled otherwise** (26 in tq-cli): `false|string` where authors
   and PHP's stubs write `string|false` (14 environment maps, 2 other orders), `map<string,
   mixed>|null` for `?map<string, mixed>` in a tuple (6), the class's name where authors wrote
@@ -561,9 +560,22 @@ and the codemod's types leave no finding of `phn check` or PHPStan max.
   printed a promise stack trace (`b3b8d30`).
 - **No download path for a private repository**: `releases/download/…` answers 404 even with a
   GitHub token (private assets come only through the API's asset endpoint), so until the
-  repositories are public the plugin downloads only from a mirror. Publishing the binaries on the
-  registry's release-asset door for Tequila's CI (`extra.phaenon.binary-url`) is a Tequila-side
-  step not taken yet; locally, `PHN_BINARY` or a compiler checkout's `bin/phn`.
+  repositories are public the plugin downloads only from a mirror. Locally, `PHN_BINARY` or a
+  compiler checkout's `bin/phn`. **The mirror is phaenon.dev** (built 2026-11-06, not deployed):
+  a Tequila Sites site, `phaenonlang/website`, with the binaries as immutable *downloads* beside
+  the site's releases, served at `https://phaenon.dev/releases/{version}/{file}` behind a Caddy
+  gate that checks an IAM bearer of audience `downloads` (`tq composer:login --host phaenon.dev
+  --audience downloads` for people, a service client or the federated `tq ci:token` for CI;
+  `bearer.phaenon.dev` in `auth.json`, `extra.phaenon.binary-url` set to that URL). Open PRs:
+  tequila/sites#32 (downloads, the gate, publishers scoped per site by audience `sites:<name>`),
+  tequila/tq-cli#398 (`downloads` in the manifest, `composer:login --audience`),
+  tequila-platform/gitops#1309 (the site, draft until tq-cli is pinned). Left to a maintainer:
+  merge and release in that order; phaenon.dev's DNS (DNSSEC off at the registrar, a Route53
+  zone aliased to the gateway, the nameservers); mint the `phaenon-website` publisher
+  (`sites:phaenon`) and set its pair in both phaenonlang repositories; publish, upload v0.1.0;
+  add the website upload job the website README gives to this repository's `release.yml`. A
+  browser cannot download (the IAM session cookie does not reach phaenon.dev): an OIDC sign-in
+  on the site, later.
 - A source install of `phaenon/phn` (`--prefer-source`, a dev version from VCS) is a checkout too:
   it holds `go.mod`, so the plugin wants `PHN_BINARY` or a `bin/phn` built there.
 - PHPStan on the plugin against Composer 2.3 (the floor `composer-plugin-api ^2.3` admits) reports
