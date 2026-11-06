@@ -3,8 +3,8 @@
 # PR's branch once the pins are pushed there: what a workflow's GITHUB_TOKEN
 # pushes starts no pull_request run, and the PR needs its checks.
 #
-# What `go test ./...` runs on the runner (the vault's `testing` note lists
-# every variable):
+# What `go test ./...` runs on the runner (AGENTS.md, "Build and test",
+# lists every variable):
 #   - PHP 8.5 is on PATH, so the tests that take php as the oracle run: the
 #     emitter goldens' `php -l` (TestGenerics), the migrate goldens' runs,
 #     heredocs through the tab replacement (TestHeredocValues), the stubs
@@ -13,11 +13,12 @@
 #     `phn build` in cmd/phn and the playground read them too.
 #   - Composer is on PATH and PHAENON_COMPOSER names it, yet the plugin's
 #     suite (internal/distribution) skips: it installs the phaenon/runtime
-#     checkout beside the repository, a private repository this workflow's
-#     token cannot read. TestRuntimePackageFresh, TestConcurrentPackageFresh
-#     and TestVectorCopiesFresh skip for their sibling checkouts likewise.
+#     checkout beside the repository, and for now this workflow checks out
+#     this repository alone. TestRuntimePackageFresh,
+#     TestConcurrentPackageFresh and TestVectorCopiesFresh skip for their
+#     sibling checkouts likewise.
 #   - Skipped for want of their variables, which name a php-src corpus, a
-#     PHPStan install, a PHP 8.6 or the private dogfood trees: conformance
+#     PHPStan install, a PHP 8.6 or Phaenon trees to run over: conformance
 #     (PHAENON_PHP_SRC, PHAENON_EXEC), the stubs' freshness (PHAENON_PHP_SRC),
 #     PHPStan parity (PHAENON_PHPSTAN), the 8.6 runs (PHAENON_PHP86), the
 #     measurements and tree runs (PHAENON_LISTTYPES, PHAENON_THROWS,

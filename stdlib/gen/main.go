@@ -15,9 +15,13 @@
 //
 // Run it from the repository root:
 //
-//	PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go generate ./stdlib
-//	go run ./stdlib/gen -php-src ../php-src -php /opt/homebrew/opt/php@8.6/bin/php
+//	go generate ./stdlib
+//	go run ./stdlib/gen -php php
 //
+// The php-src clone is the one $PHAENON_PHP_SRC names, else a clone of
+// php/php-src beside the repository (../php-src from its root); -php-src
+// names another. constants.php is rewritten only when -php names a php:
+// `php` takes the one on PATH, which should be the newest supported release.
 // -check compares instead of writing and fails when anything is stale.
 package main
 
@@ -64,20 +68,23 @@ var releases = []release{
 var testExtensions = []string{"ext/zend_test/", "ext/dl_test/", "ext/skeleton/"}
 
 func main() {
-	phpSrc := flag.String("php-src", os.Getenv("PHAENON_PHP_SRC"), "the php-src clone (default $PHAENON_PHP_SRC)")
+	phpSrc := flag.String("php-src", os.Getenv("PHAENON_PHP_SRC"), "the php-src clone (default $PHAENON_PHP_SRC, else php-src beside the repository)")
 	remote := flag.String("remote", "origin", "the remote whose release branches are read")
-	php := flag.String("php", "", "a php of the newest release, to regenerate constants.php")
+	php := flag.String("php", "", "a php of the newest release, to regenerate constants.php (php: the one on PATH)")
 	dir := flag.String("dir", "", "the stdlib directory (default: found from the working directory)")
 	check := flag.Bool("check", false, "compare with the committed files instead of writing them")
 	flag.Parse()
 	if releases[0].Version != phpversion.Floor || releases[len(releases)-1].Version != phpversion.Newest {
 		fail(fmt.Sprintf("the releases listed here must run from phpversion.Floor (%s) to phpversion.Newest (%s)", phpversion.Floor, phpversion.Newest))
 	}
-	if *phpSrc == "" {
-		fail("no php-src clone: pass -php-src or set PHAENON_PHP_SRC")
-	}
 	if *dir == "" {
 		*dir = findStdlib()
+	}
+	if *phpSrc == "" {
+		*phpSrc = siblingPHPSrc(*dir)
+	}
+	if *phpSrc == "" {
+		fail("no php-src clone: pass -php-src, set PHAENON_PHP_SRC or clone php/php-src beside the repository")
 	}
 	g := &generator{phpSrc: *phpSrc, remote: *remote, dir: *dir, check: *check}
 	if err := g.run(*php); err != nil {
@@ -103,6 +110,20 @@ func findStdlib() string {
 	}
 	fail("run from the repository root or the stdlib directory")
 	return ""
+}
+
+// siblingPHPSrc returns the php-src clone beside the repository whose
+// stdlib directory is dir, or "" when there is none.
+func siblingPHPSrc(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	clone := filepath.Join(filepath.Dir(filepath.Dir(abs)), "php-src")
+	if _, err := os.Stat(filepath.Join(clone, ".git")); err != nil {
+		return ""
+	}
+	return clone
 }
 
 type generator struct {
@@ -593,12 +614,61 @@ func (t *table) summary(w io.Writer, branches []*branch) {
 
 // ------------------------------------------------------------------ constants.php
 
+// installPaths are the constants that say where the generating php is
+// installed. Their values are that machine's, and the checker reads only
+// their type (string: dynamicConstants in internal/checker), so
+// constants.php gives them the paths of a php built with
+// `./configure --prefix=/usr`, the extension directory without its API
+// subdirectory. Generation fails when another string constant holds one of
+// the real paths: a constant a newer PHP adds goes here.
+var installPaths = map[string]string{
+	"DEFAULT_INCLUDE_PATH":     ".:/usr/lib/php",
+	"PEAR_EXTENSION_DIR":       "/usr/lib/php/extensions",
+	"PEAR_INSTALL_DIR":         "/usr/lib/php",
+	"PHP_BINARY":               "/usr/bin/php",
+	"PHP_BINDIR":               "/usr/bin",
+	"PHP_CONFIG_FILE_PATH":     "/usr/lib",
+	"PHP_CONFIG_FILE_SCAN_DIR": "",
+	"PHP_DATADIR":              "/usr/share/php",
+	"PHP_EXTENSION_DIR":        "/usr/lib/php/extensions",
+	"PHP_LIBDIR":               "/usr/lib/php",
+	"PHP_LOCALSTATEDIR":        "/usr/var",
+	"PHP_MANDIR":               "/usr/php/man",
+	"PHP_PREFIX":               "/usr",
+	"PHP_SBINDIR":              "/usr/sbin",
+	"PHP_SYSCONFDIR":           "/usr/etc",
+}
+
+// installPathsPHP is installPaths as a PHP array literal, $neutral.
+func installPathsPHP() string {
+	names := make([]string, 0, len(installPaths))
+	for name := range installPaths {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	quote := strings.NewReplacer(`\`, `\\`, `'`, `\'`)
+	var b strings.Builder
+	b.WriteString("$neutral = [")
+	for _, name := range names {
+		fmt.Fprintf(&b, "'%s' => '%s', ", name, quote.Replace(installPaths[name]))
+	}
+	b.WriteString("];")
+	return b.String()
+}
+
 // constantsScript prints `const NAME = value;` for every constant of the
 // extensions named on stdin (one lower-cased name per line), grouped by
-// namespace and sorted. true, false and null are syntax, not constants, to
-// the checker, and resources (STDIN…) have no constant expression.
+// namespace and sorted, the installation paths in $neutral replaced. true,
+// false and null are syntax, not constants, to the checker, and resources
+// (STDIN…) have no constant expression.
 const constantsScript = `
 $exts = array_flip(explode("\n", trim(stream_get_contents(STDIN))));
+$machine = [];
+foreach ($neutral as $name => $_) {
+    if (defined($name) && is_string(constant($name)) && strlen(constant($name)) > 1) {
+        $machine[] = constant($name);
+    }
+}
 $byNs = [];
 foreach (get_defined_constants(true) as $module => $consts) {
     if (!isset($exts[strtolower($module)])) {
@@ -610,7 +680,18 @@ foreach (get_defined_constants(true) as $module => $consts) {
         }
         $i = strrpos($fqn, '\\');
         $ns = $i === false ? '' : substr($fqn, 0, $i);
-        $byNs[$ns][$i === false ? $fqn : substr($fqn, $i + 1)] = $value;
+        $name = $i === false ? $fqn : substr($fqn, $i + 1);
+        if ($ns === '' && array_key_exists($name, $neutral)) {
+            $value = $neutral[$name];
+        } elseif (is_string($value)) {
+            foreach ($machine as $path) {
+                if (str_contains($value, $path)) {
+                    fwrite(STDERR, "$fqn holds the installation path $path: add it to installPaths\n");
+                    exit(1);
+                }
+            }
+        }
+        $byNs[$ns][$name] = $value;
     }
 }
 ksort($byNs, SORT_STRING);
@@ -642,7 +723,7 @@ func constants(php string, b *branch) ([]byte, error) {
 		names = append(names, e)
 	}
 	sort.Strings(names)
-	cmd := exec.Command(php, "-d", "display_errors=stderr", "-r", constantsScript)
+	cmd := exec.Command(php, "-d", "display_errors=stderr", "-r", installPathsPHP()+constantsScript)
 	cmd.Stdin = strings.NewReader(strings.Join(names, "\n") + "\n")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -660,7 +741,8 @@ func constants(php string, b *branch) ([]byte, error) {
 	fmt.Fprintf(&buf, " * from PHP %s (get_defined_constants(), the embedded extensions only).\n", version)
 	buf.WriteString(" * A stub keeps its @var type; the value is what a conditional type decides\n")
 	buf.WriteString(" * on. Machine-dependent constants (PHP_OS, PHP_EOL, …) are typed, not\n")
-	buf.WriteString(" * valued, by the checker.\n */\n\n")
+	buf.WriteString(" * valued, by the checker. The installation paths (PHP_PREFIX, PHP_BINARY,\n")
+	buf.WriteString(" * …) are those of a build with --prefix=/usr, not the generating php's.\n */\n\n")
 	buf.WriteString(body)
 	return buf.Bytes(), nil
 }

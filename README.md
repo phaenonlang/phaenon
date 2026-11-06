@@ -5,28 +5,25 @@ A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for P
 - `phn` — the compiler (this repository, Go)
 - `phaenon/runtime` — the PHP runtime package (`\Phaenon\Type` behind `is` / `as`, the checked
   conversions of `\Phaenon\Bytes`, the line map for Monolog and Sentry)
-- `design/` — language design documents
+- [`phaenonlang/design`](https://github.com/phaenonlang/design) — the language design documents, a
+  repository of their own: a path such as `design/checker.md` below is a file there
 
-Status: pre-alpha. M0 done — lexer, parser and printer are conformance-tested against php-src's
-`.phpt` corpus (token-identical lexing, 100% of PHP-accepted files parse, parse → print round-trips
-token-identically, printed files run identically under `php`). M1 done — `phn build` and
-`phn migrate` work for the PHP subset with line-preserving output. M2 done — `phn check` is a
-type checker for the PHP subset plus the PHPStan docblock vocabulary; on the first two Tequila
-libraries it reports exactly what PHPStan reports at level 10. M3 done — generics are syntax:
-`class Box<T>`, `list<T>`, `map<K, V>`, `class<T>`, `Closure(T): U`, `is` / `as`, `type` aliases;
-they compile to PHP with PHPStan docblocks, and `phn migrate` lifts PHPStan's docblock generics
-into that syntax. M4 done — `list<T>`, `map<K, V>`, tuples and `bytes`, `fun` with `public`
-implied, closures in attributes, and a project file that builds sources into sibling output
-directories. (The method syntax on lists, maps and strings M4 also brought, and its stdlib `Seq`,
-`Map` and `Str`, were removed by D20: `->` means what PHP means by it, and these values go through
-PHP's functions, chained with pipes.)
-Four Tequila libraries build from `.phn` with their suites passing, `tequila/core` among them;
-the checker reads the extensions the local `php` has loaded (ext-mongodb and friends) from its
-reflection. M5 done — structured concurrency: `concurrently { … }` blocks and `spawn` over amp v3
-and the Revolt event loop compile to `Scope::run(…)` / `Scope::spawn(…)` on the
-`phaenon/concurrent` package; `tq-cli` (859 `.phn`, fifteen fan-outs as blocks) runs its 2052
-tests on the compiled output with `phn check` clean, and `tequila/nats` gained a Revolt transport
-so that one connection serves concurrent tasks.
+Status: pre-alpha; the language and the CLI still change between releases. What works today:
+
+- `phn check`, the type checker: PHP plus Phaenon's syntax (generics, `list<T>` and `map<K, V>`,
+  tuples, `bytes`, `fun`, `throws`, `concurrently` blocks) and the PHPStan docblock vocabulary;
+  it reports what PHPStan reports at level max, and may be stricter, never more lenient.
+- `phn build`, the emitter: the PHP you would have written, with PHPStan docblocks, laid out as PER
+  Coding Style 3.0, each file ending with a line map back to its `.phn`.
+- The `phaenon/phn` Composer plugin: the pinned compiler, and the builds at every autoload dump.
+- `phn fix`, `phn fmt`, `phn lsp`, `phn trace` and `phn migrate`, which turns `.php` into `.phn`
+  and lifts PHPStan's docblock generics into syntax.
+- The PhpStorm plugin and the VS Code extension, and the playground on
+  [phaenon.dev](https://phaenon.dev), the compiler built for WebAssembly.
+
+The lexer, parser and printer are conformance-tested against php-src's `.phpt` corpus with `php`
+itself as the oracle. The language is developed against a production PHP codebase, the Tequila
+Platform's, from its libraries to its services, whose own suites run on the compiled output.
 
 ## Type checking
 
@@ -276,7 +273,9 @@ A library ships its `.phn` sources and no compiled PHP (`roadmap.md` D13): with 
 library pinned, the output is reproducible byte for byte, and the Composer plugin below builds it
 where it is installed.
 
-### Installing through Composer
+### Installing
+
+A Composer project takes it as a plugin:
 
 ```sh
 composer require phaenon/phn
@@ -295,6 +294,18 @@ nothing changed: `phn build --vendor`), then the project itself (`phn build`), s
 - `"extra": {"phaenon": {"build": false}}` leaves the project's own build to its workflow.
 - `composer install --no-autoloader` builds nothing; the `dump-autoload` that follows does
   (`--no-scripts` does not skip the plugin).
+
+Without Composer, `phn` is one static binary. Each
+[release](https://github.com/phaenonlang/phaenon/releases) carries it for Linux and macOS (amd64,
+arm64) and Windows (amd64), with the playground's WebAssembly build and the source tree; their
+SHA-256 sums are in `composer/checksums.json` at the release's tag. From source, with the Go
+toolchain `go.mod` names:
+
+```sh
+go install github.com/phaenonlang/phaenon/cmd/phn@latest
+```
+
+A build from source calls itself `dev` in `phn version`.
 
 ## Declarations
 
@@ -414,7 +425,25 @@ phn print [--php] file                    # parse and pretty-print
 
 `--php` reads plain PHP (with `<?php` tags); the default reads Phaenon (code from byte 0).
 
+## Repositories
+
+The language's other parts live beside this repository in the
+[`phaenonlang`](https://github.com/phaenonlang) organisation; [phaenon.dev](https://phaenon.dev) is
+its site.
+
+- [`design`](https://github.com/phaenonlang/design) — the language design and every decision
+- [`runtime`](https://github.com/phaenonlang/runtime) — the Composer package `phaenon/runtime`
+- [`concurrent`](https://github.com/phaenonlang/concurrent) — the Composer package
+  `phaenon/concurrent`, the runtime of `concurrently { }` and `spawn` on amp v3 and Revolt
+- [`jetbrains`](https://github.com/phaenonlang/jetbrains) — the PhpStorm plugin
+- [`vscode`](https://github.com/phaenonlang/vscode) — the VS Code extension
+- [`website`](https://github.com/phaenonlang/website) — phaenon.dev: the landing page, the
+  playground and the release downloads
+
 ## Development
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) says what a pull request must satisfy; [`AGENTS.md`](AGENTS.md)
+maps the code, its tests and every test variable.
 
 ```sh
 go test ./...                                   # unit tests
@@ -457,4 +486,4 @@ checksum, the launcher. `go run ./tools/release -version X.Y.Z -out dist` builds
 binaries and writes their checksums (`-verify` compares instead); two builds from the same sources
 and toolchain give the same bytes.
 
-License: MIT.
+License: [MIT](LICENSE).

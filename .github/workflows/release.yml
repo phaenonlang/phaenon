@@ -8,8 +8,9 @@
 # again from the merged commit and goes on only when they match the
 # checksums the PR pinned; release-please then tags the commit vX.Y.Z and
 # makes the GitHub release, and the assets and the source tarball go onto
-# it, then onto https://phaenon.dev/releases/ (phaenonlang/website,
-# «Uploading a release»).
+# it. Last, the website repository (phaenonlang/website) is told of the
+# release; it fetches the files from the release and puts them onto
+# https://phaenon.dev/releases/.
 #
 # Why the publish runs here rather than on the tag: release-please creates
 # the tag through the API with this workflow's GITHUB_TOKEN, and nothing that
@@ -22,8 +23,8 @@
 # `autorelease: pending` label off its PR: release-please then proposes the
 # version again from the commits since the last tag.
 #
-# Run by hand with a tag, the workflow uploads a release that exists already
-# to phaenon.dev and publishes nothing again.
+# Run by hand with a tag, the workflow tells the website repository of a
+# release that exists already and publishes nothing again.
 name: release
 
 on:
@@ -32,7 +33,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'An existing release to upload to phaenon.dev, e.g. v0.1.0'
+        description: 'An existing release to hand to phaenon.dev, e.g. v0.2.0'
         required: true
         type: string
 
@@ -134,54 +135,30 @@ jobs:
         run: gh workflow run release-checksums.yml -R "$GITHUB_REPOSITORY" --ref "$(jq -r .headBranchName <<<"$PR")"
 
   website:
-    # The release's files onto https://phaenon.dev/releases/<version>/. After
-    # a release is made; alone when run by hand with a tag. Skipped while the
-    # publisher's secrets are not set.
+    # A repository_dispatch "release" to phaenonlang/website with the tag,
+    # on which that repository puts the release's files onto
+    # https://phaenon.dev/releases/<version>/. After a release is made; alone
+    # when run by hand with an existing tag. Skipped while the
+    # WEBSITE_DISPATCH_TOKEN secret, a token allowed to dispatch events to
+    # the website repository, is not set.
     needs: release
     if: ${{ !cancelled() && ((needs.release.result == 'success' && needs.release.outputs.created == 'true') || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     env:
       TAG: ${{ inputs.tag || needs.release.outputs.tag }}
-      TEQUILA_SITES_CLIENT_ID: ${{ secrets.TEQUILA_SITES_CLIENT_ID }}
-      TEQUILA_SITES_CLIENT_SECRET: ${{ secrets.TEQUILA_SITES_CLIENT_SECRET }}
       WEBSITE_DISPATCH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          # The checksums the release was pinned at, whichever branch ran this.
-          ref: ${{ env.TAG }}
-      - name: Fetch the release's files
+      - name: Tell phaenonlang/website of the release
+        if: env.WEBSITE_DISPATCH_TOKEN != ''
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download "$TAG" --dir release
-      - name: Upload them to phaenon.dev
-        if: env.TEQUILA_SITES_CLIENT_ID != ''
+          RELEASES_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version="${TAG#v}"
-          # Every binary is the one composer/checksums.json pins, before a byte goes out.
-          jq -r '.assets[] | "\(.sha256)  release/\(.file)"' composer/checksums.json | sha256sum --check --strict
-          token=$(printf %s "$TEQUILA_SITES_CLIENT_SECRET" | curl -fsS https://id.tequila.dev/oauth/token \
-            -d grant_type=client_credentials -d audience=sites:phaenon -d "client_id=$TEQUILA_SITES_CLIENT_ID" \
-            --data-urlencode client_secret@- | jq -r .access_token)
-          echo "::add-mask::$token"
-          printf 'Authorization: Bearer %s\n' "$token" > "$RUNNER_TEMP/auth"
-          for file in release/*; do
-            name=$(basename "$file")
-            code=$(curl -sS -o "$RUNNER_TEMP/answer" -w '%{http_code}' -T "$file" \
-              "https://sites.tequila.dev/api/v1/sites/phaenon/downloads/$version/$name" \
-              -H @"$RUNNER_TEMP/auth" -H "X-Tequila-Sha256: $(sha256sum "$file" | cut -d' ' -f1)" \
-              -H 'Content-Type: application/octet-stream')
-            case "$code" in
-              201) echo "uploaded $version/$name" ;;
-              200) echo "already there: $version/$name" ;;
-              *) echo "::error::$version/$name: HTTP $code $(cat "$RUNNER_TEMP/answer")"; exit 1 ;;
-            esac
-          done
-      - name: Refresh the download page
-        if: env.TEQUILA_SITES_CLIENT_ID != '' && env.WEBSITE_DISPATCH_TOKEN != ''
-        env:
-          GH_TOKEN: ${{ env.WEBSITE_DISPATCH_TOKEN }}
-        run: gh api repos/phaenonlang/website/dispatches -f event_type=phaenon-release -f "client_payload[version]=${TAG#v}"
+          # The tag must name a release of this repository, given by hand too.
+          GH_TOKEN="$RELEASES_TOKEN" gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json tagName --jq .tagName
+          GH_TOKEN="$WEBSITE_DISPATCH_TOKEN" gh api repos/phaenonlang/website/dispatches \
+            -f event_type=release -f "client_payload[tag]=$TAG"
+          echo "phaenonlang/website told of $TAG"

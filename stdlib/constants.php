@@ -5,7 +5,8 @@
  * from PHP 8.6.0-dev (get_defined_constants(), the embedded extensions only).
  * A stub keeps its @var type; the value is what a conditional type decides
  * on. Machine-dependent constants (PHP_OS, PHP_EOL, …) are typed, not
- * valued, by the checker.
+ * valued, by the checker. The installation paths (PHP_PREFIX, PHP_BINARY,
+ * …) are those of a build with --prefix=/usr, not the generating php's.
  */
 
 namespace {
@@ -814,7 +815,7 @@ const DAY_6 = 12;
 const DAY_7 = 13;
 const DEBUG_BACKTRACE_IGNORE_ARGS = 2;
 const DEBUG_BACKTRACE_PROVIDE_OBJECT = 1;
-const DEFAULT_INCLUDE_PATH = '.:/opt/homebrew/Cellar/php@8.6/8.6.0_2/share/php@8.6/pear';
+const DEFAULT_INCLUDE_PATH = '.:/usr/lib/php';
 const DIRECTORY_SEPARATOR = '/';
 const DNS_A = 1;
 const DNS_A6 = 16777216;
@@ -1694,8 +1695,8 @@ const PCRE_VERSION = '10.49 2026-09-28';
 const PCRE_VERSION_MAJOR = 10;
 const PCRE_VERSION_MINOR = 49;
 const PDO_ODBC_TYPE = 'unixODBC';
-const PEAR_EXTENSION_DIR = '/opt/homebrew/Cellar/php@8.6/8.6.0_2/lib/php/20260924';
-const PEAR_INSTALL_DIR = '/opt/homebrew/Cellar/php@8.6/8.6.0_2/share/php@8.6/pear';
+const PEAR_EXTENSION_DIR = '/usr/lib/php/extensions';
+const PEAR_INSTALL_DIR = '/usr/lib/php';
 const PGSQL_ASSOC = 1;
 const PGSQL_BAD_RESPONSE = 5;
 const PGSQL_BOTH = 3;
@@ -1773,19 +1774,19 @@ const PGSQL_TRANSACTION_INTRANS = 2;
 const PGSQL_TRANSACTION_UNKNOWN = 4;
 const PGSQL_TUPLES_CHUNK = 12;
 const PGSQL_TUPLES_OK = 2;
-const PHP_BINARY = '/opt/homebrew/Cellar/php@8.6/8.6.0_2/bin/php';
+const PHP_BINARY = '/usr/bin/php';
 const PHP_BINARY_READ = 2;
-const PHP_BINDIR = '/opt/homebrew/Cellar/php@8.6/8.6.0_2/bin';
+const PHP_BINDIR = '/usr/bin';
 const PHP_BUILD_DATE = 'Oct 31 2026 23:25:36';
 const PHP_BUILD_PROVIDER = 'Shivam Mathur';
 const PHP_CLI_PROCESS_TITLE = true;
-const PHP_CONFIG_FILE_PATH = '/opt/homebrew/etc/php/8.6';
-const PHP_CONFIG_FILE_SCAN_DIR = '/opt/homebrew/etc/php/8.6/conf.d';
-const PHP_DATADIR = '/opt/homebrew/Cellar/php@8.6/8.6.0_2/share/php';
+const PHP_CONFIG_FILE_PATH = '/usr/lib';
+const PHP_CONFIG_FILE_SCAN_DIR = '';
+const PHP_DATADIR = '/usr/share/php';
 const PHP_DEBUG = false;
 const PHP_EOL = '
 ';
-const PHP_EXTENSION_DIR = '/opt/homebrew/Cellar/php@8.6/8.6.0_2/lib/php/20260924';
+const PHP_EXTENSION_DIR = '/usr/lib/php/extensions';
 const PHP_EXTRA_VERSION = '-dev';
 const PHP_FD_SETSIZE = 1024;
 const PHP_FLOAT_DIG = 15;
@@ -1795,10 +1796,10 @@ const PHP_FLOAT_MIN = 2.2250738585072014E-308;
 const PHP_INT_MAX = 9223372036854775807;
 const PHP_INT_MIN = -9223372036854775807-1;
 const PHP_INT_SIZE = 8;
-const PHP_LIBDIR = '/opt/homebrew/Cellar/php@8.6/8.6.0_2/lib/php';
-const PHP_LOCALSTATEDIR = '/opt/homebrew/var';
+const PHP_LIBDIR = '/usr/lib/php';
+const PHP_LOCALSTATEDIR = '/usr/var';
 const PHP_MAJOR_VERSION = 8;
-const PHP_MANDIR = '/opt/homebrew/Cellar/php@8.6/8.6.0_2/share/man';
+const PHP_MANDIR = '/usr/php/man';
 const PHP_MAXPATHLEN = 1024;
 const PHP_MINOR_VERSION = 6;
 const PHP_NORMAL_READ = 1;
@@ -1818,7 +1819,7 @@ const PHP_OUTPUT_HANDLER_START = 1;
 const PHP_OUTPUT_HANDLER_STARTED = 4096;
 const PHP_OUTPUT_HANDLER_STDFLAGS = 112;
 const PHP_OUTPUT_HANDLER_WRITE = 0;
-const PHP_PREFIX = '/opt/homebrew/Cellar/php@8.6/8.6.0_2';
+const PHP_PREFIX = '/usr';
 const PHP_QUERY_RFC1738 = 1;
 const PHP_QUERY_RFC3986 = 2;
 const PHP_RELEASE_VERSION = 0;
@@ -1827,12 +1828,12 @@ const PHP_ROUND_HALF_EVEN = 3;
 const PHP_ROUND_HALF_ODD = 4;
 const PHP_ROUND_HALF_UP = 1;
 const PHP_SAPI = 'cli';
-const PHP_SBINDIR = '/opt/homebrew/Cellar/php@8.6/8.6.0_2/sbin';
+const PHP_SBINDIR = '/usr/sbin';
 const PHP_SESSION_ACTIVE = 2;
 const PHP_SESSION_DISABLED = 0;
 const PHP_SESSION_NONE = 1;
 const PHP_SHLIB_SUFFIX = 'so';
-const PHP_SYSCONFDIR = '/opt/homebrew/etc/php/8.6';
+const PHP_SYSCONFDIR = '/usr/etc';
 const PHP_URL_FRAGMENT = 7;
 const PHP_URL_HOST = 1;
 const PHP_URL_PASS = 4;

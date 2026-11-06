@@ -3,15 +3,17 @@
 Phaenon is a typed dialect of PHP 8.5+ that compiles to idiomatic PHP ("TypeScript for PHP"):
 the `.phn` sources of a Composer project compile into a sibling output directory (`src/` →
 `.src/`, named in `phaenon.json`) holding the PHP you would have written by hand. The type checker is the product. This repository is the compiler, `phn`, written in Go.
-Pre-alpha; GitHub org `phaenonlang`, repositories private until they are published under MIT.
+Pre-alpha; MIT-licensed; GitHub org `phaenonlang`.
 
-**This repository is the entry point for agents.** Start sessions here; the map below says where
-everything else lives. Project memory — milestone history, test environment, gotchas, open items —
-is the vault in `.serena/memories/` (Serena memories, also an Obsidian vault); start at `Home.md`.
+**This repository is the entry point for agents.** Start here; the map below says where everything
+else lives. The language design and every decision are in the `design` repository. Milestone
+history, the dogfood notes and the rest of the project's working memory are the maintainers' local
+working notes, not part of this repository: what a change needs is here, in `../design` and in the
+README.
 
 ## Org map
 
-The workspace is `~/labs/phaenon/`; the other repos are siblings, reached as `../<name>`.
+The other repositories are sibling checkouts beside this one, reached as `../<name>`.
 
 | Repo | Path | Remote | Holds | Build / test |
 |---|---|---|---|---|
@@ -21,23 +23,13 @@ The workspace is `~/labs/phaenon/`; the other repos are siblings, reached as `..
 | **concurrent** | `../concurrent` | `phaenonlang/concurrent` | Composer package `phaenon/concurrent`: `\Phaenon\Concurrent\Scope` behind `concurrently { }` and `spawn`, on amp v3 / Revolt; `src/Scope.php` is compiled from `stdlib/concurrent/Scope.phn` here | `composer install`, `composer test`, `composer stan` |
 | **jetbrains** | `../jetbrains` | `phaenonlang/jetbrains` | PhpStorm plugin: `.phn` read as PHP code without the open tag (Kotlin, Gradle); `phn lsp`'s diagnostics and build on save; Reformat Code ends with `phn fmt --stdin` | `./gradlew test` (`PHAENON_PHN=bin/phn` of this repo for the layout tests), `./gradlew buildPlugin` |
 | **vscode** | `../vscode` | `phaenonlang/vscode` | VS Code extension (TypeScript): the TextMate grammar, `source.php` plus injections for Phaenon's syntax (the PhpStorm plugin's TextMate bundle copies it); one `phn lsp` per project with §6.1's whole list; build, check and watch as tasks; `phn trace` of the selection or the terminal | `npm install`, `npm test` (`PHAENON_TREES` for whole trees), `PHAENON_PHN=../phaenon/bin/phn npm run test:e2e`, `npm run package` (`.vsix`) |
-| **website** | not checked out here | `phaenonlang/website` | phaenon.dev, a Tequila Sites site: the landing page and the compiler's release binaries as public, immutable downloads under `/releases/{version}/{file}` (`tooling.md` §3.2; vault `open-items` § M6 — distribution) | the README's publish and upload scripts |
-| **php-src** | `../php-src` | clone of `php/php-src` | **Read-only reference.** The scanner and grammar the lexer and parser port, the `.phpt` corpus of the conformance suite, the source of `stdlib/php-src` | Never modify, build or change its git state |
+| **website** | `../website` | `phaenonlang/website` | phaenon.dev: the landing page, the playground and the compiler's release binaries as public, immutable downloads under `/releases/{version}/{file}` (`tooling.md` §3.2), uploaded from each release once `release.yml` sends it the tag | its README |
+| **php-src** | `../php-src` | a read-only clone of `php/php-src` beside this repository | **Read-only reference.** The scanner and grammar the lexer and parser port, the `.phpt` corpus of the conformance suite, the source of `stdlib/php-src` | Never modify, build or change its git state |
 
-**Tequila dogfood targets** — the PHP platform behind tequila.dev, the codebase Phaenon must run.
-Those repos follow their own rules (`~/labs/tequila/platform/CLAUDE.md`: Conventional Commits,
-squash merges).
-
-| Package | Repo | Role |
-|---|---|---|
-| `tequila/reflection` | `~/labs/tequila/reflector`, branch `phaenon-dogfood` (local only) | M1: built from `.phn`; its phpunit, PHPStan 10 and php-cs-fixer pass. M6: sibling layout (`src`/`tests` → `.src`/`.tests`, no committed PHP), consumed by core as a path repository |
-| `tequila/object-mapper` | `~/labs/tequila/object-mapper`, branch `phaenon-dogfood` (local only) | M2: `phn check src` = 0 findings (2 errors since the checker grew: P2202 on `ObjectMapper::map()`, vault `dogfood`). M3: migrated with real generics (51 `.phn`), suite + PHPStan + cs pass. `tools/phpstan` is the parity PHPStan. M6: sibling layout, consumed by core as a path repository |
-| `tequila/mongodb-odm` | `~/labs/tequila/mongodb-odm`, branch `phaenon-dogfood` (local only) | M3: migrated (125 `.phn`), suite + PHPStan max + cs pass, `phn check` 0 errors at M3, 3 since the checker grew (vault `dogfood`) (`main` went to level max for it). Needs ext-mongodb in the local `php`. M6: sibling layout, consumed by core as a path repository |
-| `tequila/core` | `~/labs/tequila/core`, branch `phaenon-dogfood` (local only) | M4: migrated (800 `.phn`; the 12 PHPStan rule fixtures in `tests/PHPStan/Data` are plain `.php`, copied as written) on a `main` at PHPStan level max; `phaenon.json` builds `src`/`tests` into `.src`/`.tests` (gitignored), where Composer, PHPUnit, PHPStan and cs look; suite (1188 tests), PHPStan max and cs (no compiled-tree exceptions) pass on the output; `phn check` 0 findings since 2026-11-05, and `build` runs without `--emit-on-error` (vault `dogfood`); `exclude` lists the analyser tooling and what `phpstan.neon` excludes. Run `composer update` after switching to the branch: `composer.lock` is ignored. M6: reflection, object-mapper and mongodb-odm come from the sibling dogfood checkouts as path repositories (`dev-phaenon-dogfood as` the released version), `phaenon/phn` from this checkout, whose `bin/phn` the plugin runs to build them at every autoload dump; its own build stays `composer build` (`extra.phaenon.build: false`) |
-| `tq-cli` | `~/labs/tequila/tq-cli-phaenon-dogfood` (a worktree of `~/labs/tequila/tq-cli`), branch `phaenon-dogfood` (local only) | M5: 859 `.phn`, the fifteen `Api::concurrently` fan-outs as `concurrently` blocks; suite (2052 tests), PHPStan 10 and cs pass on the output, `phn check` 0 over `src` and `tests`. Requires `phaenon/concurrent` and `phaenon/runtime` as path repositories from the sibling checkouts, and `phaenon/phn` from this checkout: since M6 the plugin builds `src`/`tests` at every autoload dump with `bin/phn` |
-| `tequila/nats` | `~/labs/tequila/nats` | M5: `RevoltTransport`, the pump lease and the opt-in reader task merged upstream (tequila/nats#13); no Phaenon sources |
-| `php-service-template` | `~/labs/tequila/php-service-template`, branch `phaenon-dogfood` (local only, off `origin/main`) | M6 slice 8: 22 `.phn` (`phn migrate`), `phaenon.json` builds `src`/`tests` into `.src`/`.tests`; Composer, PHPUnit, PHPStan (level 8 + core's rules), php-cs-fixer (PER-CS 3.0 since this branch) and Rector (`phn fix`) point at the outputs; `bin/init` rewrites `.phn`; the vendor stage of the Dockerfile builds at the dump. `phn check` 0, suite, PHPStan and cs green, also on a service born with `bin/init`. Takes `phaenon/phn` and `phaenon/runtime` as path repositories until the registry serves them; the image build waits for the first release on phaenon.dev (vault `dogfood`, `open-items` § M6 — the template) |
-| later | `iam` (M7) | `../design/roadmap.md` §3 |
+**Dogfood.** The language is developed against the Tequila Platform's PHP codebase
+([tequila.dev](https://tequila.dev)) as its dogfood, from the libraries to the services: a feature
+is done when a dogfood codebase's own suite, PHPStan and coding-style checks pass on its compiled
+output. `../design/roadmap.md` §3 names the milestones and what each one brings onto Phaenon.
 
 ## Where to look things up
 
@@ -45,9 +37,9 @@ squash merges).
 |---|---|
 | What the language is, and will be | `../design/language-overview.md`, then the feature's doc (`functions.md` for `fun` and closures in constant expressions, `concurrency.md` for `concurrently` and `spawn`) |
 | Why something is the way it is | The decision sections: `roadmap.md` §1, `checker.md` §9, `generics.md` §11 — they win over the draft text above them |
-| Milestone status and what is next | `../design/roadmap.md` §3; vault `milestones` |
-| Deferred work | vault `open-items` |
-| Every `PHAENON_*` test variable, which `php` and which PHPStan | vault `testing` |
+| Milestone status and what is next | `../design/roadmap.md` §3 |
+| Open questions and deferred work | `../design/roadmap.md` §6, `checker.md` §10, `tooling.md` §13; the repository's issues |
+| Every `PHAENON_*` test variable | [Test variables](#test-variables) |
 | A diagnostic code | `internal/checker/codes.go` |
 | What PHP does | `php` itself (the oracle), then `../php-src` |
 | A PHP function's signature | `stdlib/php-src/**/*.stub.php`, refined by `stdlib/overlay/` |
@@ -91,22 +83,69 @@ tools/release         the release assets: reproducible builds for five platforms
 go build -o bin/phn ./cmd/phn      # bin/ is gitignored; or `go run ./cmd/phn <command> …`
 go test ./...                      # unit and golden tests; suites below skip without their variable
 
-PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go test ./internal/conformance/
-PHAENON_PHP_SRC=$HOME/labs/phaenon/.cache/php-src-8.6 PHAENON_PHP=/opt/homebrew/opt/php@8.6/bin/php \
-  go test ./internal/conformance/                                      # PHP-8.6 corpus under PHP 8.6 (vault testing)
-PHAENON_EXEC=1 PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src \
+PHAENON_PHP_SRC=/path/to/php-src go test ./internal/conformance/
+PHAENON_PHP_SRC=/path/to/php-src-8.6 PHAENON_PHP=/path/to/php8.6 \
+  go test ./internal/conformance/                                      # a release branch's corpus under its php
+PHAENON_EXEC=1 PHAENON_PHP_SRC=/path/to/php-src \
   go test ./internal/conformance/ -run Execution -timeout 30m          # ≈2.5 min per suite
-PHAENON_PHPSTAN=$HOME/labs/tequila/object-mapper/tools/phpstan/vendor/bin/phpstan \
+PHAENON_PHPSTAN=/path/to/phpstan \
   go test ./internal/checker ./internal/emit                           # PHPStan level max on goldens
 PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite emitter goldens
-PHAENON_PHP86=/opt/homebrew/opt/php@8.6/bin/php go test ./internal/emit  # goldens compiled for 8.6: php -l, behaviour
-PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go generate ./stdlib        # refresh stubs + version table (vault `testing`)
+PHAENON_PHP86=/path/to/php8.6 go test ./internal/emit                  # goldens compiled for 8.6: php -l, behaviour
+go generate ./stdlib                                                   # refresh stubs + version table from the php-src clone
 PHAENON_COMPOSER=$(which composer) go test ./internal/distribution     # the Composer plugin under a real Composer
 GOOS=js GOARCH=wasm go build -o bin/phn.wasm ./cmd/phn-wasm            # the playground's compiler (tests: internal/playground)
 ```
 
+A release branch's corpus is extracted from the clone, never checked out, so that the clone stays
+read-only:
+
+```sh
+mkdir -p /path/to/php-src-8.6
+git -C /path/to/php-src archive origin/PHP-8.6 -- ':(glob)**/*.phpt' ':(glob)**/*.inc' | tar -x -f - -C /path/to/php-src-8.6
+```
+
+`go generate ./stdlib` reads the clone `PHAENON_PHP_SRC` names, else `../php-src`, through `git
+archive` only; `go run ./stdlib/gen -php /path/to/php8.6` also rewrites `stdlib/constants.php` from
+a php of the newest release.
+
 CI (`.github/workflows/ci.yml`) runs `gofmt -l`, `go vet` (native and wasm) and `go test ./...` with
-PHP 8.5 and Composer on the runner; the suites gated by a variable above skip there (vault `testing`).
+PHP 8.5 and Composer on the runner; the suites gated by a variable skip there, and so does the
+plugin's suite, which needs the `runtime` checkout beside the repository.
+
+### Test variables
+
+Without its variable a suite skips, so a green `go test ./...` says nothing about conformance or
+PHPStan parity.
+
+| Variable | Read by | Effect |
+|---|---|---|
+| `PHAENON_PHP_SRC` | `internal/conformance`; `TestFresh` (`stdlib/gen`) | Absolute path of a php-src tree (`/path/to/php-src`): the `.phpt` corpus, a clone or a release branch extracted as above; for `TestFresh`, the clone whose release branches the committed stubs and version table must match |
+| `PHAENON_PHP` | `internal/conformance`; `TestPHPStanParity` | The php taken as the oracle, `php` on `PATH` by default; the emit execution suite compiles for its release line, and an 8.6 here also serves the parity run's 8.6 goldens |
+| `PHAENON_PHP86` | `TestGenerics` (emit), `TestLift` (migrate), `TestPHPStanParity` | A PHP 8.6 (`/path/to/php8.6`): `php -l` and the behaviour of the outputs compiled for 8.6, and PHPStan on it for the goldens whose header says `// target: 8.6` |
+| `PHAENON_EXEC` | `TestPrinterExecution`, `TestEmitExecution` | Any non-empty value runs the execution comparisons (≈2.5 min each; pass `-timeout 30m`) |
+| `PHAENON_PHPT_FILTER` | `internal/conformance` | Only the `.phpt` paths containing this substring, e.g. `Zend/tests` |
+| `PHAENON_SHOW_DIFFS` | printer round trip, execution suites | How many differences to print (default 25) |
+| `PHAENON_SHOW_FALSE_ACCEPT` | `TestParserAgainstPHP` | Lists (up to 30) files PHP rejects but Phaenon parses |
+| `PHAENON_PHPSTAN` | `TestPHPStanParity` (checker), `TestGenerics` (emit) | Path to a PHPStan binary (`/path/to/phpstan`), run at level max with `treatPhpDocTypesAsCertain: false` (`../design/checker.md` §9) |
+| `PHAENON_UPDATE` | the emit, format, migrate and trace goldens | Rewrites the expected files from the current output |
+| `PHAENON_GOLDEN` | `TestGolden` (checker) | Only the golden files whose name contains this substring |
+| `PHAENON_COMPOSER` | `internal/distribution` | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects; needs the `runtime` checkout beside the repository |
+| `PHAENON_COMPOSER_PROJECT` | `TestComposer` (program) | A Composer project to exercise the vendor reader on |
+| `PHAENON_FMT_TREE` | `TestTree` (format) | Any Phaenon tree: each `.phn` must format, and to itself a second time (`-v` lists the files it would change) |
+| `PHAENON_LINEMAP_TREE` | `TestLineMapTree` (emit) | Any Phaenon tree: `TestLineMapProperty`'s invariant over every `.phn` in it |
+| `PHAENON_LINEMAP_OUT` | `TestLineMapTree` (emit) | A directory the compiled files of that tree are written to |
+| `PHAENON_LISTTYPES` | `TestListTypesMeasure` (`cmd/phn`) | Phaenon trees (each a `phaenon.json`'s directory, separated as `PATH` is) the `list-types` codemod is measured on |
+| `PHAENON_LISTTYPES_MIN` | `TestListTypesMeasure` | The floor, in percent, of declarations that must come back as written or narrower (0 by default) |
+| `PHAENON_LISTTYPES_FINDINGS` | `TestListTypesMeasure` | Lists the findings left with the codemod's types |
+| `PHAENON_THROWS` | `TestThrowsMeasure` (`cmd/phn`) | Phaenon trees, as above, the `throws` rules are measured on (`../design/tooling.md` §8.3) |
+| `PHAENON_THROWS_UNCHECKED` | `TestThrowsMeasure` | More unchecked exception classes, comma-separated |
+| `PHAENON_THROWS_OWNED` | `TestThrowsMeasure` | Counts only the exception classes under these namespace prefixes, comma-separated |
+| `PHAENON_THROWS_LIST` | `TestThrowsMeasure` | Lists every clause the own rule writes |
+| `PHAENON_THROWS_FINDINGS` | `TestThrowsMeasure` | Lists the findings the clauses add |
+
+The editor repositories read variables of their own (`PHAENON_PHN`, `PHAENON_TREES`, …): see the
+org map above and their READMEs.
 
 `phn` itself: `phn build|check|fix|fmt|lsp|watch|migrate|stdlib|trace|lex|print` — run `phn` without arguments for usage; the
 README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`, or, through the `phaenon/phn` plugin, this checkout's `bin/phn` (`go build -o bin/phn ./cmd/phn`; `PHN_BINARY` names another). `phn stdlib` writes the
@@ -123,8 +162,8 @@ removes none: a source deleted here is deleted from the package by hand.
 
 - **Design doc → golden tests → implementation → PHPStan on the output → Tequila dogfood**, for
   every feature. A feature starts as a section in a `../design` doc and as golden tests that fail;
-  it is done when the dogfood target's own suite passes on compiled output. Checklist, including
-  how a milestone is closed: vault `working-method`.
+  it is done when the dogfood target's own suite passes on compiled output. The working method is
+  `../design/roadmap.md` §4.
 - **A milestone starts, and the roadmap's order changes, only on a maintainer's go-ahead.** Finish
   the current step, report, and wait for the choice.
 - Weigh every choice against "can Tequila still run on it?": compatibility with Symfony, PHPStan,
@@ -177,17 +216,17 @@ removes none: a source deleted here is deleted from the package by hand.
 
 ### Git and commits
 
-- Commit only when the developer running the session asks. Stage by path, never `git add -A` /
-  `git add .` / `git commit -a`, and account for every line of `git status --short`: parallel
-  sessions leave work in these trees.
+- One change per commit, staged by path: a reviewer reads a diff that is about one thing, and
+  goldens, generated files and the design text that go with a change travel in the same commit.
 - **Commit messages follow [Conventional Commits](https://www.conventionalcommits.org):** `type(scope):
   subject`, the scope a package or area (`feat(checker):`, `fix(emit):`, `docs(design):`), `!` for
   a breaking change to the language or the CLI, and a body that says what changed and why. **No
-  attribution lines, no `Co-Authored-By`, no "Generated with"** — the repositories will be open
+  attribution lines, no `Co-Authored-By`, no "Generated with"** — the repositories are open
   source. The same rule holds in `design`, `runtime`, `concurrent`, `jetbrains` and `vscode`.
 - **A PR is squash-merged, so its title becomes the commit on `main` that release-please reads** to
   version the next release and write `CHANGELOG.md`: the title is a Conventional Commit header whose
   release impact (`!` or a `BREAKING CHANGE:` footer, then `feat`, then `fix` and `revert`, then the
   rest) equals the highest of the PR's commits, which `pr-semantics.yml` checks.
-- `go.mod`'s module line is `github.com/phaenonlang/phaenon`; GoLand has rewritten it before (vault
-  `gotcha-goland-rewrites-go-mod`).
+- `go.mod`'s module line is `github.com/phaenonlang/phaenon`. GoLand has rewritten it to `module
+  phaenon` before, which breaks every import of the repository's own packages: put the line back by
+  hand and never commit the rewritten one (`go mod init` or `go mod tidy` repairs it the wrong way).

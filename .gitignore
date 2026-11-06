@@ -2,3 +2,7 @@
 /dist/
 *.test
 .idea/
+
+# Local working notes and agent tool state, never committed.
+/.serena/
+/.claude/
