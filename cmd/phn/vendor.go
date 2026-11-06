@@ -158,12 +158,7 @@ func buildVendor() {
 	compiler := compilerStamp()
 	built, current, failed := 0, 0, 0
 	for _, p := range pkgs {
-		var roots []string
-		for _, r := range p.proj.roots() {
-			if st, err := os.Stat(r); err == nil && st.IsDir() {
-				roots = append(roots, r) // a dist archive may leave out tests/
-			}
-		}
+		roots := p.proj.roots() // only the roots present: a dist archive may leave out tests/
 		if len(roots) == 0 {
 			continue
 		}

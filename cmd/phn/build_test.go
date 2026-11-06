@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -45,5 +47,35 @@ func TestBuildCheckEmitOnError(t *testing.T) {
 	writeTree(t, root, map[string]string{".src/Bad.php": "<?php\n"})
 	if stdout, _, err := run(t, root, bin, "build", "--check", "--emit-on-error"); err == nil {
 		t.Errorf("a stale output passed:\n%s", stdout)
+	}
+}
+
+// TestBuildAbsentRoot: a root the project file names but the tree lacks is
+// skipped, not failed on. An image's build context, or a dist archive,
+// leaves tests/ out and is still the same project; a tree with none of the
+// roots is a mistake.
+func TestBuildAbsentRoot(t *testing.T) {
+	bin := phnBinary(t)
+	root := formatTree(t)
+	writeTree(t, root, map[string]string{
+		"phaenon.json": `{"roots": {"src": ".src", "tests": ".tests"}}`,
+		"src/Good.phn": "namespace App;\n\nfun good(): int => 1;\n",
+	})
+	if err := os.Remove(filepath.Join(root, "src", "Bad.phn")); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := run(t, root, bin, "build")
+	if err != nil || !strings.Contains(stdout, "1 files compiled") {
+		t.Errorf("build with tests/ absent (%v):\n%s%s", err, stdout, stderr)
+	}
+	if _, _, err := run(t, root, bin, "check"); err != nil {
+		t.Errorf("check with tests/ absent: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "src")); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, err := run(t, root, bin, "build"); err == nil || !strings.Contains(stderr, "none of the roots") {
+		t.Errorf("build with no root present should fail and say so (%v):\n%s", err, stderr)
 	}
 }
