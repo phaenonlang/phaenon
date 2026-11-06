@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# The PR semantics gate: the contract every pull request into main is held
-# to, so that what its squash merge leaves on main tells release-please the
-# truth. It is Tequila's gate (ADR release-automation-conventional-commits,
-# operations-github-actions' actions/lib/pr-semantics.sh), standalone:
+# The PR semantics gate: the repository's PR contract, which every pull
+# request into main is held to, so that what its squash merge leaves on main
+# tells release-please the truth:
 #
 #   1. The PR title is a Conventional Commit header: the squash merge gives
 #      main a commit with that header, and release-please versions the
