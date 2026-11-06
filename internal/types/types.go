@@ -269,6 +269,15 @@ func Nullable(t Type) Type { return MakeUnion(t, TNull) }
 // NewClass is a class instance type without arguments.
 func NewClass(name string) Type { return Class{Name: name} }
 
+// traversableOf is the Traversable an iterable<K, V>'s objects are:
+// Traversable<K, V>, or the bare class when the iterable says nothing.
+func traversableOf(it Iterable) Type {
+	if IsMixed(it.Key) && IsMixed(it.Value) {
+		return NewClass("Traversable")
+	}
+	return Class{Name: "Traversable", Args: []Type{it.Key, it.Value}}
+}
+
 // ------------------------------------------------------------------ equality
 
 // Equal reports structural equality after normalisation.
@@ -1044,7 +1053,10 @@ func meet2(a, b Type) Type {
 		case Iterable:
 			return Iterable{meet2(a.Key, b.Key), meet2(a.Value, b.Value)}
 		case Class, Object:
-			return MakeIntersection(NewClass("Traversable"), b)
+			// What the iterable yields is kept: iterable<K, V> met with a
+			// class is Traversable<K, V> & the class, still an iterable<K, V>
+			// where one is expected.
+			return MakeIntersection(traversableOf(a), b)
 		}
 	case Callable:
 		switch b := b.(type) {
