@@ -44,8 +44,11 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
   tags (`74ce488`), the checker holds the widened parameter to what PHP checks (`3490338`), and the
   emitter applies the rule down a chain of Phaenon classes (`c39ae1c`). odm's two normalizers wait
   for the tree's uncommitted re-migration ([[dogfood]]).
-- Trait **properties** used on `$this` in a trait body are not yet looked up in the using classes
-  (methods are, since 2026-10-29).
+- ~~Trait **properties** used on `$this` in a trait body are not yet looked up in the using classes
+  (methods are, since 2026-10-29).~~ — done 2026-11-06 (`checker.md` §9 "A trait sees its users",
+  fixture `trait-properties.phn`): every user's declaration types a read and judges a write; the
+  parity run now reads PHPStan's per-user results ("in context of class …"). Left: static
+  properties through `self::`/`static::` in a trait body are still looked up in the trait only.
 
 ## M4 — collections and strings
 
@@ -137,10 +140,11 @@ silently dropped. When a milestone touches an item, pick it up; when it is done,
 
 ## M5 — concurrency (2026-11-01)
 
-- **`phn check` against `composer.json`**: a file that uses `concurrently` in a project that does
+- ~~**`phn check` against `composer.json`**: a file that uses `concurrently` in a project that does
   not require `phaenon/concurrent` fails at runtime, not at check time — the compiler knows the
   amp API from its embedded declarations (`stdlib/concurrent/amp/`), so it cannot tell. A P4xxx
-  warning from the project's `composer.json` / `installed.json` is the fix (`concurrency.md` §7).
+  warning from the project's `composer.json` / `installed.json` is the fix (`concurrency.md` §7).~~
+  — done 2026-11-03 (`f005498`, slice 2): `P4013` from `installed.json`, an error.
 - **The embedded amp declarations shadow the vendor's**: `LoadStubs` declares `Amp\Future` and
   friends eagerly, so a project's real `amphp/amp` is never consulted for them. Signatures follow
   3.1; a method missing there is a declaration to add, not a checker bug.
@@ -253,8 +257,8 @@ Decisions are in `../design/php-versions.md` §9; these are what the first build
 - A callee returning by reference: PHP 8.6's closure returns by reference, the lowered one by value.
 - Once the parity PHPStan parses PHP 8.6, run it on the 8.6 emitter output and on the checker
   goldens with placeholders (both skipped now).
-- `../design/php-versions.md` §5.4 still says a `void` stage feeding another warns; §9 made it
-  `P2205`. Align the draft text when the milestone closes.
+- ~~`../design/php-versions.md` §5.4 still says a `void` stage feeding another warns; §9 made it
+  `P2205`. Align the draft text when the milestone closes.~~ — aligned 2026-11-06.
 - tq-cli on PHP 8.6 meets one 8.6 deprecation, the class constant `StatusCommand::NAMESPACE`
   (`namespace` is case-insensitive); the deprecation checks belong to the library branch.
 
@@ -316,12 +320,19 @@ Decisions are in `../design/php-versions.md` §9; what was left:
 
 - **`stdlib/constants.php` comes from PHP 8.6.0-dev**: regenerate with the 8.6.0 release
   (`go run ./stdlib/gen -php …`, [[testing]]).
-- **P2515 (uninitialised readonly property) is declared but never reported**: no analysis checks
+- ~~**P2515 (uninitialised readonly property) is declared but never reported**: no analysis checks
   that a readonly property is assigned before the constructor returns. When it is written, a
-  default (PHP 8.6) counts as the initialisation.
-- **`#[\Override]` on properties** (PHP 8.5) is not checked; methods and, since 8.6, constants are.
-- **Version guards** are read in `if`/`elseif`/`else` and early exits only, not in `?:`, `&&`
-  operands or `match (true)`; a guard in those positions still leaves P4011.
+  default (PHP 8.6) counts as the initialisation.~~ — done 2026-11-06 (`checker.md` §9 "A
+  readonly property is initialised by its constructor", fixture `readonly-uninitialised.phn`,
+  line for line with PHPStan 2.2.5). Left: PHPStan's "already assigned"
+  (`assign.readOnlyProperty`), and reads before initialisation in the methods the constructor
+  calls.
+- ~~**`#[\Override]` on properties** (PHP 8.5) is not checked; methods and, since 8.6, constants are.~~
+  — done 2026-11-06 (`php-versions.md` §9, fixture `override-properties.phn`, `P2503`). Left:
+  `#[\Override]` on a property hook (it names a parent's hook).
+- ~~**Version guards** are read in `if`/`elseif`/`else` and early exits only, not in `?:`, `&&`
+  operands or `match (true)`; a guard in those positions still leaves P4011.~~ — done 2026-11-06
+  (`php-versions.md` §9 "Guards in expressions", `library-guards.phn`).
 - **PHPStan 2.2 lags PHP 8.6** (refuses readonly defaults, `#[\Override]` on constants,
   `__debugInfo()` on enums; misses members 8.6 added): the per-file allowances in
   `phpstan_test.go` go once the parity PHPStan supports 8.6.
@@ -414,6 +425,44 @@ braces (§7). Left:
   handler's `$errline`, `getLine()`, reflection's start line, `debug_backtrace()` taken as data, an
   assertion callback) with digits blinded, counted apart ([[testing]]); the map cannot reach those
   numbers.
+
+## M6 — the template (slice 8, 2026-11-06)
+
+`../design/tooling.md` §10; the branch and its gates in [[dogfood]]. Left:
+- **The proof's steps 2–4**: the image build needs `phaenon/*` on `composer.tequila.dev` (the
+  registry's `config/satis.json` and the GitHub App on `phaenonlang`) and the binary on
+  phaenon.dev (v0.2.0); then the OrbStack deploy and an exception logged at its `.phn` line,
+  for which the Monolog processor (`phaenon/runtime`'s `Debug`) is not wired in the template yet.
+- **The registry swap**: path repositories → `composer.tequila.dev`, `phaenon/phn` `^0.2`.
+- **The reusable workflows** (`operations-github-actions`, §7.2): `phn check --format=github`,
+  `phn fmt --check`, PHPStan and PHPUnit through `phn trace`, for a project with `phaenon.json`.
+  A PR there, now that platform repositories may name Phaenon (2026-11-06).
+- **PER-CS 3.0 on the template's `main`** (`c3b7c48`): a PR of its own, layout only, as the
+  libraries' `main` took it.
+- **The binary ships in the api and worker images** (`vendor/phaenon/phn/bin/phn`, about 9 MB),
+  as `require` implies (§3.1), and every image build downloads it once (no cache mount in the
+  template's Dockerfile). Whether a runtime stage drops it, or the Dockerfile mounts Composer's
+  cache, is open.
+- ~~`phn build` failed when a root `phaenon.json` names is absent~~ — fixed 2026-11-06: a root
+  the tree lacks is skipped (an image's context leaves `tests/` out), a tree with none fails.
+- **Migrate's pipelines in tests**: `$run->aggregate->id() |> $id->equals(...) |>
+  self::assertTrue(...)` reads worse than the call; a rule for §8.1 (an assertion as the last
+  stage, or a chain whose head is a method call on a result) may be worth measuring.
+- **Minor, emitter**: a docblock the compiler writes appends the lifted tag right after the
+  prose, without the blank `*` line the source had; PER does not flag it.
+
+## Checker strictness noted by the website's samples (2026-11-06)
+
+- **An unknown class in a declared type is not reported**: `P2001` covers `new`, static
+  references, attributes and the class header, not a parameter, return, property or constant
+  type, so `const Closure TRIM = …` in a namespace without `use Closure;` passes while PHPStan
+  reports `class.notFound` and PHP fails at the first type check. Being fixed with the
+  2026-11-06 checker items. The emitter is right to write the name as written: `Closure` is a
+  PHP class name under PHP's resolution, unlike the `Closure(T): U` type, which erases to
+  `\Closure`; `functions.md` §2.2's example now imports it.
+- ~~A closure in an attribute argument or a parameter default kept its Phaenon types~~ — fixed
+  2026-11-06: the erasure walk now covers attribute arguments and parameter defaults
+  (`lowering.declHead`, `attrGroup`); `functions.md` §2.2 says so.
 
 ## Checker strictness noted with D19 (2026-11-02)
 
@@ -561,21 +610,46 @@ and the codemod's types leave no finding of `phn check` or PHPStan max.
 - **No download path for a private repository**: `releases/download/…` answers 404 even with a
   GitHub token (private assets come only through the API's asset endpoint), so until the
   repositories are public the plugin downloads only from a mirror. Locally, `PHN_BINARY` or a
-  compiler checkout's `bin/phn`. **The mirror is phaenon.dev** (built 2026-11-06, not deployed):
-  a Tequila Sites site, `phaenonlang/website`, with the binaries as immutable *downloads* beside
-  the site's releases, served at `https://phaenon.dev/releases/{version}/{file}` behind a Caddy
-  gate that checks an IAM bearer of audience `downloads` (`tq composer:login --host phaenon.dev
-  --audience downloads` for people, a service client or the federated `tq ci:token` for CI;
-  `bearer.phaenon.dev` in `auth.json`, `extra.phaenon.binary-url` set to that URL). Open PRs:
-  tequila/sites#32 (downloads, the gate, publishers scoped per site by audience `sites:<name>`),
-  tequila/tq-cli#398 (`downloads` in the manifest, `composer:login --audience`),
-  tequila-platform/gitops#1309 (the site, draft until tq-cli is pinned). Left to a maintainer:
-  merge and release in that order; phaenon.dev's DNS (DNSSEC off at the registrar, a Route53
-  zone aliased to the gateway, the nameservers); mint the `phaenon-website` publisher
-  (`sites:phaenon`) and set its pair in both phaenonlang repositories; publish, upload v0.1.0;
-  add the website upload job the website README gives to this repository's `release.yml`. A
-  browser cannot download (the IAM session cookie does not reach phaenon.dev): an OIDC sign-in
-  on the site, later.
+  compiler checkout's `bin/phn`. **The mirror is phaenon.dev** (live 2026-11-06): a Tequila
+  Sites site, `phaenonlang/website` (Nuxt 4 static, `nuxt generate` → `.output/public`;
+  `scripts/tequila-sites.mjs`, `npm run sites -- publish|upload|list`), with the binaries as
+  immutable *downloads* served at `https://phaenon.dev/releases/{version}/{file}`. The downloads
+  are **public** (tequila/sites v0.4.0, tq-cli v0.96.0: `downloads: {path: /releases/, public:
+  true}`; a year-long immutable `Cache-Control`, ETag = SHA-256, `Repr-Digest`, attachment
+  disposition, `/releases/` itself 404): no token, no `auth.json` entry, nothing in the plugin.
+  Publishing and uploading stay gated: write-once `PUT` with the site's publisher client
+  (`svc:phaenon-website`, audience `sites:phaenon`; its pair is `TEQUILA_SITES_CLIENT_ID` /
+  `TEQUILA_SITES_CLIENT_SECRET` in both phaenonlang repositories' Actions secrets). Merged:
+  sites#32, tq-cli#398, the zone as IaC (operations-opentofu-modules#54, tq-cli#399,
+  gitops#1315: the `site-zones` root, hand-kept `<zone>.yaml` files, the four hand-made zones
+  imported), gitops#1309 (the site) and #1324 (the public flip); the nameservers point at
+  Route53 and the site answers. **Left:** phaenonlang/phaenon#2 (branch
+  `ci/release-uploads-to-phaenon-dev`): `release.yml` gains a `website` job that, after
+  `release` on a `v*` tag, checks every asset against the tag's `composer/checksums.json` and
+  `PUT`s it to `https://sites.tequila.dev/api/v1/sites/phaenon/downloads/<version>/<file>` (201
+  written, 200 already there, 409 other bytes), skipped while the secrets are absent, plus a
+  `workflow_dispatch` with a `tag` input for a release made before the job existed:
+  `gh workflow run release.yml --repo phaenonlang/phaenon -f tag=v0.1.0` uploads v0.1.0's five
+  binaries and the source tarball. Its merge and the upload are a maintainer's; afterwards
+  `curl -I https://phaenon.dev/releases/0.1.0/phn-linux-amd64` answers 200 (404 until the
+  upload). The download page is refreshed by `gh workflow run publish.yaml --repo
+  phaenonlang/website` or its daily run (`WEBSITE_DISPATCH_TOKEN` is not set). The site's own
+  open PR: website#4 (README: downloads are public).
+- **The first release on phaenon.dev is v0.2.0** (decided 2026-11-06): 81 commits past v0.1.0
+  with a breaking change (exact tuples), so the v0.1.0 upload is not run. In lockstep: tags on
+  `runtime` and `concurrent`, the `0.2.x-dev` aliases, the plugin's and the extension's
+  versions. The release is cut when the template's image build (slice 8) needs the binary.
+- **A playground on phaenon.dev** (agreed 2026-11-06, for v0.2.0): a WebAssembly build of the
+  compiler (`GOOS=js GOARCH=wasm`, about 3.5 MB gzipped at main) exposing one function,
+  `compile(files, target, emitOnError)` → the PHP `phn build` writes (line map included) and
+  the findings `phn check` prints, from an in-memory program with the embedded stdlib alone;
+  panics come back as a finding. Published as a release asset beside the five binaries, pinned
+  in `composer/checksums.json`. The page (CodeMirror, split view, the front page's samples,
+  source in the URL hash) is the website's side; it waits for the entry point's signature.
+- **`phaenon/*` on `composer.tequila.dev`** (slice 8's second blocker): the registry serves a
+  vendor only from the operator's list, `config/satis.json` of the registry's repository, read
+  through the GitHub App, which must cover the `phaenonlang` repositories. A maintainer's step
+  and decision, since that list would name the repositories.
 - A source install of `phaenon/phn` (`--prefer-source`, a dev version from VCS) is a checkout too:
   it holds `go.mod`, so the plugin wants `PHN_BINARY` or a `bin/phn` built there.
 - PHPStan on the plugin against Composer 2.3 (the floor `composer-plugin-api ^2.3` admits) reports
@@ -820,9 +894,10 @@ jetbrains `702058a`; the reasoning is the plugin's README § Debugging and the p
 ## M6 — `phn fmt` (slice 3, 2026-11-04)
 
 `../design/tooling.md` §5.4. Left:
-- **The stdlib's six `.phn` are not in the canonical layout** (written before it): `phn fmt
+- ~~**The stdlib's six `.phn` are not in the canonical layout** (written before it): `phn fmt
   stdlib/**/*.phn` would put their method braces up and write `{}`, and the runtime and concurrent
-  packages would then be regenerated (`phn stdlib`), since one-line docblocks reach the output.
+  packages would then be regenerated (`phn stdlib`), since one-line docblocks reach the output.~~
+  — verified 2026-11-06: each of the six formats to itself.
 - ~~**PhpStorm's Reformat Code** writing the first layer~~ — done 2026-11-04 (slice 4,
   `../design/tooling.md` §6.5): `phn fmt --stdin` before and after PhpStorm's formatter.
 - `phn fmt FILE…` hands the fixer the outputs as arguments, which php-cs-fixer reads as the paths
@@ -931,9 +1006,10 @@ checker is more lenient there, never stricter. Left:
   a closure a function calls at once (and of `@param-immediately-invoked-callable`).
 - **A statement's `/** @throws X */`**, **property hooks' `@throws`** (a hooked property is
   implicit), **`final` properties** (PHP 8.4; not in the program model, so implicit).
-- **`as` in the compiled output**: the checker reads `as` as throwing `TypeError`, while PHPStan
+- ~~**`as` in the compiled output**: the checker reads `as` as throwing `TypeError`, while PHPStan
   sees `Type::…->assert()`, which declares nothing (implicit). A `@throws \TypeError` on
-  `assert()` in `../runtime/src/Type.php` would make them agree.
+  `assert()` in `../runtime/src/Type.php` would make them agree.~~ — done 2026-11-06: the
+  runtime's `assert()` and its stub (`stdlib/runtime/Type.php`) declare `@throws TypeError`.
 - **Covariance of an override's `throws`** and checked exceptions: not done by decision (§9.1).
 
 ## M6 — unused private members (slice 6, 2026-11-05)

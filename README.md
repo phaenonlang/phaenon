@@ -293,7 +293,8 @@ nothing changed: `phn build --vendor`), then the project itself (`phn build`), s
 - `"extra": {"phaenon": {"binary-url": "https://mirror/{version}/{file}"}}` fetches the binary from
   a mirror, with the credentials of `auth.json`.
 - `"extra": {"phaenon": {"build": false}}` leaves the project's own build to its workflow.
-- `composer install --no-scripts` builds nothing; the `dump-autoload` that follows does.
+- `composer install --no-autoloader` builds nothing; the `dump-autoload` that follows does
+  (`--no-scripts` does not skip the plugin).
 
 ## Declarations
 

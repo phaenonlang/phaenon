@@ -431,4 +431,30 @@ push dogfood work without a maintainer's go-ahead.
   by reference until the capture rule became "mentioned before the block, or read first after
   it, parameters shadowing".
 
+## `php-service-template` — M6 slice 8, 2026-11-06
+
+- Local branch `phaenon-dogfood` off `origin/main` (`89e0ffa`, release 0.8.3), **never pushed**:
+  `c3b7c48` PER-CS 3.0 instead of PSR-12 (which expands `{}`, so `phn fmt` would fail; the
+  template's `main` should take it as the libraries' did), `0914239` the service compiled from
+  `.phn`, `4e0832c` the vendor stage builds at the dump, `8df401d` `bin/init` rewrites `.phn`,
+  `6f9b38c` the inherited guide and the README in Phaenon; then the compiler learned to skip a
+  root the tree lacks and the Dockerfile's `mkdir -p tests` stand-in went.
+- 22 `.phn` (`phn migrate src tests`: 853 → 693 lines, 4 pipelines, 3 tags kept; one hand edit,
+  a docblock naming the lifted `@extends`). `phaenon.json` builds `src`/`tests` into
+  `.src`/`.tests`, where PSR-4, PHPUnit, PHPStan (level 8 + core's rules), the fixer and Rector
+  look; `contracts/` stays PHP. Scripts: `build`, `build:check` (no `--emit-on-error` needed),
+  `cs` → `phn fmt`, `rector` / `rector:check` through `phn fix`; Makefile `build`,
+  `build-check`, `check` runs it first. `extra.phaenon.binary-url` names phaenon.dev's
+  releases. `phaenon/phn` `0.1.x-dev` and `phaenon/runtime` as path repositories of the sibling
+  checkouts (the swap to `composer.tequila.dev` is one commit); no `is`/`as`/`bytes` in the
+  sources, so the runtime comes in through the plugin only.
+- Verified: `phn check` 22 files, 0 findings; `build:check` current; 18 tests (one new:
+  `phaenon.json` and `src` copied before the dump, `.dockerignore` lists the outputs); PHPStan
+  no errors; `phn fmt --check` clean; the same on a service born in a scratch copy with
+  `bin/init demo Demo` (contracts and k8s fetched from the registry). The vendor stage's steps run
+  outside Docker: 15 files compiled, an authoritative classmap, a prod warmup.
+- Left (`open-items` § M6 — the template): the image build, the OrbStack deploy and the
+  exception-mapping proof (the Monolog processor is not wired yet), the registry swap, the
+  reusable workflows' steps.
+
 ← [[Home]]
