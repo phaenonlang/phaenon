@@ -1,0 +1,99 @@
+// #[\Override] on properties (PHP 8.5, the floor: no target header): a
+// parent class must declare the property, a parent's private one not
+// counting, or an interface a property with hooks; promoted properties
+// too. PHP checks it when it links the class.
+namespace App\OverrideProperties;
+
+interface HasName
+{
+    public string $name { get; }
+}
+
+interface Labelled extends HasName
+{
+    #[\Override]
+    public string $name { get; }
+
+    #[\Override]
+    public string $label { get; } // want P2503 "property App\OverrideProperties\Labelled::$label has #[\Override] but no parent class or interface declares it"
+}
+
+abstract class Base
+{
+    public int $count = 0;
+    protected string $kind = 'base';
+    private string $secret = 's'; // want P2407 "Base::$secret"
+    public static int $instances = 0;
+}
+
+final class Child extends Base implements HasName
+{
+    #[\Override]
+    public string $name = 'child';
+
+    #[\Override]
+    public int $count = 1;
+
+    #[\Override]
+    public string $kind = 'child';
+
+    #[\Override]
+    private string $secret = 'c'; // want P2503 "Child::$secret", P2407 "Child::$secret"
+
+    #[\Override]
+    public static int $instances = 1;
+
+    #[\Override]
+    public int $fresh = 1; // want P2503
+
+    public function __construct(
+        #[\Override] // want P2503 "Child::$promoted"
+        public int $promoted = 0,
+    ) {
+    }
+}
+
+final class Promotes implements HasName
+{
+    public function __construct(
+        #[\Override]
+        public string $name,
+    ) {
+    }
+}
+
+// A trait's property is judged in each class using it; redeclaring a
+// trait's property overrides nothing.
+trait Named
+{
+    #[\Override]
+    public string $name = 'trait'; // want P2503 "UsesNamedAlone::$name"
+}
+
+final class UsesNamed implements HasName
+{
+    use Named;
+}
+
+final class UsesNamedAlone
+{
+    use Named;
+}
+
+trait Tagged
+{
+    public string $tag = 'trait';
+}
+
+final class RedeclaresTag
+{
+    use Tagged;
+
+    #[\Override]
+    public string $tag = 'own'; // want P2503
+}
+
+function overrideProperties(Child $c, Promotes $p, UsesNamed $u, RedeclaresTag $r): string
+{
+    return $c->name . $c->kind . $c->count . $c->fresh . $c->promoted . $p->name . $u->name . $r->tag;
+}

@@ -375,6 +375,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 		c.checkEnum(cl)
 	}
 	c.checkConstOverrides(cl)
+	c.checkPropertyOverrides(cl)
 	if cl.Kind == ast.KindInterface {
 		for _, m := range cl.Methods {
 			if m.Vis != program.Public {
@@ -786,6 +787,49 @@ func (c *Checker) checkConstOverrides(cl *program.Class) {
 			judge(cs.Name.Name, cs.Attrs, cs.Name.S, "enum case")
 		}
 	}
+}
+
+// checkPropertyOverrides verifies #[\Override] on properties (PHP 8.5),
+// promoted ones included, as PHP does when it links the class: a parent
+// class must declare a property of that name that is not private, or an
+// interface of the class one (with hooks), static or not. A property of
+// cl's own that redeclares a trait's overrides nothing. A trait's
+// properties are judged in each class using it, as PHP judges them, on
+// the class's name when the trait is in another file. The attribute is the
+// floor's, so the target does not matter; what a property hook's own
+// #[\Override] means is a parent's hook, not checked here.
+func (c *Checker) checkPropertyOverrides(cl *program.Class) {
+	if cl.Kind == ast.KindTrait || cl.Kind == ast.KindEnum {
+		return
+	}
+	for _, pr := range cl.Props {
+		if pr.Class != cl || pr.Magic || !hasOverride(pr.Attrs) || c.parentProperty(cl, pr.Name) != nil {
+			continue
+		}
+		span := pr.Span
+		if pr.File != cl.File && cl.Decl.Name != nil {
+			span = cl.Decl.Name.S // copied from a trait declared elsewhere
+		}
+		c.report(span, P2503, "property %s::$%s has #[\\Override] but no parent class or interface declares it", cl.Name, pr.Name)
+	}
+}
+
+// parentProperty finds the property of that name a parent class or an
+// interface of cl declares, a class's private property aside.
+func (c *Checker) parentProperty(cl *program.Class, name string) *program.Property {
+	for _, a := range cl.Ancestors() {
+		a.Signature()
+		for _, pr := range a.Props {
+			if pr.Name != name || pr.Class != a || pr.Magic {
+				continue
+			}
+			if pr.Vis == program.Private && a.Kind != ast.KindInterface {
+				continue
+			}
+			return pr
+		}
+	}
+	return nil
 }
 
 // parentConstant finds the constant of that name a parent class or an
