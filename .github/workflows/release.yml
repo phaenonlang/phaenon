@@ -1,10 +1,11 @@
-# A tag publishes the release (design/tooling.md §3.2): the binaries are
-# built again and published only when they match the checksums the release
-# PR committed, so what the plugin downloads is what anyone rebuilding the
-# tag gets. The release's files then go onto https://phaenon.dev/releases/
-# (phaenonlang/website, «Uploading a release»). Run by hand with a tag, the
-# workflow uploads a release that exists already — the one made before the
-# upload job did (v0.1.0) — and publishes nothing again.
+# A tag publishes the release (design/tooling.md §3.2): the binaries and the
+# playground's assets (§3.6) are built again and published only when they
+# match the checksums the release PR committed, so what the plugin and
+# phaenon.dev download is what anyone rebuilding the tag gets. The release's
+# files then go onto https://phaenon.dev/releases/ (phaenonlang/website,
+# «Uploading a release»). Run by hand with a tag, the workflow uploads a
+# release that exists already — the one made before the upload job did
+# (v0.1.0) — and publishes nothing again.
 name: release
 
 on:
@@ -32,7 +33,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Build the binaries and compare them with the pinned checksums
+      - name: Build the release assets and compare them with the pinned checksums
         run: go run ./tools/release -version "${GITHUB_REF_NAME#v}" -out dist -verify
       - name: Archive the whole source tree
         # .gitattributes keeps all but the plugin out of the Composer dist,

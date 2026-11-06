@@ -10,7 +10,9 @@ namespace Phaenon\Composer;
  *
  * The release tooling writes the file:
  * `{"version": "0.1.0", "assets": {"darwin-arm64": {"file": "phn-darwin-arm64", "sha256": "…"}}}`.
- * A package with no release yet says `{"version": null, "assets": {}}`.
+ * A package with no release yet says `{"version": null, "assets": {}}`. The playground's assets
+ * (`wasm`, `wasm-exec`) are pinned there too, under keys no platform has, so they are read and
+ * never chosen.
  */
 final readonly class Checksums
 {

@@ -56,6 +56,7 @@ squash merges).
 
 ```text
 cmd/phn/              CLI: build, check, fix, fmt, lsp, watch, migrate, stdlib, trace, lex, print
+cmd/phn-wasm/         the compiler for WebAssembly (js/wasm only): globalThis.phaenon.compile for phaenon.dev's playground
 internal/token        token set: PHP 8.5's plus Phaenon's, named like token_name()
 internal/lexer        hand-written port of zend_language_scanner.l; lossless
 internal/ast          typed node families; Phaenon constructs are additions to the PHP tree
@@ -73,13 +74,14 @@ internal/lsp          `phn lsp`: JSON-RPC on stdio, a program per check (parsed 
 internal/fix          `phn fix`: a PHP tool's changes of the outputs carried back to the sources through the emitter's verbatim spans
 internal/trace        `phn trace`: positions in compiled files → `.phn` positions, in text, GitHub workflow commands and CI reports (Checkstyle, JUnit, Clover, Cobertura)
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
+internal/playground   one file checked and compiled in memory, the embedded stdlib alone: what cmd/phn-wasm answers (design/tooling.md §3.6)
 internal/conformance  suites over the php-src corpus with `php` as the oracle
 stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime and phaenon/concurrent sources (.phn), the amp/Revolt declarations;
                       suggested/: the Monolog and Sentry API the runtime's Debug integrations are checked against, loaded only by the stdlib's own programs
 stdlib/gen            generator of stdlib/php-src (the newest release branch's stubs), versions_gen.go (the release each symbol came in) and constants.php
 internal/distribution tests of the phaenon/phn Composer plugin under a real Composer (PHAENON_COMPOSER)
 composer/             the phaenon/phn Composer plugin (PHP): the pinned binary, vendor/bin/phn, the builds at the autoload dump; composer.json at the root, .gitattributes keeps the dist to it
-tools/release         the release binaries: reproducible builds for five platforms, their checksums in composer/checksums.json
+tools/release         the release assets: reproducible builds for five platforms and the playground's phn.wasm.gz + wasm_exec.js, their checksums in composer/checksums.json
 .github/workflows     the release PR pins the checksums, the tag publishes the binaries (design/tooling.md §3.2)
 ```
 
@@ -100,6 +102,7 @@ PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite
 PHAENON_PHP86=/opt/homebrew/opt/php@8.6/bin/php go test ./internal/emit  # goldens compiled for 8.6: php -l, behaviour
 PHAENON_PHP_SRC=$HOME/labs/phaenon/php-src go generate ./stdlib        # refresh stubs + version table (vault `testing`)
 PHAENON_COMPOSER=$(which composer) go test ./internal/distribution     # the Composer plugin under a real Composer
+GOOS=js GOARCH=wasm go build -o bin/phn.wasm ./cmd/phn-wasm            # the playground's compiler (tests: internal/playground)
 ```
 
 `phn` itself: `phn build|check|fix|fmt|lsp|watch|migrate|stdlib|trace|lex|print` — run `phn` without arguments for usage; the

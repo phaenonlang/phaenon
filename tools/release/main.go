@@ -7,6 +7,12 @@
 // phaenon/phn plugin verifies every download against, so composer.lock pins
 // the binary through the package.
 //
+// Beside the binaries go the playground's two assets (§3.6): phn.wasm.gz,
+// cmd/phn-wasm built the same way and gzipped with a header that names no
+// file, time or system, and wasm_exec.js, the loader of the toolchain that
+// built it. They are pinned in the same file under keys no platform has,
+// which the plugin never asks for.
+//
 //	go run ./tools/release -version 0.1.0 -out dist           # build, write the checksums
 //	go run ./tools/release -version 0.1.0 -out dist -verify   # build, refuse unless they match
 //
@@ -19,6 +25,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +35,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -45,7 +54,14 @@ var platforms = []platform{
 	{"windows-amd64", "windows", "amd64"},
 }
 
-// asset is a binary's entry in checksums.json.
+// The keys of the playground's assets in checksums.json: not os-arch, so
+// that no platform the plugin runs on picks them.
+const (
+	wasmKey     = "wasm"      // phn.wasm.gz
+	wasmExecKey = "wasm-exec" // wasm_exec.js
+)
+
+// asset is a release file's entry in checksums.json.
 type asset struct {
 	File   string `json:"file"`
 	SHA256 string `json:"sha256"`
@@ -83,6 +99,22 @@ func main() {
 		fail("release: go.mod names no toolchain goX.Y.Z to build with")
 	}
 	toolchain := string(tc[1])
+	// The wasm's gzip is written by this process, and compress/flate's
+	// output is its toolchain's: run by another Go, the tool runs again
+	// under the pinned one, so that the .gz is as reproducible as the
+	// binaries.
+	if runtime.Version() != toolchain && os.Getenv("GOTOOLCHAIN") != toolchain {
+		cmd := exec.Command("go", append([]string{"run", "./tools/release"}, os.Args[1:]...)...)
+		cmd.Env = append(os.Environ(), "GOTOOLCHAIN="+toolchain)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		if err := cmd.Run(); err != nil {
+			if exit, ok := err.(*exec.ExitError); ok {
+				os.Exit(exit.ExitCode())
+			}
+			fail("release: running under %s: %v", toolchain, err)
+		}
+		return
+	}
 	fmt.Printf("toolchain %s\n", toolchain)
 	parts := strings.SplitN(*version, ".", 3)
 	minor := parts[0] + "." + parts[1] + ".*"
@@ -109,27 +141,85 @@ func main() {
 		fail("%v", err)
 	}
 	built := checksums{Version: version, Assets: map[string]asset{}}
+	pin := func(key, file string, data []byte) {
+		sum := sha256.Sum256(data)
+		built.Assets[key] = asset{File: file, SHA256: hex.EncodeToString(sum[:])}
+		fmt.Printf("%s  %s\n", hex.EncodeToString(sum[:]), file)
+	}
+	// goEnv is the environment every go command runs in: the pinned
+	// toolchain, and every setting that would change the bytes fixed.
+	goEnv := slices.Clip(append(os.Environ(), "GOTOOLCHAIN="+toolchain, "CGO_ENABLED=0", "GOFLAGS=", "GOAMD64=v1", "GOARM64=v8.0", "GOWASM="))
+	build := func(goos, goarch, dst, pkg string) {
+		cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false",
+			"-ldflags", "-s -w -buildid= -X main.version="+*version, "-o", dst, pkg)
+		cmd.Env = append(goEnv, "GOOS="+goos, "GOARCH="+goarch)
+		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+		if err := cmd.Run(); err != nil {
+			fail("release: building %s for %s-%s: %v", pkg, goos, goarch, err)
+		}
+	}
 	for _, p := range platforms {
 		file := "phn-" + p.key
 		if p.goos == "windows" {
 			file += ".exe"
 		}
 		dst := filepath.Join(*out, file)
-		cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false",
-			"-ldflags", "-s -w -buildid= -X main.version="+*version, "-o", dst, "./cmd/phn")
-		cmd.Env = append(os.Environ(), "GOTOOLCHAIN="+toolchain, "CGO_ENABLED=0", "GOOS="+p.goos, "GOARCH="+p.goarch, "GOFLAGS=", "GOAMD64=v1", "GOARM64=v8.0")
-		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-		if err := cmd.Run(); err != nil {
-			fail("release: building %s: %v", p.key, err)
-		}
+		build(p.goos, p.goarch, dst, "./cmd/phn")
 		data, err := os.ReadFile(dst)
 		if err != nil {
 			fail("%v", err)
 		}
-		sum := sha256.Sum256(data)
-		built.Assets[p.key] = asset{File: file, SHA256: hex.EncodeToString(sum[:])}
-		fmt.Printf("%s  %s\n", hex.EncodeToString(sum[:]), file)
+		pin(p.key, file, data)
 	}
+	// The raw wasm is not an asset: phaenon.dev serves its downloads as
+	// published, without transfer compression, so the page fetches the gzip
+	// and inflates it (DecompressionStream). It is built outside out, which
+	// the tag's workflow uploads whole.
+	tmp, err := os.MkdirTemp("", "phn-release-")
+	if err != nil {
+		fail("%v", err)
+	}
+	build("js", "wasm", filepath.Join(tmp, "phn.wasm"), "./cmd/phn-wasm")
+	raw, err := os.ReadFile(filepath.Join(tmp, "phn.wasm"))
+	os.RemoveAll(tmp)
+	if err != nil {
+		fail("%v", err)
+	}
+	var gz bytes.Buffer
+	zw, err := gzip.NewWriterLevel(&gz, gzip.BestCompression)
+	if err != nil {
+		fail("%v", err)
+	}
+	// No name, a zero time, the "unknown" system: the header says nothing
+	// about the machine or the moment of the build.
+	zw.Header = gzip.Header{OS: 255}
+	if _, err := zw.Write(raw); err != nil {
+		fail("%v", err)
+	}
+	if err := zw.Close(); err != nil {
+		fail("%v", err)
+	}
+	if err := os.WriteFile(filepath.Join(*out, "phn.wasm.gz"), gz.Bytes(), 0o644); err != nil {
+		fail("%v", err)
+	}
+	pin(wasmKey, "phn.wasm.gz", gz.Bytes())
+	fmt.Printf("phn.wasm: %d bytes, %d gzipped\n", len(raw), gz.Len())
+	// wasm_exec.js is the runtime glue of the toolchain that built the wasm,
+	// and only that one's fits it.
+	cmd := exec.Command("go", "env", "GOROOT")
+	cmd.Env = goEnv
+	goroot, err := cmd.Output()
+	if err != nil {
+		fail("release: go env GOROOT: %v", err)
+	}
+	glue, err := os.ReadFile(filepath.Join(strings.TrimSpace(string(goroot)), "lib", "wasm", "wasm_exec.js"))
+	if err != nil {
+		fail("release: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(*out, "wasm_exec.js"), glue, 0o644); err != nil {
+		fail("%v", err)
+	}
+	pin(wasmExecKey, "wasm_exec.js", glue)
 	if *verify {
 		data, err := os.ReadFile(checksumsPath)
 		if err != nil {
@@ -140,9 +230,9 @@ func main() {
 			fail("release: %s: %v", checksumsPath, err)
 		}
 		if diff := compare(pinned, built); diff != "" {
-			fail("release: the binaries built differ from %s, which the release PR pinned:\n%s", checksumsPath, diff)
+			fail("release: the assets built differ from %s, which the release PR pinned:\n%s", checksumsPath, diff)
 		}
-		fmt.Printf("%d binaries match %s\n", len(built.Assets), checksumsPath)
+		fmt.Printf("%d assets match %s\n", len(built.Assets), checksumsPath)
 		return
 	}
 	var buf bytes.Buffer
