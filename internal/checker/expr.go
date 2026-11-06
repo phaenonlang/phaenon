@@ -1929,14 +1929,19 @@ func (x *fnCtx) maybeUndefined(e ast.Expr, env *state) bool {
 func (x *fnCtx) ternary(e *ast.Ternary, env *state, expected types.Type) types.Type {
 	thenEnv, elseEnv := x.cond(e.Cond, env)
 	cv := x.condValueType
+	positive, negative := x.guardOf(e.Cond)
 	var thenT types.Type
 	if e.Then == nil {
 		// c ?: b — the value of c when truthy.
 		thenT = types.Truthy(x.condValueType)
 	} else {
+		pop := x.c.pushGuard(positive)
 		thenT = x.expr(e.Then, thenEnv, expected)
+		pop()
 	}
+	pop := x.c.pushGuard(negative)
 	elseT := x.expr(e.Else, elseEnv, expected)
+	pop()
 	// A condition the types decide takes one branch, as PHPStan does;
 	// the other is still checked.
 	alwaysTrue, alwaysFalse := types.Equal(cv, types.TTrue), types.Equal(cv, types.TFalse)

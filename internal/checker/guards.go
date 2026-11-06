@@ -12,9 +12,12 @@ import (
 
 // Version guards. Code that runs on several PHP versions tests for what it
 // uses: `if (\function_exists('clamp'))`, `if (\PHP_VERSION_ID >= 80600)`,
-// or the early exit `if (PHP_VERSION_ID < 80600) { return …; }`. Inside a
-// guard a library symbol newer than the target is not P4011: the code that
-// uses it only runs where it exists, as PHPStan reads function_exists().
+// or the early exit `if (PHP_VERSION_ID < 80600) { return …; }`, and in
+// expressions `PHP_VERSION_ID >= 80600 ? clamp(…) : …`,
+// `function_exists('clamp') && clamp(…)` and the arms of `match (true)`.
+// Inside a guard a library symbol newer than the target is not P4011: the
+// code that uses it only runs where it exists, as PHPStan reads
+// function_exists().
 
 // libraryGuard is what a condition proves while its branch runs: symbols
 // that exist, keyed as the library checks key them ("function clamp",
@@ -44,6 +47,17 @@ func (c *Checker) pushGuard(g libraryGuard) func() {
 	c.guards = append(c.guards, g)
 	n := len(c.guards)
 	return func() { c.guards = c.guards[:n-1] }
+}
+
+// pushGuards pushes several guards; the function returned pops them all.
+func (c *Checker) pushGuards(gs ...libraryGuard) func() {
+	n := len(c.guards)
+	for _, g := range gs {
+		if !g.empty() {
+			c.guards = append(c.guards, g)
+		}
+	}
+	return func() { c.guards = c.guards[:n] }
 }
 
 // guardOf reads what a condition proves when it holds (positive) and when
