@@ -104,7 +104,10 @@ final class Type
     /** @phpstan-assert-if-true T $value */
     public function check(mixed $value): bool {}
 
-    /** @return T */
+    /**
+     * @return T
+     * @throws \TypeError
+     */
     public function assert(mixed $value): mixed {}
 
     /** @return T|null */
