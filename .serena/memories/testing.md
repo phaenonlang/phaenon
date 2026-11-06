@@ -306,3 +306,23 @@ After D21 (tabs replaced by migrate), with the cached release-branch corpora:
 - The `master` checkout pairs badly with PHP 8.5.3 for execution: its 8.6 tests other than the
   placeholder ones (`#[\Override]` on constants, 19) fail in the original run and are not filtered
   as newer than the oracle. Use `.cache/php-src-8.5` and `.cache/php-src-8.6`.
+
+## CI (2026-11-06)
+
+`.github/workflows/ci.yml` runs on every PR into `main`, every push to `main`, and by hand on
+the release PR's branch (`release-checksums.yml` starts it): `gofmt -l`, `go vet ./...`,
+`GOOS=js GOARCH=wasm go vet ./cmd/phn-wasm` and `go test ./...` on `ubuntu-latest`, with go.mod's
+toolchain, PHP 8.5 with ext-mongodb and Composer from setup-php (8.5.12 and Composer 2.11.1 on
+the first run), and `PHAENON_COMPOSER` set.
+- **Runs there:** everything no variable gates, the php-backed tests included: `TestGenerics`'
+  `php -l`, the migrate goldens' runs, `TestHeredocValues`, `TestExtensionStubsParse` and
+  `TestLoadExtensions` (ext-mongodb loaded).
+- **Skips there:** `internal/distribution`, for want of the `../runtime` checkout (a private
+  repository the workflow's token cannot read); `TestRuntimePackageFresh`,
+  `TestConcurrentPackageFresh` and `TestVectorCopiesFresh`'s copies likewise; every suite behind
+  a variable of § Variables.
+- First run, caches cold: 2 min 35 s for the job (`go vet` 40 s, the wasm vet 15 s, `go test`
+  72 s). Only `main`'s runs save the build cache; every run restores the newest.
+- The plugin's suite failed from v0.2.0 until phaenonlang/phaenon#4: its test world offered the
+  runtime checkout as `0.1.x-dev` against the plugin's `0.2.*`. The line is now read from
+  `composer.json`, so a release's move of the constraint no longer breaks it.
