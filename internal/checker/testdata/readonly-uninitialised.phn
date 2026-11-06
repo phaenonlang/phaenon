@@ -1,0 +1,240 @@
+// Readonly properties the constructor must initialise (P2515), as PHPStan's
+// property.uninitializedReadonly: assigned on every way out of the
+// constructor, or of a method of the class it calls (design/checker.md §9).
+
+// No constructor at all.
+final class NoConstructor
+{
+    public readonly int $id; // want P2515 "class NoConstructor has an uninitialised readonly property $id"
+}
+
+final class Branches
+{
+    public readonly int $both;
+    public readonly int $one; // want P2515 "$one"
+    public readonly int $afterThrow;
+
+    public function __construct(bool $flag, public readonly int $promoted)
+    {
+        if ($flag) {
+            $this->both = 1;
+        } else {
+            $this->both = 2;
+        }
+        if ($flag) {
+            $this->one = 1;
+        }
+        if (!$flag) {
+            throw new \RuntimeException('no');
+        }
+        $this->afterThrow = 3;
+    }
+}
+
+final class EarlyReturn
+{
+    public readonly int $id; // want P2515
+
+    public function __construct(bool $skip)
+    {
+        if ($skip) {
+            return;
+        }
+        $this->id = 1;
+    }
+}
+
+final class AlwaysThrows
+{
+    public readonly int $id; // want P2515
+
+    public function __construct()
+    {
+        throw new \LogicException('abstract by convention');
+    }
+}
+
+final class NeverReturns
+{
+    public readonly int $id;
+
+    public function __construct(bool $bad)
+    {
+        if ($bad) {
+            $this->fail();
+        }
+        $this->id = 1;
+    }
+
+    private function fail(): never
+    {
+        throw new \LogicException('bad');
+    }
+}
+
+final class Expressions
+{
+    public readonly int $ternary;
+    public readonly int $matched;
+    public readonly int $shortCircuit; // want P2515
+    public readonly int $switched;
+
+    public function __construct(bool $flag, int $n)
+    {
+        $flag ? $this->ternary = 1 : $this->ternary = 2;
+        match ($n) {
+            1 => $this->matched = 1,
+            default => $this->matched = 2,
+        };
+        $flag && $this->shortCircuit = 1;
+        switch ($n) {
+            case 1:
+                $this->switched = 1;
+                break;
+            default:
+                $this->switched = 2;
+        }
+    }
+}
+
+final class Caught
+{
+    public readonly int $id;
+
+    public function __construct()
+    {
+        try {
+            $this->id = random_int(1, 2);
+        } catch (\Exception $e) {
+            throw new \RuntimeException('no randomness', 0, $e);
+        }
+    }
+}
+
+// A method the constructor calls counts, as for PHPStan; assigning a
+// readonly property there is P2206 on its own.
+final class ThroughMethod
+{
+    public readonly int $id;
+
+    public function __construct()
+    {
+        $this->init();
+    }
+
+    private function init(): void
+    {
+        $this->id = 1; // want P2206
+    }
+}
+
+// Every property of a readonly class is readonly.
+final readonly class Whole
+{
+    public int $set;
+    public string $unset; // want P2515 "class Whole has an uninitialised readonly property $unset"
+
+    public function __construct()
+    {
+        $this->set = 1;
+    }
+}
+
+// A trait's property is its user's: reported on the trait's declaration,
+// where PHPStan reports it too.
+trait HasName
+{
+    public readonly string $name; // want P2515 "class Unnamed has an uninitialised readonly property $name"
+}
+
+final class Unnamed
+{
+    use HasName;
+
+    public function __construct()
+    {
+    }
+}
+
+final class Named
+{
+    use HasName;
+
+    public function __construct(string $name)
+    {
+        $this->name = $name;
+    }
+}
+
+// A trait's constructor initialises its user's property.
+trait InitialisesTitle
+{
+    public function __construct(string $title)
+    {
+        $this->title = $title;
+    }
+}
+
+final class Titled
+{
+    use InitialisesTitle;
+
+    public readonly string $title;
+}
+
+// An inherited constructor runs in the parent's scope and initialises none
+// of the child's properties.
+class Base
+{
+    public function __construct()
+    {
+    }
+}
+
+final class Child extends Base
+{
+    public readonly int $id; // want P2515
+}
+
+abstract class Holder
+{
+    public readonly int $id; // want P2515
+}
+
+function anonymousHolder(): object
+{
+    return new class () {
+        public readonly int $id; // want P2515
+    };
+}
+
+// Read before the constructor assigned it: PHP throws.
+final class ReadTooEarly
+{
+    public readonly int $id;
+
+    public function __construct()
+    {
+        echo $this->id; // want P2515 "readonly property ReadTooEarly::$id is read before the constructor initialises it"
+        $this->id = 1;
+    }
+}
+
+// isset() of it answers false there, which PHPStan reports as a read too;
+// the branch that skips the assignment leaves it uninitialised.
+final class LazyInConstructor
+{
+    public readonly int $id; // want P2515
+
+    public function __construct()
+    {
+        if (!isset($this->id)) { // want P2515 "read before"
+            $this->id = 1;
+        }
+    }
+}
+
+function readonlyUninitialised(Branches $b, Whole $w, Named $n, Titled $t): string
+{
+    return $b->both . $w->set . $n->name . $t->title;
+}

@@ -129,6 +129,11 @@ type Checker struct {
 	// refVars are the variables passed by reference, which a try's catch
 	// blocks see bound (tryStmt).
 	refVars map[*ast.Variable]bool
+	// inits and initClasses are what the readonly pass reads (readonly.go):
+	// the properties of $this each method body certainly assigns before it
+	// returns, and the classes checked, in order.
+	inits       map[*ast.MethodDecl]map[string]bool
+	initClasses []*program.Class
 }
 
 // New creates a checker for the program.
@@ -188,6 +193,7 @@ func (c *Checker) Check() []Diagnostic {
 		c.file = f
 		c.checkFile(f)
 	}
+	c.checkReadonlyInits()
 	for _, pr := range c.p.Problems {
 		if pr.File == nil || !pr.File.Checked {
 			continue
@@ -448,6 +454,10 @@ type fnCtx struct {
 	// any of its exits does.
 	returnEnvs   []*state
 	trackReturns bool
+	// trackInits records the properties of $this a method body assigns
+	// (state.inits), for the readonly properties a constructor must
+	// initialise (readonly.go).
+	trackInits bool
 	// sawReturnValue is set when a `return expr;` was seen.
 	sawReturnValue bool
 	// shortCircuit marks `$a?->b` expressions whose null, if any, comes from

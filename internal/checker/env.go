@@ -131,6 +131,10 @@ type state struct {
 	vars  map[string]varInfo
 	paths map[string]types.Type // "$this->x", "$a['k']" → narrowed type
 	dead  bool
+	// inits are the properties of $this the body has certainly assigned on
+	// the way here (readonly.go): unlike a path, nothing a call does takes
+	// one away, and a meet keeps those assigned on every way in.
+	inits map[string]bool
 }
 
 func newEnv() *state {
@@ -144,6 +148,12 @@ func (e *state) clone() *state {
 	}
 	for k, v := range e.paths {
 		n.paths[k] = v
+	}
+	if e.inits != nil {
+		n.inits = make(map[string]bool, len(e.inits))
+		for k := range e.inits {
+			n.inits[k] = true
+		}
 	}
 	return n
 }
@@ -371,6 +381,11 @@ func join(a, b *state) *state {
 	for k, ta := range a.paths {
 		if tb, ok := b.paths[k]; ok {
 			n.paths[k] = types.MakeUnion(ta, tb)
+		}
+	}
+	for k := range a.inits {
+		if b.inits[k] {
+			n.initialise(k)
 		}
 	}
 	return n

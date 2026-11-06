@@ -690,6 +690,7 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 // ------------------------------------------------------------------ members
 
 func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) types.Type {
+	x.prematureRead(e, env)
 	if key, ok := pathKey(e); ok {
 		if t, ok := env.getPath(key); ok {
 			// The member was narrowed: its type is known without re-checking
@@ -2187,6 +2188,9 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 		for _, pr := range prs {
 			x.assignDeclared(t, pr, name, base, vt, span)
 		}
+	}
+	if v, ok := t.Object.(*ast.Variable); ok && v.Name == "this" && x.trackInits {
+		env.initialise(name)
 	}
 	if key, ok := pathKey(t); ok {
 		env.invalidatePrefix(key)
