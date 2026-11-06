@@ -20,7 +20,7 @@ interface Named
     fun name(): string;
 }
 
-#[Map(fn (int $x): int => $x * 2)]
+#[Map(fn (list<int> $xs): int => \count($xs) * 2)]
 abstract class Doubled implements Named
 {
     const Closure UPPER = fn (string $s): string => \strtoupper($s);
@@ -31,7 +31,7 @@ abstract class Doubled implements Named
 
     final fun __construct(
         private(set) string $id,
-        public Closure $normalise = fn (string $s): string => \trim($s),
+        public Closure $normalise = fn (list<string> $parts): int => \count($parts),
     ) {
     }
 

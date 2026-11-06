@@ -821,6 +821,9 @@ func (l *lowering) funcDecl(d *ast.FunctionDecl) error {
 	if l.addDocWith(d.S.Start, d.Doc, tags, l.e.throwsTag(d.Throws)) {
 		l.e.throwsWritten[d] = true
 	}
+	if err := l.declHead(d.Attrs, d.Params, sc); err != nil {
+		return err
+	}
 	return l.walkBody(d.Body, sc)
 }
 
@@ -863,6 +866,9 @@ func (l *lowering) classDecl(d *ast.ClassDecl) error {
 		}
 	}
 	l.addDoc(d.S.Start, d.Doc, tags)
+	if err := l.declHead(d.Attrs, nil, sc); err != nil {
+		return err
+	}
 
 	for _, m := range d.Members {
 		switch m := m.(type) {
@@ -872,6 +878,9 @@ func (l *lowering) classDecl(d *ast.ClassDecl) error {
 			}
 		case *ast.PropertyDecl:
 			psc := sc.child()
+			if err := l.declHead(m.Attrs, nil, psc); err != nil {
+				return err
+			}
 			if l.eraseType(m.Type, psc, "") {
 				l.addDoc(m.S.Start, m.Doc, []string{"@var " + l.docType(m.Type, psc)})
 			}
@@ -921,6 +930,9 @@ func (l *lowering) methodDecl(cl *program.Class, d *ast.MethodDecl, csc *scope) 
 	tags = append(tags, l.signature(d.Params, d.ReturnType, sc, overrides)...)
 	if l.addDocWith(d.S.Start, d.Doc, tags, l.e.throwsTag(d.Throws)) {
 		l.e.throwsWritten[d] = true
+	}
+	if err := l.declHead(d.Attrs, d.Params, sc); err != nil {
+		return err
 	}
 	if !d.HasBody {
 		return nil
@@ -1052,12 +1064,54 @@ func (l *lowering) walk(root ast.Node, sc *scope) error {
 			return true
 		case *ast.Name:
 			return false
-		case *ast.AttrGroup, *ast.Use, *ast.Namespace:
+		case *ast.AttrGroup:
+			err = l.attrGroup(n, sc)
+			return false
+		case *ast.Use, *ast.Namespace:
 			return false
 		}
 		return true
 	})
 	return err
+}
+
+// attrGroup lowers the arguments of an attribute group: a closure there
+// (functions.md §2) carries Phaenon types like any other and is erased and
+// documented the same way; the attribute's own name is left alone.
+func (l *lowering) attrGroup(g *ast.AttrGroup, sc *scope) error {
+	for _, a := range g.Attrs {
+		if a.Args == nil {
+			continue
+		}
+		if err := l.walk(a.Args, sc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// declHead lowers what a declaration holds outside its body and signature:
+// its attributes, and its parameters' attributes and defaults. The walk
+// does not descend into declarations, so each kind calls this itself.
+func (l *lowering) declHead(attrs []*ast.AttrGroup, params []*ast.Param, sc *scope) error {
+	for _, g := range attrs {
+		if err := l.attrGroup(g, sc); err != nil {
+			return err
+		}
+	}
+	for _, p := range params {
+		for _, g := range p.Attrs {
+			if err := l.attrGroup(g, sc); err != nil {
+				return err
+			}
+		}
+		if p.Default != nil {
+			if err := l.walk(p.Default, sc); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (l *lowering) walkOr(err error, n ast.Node, sc *scope) error {
@@ -1126,6 +1180,9 @@ func (l *lowering) closure(n *ast.Closure, sc *scope) error {
 	l.removeTypeParams(n.S.Start, n.TypeParams)
 	tags := append(l.templateTags(n.TypeParams, c), l.signature(n.Params, n.ReturnType, c, nil)...)
 	l.addDoc(n.S.Start, "", tags)
+	if err := l.declHead(n.Attrs, n.Params, c); err != nil {
+		return err
+	}
 	for _, u := range n.Uses {
 		if err := l.walk(u, c); err != nil {
 			return err
@@ -1143,6 +1200,9 @@ func (l *lowering) arrowFunc(n *ast.ArrowFunc, sc *scope) error {
 	l.removeTypeParams(n.S.Start, n.TypeParams)
 	tags := append(l.templateTags(n.TypeParams, c), l.signature(n.Params, n.ReturnType, c, nil)...)
 	l.addDoc(n.S.Start, "", tags)
+	if err := l.declHead(n.Attrs, n.Params, c); err != nil {
+		return err
+	}
 	return l.walk(n.Body, c)
 }
 

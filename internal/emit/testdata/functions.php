@@ -26,8 +26,8 @@ interface Named
     public function name(): string;
 }
 
-#[Map(static function (int $x): int {
-    return $x * 2;
+#[Map(/** @param list<int> $xs */ static function (array $xs): int {
+    return \count($xs) * 2;
 })]
 abstract class Doubled implements Named
 {
@@ -41,8 +41,8 @@ abstract class Doubled implements Named
 
     final public function __construct(
         public private(set) string $id,
-        public Closure $normalise = static function (string $s): string {
-            return \trim($s);
+        public Closure $normalise = /** @param list<string> $parts */ static function (array $parts): int {
+            return \count($parts);
         },
     ) {
     }
