@@ -216,13 +216,12 @@ removes none: a source deleted here is deleted from the package by hand.
 
 ### Git and commits
 
-- Commit only when the developer running the session asks. Stage by path, never `git add -A` /
-  `git add .` / `git commit -a`, and account for every line of `git status --short`: parallel
-  sessions leave work in these trees.
+- One change per commit, staged by path: a reviewer reads a diff that is about one thing, and
+  goldens, generated files and the design text that go with a change travel in the same commit.
 - **Commit messages follow [Conventional Commits](https://www.conventionalcommits.org):** `type(scope):
   subject`, the scope a package or area (`feat(checker):`, `fix(emit):`, `docs(design):`), `!` for
   a breaking change to the language or the CLI, and a body that says what changed and why. **No
-  attribution lines, no `Co-Authored-By`, no "Generated with"** — the repositories will be open
+  attribution lines, no `Co-Authored-By`, no "Generated with"** — the repositories are open
   source. The same rule holds in `design`, `runtime`, `concurrent`, `jetbrains` and `vscode`.
 - **A PR is squash-merged, so its title becomes the commit on `main` that release-please reads** to
   version the next release and write `CHANGELOG.md`: the title is a Conventional Commit header whose
