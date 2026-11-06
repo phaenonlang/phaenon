@@ -1,0 +1,90 @@
+// A class named in a declared type must exist: PHP resolves the name when a
+// value is checked against the type, and PHPStan reports it (class.notFound).
+// In a namespace that does not import it, a bare `Closure` is a class of
+// that namespace (design/checker.md §9).
+namespace App\Unimported {
+    final class Config
+    {
+        public const Closure TRIM = static function (string $s): string { // want P2001 "unknown class App\Unimported\Closure: write \Closure, or import it with `use Closure;`"
+            return \trim($s);
+        };
+
+        private Closure $f; // want P2001
+
+        private ?Clock $clock = null; // want P2001 "unknown class App\Unimported\Clock"
+
+        public function __construct(Closure $f) // want P2001
+        {
+            $this->f = $f;
+        }
+
+        public function at(Clock|int $clock): ?Instant // want P2001 "App\Unimported\Clock", P2001 "App\Unimported\Instant"
+        {
+            echo \is_int($clock) ? $clock : 0;
+            return null;
+        }
+
+        public function later(): callable
+        {
+            return static fn (Instant $at): int => 1; // want P2001
+        }
+
+        public function run(): void
+        {
+            echo \get_debug_type($this->f), \get_debug_type($this->clock);
+        }
+    }
+}
+
+namespace App\Time {
+    final class Clock
+    {
+        public function now(): Instant
+        {
+            return new Instant();
+        }
+    }
+
+    final class Instant
+    {
+    }
+}
+
+// The same declarations with the names imported.
+namespace App\Imported {
+    use App\Time\Clock;
+    use App\Time\Instant;
+    use Closure;
+
+    final class Config
+    {
+        public const Closure TRIM = static function (string $s): string {
+            return \trim($s);
+        };
+
+        private Closure $f;
+
+        private ?Clock $clock = null;
+
+        public function __construct(Closure $f, ?Clock $clock = null)
+        {
+            $this->f = $f;
+            $this->clock = $clock;
+        }
+
+        public function at(Clock|int $clock): ?Instant
+        {
+            return \is_int($clock) ? null : $clock->now();
+        }
+
+        public function later(): callable
+        {
+            return static fn (Instant $at): int => 1;
+        }
+
+        public function run(): void
+        {
+            echo \get_debug_type($this->f), \get_debug_type($this->clock);
+        }
+    }
+}

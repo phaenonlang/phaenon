@@ -1,0 +1,30 @@
+// Unknown classes in the positions Phaenon's syntax adds: type arguments,
+// closure signatures, tuples. The emitter writes them into docblocks, where
+// PHPStan reports them too (class.notFound). A bare `Closure` there is
+// Phaenon's name for \Closure, which the emitter writes (design/checker.md
+// §9); only where the type reaches PHP as written does PHP read it as a
+// class of the namespace.
+namespace App\UnknownNative;
+
+final class Known
+{
+}
+
+final class Uses
+{
+    private list<Closure> $handlers = [];
+
+    fun add(Closure(Known): int $handler): void {
+        $this->handlers[] = $handler;
+    }
+
+    fun names(list<Missing> $xs): int => \count($xs); // want P2001 "unknown class App\UnknownNative\Missing"
+
+    fun keyed(map<string, Known|Gone> $xs): int => \count($xs); // want P2001 "App\UnknownNative\Gone"
+
+    fun apply(Closure(Absent): int $f): int => \count($this->handlers); // want P2001 "App\UnknownNative\Absent"
+
+    fun pair(): (int, ?Nowhere) => [1, null]; // want P2001 "App\UnknownNative\Nowhere"
+
+    fun class(class<Unseen> $c): string => $c; // want P2001 "App\UnknownNative\Unseen"
+}
