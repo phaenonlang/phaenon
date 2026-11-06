@@ -59,6 +59,10 @@ func newWorld(t *testing.T, failOn string) *world {
 	root := repositoryRoot(t)
 	copyFile(t, filepath.Join(root, "composer.json"), filepath.Join(w.plugin, "composer.json"))
 	copyTree(t, filepath.Join(root, "composer"), filepath.Join(w.plugin, "composer"))
+	// The repository pins its last release; a world starts with no release
+	// pinned, as the repository did before the first one, and a test that
+	// wants one pins it.
+	writeJSON(t, filepath.Join(w.plugin, "composer", "checksums.json"), map[string]any{"version": nil, "assets": map[string]any{}})
 	writeFile(t, w.fake, fakePhn(w.log, failOn), 0o755)
 	return w
 }
