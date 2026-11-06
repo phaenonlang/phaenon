@@ -127,8 +127,11 @@ jobs:
         if: steps.release-please.outputs.prs_created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ fromJSON(steps.release-please.outputs.pr).headBranchName }}
-        run: gh workflow run release-checksums.yml -R "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          PR: ${{ steps.release-please.outputs.pr }}
+        # The branch is read in the script: a step's env is evaluated before
+        # its if, and fromJSON of the empty output of a run that made no PR
+        # fails the whole job.
+        run: gh workflow run release-checksums.yml -R "$GITHUB_REPOSITORY" --ref "$(jq -r .headBranchName <<<"$PR")"
 
   website:
     # The release's files onto https://phaenon.dev/releases/<version>/. After
