@@ -28,6 +28,10 @@ type world struct {
 	cache    string // COMPOSER_CACHE_DIR
 	fake     string // the fake phn
 	log      string // the fake's record of its runs
+
+	// runtimeVersion is the version the runtime checkout is given, whatever
+	// branch it is on: the line the plugin requires, X.Y.x-dev.
+	runtimeVersion string
 }
 
 // newWorld prepares a test's world. The fake phn exits with status 2 when it
@@ -58,6 +62,7 @@ func newWorld(t *testing.T, failOn string) *world {
 	}
 	root := repositoryRoot(t)
 	copyFile(t, filepath.Join(root, "composer.json"), filepath.Join(w.plugin, "composer.json"))
+	w.runtimeVersion = requiredLine(t, filepath.Join(root, "composer.json"), "phaenon/runtime")
 	copyTree(t, filepath.Join(root, "composer"), filepath.Join(w.plugin, "composer"))
 	// The repository pins its last release; a world starts with no release
 	// pinned, as the repository did before the first one, and a test that
@@ -217,7 +222,7 @@ func (p *project) write() {
 		map[string]any{"packagist.org": false},
 		pathRepository(p.w.plugin, "phaenon/phn", "0.1.x-dev", p.symlinkPlugin),
 		// The runtime is symlinked, and its version given whatever branch the checkout is on.
-		pathRepository(p.w.runtime, "phaenon/runtime", "0.1.x-dev", true),
+		pathRepository(p.w.runtime, "phaenon/runtime", p.w.runtimeVersion, true),
 	}
 	require := map[string]string{"phaenon/phn": "*"}
 	for _, name := range p.libraries {
@@ -401,6 +406,29 @@ func repositoryRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+// requiredLine is the development line of the version a package's
+// composer.json requires of a dependency: "0.2.*" gives "0.2.x-dev". Every
+// release moves the plugin's runtime constraint to its own minor version
+// (design/tooling.md §3.4), and the checkout must stay installable.
+func requiredLine(t *testing.T, manifest, dependency string) string {
+	t.Helper()
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Require map[string]string `json:"require"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("%s: %v", manifest, err)
+	}
+	line, ok := strings.CutSuffix(m.Require[dependency], ".*")
+	if !ok {
+		t.Fatalf("%s requires %s %q, not X.Y.*", manifest, dependency, m.Require[dependency])
+	}
+	return line + ".x-dev"
 }
 
 // runtimeCheckout returns the phaenon/runtime checkout beside the repository,

@@ -1,33 +1,84 @@
-# The release PR pins the binaries (design/tooling.md §3.2): a pull request
-# from a release/vX.Y.Z branch builds the five binaries and the playground's
-# phn.wasm.gz and wasm_exec.js (§3.6), and commits their SHA-256s into
-# composer/checksums.json, so that the tag the PR leads to carries them, and
-# composer.lock, pinning the phaenon/phn package, pins the binaries too. composer.json's runtime constraints move to the
-# release's minor version with them (lockstep, §3.4).
+# The release PR pins the binaries (design/tooling.md §3.2). release-please
+# keeps one release PR open, "chore(main): release X.Y.Z", on its branch
+# release-please--branches--main; its commit moves composer/checksums.json's
+# version to X.Y.Z (extra-files in release-please-config.json). This
+# workflow builds the five binaries and the playground's phn.wasm.gz and
+# wasm_exec.js (§3.6) on that branch and commits their SHA-256s into
+# composer/checksums.json, with composer.json's runtime constraints and the
+# main line's alias at the release's minor version (lockstep, §3.4), so that
+# the merge carries them and composer.lock, pinning the phaenon/phn package,
+# pins the binaries too.
+#
+# When it runs: release-please rebuilds its branch from main on every push to
+# main (always-update) and force-pushes it, dropping the previous pins, so
+# the pins are made again after each rebuild. release-please pushes with
+# release.yml's GITHUB_TOKEN, and what that token pushes starts no
+# pull_request run, so release.yml starts this workflow on the branch
+# (workflow_dispatch) right after release-please has written it. The
+# pull_request trigger covers a push to the branch by a person, and
+# release-please's own pushes were it ever given a token of another
+# identity. A rebuild supersedes a run still pinning the one before.
+#
+# The pins are pushed with this workflow's GITHUB_TOKEN, so they start no CI
+# either: the job starts CI and the PR semantics gate on the pinned commit by
+# hand, and those are the checks the release PR shows.
 name: release checksums
 
 on:
   pull_request:
     branches: [main]
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-checksums-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   checksums:
-    if: startsWith(github.head_ref, 'release/v') && github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      startsWith(github.head_ref || github.ref_name, 'release-please--')
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # the pins, onto the release PR's branch
+      actions: write # CI and the semantics gate, started on the pinned commit
+    env:
+      BRANCH: ${{ github.head_ref || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ github.head_ref }}
-      - uses: actions/setup-go@v5
+          ref: ${{ env.BRANCH }}
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: Build the release assets and write their checksums
-        run: go run ./tools/release -version "${GITHUB_HEAD_REF#release/v}" -out dist
-      - name: Commit the checksums
+          cache: false
+      - name: Read the release's version
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          # release-please's commit wrote it; the PR's title names it too.
+          version=$(jq -r .version composer/checksums.json)
+          title=$(gh pr list -R "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json title --jq '.[0].title // empty')
+          if [[ "$title" != *" release $version" ]]; then
+            echo "::error::composer/checksums.json names $version, the release PR is titled \"$title\""
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Build the release assets and write their checksums
+        run: go run ./tools/release -version "${{ steps.release.outputs.version }}" -out dist
+      - name: Commit the checksums
+        id: commit
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
           if git diff --quiet -- composer/checksums.json composer.json; then
             echo "composer/checksums.json and composer.json are current"
             exit 0
@@ -35,5 +86,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add composer/checksums.json composer.json
-          git commit -m "build: pin the ${GITHUB_HEAD_REF#release/} binaries"
-          git push
+          git commit -m "build: pin the v$VERSION binaries"
+          git push origin "HEAD:$BRANCH"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+      - name: Start CI and the semantics gate on the release PR
+        # After a push of the pins, and after release-please's own push,
+        # which started neither.
+        if: steps.commit.outputs.pushed == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run ci.yml -R "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          gh workflow run pr-semantics.yml -R "$GITHUB_REPOSITORY" --ref "$BRANCH"
