@@ -11,6 +11,11 @@
     "composer-plugin"
   ],
   "homepage": "https://phaenon.dev",
+  "support": {
+    "issues": "https://github.com/phaenonlang/phaenon/issues",
+    "source": "https://github.com/phaenonlang/phaenon",
+    "docs": "https://phaenon.dev"
+  },
   "require": {
     "php": ">=8.3",
     "composer-plugin-api": "^2.3",
