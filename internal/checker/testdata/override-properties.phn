@@ -97,3 +97,47 @@ function overrideProperties(Child $c, Promotes $p, UsesNamed $u, RedeclaresTag $
 {
     return $c->name . $c->kind . $c->count . $c->fresh . $c->promoted . $p->name . $u->name . $r->tag;
 }
+
+// A property redeclared in a subclass keeps the parent's static-ness,
+// readonly-ness, a visibility no narrower and the same native type, or none
+// when the parent declares none (PHP's own classes do; a Phaenon property
+// always has a type): the rules PHP checks when it links the class, the
+// first one broken reported, as PHP reports it.
+abstract class Shape
+{
+    public int $sides = 0;
+    protected string $label = '';
+    public static int $made = 0;
+    public readonly string $id;
+    protected int|string $either = 0;
+
+    public function __construct()
+    {
+        $this->id = 'shape';
+    }
+}
+
+final class Square extends Shape
+{
+    public string $sides = '4'; // want P2502 "type of App\OverrideProperties\Square::$sides must be int (as in class App\OverrideProperties\Shape)"
+    private string $label = 'square'; // want P2502 "access level to App\OverrideProperties\Square::$label must be protected (as in class App\OverrideProperties\Shape) or weaker"
+    public int $made = 1; // want P2502 "cannot redeclare static App\OverrideProperties\Shape::$made as non-static App\OverrideProperties\Square::$made"
+    public string $id = 'square'; // want P2502 "cannot redeclare readonly property App\OverrideProperties\Shape::$id as non-readonly App\OverrideProperties\Square::$id"
+    public string|int $either = 'both'; // the same type, written the other way round
+
+    public function label(): string
+    {
+        return $this->label;
+    }
+}
+
+// Exception::$code is untyped and not readonly in PHP's own declaration, so
+// a subclass cannot promote a typed, readonly $code: PHP refuses the class.
+final class Missing extends \RuntimeException
+{
+    public function __construct(
+        public readonly string $code, // want P2502 "cannot redeclare non-readonly property Exception::$code as readonly App\OverrideProperties\Missing::$code"
+    ) {
+        parent::__construct('missing');
+    }
+}

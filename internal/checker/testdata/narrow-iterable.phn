@@ -1,0 +1,40 @@
+// An iterable<V> narrowed by instanceof keeps what it yields: the then
+// branch is Traversable<mixed, V> & the class, still an iterable<V> where
+// one is expected, and the else branch the iterable<V> itself.
+namespace App\NarrowIterable;
+
+final class Counts
+{
+    /** @param iterable<string> $xs */
+    public function viaDoc(iterable $xs): int
+    {
+        if (!is_array($xs) && !$xs instanceof \Countable) {
+            $xs = iterator_to_array($xs);
+        }
+
+        return $this->count($xs);
+    }
+
+    public function direct(iterable<string> $xs): int
+    {
+        if ($xs instanceof \Countable) {
+            return \count($xs) + $this->count($xs);
+        }
+
+        return $this->count($xs);
+    }
+
+    public function wrongValue(iterable<int> $xs): int
+    {
+        if ($xs instanceof \Countable) {
+            return $this->count($xs); // want P2103 "expects iterable<string>, Traversable<mixed, int>&Countable given"
+        }
+
+        return 0;
+    }
+
+    private function count(iterable<string> $xs): int
+    {
+        return \count([...$xs]);
+    }
+}

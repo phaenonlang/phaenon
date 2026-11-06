@@ -365,12 +365,12 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 	var keys, values []types.Type
 	nextInt := int64(0)
 	isList := true
-	nonEmpty := false
+	hasItems, nonEmpty := false, false
 	for _, item := range e.Items {
 		if item == nil {
 			continue
 		}
-		nonEmpty = true
+		hasItems = true
 		if item.Unpack {
 			t := x.expr(item.Value, env, nil)
 			k, v, ok := types.IterableKV(t, x.p())
@@ -378,6 +378,15 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 				x.report(item.Value.Span(), P2303, "cannot unpack %s", x.typeName(t))
 			}
 			isShape = false
+			// An unpacked iterable may yield nothing, and what it yields lands
+			// under the keys an array can have: PHP throws on any other key,
+			// so iterable<mixed, V> unpacks to array<array-key, V>.
+			if a, isArray := t.(types.Array); isArray && a.NonEmpty {
+				nonEmpty = true
+			}
+			if !types.IsSubtype(k, types.TArrayKey, nil) {
+				k = types.TArrayKey
+			}
 			keys = append(keys, k)
 			values = append(values, v)
 			if !types.IsSubtype(k, types.TInt, nil) {
@@ -385,6 +394,7 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 			}
 			continue
 		}
+		nonEmpty = true
 		var ev types.Type
 		if item.Key != nil {
 			kt, stored := x.keyExpr(item.Key, env)
@@ -446,7 +456,7 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 		}
 		values = append(values, ev)
 	}
-	if !nonEmpty {
+	if !hasItems {
 		return types.Shape{List: true} // [] is an empty list
 	}
 	_ = expectedKey
@@ -454,7 +464,7 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 		shape.List = isList
 		return shape
 	}
-	return types.Array{Key: types.MakeUnion(keys...), Value: types.MakeUnion(values...), List: isList, NonEmpty: true}
+	return types.Array{Key: types.MakeUnion(keys...), Value: types.MakeUnion(values...), List: isList, NonEmpty: nonEmpty}
 }
 
 func expectedShapeEntry(expected types.Type, key types.Type) (types.Type, bool) {
