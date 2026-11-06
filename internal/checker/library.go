@@ -7,6 +7,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/types"
 	"github.com/phaenonlang/phaenon/stdlib"
 )
 
@@ -105,34 +106,80 @@ func (c *Checker) libraryParam(span ast.Span, callee, param string) {
 }
 
 // libraryTypes judges the class names of a type written in a declaration
-// (a parameter, a return type, a property): PHP resolves them when a value
-// is checked against the type, so on an older PHP every call fails.
-func (x *fnCtx) libraryTypes(t ast.TypeExpr) {
+// (a parameter, a return type, a property, a class constant): PHP resolves
+// them when a value is checked against the type, so on an older PHP every
+// call fails, and a class that does not exist at all is P2001, as PHPStan
+// reports it (class.notFound). A type argument, a closure signature's
+// members and a tuple's elements are named too, though erased.
+func (x *fnCtx) libraryTypes(t ast.TypeExpr) { x.declaredTypes(t, false) }
+
+// declaredTypes walks a declared type; erased says the position does not
+// reach PHP as written but through the emitter (a type argument, a closure
+// signature, a tuple), where a bare `Closure` is Phaenon's name for
+// \Closure (design/checker.md §9).
+func (x *fnCtx) declaredTypes(t ast.TypeExpr, erased bool) {
 	switch t := t.(type) {
 	case *ast.NamedType:
+		for _, a := range t.TypeArgs {
+			x.declaredTypes(a, true)
+		}
 		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
-			if _, builtin := keywordArity[strings.ToLower(t.Name.Parts[0])]; builtin {
+			lower := strings.ToLower(t.Name.Parts[0])
+			if _, builtin := keywordArity[lower]; builtin {
+				if lower == "closure" && !erased {
+					x.bareClosure(t.Name)
+				}
 				return
 			}
 			if x.res.TypeParam(t.Name.Parts[0]) != nil || x.res.FileAlias(t.Name.Parts[0]) != nil {
 				return
 			}
 		}
-		if cl := x.p().Class(x.res.ClassName(t.Name)); cl != nil {
-			x.c.libraryClass(t.Name.S, cl)
+		// What the name denotes: a class, or an alias a class docblock
+		// declares or imports (@phpstan-type, @phpstan-import-type), self,
+		// static.
+		c, ok := x.res.Native(&ast.NamedType{S: t.S, Name: t.Name}).(types.Class)
+		if !ok {
+			return
 		}
-		for _, a := range t.TypeArgs {
-			x.libraryTypes(a)
+		cl := x.p().Class(c.Name)
+		if cl == nil {
+			x.report(t.Name.S, P2001, "unknown class %s", c.Name)
+			return
 		}
+		x.c.libraryClass(t.Name.S, cl)
 	case *ast.NullableType:
-		x.libraryTypes(t.Type)
+		x.declaredTypes(t.Type, erased)
 	case *ast.UnionType:
 		for _, m := range t.Types {
-			x.libraryTypes(m)
+			x.declaredTypes(m, erased)
 		}
 	case *ast.IntersectionType:
 		for _, m := range t.Types {
-			x.libraryTypes(m)
+			x.declaredTypes(m, erased)
+		}
+	case *ast.ClosureType:
+		for _, m := range t.Params {
+			x.declaredTypes(m.Type, true)
+		}
+		x.declaredTypes(t.Return, true)
+	case *ast.TupleType:
+		for _, m := range t.Elems {
+			x.declaredTypes(m, true)
 		}
 	}
+}
+
+// bareClosure judges `Closure` written where the type reaches PHP as
+// written: in a namespace that does not import it, PHP resolves the name
+// to a class of that namespace, so the type is a class that does not exist
+// (`App\Closure`) and every value fails it. The checker reads a bare
+// `Closure` as \Closure anywhere, which is what the emitter writes where
+// it erases a type; here the code itself is wrong.
+func (x *fnCtx) bareClosure(n *ast.Name) {
+	name := x.res.ClassName(n)
+	if strings.EqualFold(name, "Closure") || x.p().Class(name) != nil {
+		return
+	}
+	x.report(n.S, P2001, "unknown class %s: write \\Closure, or import it with `use Closure;`", name)
 }
