@@ -1,0 +1,98 @@
+# CI (AGENTS.md, "Build and test"): every pull request into main and every
+# push to main. release-checksums.yml also starts it by hand on the release
+# PR's branch once the pins are pushed there: what a workflow's GITHUB_TOKEN
+# pushes starts no pull_request run, and the PR needs its checks.
+#
+# What `go test ./...` runs on the runner (the vault's `testing` note lists
+# every variable):
+#   - PHP 8.5 is on PATH, so the tests that take php as the oracle run: the
+#     emitter goldens' `php -l` (TestGenerics), the migrate goldens' runs,
+#     heredocs through the tab replacement (TestHeredocValues), the stubs
+#     generated from the runner's extensions, ext-mongodb's included
+#     (TestExtensionStubsParse, TestLoadExtensions), and `phn check` and
+#     `phn build` in cmd/phn and the playground read them too.
+#   - Composer is on PATH and PHAENON_COMPOSER names it, yet the plugin's
+#     suite (internal/distribution) skips: it installs the phaenon/runtime
+#     checkout beside the repository, a private repository this workflow's
+#     token cannot read. TestRuntimePackageFresh, TestConcurrentPackageFresh
+#     and TestVectorCopiesFresh skip for their sibling checkouts likewise.
+#   - Skipped for want of their variables, which name a php-src corpus, a
+#     PHPStan install, a PHP 8.6 or the private dogfood trees: conformance
+#     (PHAENON_PHP_SRC, PHAENON_EXEC), the stubs' freshness (PHAENON_PHP_SRC),
+#     PHPStan parity (PHAENON_PHPSTAN), the 8.6 runs (PHAENON_PHP86), the
+#     measurements and tree runs (PHAENON_LISTTYPES, PHAENON_THROWS,
+#     PHAENON_FMT_TREE, PHAENON_LINEMAP_TREE, PHAENON_COMPOSER_PROJECT).
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        id: go
+        with:
+          # The toolchain line, which setup-go prefers to the go line.
+          go-version-file: go.mod
+          # Its own cache is keyed on go.mod alone, so it would never take a
+          # newer build cache; the steps below key on the commit and restore
+          # the newest one main saved.
+          cache: false
+      - name: Find Go's caches
+        id: cache-paths
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ steps.cache-paths.outputs.build }}
+            ${{ steps.cache-paths.outputs.modules }}
+          key: go-${{ runner.os }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
+          restore-keys: go-${{ runner.os }}-${{ steps.go.outputs.go-version }}-
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: mongodb
+          coverage: none
+          tools: composer
+      - name: Name Composer for the plugin's suite
+        run: echo "PHAENON_COMPOSER=$(command -v composer)" >> "$GITHUB_ENV"
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would rewrite these files:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go vet (WebAssembly)
+        run: GOOS=js GOARCH=wasm go vet ./cmd/phn-wasm
+      - name: go test
+        run: go test ./...
+      - uses: actions/cache/save@v6
+        # main's caches are the ones every branch can restore.
+        if: github.event_name == 'push'
+        with:
+          path: |
+            ${{ steps.cache-paths.outputs.build }}
+            ${{ steps.cache-paths.outputs.modules }}
+          key: go-${{ runner.os }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
