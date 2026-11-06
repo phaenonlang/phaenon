@@ -85,6 +85,17 @@ function tuples((string, int) $pair, list<(string, int)> $pairs): (int, string)
     return [$age, $name];
 }
 
+// A tuple is exact: a longer value is not one (collections.md §2.4).
+function longer((string, int) $pair, list<(string, int)> $pairs, list<(string, int, bool)> $triples): (string, int)
+{
+    tuples(['a', 1, true], $pairs); // want P2103
+    tuples($pair, $triples); // want P2103
+    tuples([...$pair], $pairs);
+    takesInt(count($triples));
+
+    return ['a', 1, 2]; // want P2202
+}
+
 function bytesAreNotText(bytes $raw, string $text): void
 {
     takesString($raw); // want P2103

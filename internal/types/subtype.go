@@ -401,10 +401,17 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 				}
 			}
 			// Keys b does not name are fine: `array{a: int, b: int}` is an
-			// `array{a: int}`, and `list{int, string, string}` a
-			// `list{int, string}`, as PHPStan has it. Only `array{}` names
-			// its whole content: nothing with a key is the empty array.
+			// `array{a: int}`, as PHPStan has it. Not for a tuple, which is
+			// exact (design/collections.md §2.4): `list{int, string, string}`
+			// is no `(int, string)`, nor is a shape that may hold more; a
+			// shorter value fits only where the entries it lacks are
+			// optional, which the loop above held it to. And only `array{}`
+			// names its whole content: nothing with a key is the empty
+			// array.
 			if len(b.Entries) == 0 && !b.Unsealed && len(a.Entries) > 0 {
+				return false
+			}
+			if IsTuple(b) && (a.Unsealed || len(a.Entries) > len(b.Entries)) {
 				return false
 			}
 			if b.List && !a.List && !shapeIsList(a) {
@@ -735,6 +742,15 @@ func shapeNonEmpty(s Shape) bool {
 		}
 	}
 	return false
+}
+
+// IsTuple reports the shape a tuple `(A, B)` is: sealed, positional, two
+// entries or more (design/collections.md §2.4). It admits no longer value,
+// and a shorter one only for entries marked optional, which a docblock's
+// `list{int, string, 2?: bool}` has and a written tuple has not.
+func IsTuple(t Type) bool {
+	s, ok := t.(Shape)
+	return ok && !s.Unsealed && len(s.Entries) >= 2 && shapeIsList(s)
 }
 
 func shapeIsList(s Shape) bool {
