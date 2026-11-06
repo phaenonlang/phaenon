@@ -1,5 +1,5 @@
 {
-    "version": "0.2.0",
+    "version": "0.2.1",
     "assets": {
         "darwin-amd64": {
             "file": "phn-darwin-amd64",
