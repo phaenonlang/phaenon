@@ -3,6 +3,13 @@
 From 0.3.0 on, release-please writes each entry from the Conventional Commits merged since the
 previous release (`release-please-config.json`). The two releases before were cut by hand.
 
+## [0.3.0](https://github.com/phaenonlang/phaenon/compare/v0.2.1...v0.3.0) (2026-11-07)
+
+
+### Features
+
+* **checker:** P3010 warns of a type argument nothing determines ([#10](https://github.com/phaenonlang/phaenon/issues/10)) ([6b9a0cd](https://github.com/phaenonlang/phaenon/commit/6b9a0cd7db62c5b21a7af02eb2dbd9c4aa6bdd94))
+
 ## [0.2.1](https://github.com/phaenonlang/phaenon/compare/v0.2.0...v0.2.1) (2026-11-06)
 
 
