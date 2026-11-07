@@ -174,6 +174,7 @@ var (
 	P3007 = Code{"P3007", Error, "generic property redeclared"}
 	P3008 = Code{"P3008", Error, "class type parameter in a static property"}
 	P3009 = Code{"P3009", Error, "type arguments on a non-generic callee"}
+	P3010 = Code{"P3010", Warning, "type argument not inferable"}
 
 	// P4 — interop
 	P4001 = Code{"P4001", Warning, "docblock cannot be parsed"}
