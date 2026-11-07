@@ -91,7 +91,7 @@ PHAENON_EXEC=1 PHAENON_PHP_SRC=/path/to/php-src \
 PHAENON_PHPSTAN=/path/to/phpstan \
   go test ./internal/checker ./internal/emit                           # PHPStan level max on goldens
 PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite emitter goldens
-PHAENON_PHP86=/path/to/php8.6 go test ./internal/emit                  # goldens compiled for 8.6: php -l, behaviour
+PHAENON_PHP86=/path/to/php8.6 go test ./internal/emit                  # goldens compiled for 8.6: php -l, loading, behaviour
 go generate ./stdlib                                                   # refresh stubs + version table from the php-src clone
 PHAENON_COMPOSER=$(which composer) go test ./internal/distribution     # the Composer plugin under a real Composer
 GOOS=js GOARCH=wasm go build -o bin/phn.wasm ./cmd/phn-wasm            # the playground's compiler (tests: internal/playground)
@@ -122,7 +122,7 @@ PHPStan parity.
 |---|---|---|
 | `PHAENON_PHP_SRC` | `internal/conformance`; `TestFresh` (`stdlib/gen`) | Absolute path of a php-src tree (`/path/to/php-src`): the `.phpt` corpus, a clone or a release branch extracted as above; for `TestFresh`, the clone whose release branches the committed stubs and version table must match |
 | `PHAENON_PHP` | `internal/conformance`; `TestPHPStanParity` | The php taken as the oracle, `php` on `PATH` by default; the emit execution suite compiles for its release line, and an 8.6 here also serves the parity run's 8.6 goldens |
-| `PHAENON_PHP86` | `TestGenerics` (emit), `TestLift` (migrate), `TestPHPStanParity` | A PHP 8.6 (`/path/to/php8.6`): `php -l` and the behaviour of the outputs compiled for 8.6, and PHPStan on it for the goldens whose header says `// target: 8.6` |
+| `PHAENON_PHP86` | `TestGenerics` (emit), `TestLift` (migrate), `TestPHPStanParity` | A PHP 8.6 (`/path/to/php8.6`): `php -l`, the loading and the behaviour of the outputs compiled for 8.6, and PHPStan on it for the goldens whose header says `// target: 8.6` |
 | `PHAENON_EXEC` | `TestPrinterExecution`, `TestEmitExecution` | Any non-empty value runs the execution comparisons (≈2.5 min each; pass `-timeout 30m`) |
 | `PHAENON_PHPT_FILTER` | `internal/conformance` | Only the `.phpt` paths containing this substring, e.g. `Zend/tests` |
 | `PHAENON_SHOW_DIFFS` | printer round trip, execution suites | How many differences to print (default 25) |
@@ -187,7 +187,8 @@ removes none: a source deleted here is deleted from the package by hand.
   is `TestLineMapProperty`: every source byte that reaches the output sits on a line whose forward
   lookup gives its source line. A position reported in compiled PHP goes through the map
   (`phn trace`), never by line number alone.
-- Emitted PHP must pass `php -l` and PHPStan at level max.
+- Emitted PHP must pass `php -l`, load under php (which links the classes it declares) and pass
+  PHPStan at level max.
 
 ### Tests, fixtures, golden files
 
