@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/linemap"
@@ -54,11 +55,16 @@ func phpFor(v phpversion.Version) string {
 // TestGenerics compiles each testdata/*.phn through the checker and the
 // emitter and compares the output with the .php next to it, once per target
 // the file names. The output must also pass `php -l` under a php of its
-// target (PHAENON_PHP86 names one for 8.6), and PHPStan at level max when
-// PHAENON_PHPSTAN names the binary and that PHPStan parses the output. A
-// file compiled for several targets runs every output under PHP 8.6 and
-// the 8.5 one under the php on PATH too: they must print the same.
-// PHAENON_UPDATE=1 rewrites the expected files.
+// target (PHAENON_PHP86 names one for 8.6) and, when the file declares
+// only classes, functions and constants, load under it: php links a class
+// as it declares it, so a signature `php -l` accepts and PHP rejects (an
+// override narrowing a parameter) fails here, without PHPStan. The
+// declarations of phaenon/runtime and phaenon/concurrent are autoloaded
+// beside the output. PHPStan runs at level max when PHAENON_PHPSTAN names
+// the binary and that PHPStan parses the output. A file compiled for
+// several targets runs every output under PHP 8.6 and the 8.5 one under
+// the php on PATH too: they must print the same. PHAENON_UPDATE=1 rewrites
+// the expected files.
 func TestGenerics(t *testing.T) {
 	files, _ := filepath.Glob("testdata/*.phn")
 	if len(files) == 0 {
@@ -69,8 +75,10 @@ func TestGenerics(t *testing.T) {
 	// PHPStan reads the runtime package's declarations beside the output;
 	// the stubs written in Phaenon are compiled first, as the package is.
 	var runtimeStubs []string
+	var runtimeDir string
 	if phpstan != "" || php != "" {
 		dir := t.TempDir()
+		runtimeDir = dir
 		compiled, err := Stdlib()
 		if err != nil {
 			t.Fatal(err)
@@ -107,7 +115,7 @@ func TestGenerics(t *testing.T) {
 					wantPath = strings.TrimSuffix(path, ".phn") + "." + target.String() + ".php"
 				}
 				outputs[target] = wantPath
-				compileGolden(t, path, src, target, wantPath, phpstan, runtimeStubs)
+				compileGolden(t, path, src, target, wantPath, phpstan, runtimeDir, runtimeStubs)
 			}
 			if len(targets) > 1 {
 				sameBehaviour(t, targets, outputs)
@@ -117,8 +125,9 @@ func TestGenerics(t *testing.T) {
 }
 
 // compileGolden compiles one golden file for a target and checks the
-// output against wantPath, php -l and PHPStan.
-func compileGolden(t *testing.T, path string, src []byte, target phpversion.Version, wantPath, phpstan string, runtimeStubs []string) {
+// output against wantPath, php -l, loading it under php where it declares
+// only, and PHPStan.
+func compileGolden(t *testing.T, path string, src []byte, target phpversion.Version, wantPath, phpstan, runtimeDir string, runtimeStubs []string) {
 	t.Helper()
 	p := program.New()
 	if err := p.LoadStubs(); err != nil {
@@ -150,6 +159,8 @@ func compileGolden(t *testing.T, path string, src []byte, target phpversion.Vers
 		out, err := exec.Command(php, "-l", wantPath).CombinedOutput()
 		if err != nil {
 			t.Errorf("php -l (target %s): %s", target, out)
+		} else if declarationsOnly(f.AST.Stmts) {
+			loadOutput(t, php, target, path, wantPath, got, runtimeDir)
 		}
 	}
 	if phpstan != "" && target.AtLeast(phpversion.PHP86) && f.Partials != nil {
@@ -220,4 +231,83 @@ func sameBehaviour(t *testing.T, targets []phpversion.Version, outputs map[phpve
 			compare(php85, path)
 		}
 	}
+}
+
+// declarationsOnly reports whether the statements declare and nothing
+// else: classes, functions, constants and type aliases, under declare,
+// namespace and use. Loading such a file runs no code of its own, only
+// PHP's linking of its classes.
+func declarationsOnly(stmts []ast.Stmt) bool {
+	for _, st := range stmts {
+		switch st := st.(type) {
+		case *ast.Declare, *ast.Use, *ast.ClassDecl, *ast.FunctionDecl, *ast.ConstDecl, *ast.TypeAlias, *ast.Nop:
+		case *ast.Namespace:
+			if !declarationsOnly(st.Body) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// loader is the script that loads one output: `php loader.php output.php
+// runtimeDir`. It autoloads the Phaenon\ classes from the compiled runtime
+// and concurrent packages laid out in runtimeDir as their src/ are, and
+// requires the output, which declares its classes and links them.
+const loader = `<?php
+spl_autoload_register(function (string $class): void {
+    foreach (['Phaenon\\Concurrent\\', 'Phaenon\\'] as $prefix) {
+        if (!str_starts_with($class, $prefix)) {
+            continue;
+        }
+        $file = $_SERVER['argv'][2] . '/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
+        if (is_file($file)) {
+            require $file;
+        }
+        return;
+    }
+});
+require $_SERVER['argv'][1];
+`
+
+// reErrorLine finds the output line in php's "in path on line N".
+var reErrorLine = regexp.MustCompile(` in (\S+) on line (\d+)`)
+
+// loadOutput requires the compiled file under php and reports what php
+// prints, which must be nothing, with its output lines mapped back to the
+// golden's.
+func loadOutput(t *testing.T, php string, target phpversion.Version, path, wantPath string, got []byte, runtimeDir string) {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "loader.php")
+	if err := os.WriteFile(script, []byte(loader), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// php names the file as it was given; the absolute path makes the
+	// message's path the one the map is matched against.
+	absPath, err := filepath.Abs(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(php, "-n", "-d", "display_errors=1", "-d", "error_reporting=-1", script, absPath, runtimeDir).CombinedOutput()
+	if err == nil && len(bytes.TrimSpace(out)) == 0 {
+		return
+	}
+	text := strings.TrimSpace(string(out))
+	// The stack trace below a fatal error names the loader alone.
+	if i := strings.Index(text, "\nStack trace:"); i >= 0 {
+		text = text[:i]
+	}
+	if m, _ := linemap.Find(got); m != nil {
+		text = reErrorLine.ReplaceAllStringFunc(text, func(s string) string {
+			sub := reErrorLine.FindStringSubmatch(s)
+			n, _ := strconv.Atoi(sub[2])
+			if src, ok := m.Forward(n); ok && sub[1] == absPath {
+				return fmt.Sprintf(" in %s:%d (output line %d)", path, src, n)
+			}
+			return s
+		})
+	}
+	t.Errorf("php loads the output (target %s): %v\n%s", target, err, text)
 }
