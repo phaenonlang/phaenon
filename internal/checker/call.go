@@ -2172,6 +2172,69 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		}
 		ret = x.evalConditional(ret, argByName)
 	}
+	// A type parameter of the callee that nothing determined, no argument,
+	// no closure, no expected type, and that has no bound to fall back on
+	// is mixed from here on (generics.md §3.4 item 4): the call is typed
+	// as if it were not generic, silently in PHPStan. The warning names it
+	// where an explicit argument (`f<User>(...)`) or a declared type on the
+	// receiving side would fix it.
+	for i, tp := range sig.typeParams {
+		if _, ok := subst[tps[i].Name]; ok || !inferable[tps[i].Name] || tp.Bound != nil {
+			continue
+		}
+		if sig.ret == nil || !types.ContainsParam(sig.ret, tp.Name) {
+			continue
+		}
+		// An argument the checker could not read is the reason here, not
+		// the call: a mixed or an unknown, or a callable parameter given
+		// anything but a signature the checker knows (`[$this, 'method']`,
+		// a string, a plain callable). Reported where it is, if at all.
+		opaque := false
+		for j, b := range bindings {
+			if !types.ContainsParam(b.param.Type, tp.Name) {
+				continue
+			}
+			at := argTypes[j]
+			if _, unknown := at.(types.Unknown); at == nil || unknown || types.IsMixed(at) {
+				opaque = true
+				break
+			}
+			if _, never := at.(types.Never); never {
+				opaque = true // an unreachable branch
+				break
+			}
+			if isCallableType(b.param.Type) {
+				c, ok := at.(types.Callable)
+				if !ok || !c.HasSig {
+					opaque = true
+					break
+				}
+				// A closure that returns nothing (`run(fn() => $this->log())`)
+				// binds no T to its return: the result, void, is not used.
+				switch c.Return.(type) {
+				case nil, types.Void, types.Never:
+					opaque = true
+				}
+				if opaque {
+					break
+				}
+			}
+			// A generic class written without its arguments (`Traversable`)
+			// says nothing of them either.
+			for _, m := range types.Members(at) {
+				if c, ok := m.(types.Class); ok && len(c.Args) == 0 && len(x.p().Variances(c.Name)) > 0 {
+					opaque = true
+				}
+			}
+			if opaque {
+				break
+			}
+		}
+		if opaque {
+			continue
+		}
+		x.report(span, P3010, "type argument %s of %s is not inferable here and is mixed: write it as an explicit type argument, or type what receives the result", tp.Name, sig.name)
+	}
 	// The parameters as the arguments resolved them; a type parameter
 	// nothing determined widens to its bound (closure types are not
 	// generic).

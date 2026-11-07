@@ -205,3 +205,27 @@ function splArity(
     \WeakMap<int, int> $w, // want P3002
 ): void {
 }
+
+/**
+ * @template T
+ * @return Box<T>
+ */
+function emptyBox(): Box
+{
+    throw new \LogicException('a declaration for the call sites below');
+}
+
+/** @return Box<User> */
+function uninferable(): Box
+{
+    $a = first([]); // no warning: the empty array binds T to never, and $a is null
+    $b = emptyBox(); // want P3010
+    /** @var Box<User> $c */
+    $c = emptyBox();
+    $d = emptyBox<User>();
+    $e = first([new User()]);
+    takesUser($e ?? new User());
+    takesUser($d->get());
+    takesUser($c->get());
+    return emptyBox();
+}
