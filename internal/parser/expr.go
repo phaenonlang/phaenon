@@ -189,9 +189,13 @@ func (p *Parser) exprBP(min int) ast.Expr {
 				left = &ast.IsExpr{Expr: left, Type: p.typeExpr()}
 				left.(*ast.IsExpr).S = p.span(start)
 			} else {
-				p.next()
+				kw := p.next()
 				as := &ast.AsExpr{Expr: left}
-				if p.accept(token.Kind('?')) {
+				// `as?` is the operator only when the `?` touches `as`:
+				// `$x as ?int` is `as` with the nullable type ?int, which
+				// throws on a string where `$x as? int` gives null.
+				if p.at(token.Kind('?')) && p.tok().Start == kw.End {
+					p.next()
 					as.Nullable = true
 				}
 				as.Type = p.typeExpr()

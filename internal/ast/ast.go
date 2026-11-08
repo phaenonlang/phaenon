@@ -421,9 +421,11 @@ type (
 	}
 	// AsExpr is Phaenon's `x as T` (throws) / `x as? T` (null on failure).
 	AsExpr struct {
-		S        Span
-		Expr     Expr
-		Type     TypeExpr
+		S    Span
+		Expr Expr
+		Type TypeExpr
+		// Nullable is `as?`, the `?` written against `as`; `x as ?T`
+		// is `as` with the nullable type ?T.
 		Nullable bool
 	}
 )

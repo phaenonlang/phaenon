@@ -53,6 +53,45 @@ func argsOf(t *testing.T, e ast.Expr) *ast.ArgList {
 	return nil
 }
 
+// TestAsNullable: `as?` is the operator only when its `?` touches `as`.
+// With anything between them the `?` begins the type, so `$x as ?int` is
+// `as` with the nullable type ?int, throwing on a string, where `$x as?
+// int` gives null (design/generics.md §11.4).
+func TestAsNullable(t *testing.T) {
+	for in, want := range map[string]string{
+		`$x as? int`:      "as? int",
+		`$x as?int`:       "as? int",
+		`$x as? ?int`:     "as? ?int",
+		`$x as ?int`:      "as ?int",
+		`$x as ? int`:     "as ?int",
+		`$x as/**/?int`:   "as ?int",
+		"$x as\n    ?int": "as ?int",
+		`$x as int`:       "as int",
+	} {
+		e, err := ParseExpr([]byte(in), lexer.ModePhaenon)
+		if err != nil {
+			t.Errorf("%s: %v", in, err)
+			continue
+		}
+		as, ok := e.(*ast.AsExpr)
+		if !ok {
+			t.Errorf("%s: parsed as %T", in, e)
+			continue
+		}
+		got := "as "
+		if as.Nullable {
+			got = "as? "
+		}
+		if _, ok := as.Type.(*ast.NullableType); ok {
+			got += "?"
+		}
+		got += "int"
+		if got != want {
+			t.Errorf("%s: got %s, want %s", in, got, want)
+		}
+	}
+}
+
 // TestPartialApplication covers PHP 8.6's placeholders (argument_no_expr in
 // zend_language_parser.y) beside Phaenon's own uses of `?`, `...` and `<…>`.
 func TestPartialApplication(t *testing.T) {

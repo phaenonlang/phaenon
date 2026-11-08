@@ -214,3 +214,13 @@ function checked(mixed $m, mixed $l, mixed $p, mixed $u, mixed $o): string
 
     return $s . \count($list) . ($pair === null ? '' : $pair[1]) . ($user === null ? '' : $user->id) . ($owner === null ? '' : $owner->id);
 }
+
+// `as?` is the operator only when its `?` touches `as`: `as ?int` is `as`
+// with the nullable type ?int, which throws on anything else.
+function spellings(mixed $a, mixed $b): int
+{
+    $maybe = $a as ?int;
+    $orNull = $b as? int;
+
+    return ($maybe ?? 0) + ($orNull ?? 0);
+}

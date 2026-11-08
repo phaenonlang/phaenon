@@ -283,7 +283,7 @@ function operands(mixed $m, int $i, map<int, mixed> $a): int
     $x = value() as int; // want P3012 "the operand of `as` is evaluated twice"
     $y = value() as? int; // want P3012 "`as?`"
     $z = ($m ?? $i) as int; // want P3012
-    $w = $a[$i] as ?int; // want P3012
+    $w = $a[$i] as ?int; // want P3012 "the operand of `as` is"
     $v = ($m = value()) as int; // want P3012
     $u = $a[0] as int;
     if ($a is list) {
@@ -498,4 +498,19 @@ final class Hooked
 function coalescedKey(mixed $k, map<int, string> $names): string
 {
     return $names[$k as int] ?? '';
+}
+
+// `as?` is the operator only when its `?` touches `as`: `$x as ?int` is
+// `as` with the nullable type ?int, which throws on anything else, where
+// `$x as? int` gives null on anything but an int.
+function spellings(?int $n, null $z): int
+{
+    $a = $n as ?int; // want P2306 "int|null is always int|null"
+    $b = $n as? int;
+    $c = $z as? int; // want P2306 "null is never int"
+    $d = $z as ?int; // want P2306 "null is always int|null"
+    $e = value() as ?int; // want P3012 "the operand of `as` is"
+    $f = value() as? int; // want P3012 "the operand of `as?` is"
+
+    return ($a ?? 0) + ($b ?? 0) + ($c ?? 0) + ($d ?? 0) + ($e ?? 0) + ($f ?? 0);
 }
