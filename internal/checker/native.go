@@ -118,10 +118,12 @@ func (x *fnCtx) nativeOf(e ast.Expr, env *state) types.Type {
 }
 
 // refinedNative is what PHP holds a declaration to, native erased, when
-// its declared type refines it; nil when the two are the same.
+// its declared type refines it; nil when the two are the same, or when PHP
+// declares no type at all: then the docblock is all there is, and is taken
+// as the declaration's type, as the @var checks have it.
 func refinedNative(native, refined types.Type) types.Type {
 	if native == nil {
-		native = types.TMixed
+		return nil
 	}
 	native = types.Erase(native)
 	if refined == nil || types.Equal(native, refined) {

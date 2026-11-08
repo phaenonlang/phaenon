@@ -385,3 +385,30 @@ function arity(mixed $m): bool
         || $m is class<list> // want P3001
         || $m is (list, class, int);
 }
+
+// The inline @var check holds a tag to PHP's type of the value, and to the
+// docblock's where PHP declares none.
+/** @return int */
+function docblockOnly()
+{
+    return 1;
+}
+
+final class DocblockOnly
+{
+    /** @return int */
+    public static function make()
+    {
+        return 1;
+    }
+}
+
+function varTags(): string
+{
+    /** @var string $s */
+    $s = docblockOnly(); // want P2212 "@var string is not a subtype of the assigned int"
+    /** @var string $t */
+    $t = DocblockOnly::make(); // want P2212
+
+    return $s . $t;
+}
