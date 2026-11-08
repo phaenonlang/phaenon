@@ -210,6 +210,43 @@ function takesText(string $s): string
     return $s;
 }
 
+// Bytes come back only where the branch meets the untested bytes. A
+// branch that assigns the variable holds another value: text meeting
+// text stays text, and text meeting the bytes is both.
+function reassigned(bytes $b, bool $flag): string
+{
+    if (!($b is string)) {
+        throw new \ValueError('not text');
+    }
+    if ($flag) {
+        $b = 'default';
+    }
+
+    return $b;
+}
+
+function trimmed(bytes $b, bool $more): string
+{
+    if (!($b is string)) {
+        throw new \ValueError('not text');
+    }
+    while ($more) {
+        $b = \trim($b);
+        $more = $b !== '';
+    }
+
+    return $b;
+}
+
+function appended(bytes $b): bytes
+{
+    if ($b is string) {
+        $b .= '!';
+    }
+
+    return $b; // want P2202 "returns non-empty-string|bytes"
+}
+
 function nullable(?bytes $maybe): string
 {
     $text = $maybe as string;

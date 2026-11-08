@@ -25,10 +25,10 @@ type varInfo struct {
 	// PHPStan's conditional expressions do. Dropped when the variable or
 	// one the condition narrowed is assigned again.
 	conds []condHolder
-	// binary is the bytes type of a variable a UTF-8 test narrowed to text
-	// (`$b is string`, `$b as string`, design/strings.md §6): the value is
-	// still those bytes, so where the branches meet, the side that knew it
-	// as text gives it back as binary data. Dropped when it is assigned.
+	// binary is the bytes type of a variable `$b is string` narrowed to
+	// text (design/strings.md §6): the value is still those bytes, so where
+	// the branch meets one that holds the untested bytes, it gives them
+	// back as binary data. Dropped when the variable is assigned.
 	binary types.Type
 }
 
@@ -374,12 +374,15 @@ func join(a, b *state) *state {
 	for k, va := range a.vars {
 		if vb, ok := b.vars[k]; ok {
 			info := varInfo{maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds)}
+			// A side that saw the bytes as text gives them back to a side
+			// that still holds them untested; meeting text the other side
+			// assigned, it is text too.
 			switch {
 			case va.binary != nil && vb.binary != nil:
 				info.t, info.binary = types.MakeUnion(va.t, vb.t), types.MakeUnion(va.binary, vb.binary)
-			case va.binary != nil:
+			case va.binary != nil && hasBytes(vb.t):
 				info.t = types.MakeUnion(va.binary, vb.t)
-			case vb.binary != nil:
+			case vb.binary != nil && hasBytes(va.t):
 				info.t = types.MakeUnion(va.t, vb.binary)
 			default:
 				info.t = types.MakeUnion(va.t, vb.t)
