@@ -135,8 +135,10 @@ type Checker struct {
 	inits       map[*ast.MethodDecl]map[string]bool
 	initClasses []*program.Class
 	// testSeen holds the operand types of each `is` and `as` over the
-	// passes that reached it (typetest.go).
-	testSeen map[ast.Expr]testSeen
+	// passes that reached it (typetest.go); typeFindings says whether the
+	// type it tests against drew a finding of its own (testType).
+	testSeen     map[ast.Expr]testSeen
+	typeFindings map[ast.TypeExpr]bool
 }
 
 // New creates a checker for the program.

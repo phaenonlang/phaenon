@@ -511,15 +511,21 @@ func (x *fnCtx) checkTypeAlias(a *ast.TypeAlias) {
 // to (testNarrowing); ok says the type drew no finding of its own.
 func (x *fnCtx) testType(t ast.TypeExpr) (target, narrow types.Type, ok bool) {
 	x.testedNames = testedNames(t, nil)
-	// A dry run on a list of its own tells whether the type has a finding,
-	// whichever pass of a loop this is (the findings are reported once).
-	diags, seen := x.c.diags, x.c.seen
-	x.c.diags, x.c.seen = nil, map[string]bool{}
-	x.checkTypeExpr(t)
-	ok = len(x.c.diags) == 0
-	x.c.diags, x.c.seen = diags, seen
+	mark := x.c.mark()
 	x.checkTypeExpr(t)
 	x.testedNames = nil
+	// A finding is reported once: a pass that meets it again, unless the
+	// first pass was rolled back, finds it seen and reports nothing.
+	// Whether the type has one is kept from the pass that first saw it.
+	if x.c.typeFindings == nil {
+		x.c.typeFindings = map[ast.TypeExpr]bool{}
+	}
+	found, known := x.c.typeFindings[t]
+	if !known {
+		found = len(x.c.diags) > mark
+		x.c.typeFindings[t] = found
+	}
+	ok = !found
 	target = types.MapDeep(x.res.Native(t), func(m types.Type) types.Type {
 		if a, ok := m.(types.Array); ok && types.IsMixed(a.Key) {
 			a.Key = types.TArrayKey

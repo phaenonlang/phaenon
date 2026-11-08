@@ -378,6 +378,22 @@ function elseBranch((int, string)|int $t, list<int>|int $l, object|int $o, (int,
     return $n + $u->id; // a false === null leaves the User
 }
 
+// A loop's body is checked on more than one pass; the type's own finding
+// stays its one finding.
+function looped(list<mixed> $xs): int
+{
+    $n = 0;
+    $last = null;
+    foreach ($xs as $x) {
+        if ($x is Box<list>) { // want P3001
+            $n++;
+        }
+        $last = $n;
+    }
+
+    return $n + ($last ?? 0);
+}
+
 // Only the names the operand is tested against may be a bare list: a type
 // argument keeps list's arity (P3001), and a class name is a member of a
 // tuple too.
