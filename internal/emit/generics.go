@@ -1365,6 +1365,12 @@ func (l *lowering) slotsOf(n ast.Node) {
 		free(n.Step...)
 	case *ast.Match:
 		free(n.Subject)
+	case *ast.Switch:
+		free(n.Subject)
+	case *ast.Case:
+		free(n.Cond)
+	case *ast.Index:
+		free(n.Index)
 	case *ast.MatchArm:
 		free(n.Conds...)
 		free(n.Body)

@@ -185,6 +185,24 @@ function places(mixed $a, mixed $b, mixed $c, mixed $d, mixed $e, mixed $f, bool
     return $r || !($f is int|string);
 }
 
+// A switch's subject and cases and an array's index take any expression:
+// no parentheses there.
+function kinds(mixed $m, mixed $n, mixed $k, map<int, string> $names): string
+{
+    switch ($n is ?int) {
+        case true:
+            return 'maybe int';
+    }
+    switch (true) {
+        case $m is ?User:
+            return 'maybe user';
+        case $m is list:
+            return 'list';
+    }
+
+    return $names[$k as int] ?? '';
+}
+
 // `as` throws a TypeError naming the type, `as?` gives null.
 function checked(mixed $m, mixed $l, mixed $p, mixed $u, mixed $o): string
 {

@@ -201,6 +201,27 @@ function places(mixed $a, mixed $b, mixed $c, mixed $d, mixed $e, mixed $f, bool
     return $r || !(\is_int($f) || \is_string($f));
 }
 
+// A switch's subject and cases and an array's index take any expression:
+// no parentheses there.
+/**
+ * @param array<int, string> $names
+ */
+function kinds(mixed $m, mixed $n, mixed $k, array $names): string
+{
+    switch ($n === null || \is_int($n)) {
+        case true:
+            return 'maybe int';
+    }
+    switch (true) {
+        case $m === null || $m instanceof User:
+            return 'maybe user';
+        case \is_array($m) && \array_is_list($m):
+            return 'list';
+    }
+
+    return $names[\is_int($k) ? $k : throw new \TypeError('expected int, got ' . \get_debug_type($k))] ?? '';
+}
+
 // `as` throws a TypeError naming the type, `as?` gives null.
 function checked(mixed $m, mixed $l, mixed $p, mixed $u, mixed $o): string
 {
@@ -212,4 +233,4 @@ function checked(mixed $m, mixed $l, mixed $p, mixed $u, mixed $o): string
 
     return $s . \count($list) . ($pair === null ? '' : $pair[1]) . ($user === null ? '' : $user->id) . ($owner === null ? '' : $owner->id);
 }
-// phaenon-map v1 is-as.phn 1-6=1 7:1 31-33=25 34:25 36-38=27 39:28 42:33 46-48=37 49:38 86-86=74 87:76 168-172=157 173:157
+// phaenon-map v1 is-as.phn 1-6=1 7:1 31-33=25 34:25 36-38=27 39:28 42:33 46-48=37 49:38 86-86=74 87:76 168-172=157 173:157 206-208=190 209:190
