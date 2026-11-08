@@ -169,7 +169,7 @@ func classTest(name string, of types.Type, path []int) *check {
 		names := &check{kind: checkOr, args: []*check{
 			fn("class_exists", path, types.ClassString{}),
 			fn("interface_exists", path, types.ClassString{}),
-		}, accepts: types.ClassString{}}
+		}, path: path, accepts: types.ClassString{}}
 		return joinChecks(checkAnd, fn("is_string", path, types.TString), names)
 	}
 	return joinChecks(checkAnd, fn("is_string", path, types.TString),

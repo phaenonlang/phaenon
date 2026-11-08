@@ -69,6 +69,8 @@ func TestIsAsBehaviour(t *testing.T) {
 	// can land in a static property, so the checks stay.
 	src.WriteString("fun fromValues(map<int|string, int> $ints): bool\n{\n    $list = \\array_values($ints);\n\n    return $list is (int, int);\n}\n\n")
 	src.WriteString("final class Ids\n{\n    /** @var list<int> */\n    public static array $ids = [];\n\n    public static fun pair(): bool => self::$ids is (int, int);\n}\n\n")
+	// A class name among a tuple's members is a test of that member.
+	src.WriteString("fun classPair(mixed $m): bool => $m is (int, class|int);\n\n")
 	// `as` gives the value, or throws the TypeError PHP's own check would.
 	as := []struct{ expr, value, want string }{
 		{"$m as int", "'s'", "expected int, got string"},
@@ -100,6 +102,7 @@ func TestIsAsBehaviour(t *testing.T) {
 	src.WriteString("echo \\call_user_func('App\\\\fromValues', ['a' => 'x', 'b' => 'y']) ? '1' : '0', fromValues([3, 4]) ? '1' : '0';\n")
 	src.WriteString("(new \\ReflectionProperty(Ids::class, 'ids'))->setValue(null, ['a' => 1, 'b' => 2]);\n")
 	src.WriteString("echo Ids::pair() ? '1' : '0';\nIds::$ids = [1, 2];\necho Ids::pair() ? '1' : '0', \"\\n\";\n")
+	src.WriteString("echo classPair([1, User::class]) ? '1' : '0', classPair([1, 's']) ? '1' : '0', classPair([1, 'nope']) ? '1' : '0', classPair([1, 5]) ? '1' : '0', \"\\n\";\n")
 	for i, c := range as {
 		fmt.Fprintf(&src, "echo as%d(%s), \"\\n\";\n", i, c.value)
 	}
@@ -134,7 +137,7 @@ func TestIsAsBehaviour(t *testing.T) {
 	for _, c := range tests {
 		want = append(want, c.want)
 	}
-	want = append(want, "0001", "100", "0101")
+	want = append(want, "0001", "100", "0101", "1001")
 	for _, c := range as {
 		want = append(want, c.want)
 	}
@@ -145,12 +148,12 @@ func TestIsAsBehaviour(t *testing.T) {
 		if lines[i] == w {
 			continue
 		}
-		what := "pair, named, fromValues and Ids"
+		what := "pair, named, fromValues and Ids, classPair"
 		switch {
 		case i < len(tests):
 			what = "is " + tests[i].typ
-		case i >= len(tests)+3:
-			what = as[i-len(tests)-3].expr
+		case i >= len(tests)+4:
+			what = as[i-len(tests)-4].expr
 		}
 		t.Errorf("%s: got %s, want %s", what, lines[i], w)
 	}
