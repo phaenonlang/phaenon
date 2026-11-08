@@ -20,7 +20,6 @@ The other repositories are sibling checkouts beside this one, reached as `../<na
 | **phaenon** | `.` | `phaenonlang/phaenon` | The compiler `phn`: lexer, parser, checker, emitter, migrate; embedded PHP signatures | [Build and test](#build-and-test) |
 | **design** | `../design` | `phaenonlang/design` | The language design and every decision: `language-overview.md` (scope), `generics.md` (decisions §11), `checker.md` (decisions §9, open §10), `roadmap.md` (decisions D1–D8, milestones M0–M7, working method §4) | Markdown only |
 | **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `Phaenon\Debug`, the line map reader (`LineMap`), a Monolog processor and a Sentry integration that point production errors at `.phn` positions (`../design/line-map.md` §4.3); `src/` is compiled from `stdlib/runtime/**/*.phn` | `composer install`, `composer test`, `composer stan` |
-| **concurrent** | `../concurrent` | `phaenonlang/concurrent` | Composer package `phaenon/concurrent`: `\Phaenon\Concurrent\Scope` behind `concurrently { }` and `spawn`, on amp v3 / Revolt; `src/Scope.php` is compiled from `stdlib/concurrent/Scope.phn` here | `composer install`, `composer test`, `composer stan` |
 | **jetbrains** | `../jetbrains` | `phaenonlang/jetbrains` | PhpStorm plugin: `.phn` read as PHP code without the open tag (Kotlin, Gradle); `phn lsp`'s diagnostics and build on save; Reformat Code ends with `phn fmt --stdin` | `./gradlew test` (`PHAENON_PHN=bin/phn` of this repo for the layout tests), `./gradlew buildPlugin` |
 | **vscode** | `../vscode` | `phaenonlang/vscode` | VS Code extension (TypeScript): the TextMate grammar, `source.php` plus injections for Phaenon's syntax (the PhpStorm plugin's TextMate bundle copies it); one `phn lsp` per project with §6.1's whole list; build, check and watch as tasks; `phn trace` of the selection or the terminal | `npm install`, `npm test` (`PHAENON_TREES` for whole trees), `PHAENON_PHN=../phaenon/bin/phn npm run test:e2e`, `npm run package` (`.vsix`) |
 | **website** | `../website` | `phaenonlang/website` | phaenon.dev: the landing page, the playground and the compiler's release binaries as public, immutable downloads under `/releases/{version}/{file}` (`tooling.md` §3.2), uploaded from each release once `release.yml` sends it the tag | its README |
@@ -222,7 +221,7 @@ from the package by hand.
   subject`, the scope a package or area (`feat(checker):`, `fix(emit):`, `docs(design):`), `!` for
   a breaking change to the language or the CLI, and a body that says what changed and why. **No
   attribution lines, no `Co-Authored-By`, no "Generated with"** — the repositories are open
-  source. The same rule holds in `design`, `runtime`, `concurrent`, `jetbrains` and `vscode`.
+  source. The same rule holds in `design`, `runtime`, `jetbrains` and `vscode`.
 - **A PR is squash-merged, so its title becomes the commit on `main` that release-please reads** to
   version the next release and write `CHANGELOG.md`: the title is a Conventional Commit header whose
   release impact (`!` or a `BREAKING CHANGE:` footer, then `feat`, then `fix` and `revert`, then the

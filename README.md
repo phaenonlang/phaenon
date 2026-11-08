@@ -415,8 +415,6 @@ its site.
 
 - [`design`](https://github.com/phaenonlang/design) — the language design and every decision
 - [`runtime`](https://github.com/phaenonlang/runtime) — the Composer package `phaenon/runtime`
-- [`concurrent`](https://github.com/phaenonlang/concurrent) — the Composer package
-  `phaenon/concurrent`, the runtime of `concurrently { }` and `spawn` on amp v3 and Revolt
 - [`jetbrains`](https://github.com/phaenonlang/jetbrains) — the PhpStorm plugin
 - [`vscode`](https://github.com/phaenonlang/vscode) — the VS Code extension
 - [`website`](https://github.com/phaenonlang/website) — phaenon.dev: the landing page, the
