@@ -1204,7 +1204,7 @@ func bodyHasYield(stmts []ast.Stmt) bool {
 			case *ast.Yield, *ast.YieldFrom:
 				found = true
 			case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl, *ast.FunctionDecl:
-				return false
+				return false // a yield inside a nested closure or declaration is its own generator's
 			}
 			return !found
 		})
