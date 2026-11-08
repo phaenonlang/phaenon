@@ -13,11 +13,11 @@ import (
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
-// superglobals are always defined arrays. $argv and $argc are among them
-// for a script's top level; see localArgs.
-var superglobals = map[string]bool{
-	"GLOBALS": true, "_SERVER": true, "_GET": true, "_POST": true, "_FILES": true,
-	"_COOKIE": true, "_SESSION": true, "_REQUEST": true, "_ENV": true, "argv": true, "argc": true,
+// superglobal reports the variables that are always defined: PHP's
+// superglobals (ast.IsSuperglobal), and $argv and $argc for a script's top
+// level; see localArgs.
+func superglobal(name string) bool {
+	return ast.IsSuperglobal(name) || name == "argv" || name == "argc"
 }
 
 // localArgs reports whether $argv or $argc names a variable the code itself
@@ -238,7 +238,7 @@ func (x *fnCtx) variable(v *ast.Variable, env *state, lenient bool) types.Type {
 		}
 		return x.thisType
 	}
-	if superglobals[v.Name] && !localArgs(v.Name, env) {
+	if superglobal(v.Name) && !localArgs(v.Name, env) {
 		if v.Name == "argc" {
 			return types.TInt
 		}
@@ -1249,7 +1249,7 @@ func (x *fnCtx) undefinedRoot(e ast.Expr, env *state) bool {
 		case *ast.Paren:
 			e = n.Expr
 		case *ast.Variable:
-			if n.Name == "this" || superglobals[n.Name] {
+			if n.Name == "this" || superglobal(n.Name) {
 				return false
 			}
 			_, defined := env.get(n.Name)

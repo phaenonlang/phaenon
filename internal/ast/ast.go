@@ -1149,3 +1149,14 @@ func (a *ArgList) Partial() bool {
 // Closure reports whether the call creates a closure instead of calling:
 // a first-class callable or a partial application.
 func (a *ArgList) Closure() bool { return a != nil && (a.FirstClassCallable || a.Partial()) }
+
+// IsSuperglobal reports whether $name is one of PHP's superglobals, the
+// arrays every scope has without declaring them ($GLOBALS, $_SERVER, …):
+// no closure captures them, and PHP forbids them in use().
+func IsSuperglobal(name string) bool {
+	switch name {
+	case "GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV":
+		return true
+	}
+	return false
+}

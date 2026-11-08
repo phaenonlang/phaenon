@@ -224,7 +224,7 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 			env.setPath("$this", t)
 			return
 		}
-		if superglobals[p.Name] && !localArgs(p.Name, env) {
+		if superglobal(p.Name) && !localArgs(p.Name, env) {
 			return
 		}
 		info, ok := env.get(p.Name)

@@ -420,7 +420,7 @@ func captured(call ast.Expr, args *ast.ArgList) []string {
 	var out []string
 	seen := map[string]bool{}
 	add := func(name string) {
-		if name == "this" || superglobal(name) || seen[name] {
+		if name == "this" || ast.IsSuperglobal(name) || seen[name] {
 			return
 		}
 		seen[name] = true
@@ -473,14 +473,6 @@ func captured(call ast.Expr, args *ast.ArgList) []string {
 		}
 	}
 	return out
-}
-
-func superglobal(name string) bool {
-	switch name {
-	case "GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV":
-		return true
-	}
-	return false
 }
 
 // editedWithin reports whether an edit already touches the span.
