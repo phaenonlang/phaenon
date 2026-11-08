@@ -160,3 +160,32 @@ func (p *project) installedPackages() []string {
 	slices.Sort(names)
 	return names
 }
+
+// TestRefusesTheRuntime: phaenon/debug declares the classes phaenon/runtime
+// did, Phaenon\Debug\…, so a project never holds both. The plugin conflicts
+// with the old name below 0.4, its every release: a project that still
+// requires phaenon/runtime is refused, alone or beside phaenon/debug.
+// phaenon/debug replaces phaenon/runtime at its own version, 0.4 on, and
+// Composer matches a conflict against a replacement too, so the bound is
+// what lets the plugin and phaenon/debug install together.
+func TestRefusesTheRuntime(t *testing.T) {
+	w := newWorld(t, "")
+	classes := map[string]any{"autoload": map[string]any{"psr-4": map[string]string{`Phaenon\`: "src/"}}}
+	runtime := plainPackage{"phaenon/runtime", "0.3.0", classes}
+	debug := plainPackage{"phaenon/debug", "0.4.0", merge(classes, map[string]any{"replace": map[string]string{"phaenon/runtime": "self.version"}})}
+
+	for name, packages := range map[string][]plainPackage{"alone": {runtime}, "beside": {runtime, debug}} {
+		p := w.newProject(name, project{packages: packages})
+		out, err := p.composer("install")
+		// Beside phaenon/debug, Composer may name its replacement instead.
+		if err == nil || !strings.Contains(out, "conflicts with phaenon/runtime") && !strings.Contains(out, "replaces phaenon/runtime and thus cannot coexist") {
+			t.Errorf("%s: composer install with phaenon/runtime 0.3.0: %v, want a refusal\n%s", name, err, out)
+		}
+	}
+
+	renamed := w.newProject("renamed", project{packages: []plainPackage{debug}})
+	renamed.mustComposer("install")
+	if got := renamed.installedPackages(); !slices.Equal(got, []string{"phaenon/debug", "phaenon/phn"}) {
+		t.Errorf("installed %v, want phaenon/debug and phaenon/phn", got)
+	}
+}

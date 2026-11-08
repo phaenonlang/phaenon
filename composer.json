@@ -23,6 +23,9 @@
   "suggest": {
     "phaenon/debug": "The line map reader, Monolog processor and Sentry integration that point production errors at .phn positions"
   },
+  "conflict": {
+    "phaenon/runtime": "<0.4"
+  },
   "autoload": {
     "psr-4": {
       "Phaenon\\Composer\\": "composer/src/"

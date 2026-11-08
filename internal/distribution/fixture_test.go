@@ -191,6 +191,7 @@ type project struct {
 	extra         map[string]any // the root's extra
 	config        map[string]any // added to the root's config
 	libraries     []string       // Phaenon libraries the root requires, such as "acme/lib"
+	packages      []plainPackage // packages of plain PHP the root requires, each at its version
 	mirror        *mirror        // binary-url and auth.json for the mirror
 	baseURL       bool           // binary-url as a base URL rather than a template
 	override      bool           // PHN_BINARY names the fake
@@ -208,7 +209,8 @@ func (w *world) newProject(name string, p project) *project {
 }
 
 // write writes the root's composer.json, and its phaenon.json and auth.json
-// when it has them; the libraries it requires are written beside the world.
+// when it has them; the libraries and packages it requires are written
+// beside the world.
 func (p *project) write() {
 	t := p.w.t
 	t.Helper()
@@ -222,6 +224,10 @@ func (p *project) write() {
 	for _, name := range p.libraries {
 		repositories = append(repositories, pathRepository(p.w.library(name), name, "1.0.0", false))
 		require[name] = "*"
+	}
+	for _, pkg := range p.packages {
+		repositories = append(repositories, pathRepository(p.w.plainPackage(pkg), pkg.name, pkg.version, false))
+		require[pkg.name] = pkg.version
 	}
 	config := map[string]any{"allow-plugins": map[string]bool{"phaenon/phn": true}}
 	for key, value := range p.config {
@@ -277,6 +283,21 @@ func (w *world) library(name string) string {
 	})
 	writeJSON(w.t, filepath.Join(dir, "phaenon.json"), map[string]any{"roots": map[string]string{"src": ".src"}})
 	writeFile(w.t, filepath.Join(dir, "src", "Thing.phn"), []byte("namespace "+strings.TrimSuffix(namespace, `\`)+";\n\nfinal class Thing\n{\n}\n"), 0o644)
+	return dir
+}
+
+// plainPackage is a package of plain PHP: a composer.json and nothing
+// else, served by a path repository at version.
+type plainPackage struct {
+	name, version string
+	manifest      map[string]any // the rest of its composer.json: autoload, replace…
+}
+
+// plainPackage writes pkg beside the world and returns its directory.
+func (w *world) plainPackage(pkg plainPackage) string {
+	w.t.Helper()
+	dir := filepath.Join(w.base, "packages", pkg.name)
+	writeJSON(w.t, filepath.Join(dir, "composer.json"), merge(pkg.manifest, map[string]any{"name": pkg.name}))
 	return dir
 }
 

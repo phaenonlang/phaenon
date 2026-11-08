@@ -291,6 +291,8 @@ nothing changed: `phn build --vendor`), then the project itself (`phn build`), s
 `--classmap-authoritative` finds the outputs. With no `phaenon.json` anywhere it does nothing.
 It requires no other package, since the compiled output needs none, and suggests
 `phaenon/debug`, which points production errors at `.phn` positions (`design/line-map.md` §4.3).
+It conflicts with `phaenon/runtime` below 0.4, that package's name until then, which declares the
+same classes.
 
 - `PHN_BINARY=/path/to/phn` uses another binary, such as one built from a checkout.
 - `"extra": {"phaenon": {"binary-url": "https://mirror/{version}/{file}"}}` fetches the binary from
