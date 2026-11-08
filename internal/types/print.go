@@ -434,9 +434,6 @@ func Native(t Type) (string, bool) {
 		}
 		return strings.Join(parts, "|"), true
 	case Intersection:
-		if IsTextBytes(t) {
-			return "string", true
-		}
 		var parts []string
 		for _, m := range t.Types {
 			s, ok := Native(m)
