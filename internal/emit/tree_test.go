@@ -63,7 +63,9 @@ func TestLineMapTree(t *testing.T) {
 		}
 		compiled++
 		checkLineMap(t, path, src, out, w)
-		expectPHPOnly(t, path, out)
+		if expectPHPOnly(t, path, out) {
+			t.Logf("%s: exempted, in a namespace under Phaenon\\", path)
+		}
 		if dir := os.Getenv("PHAENON_LINEMAP_OUT"); dir != "" {
 			rel, _ := filepath.Rel(root, path)
 			dst := filepath.Join(dir, strings.TrimSuffix(rel, ".phn")+".php")

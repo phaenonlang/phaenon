@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/phaenonlang/phaenon/internal/emit"
 )
 
 // The compiled output depends on nothing but PHP (design/roadmap.md D24),
@@ -45,9 +47,9 @@ func TestInstallsAlone(t *testing.T) {
 
 // TestCompiledOutputRunsAlone builds a project with the real phn: the output
 // of the lowerings that once called phaenon/runtime (`is` and `as` on a list
-// and a tuple, `as` on bytes, a generic class) loads through Composer's
-// autoloader and runs with no phaenon/* package installed but the plugin,
-// and names nothing under Phaenon\.
+// and a tuple, `as` on bytes, a generic class) names nothing under Phaenon\
+// (emit.PhaenonReferences) and runs through Composer's autoloader with the
+// plugin installed alone, which TestInstallsAlone holds.
 func TestCompiledOutputRunsAlone(t *testing.T) {
 	w := newWorld(t, "")
 	php, err := exec.LookPath("php")
@@ -89,17 +91,18 @@ final class Box<T>
 
 	p.mustComposer("install")
 
-	if got := p.installedPackages(); !slices.Equal(got, []string{"phaenon/phn"}) {
-		t.Errorf("installed %v, want phaenon/phn alone", got)
-	}
 	compiled := 0
 	filepath.WalkDir(filepath.Join(p.dir, ".src"), func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
 		compiled++
-		if data, err := os.ReadFile(path); err == nil && strings.Contains(string(data), `Phaenon\`) {
-			t.Errorf("%s names Phaenon\\:\n%s", path, data)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if refs, _ := emit.PhaenonReferences(data); len(refs) > 0 {
+			t.Errorf("%s depends on more than PHP:\n\t%s", path, strings.Join(refs, "\n\t"))
 		}
 		return nil
 	})
