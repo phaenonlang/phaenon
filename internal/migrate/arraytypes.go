@@ -1886,7 +1886,7 @@ func (a *arrayTyper) returnValues(key string, m *ast.MethodDecl) ([]types.Type, 
 				return false
 			}
 			switch n := n.(type) {
-			case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl, *ast.FunctionDecl, *ast.Spawn, *ast.Concurrently:
+			case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl, *ast.FunctionDecl:
 				return false // their returns are theirs
 			case *ast.Yield, *ast.YieldFrom:
 				why = "it is a generator"

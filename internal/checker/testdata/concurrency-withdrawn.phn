@@ -1,0 +1,46 @@
+namespace Withdrawn;
+
+// `concurrently` blocks and `spawn` left the language (design/roadmap.md
+// D25, concurrency.md §17). Their shapes, never PHP, are a removed
+// construct, reported once each; the code inside is checked, and what it
+// leaves behind is not reported again. The words stay names: a method
+// and a function called spawn or concurrently, and their calls, are PHP.
+
+final class Loader
+{
+    public fun load(int $id): string {
+        return (string) $id;
+    }
+
+    public fun both(int $id): string {
+        concurrently { // want P1001
+            $a = spawn $this->load($id); // want P1001
+            $b = spawn { // want P1001
+                return $this->load($id + 1);
+            };
+        }
+        return $a->await() . $b->await();
+    }
+
+    public fun timed(int $id): string {
+        return concurrently (timeout: 5) { // want P1001
+            return $this->load('x'); // want P2103
+        };
+    }
+
+    public fun spawn(int $id): string {
+        return $this->load($id);
+    }
+
+    public fun calls(int $id): string {
+        return $this->spawn($id) . concurrently($id) . spawn($id);
+    }
+}
+
+fun concurrently(int $id): string {
+    return (string) $id;
+}
+
+fun spawn(int $id): string {
+    return (string) $id;
+}

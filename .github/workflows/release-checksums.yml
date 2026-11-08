@@ -4,7 +4,7 @@
 # version to X.Y.Z (extra-files in release-please-config.json). This
 # workflow builds the five binaries and the playground's phn.wasm.gz and
 # wasm_exec.js (§3.6) on that branch and commits their SHA-256s into
-# composer/checksums.json, with composer.json's runtime constraints and the
+# composer/checksums.json, with composer.json's runtime constraint and the
 # main line's alias at the release's minor version (lockstep, §3.4), so that
 # the merge carries them and composer.lock, pinning the phaenon/phn package,
 # pins the binaries too.

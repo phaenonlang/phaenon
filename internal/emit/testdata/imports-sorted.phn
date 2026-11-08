@@ -4,10 +4,10 @@ use ArrayObject;
 use DateTimeImmutable;
 use Stringable;
 
-// A sorted use block: the imports the compiler adds (Scope for
-// `concurrently`, Countable for the parameter the override-erasure rule
-// widens, design/generics.md §4.3) join it in their alphabetical place,
-// each on a line of its own (roadmap D11, D19).
+// A sorted use block: the import the compiler adds (Countable for the
+// parameter the override-erasure rule widens, design/generics.md §4.3)
+// joins it in its alphabetical place, on a line of its own (roadmap D11,
+// D19).
 
 interface Sizer<T of \Countable>
 {
@@ -31,12 +31,5 @@ final class Summary implements Stringable, Sizer<ArrayObject<int, string>>
     public function size(ArrayObject<int, string> $lines): int
     {
         return \count($lines);
-    }
-
-    public function warm(): void
-    {
-        concurrently {
-            spawn $this->lines->count();
-        }
     }
 }

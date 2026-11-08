@@ -54,7 +54,7 @@ type Host interface {
 	// attributes that exempt a private property (P2406–P2408).
 	Options(opts checker.Options) checker.Options
 	// ProjectDiagnostics are the findings about the project as a whole: its
-	// target, its installed packages (P4013, P4014).
+	// target, its installed packages (P4014).
 	ProjectDiagnostics(p *program.Program, files []string) []checker.Diagnostic
 	// Build compiles the project from p, a program of what is on disk,
 	// checked with diags: outputs are written as phn build writes them, and

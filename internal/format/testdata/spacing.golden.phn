@@ -13,10 +13,7 @@ final class Box<out T of Item, U = int> extends Base<T>
         $box = $f as? User;
         $n = $m as int;
         $made = Box::make<int, string> (1);
-        return concurrently (timeout: 5) {
-            $a = spawn $this->load();
-            return [$a->await(), 1];
-        };
+        return [1, 'a'];
     }
 
     /** The one line. */

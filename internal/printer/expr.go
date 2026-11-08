@@ -334,15 +334,12 @@ func (p *Printer) expr(e ast.Expr) {
 		p.returnType(e.ReturnType)
 		p.w(" => ")
 		p.expr(e.Body)
-	case *ast.Concurrently:
-		p.w("concurrently ")
+	case *ast.Withdrawn:
+		p.w(e.Name + " ")
 		if e.Opts != nil {
 			p.argList(e.Opts)
 			p.w(" ")
 		}
-		p.block(e.Body)
-	case *ast.Spawn:
-		p.w("spawn ")
 		if e.Expr != nil {
 			p.expr(e.Expr)
 		} else {

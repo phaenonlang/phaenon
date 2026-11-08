@@ -420,7 +420,7 @@ func captured(call ast.Expr, args *ast.ArgList) []string {
 	var out []string
 	seen := map[string]bool{}
 	add := func(name string) {
-		if name == "this" || superglobal(name) || seen[name] {
+		if name == "this" || ast.IsSuperglobal(name) || seen[name] {
 			return
 		}
 		seen[name] = true

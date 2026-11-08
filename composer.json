@@ -21,9 +21,6 @@
     "composer-plugin-api": "^2.3",
     "phaenon/runtime": "0.3.*"
   },
-  "suggest": {
-    "phaenon/concurrent": "0.3.*: the runtime of concurrently { } blocks and spawn"
-  },
   "autoload": {
     "psr-4": {
       "Phaenon\\Composer\\": "composer/src/"

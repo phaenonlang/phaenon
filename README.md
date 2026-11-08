@@ -10,7 +10,7 @@ A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for P
 Status: pre-alpha; the language and the CLI still change between releases. What works today:
 
 - `phn check`, the type checker: PHP plus Phaenon's syntax (generics, `list<T>` and `map<K, V>`,
-  tuples, `bytes`, `fun`, `throws`, `concurrently` blocks) and the PHPStan docblock vocabulary;
+  tuples, `bytes`, `fun`, `throws`) and the PHPStan docblock vocabulary;
   it reports what PHPStan reports at level max, and may be stricter, never more lenient.
 - `phn build`, the emitter: the PHP you would have written, with PHPStan docblocks, laid out as PER
   Coding Style 3.0, each file ending with a line map back to its `.phn`.
@@ -245,7 +245,7 @@ from the tool's own JSON report, which `phn fix` asks for.
 spaces for tabs (a tab outside a string or a comment's text doesn't compile, `P1005`), a
 function's brace on its declaration's line, a class-like's on its own, `{}` for an empty body,
 one-line docblocks, and the spacing of what only Phaenon has (`class Box<T of Item>`,
-`map<string, list<int>>`, `Closure(int): bool`, `throws A|B`, `$x as? User`, `concurrently (…) {`).
+`map<string, list<int>>`, `Closure(int): bool`, `throws A|B`, `$x as? User`).
 The second is the project's own PHP style: its php-cs-fixer, run through `phn fix`.
 
 ```sh
@@ -386,41 +386,6 @@ Design: `design/strings.md` §6.
 A generic declaration's docblock adds lines to the output (PHPStan reads one tag per line);
 every other edit keeps line numbers exact. Design: `design/generics.md`, decisions in §11.
 
-## Concurrency
-
-A `concurrently { … }` block owns every task started inside it with `spawn` and ends only when
-all of them have completed; a task's failure cancels the others and is rethrown where the block
-ends. The handle is amp's `Future<T>`, the loop is Revolt's, and no function is marked `async`:
-the body runs in the calling fiber, so a Symfony command or a request handler enters a block
-without starting a loop (`../design/concurrency.md`).
-
-```php
-return concurrently (timeout: 5.0) {
-    $user = spawn $this->users->find($id);          // Amp\Future<User>
-    $orders = spawn $this->orders->forUser($id);    // Amp\Future<list<Order>>
-
-    return new Profile($user->await(), $orders->await());
-};
-```
-
-```php
-return Scope::run(function () use ($id) {
-    $user = Scope::spawn(fn () => $this->users->find($id));
-    $orders = Scope::spawn(fn () => $this->orders->forUser($id));
-
-    return new Profile($user->await(), $orders->await());
-}, timeout: 5.0);
-```
-
-The `use` clause is computed the way a person writes it: variables the body reads by value, ones
-it assigns and the enclosing scope mentions by reference. `Scope::map($items, $f)` is the
-one-line fan-out, `Scope::all($tasks)` awaits handles under the block's cancellation,
-`Scope::cancellation()` is what to hand amp APIs so that they stop when the block does. The
-checker reports `spawn` outside a block, a handle leaving its block, `break`/`yield`/`goto`
-crossing it, a spawn body mutating an outer variable, and `sleep()`/`usleep()` inside a block
-(`P2601`–`P2606`). The runtime class is the Composer package `phaenon/concurrent`, separate from
-`phaenon/runtime` so that a project without concurrency installs no event loop.
-
 ## CLI
 
 ```sh
@@ -433,7 +398,6 @@ phn lsp                                               # the language server: dia
 phn watch [--no-build] [--interval D]                 # check and build the roots each time a file changes
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Debug/…), as phaenon/runtime ships it
-phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
 phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them
 phn trace [--root PREFIX=LOCAL]... [text...]  # positions in compiled files → .phn: text, workflow commands, XML reports on stdin
 phn version                               # the version a release sets, dev otherwise
@@ -451,8 +415,6 @@ its site.
 
 - [`design`](https://github.com/phaenonlang/design) — the language design and every decision
 - [`runtime`](https://github.com/phaenonlang/runtime) — the Composer package `phaenon/runtime`
-- [`concurrent`](https://github.com/phaenonlang/concurrent) — the Composer package
-  `phaenon/concurrent`, the runtime of `concurrently { }` and `spawn` on amp v3 and Revolt
 - [`jetbrains`](https://github.com/phaenonlang/jetbrains) — the PhpStorm plugin
 - [`vscode`](https://github.com/phaenonlang/vscode) — the VS Code extension
 - [`website`](https://github.com/phaenonlang/website) — phaenon.dev: the landing page, the

@@ -296,8 +296,10 @@ func (p *Parser) prefix() ast.Expr {
 
 // startsExpr reports whether the current token can begin an expression
 // (used after `yield`, `return`, `break`, …): `yield * 2` is `(yield) * 2`.
-func (p *Parser) startsExpr() bool {
-	k := p.kind()
+func (p *Parser) startsExpr() bool { return startsExprKind(p.kind()) }
+
+// startsExprKind reports whether a token of kind k can begin an expression.
+func startsExprKind(k token.Kind) bool {
 	switch k {
 	case token.T_VARIABLE, token.Kind('$'), token.T_LNUMBER, token.T_DNUMBER, token.T_CONSTANT_ENCAPSED_STRING,
 		token.Kind('"'), token.Kind('`'), token.T_START_HEREDOC, token.Kind('['), token.Kind('('),
@@ -407,10 +409,8 @@ func (p *Parser) primary() ast.Expr {
 		}
 		ex.S = p.span(start)
 		return ex
-	case k == token.T_CONCURRENTLY && p.concurrentlyAhead():
-		return p.concurrently()
-	case k == token.T_SPAWN:
-		return p.spawn()
+	case k == token.T_STRING && (p.concurrentlyAhead() || p.spawnAhead()):
+		return p.withdrawn()
 	case k == token.T_MATCH && p.peekKind(1) == token.Kind('('):
 		return p.matchExpr()
 	case k == token.T_FUNCTION || k == token.T_FN || k == token.T_ATTRIBUTE ||
@@ -976,60 +976,4 @@ func (p *Parser) acceptAmpersand() bool {
 		return true
 	}
 	return false
-}
-
-// concurrentlyAhead reports whether the `concurrently` at the current
-// position opens a block — `concurrently {` or `concurrently (opts) {`. Any
-// other continuation is a call of a function called concurrently
-// (design/concurrency.md §4.1).
-func (p *Parser) concurrentlyAhead() bool {
-	if p.peekKind(1) == token.Kind('{') {
-		return true
-	}
-	if p.peekKind(1) != token.Kind('(') {
-		return false
-	}
-	depth := 0
-	for i := 1; ; i++ {
-		switch p.peekKind(i) {
-		case token.Kind('('):
-			depth++
-		case token.Kind(')'):
-			depth--
-			if depth == 0 {
-				return p.peekKind(i+1) == token.Kind('{')
-			}
-		case token.EOF:
-			return false
-		}
-	}
-}
-
-// concurrently parses `concurrently (opts) { .. }`.
-func (p *Parser) concurrently() ast.Expr {
-	kw := p.next()
-	c := &ast.Concurrently{Kw: ast.Span{Start: kw.Start, End: kw.End}}
-	if p.at(token.Kind('(')) {
-		c.Opts = p.argList()
-	}
-	c.Open = ast.Span{Start: p.tok().Start, End: p.tok().End}
-	c.Body = p.block()
-	c.Close = ast.Span{Start: p.end() - 1, End: p.end()}
-	c.S = p.span(kw.Start)
-	return c
-}
-
-// spawn parses `spawn expr` (the operand binds like throw's) or `spawn { .. }`.
-func (p *Parser) spawn() ast.Expr {
-	kw := p.next()
-	s := &ast.Spawn{Kw: ast.Span{Start: kw.Start, End: kw.End}}
-	if p.at(token.Kind('{')) {
-		s.Open = ast.Span{Start: p.tok().Start, End: p.tok().End}
-		s.Body = p.block()
-		s.Close = ast.Span{Start: p.end() - 1, End: p.end()}
-	} else {
-		s.Expr = p.exprBP(bpThrow)
-	}
-	s.S = p.span(kw.Start)
-	return s
 }

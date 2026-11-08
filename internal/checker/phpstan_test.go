@@ -214,6 +214,7 @@ func TestPHPStanParity(t *testing.T) {
 
 // skipParity are the golden files PHPStan cannot judge, with the reason.
 var skipParity = map[string]string{
+	"concurrency-withdrawn.phn": "syntax that left the language (P1001), which neither PHP nor the emitter reads",
 	"library-guards.phn": "PHPStan runs on one PHP: on 8.5 the 8.6 side of each version guard does not exist " +
 		"(unknown symbols, PHP_VERSION_ID < 80600 always true), on 8.6 the 8.5 side is dead code",
 }
@@ -262,7 +263,7 @@ func compileForParity(t *testing.T, path string, src []byte) []byte {
 // usesPhaenonSyntax reports whether a corpus file has constructs PHPStan
 // cannot parse and the parity run does not compile (the emit goldens do): type
 // parameters and arguments, is / as, type aliases, Closure signatures,
-// hyphenated type names, PHP 8.6 placeholders, concurrency blocks.
+// hyphenated type names, PHP 8.6 placeholders.
 func usesPhaenonSyntax(src []byte) bool {
 	f, err := parser.Parse(src, lexer.ModePhaenon)
 	if err != nil {
@@ -272,7 +273,7 @@ func usesPhaenonSyntax(src []byte) bool {
 	for _, s := range f.Stmts {
 		ast.Inspect(s, func(n ast.Node) bool {
 			switch n := n.(type) {
-			case *ast.TypeParam, *ast.IsExpr, *ast.AsExpr, *ast.TypeAlias, *ast.ClosureType, *ast.TupleType, *ast.Concurrently, *ast.Spawn:
+			case *ast.TypeParam, *ast.IsExpr, *ast.AsExpr, *ast.TypeAlias, *ast.ClosureType, *ast.TupleType:
 				found = true
 			case *ast.Placeholder:
 				found = true // PHP 8.6 syntax, which the parity PHPStan (2.2) does not parse

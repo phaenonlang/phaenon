@@ -28,9 +28,8 @@ func TestStdlibPackagePaths(t *testing.T) {
 		t.Errorf("Stdlib() compiles\n%v\nwant\n%v", got, want)
 	}
 	for stub, want := range map[string]string{
-		"runtime/Debug/LineMap.phn": "Debug/LineMap.php",
-		"concurrent/Scope.phn":      "Scope.php",
-		"concurrent/amp/Amp.php":    "amp/Amp.php",
+		"runtime/Debug/LineMap.phn":                  "Debug/LineMap.php",
+		"runtime/Debug/Monolog/LineMapProcessor.phn": "Debug/Monolog/LineMapProcessor.php",
 	} {
 		if got := packagePath(stub); got != want {
 			t.Errorf("packagePath(%q) = %q, want %q", stub, got, want)
@@ -55,27 +54,6 @@ func TestRuntimePackageFresh(t *testing.T) {
 		got, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil || !bytes.Equal(got, want) {
 			t.Errorf("%s is stale or missing in the runtime package: run `phn stdlib --out ../runtime/src`", name)
-		}
-	}
-}
-
-// TestConcurrentPackageFresh compares the compiled Scope.php with the copy
-// the phaenon/concurrent package ships in the sibling checkout:
-// `phn stdlib --concurrent-out ../concurrent/src` materialises it. Skipped
-// when the checkout is absent.
-func TestConcurrentPackageFresh(t *testing.T) {
-	dir := filepath.Join("..", "..", "..", "concurrent", "src")
-	if _, err := os.Stat(dir); err != nil {
-		t.Skip("no ../concurrent checkout")
-	}
-	compiled, err := Concurrent()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, want := range compiled {
-		got, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil || !bytes.Equal(got, want) {
-			t.Errorf("%s is stale or missing in the concurrent package: run `phn stdlib --concurrent-out ../concurrent/src`", name)
 		}
 	}
 }

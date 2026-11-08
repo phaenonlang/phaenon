@@ -408,7 +408,7 @@ func yields(e ast.Expr) bool {
 		switch n.(type) {
 		case *ast.Yield, *ast.YieldFrom:
 			found = true
-		case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl, *ast.Concurrently, *ast.Spawn:
+		case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl:
 			return false
 		}
 		return !found

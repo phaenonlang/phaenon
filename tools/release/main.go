@@ -19,10 +19,10 @@
 // The release PR's workflow (release-checksums.yml) runs the first and
 // commits the checksums; release.yml runs the second on the merged release
 // PR before the release is tagged and published. Both keep the lockstep of
-// design/tooling.md §3.4: composer.json requires phaenon/runtime, and
-// suggests phaenon/concurrent, at the release's minor version, and the main
-// line's branch alias names that minor version (dev-main is X.Y.x-dev),
-// which the first writes and the second checks.
+// design/tooling.md §3.4: composer.json requires phaenon/runtime at the
+// release's minor version, and the main line's branch alias names that
+// minor version (dev-main is X.Y.x-dev), which the first writes and the
+// second checks.
 package main
 
 import (
@@ -76,12 +76,12 @@ type checksums struct {
 
 const checksumsPath = "composer/checksums.json"
 
-// lockstep finds the version constraints of the runtime packages in
-// composer.json: the requirement and the suggestion's leading constraint.
-var lockstep = regexp.MustCompile(`("phaenon/(?:runtime|concurrent)":\s*")(\d+\.\d+\.\*)`)
+// lockstep finds the version constraint of the runtime package in
+// composer.json's requirements.
+var lockstep = regexp.MustCompile(`("phaenon/runtime":\s*")(\d+\.\d+\.\*)`)
 
 // branchAlias finds the main line's alias in composer.json, which moves to
-// the release's minor version with the constraints.
+// the release's minor version with the constraint.
 var branchAlias = regexp.MustCompile(`("dev-main":\s*")(\d+\.\d+\.x-dev)`)
 
 var toolchainLine = regexp.MustCompile(`(?m)^toolchain (go\d+\.\d+\.\d+)$`)

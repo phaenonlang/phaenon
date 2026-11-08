@@ -311,12 +311,12 @@ func (p *Parser) statement() ast.Stmt {
 		if p.mode == lexer.ModePhaenon && p.atString1() {
 			return p.typeAlias(nil)
 		}
-	case token.T_CONCURRENTLY:
+	case token.T_STRING:
 		// A block statement needs no semicolon after its brace, like any
-		// block; a `concurrently(...)` call falls through to the expression
+		// block; a `concurrently(...)` call goes on to the expression
 		// statement below.
 		if p.concurrentlyAhead() {
-			e := p.concurrently()
+			e := p.withdrawn()
 			p.accept(token.Kind(';'))
 			return &ast.ExprStmt{S: p.span(start), Doc: doc, Expr: e}
 		}

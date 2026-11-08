@@ -13,11 +13,11 @@ import (
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
-// superglobals are always defined arrays. $argv and $argc are among them
-// for a script's top level; see localArgs.
-var superglobals = map[string]bool{
-	"GLOBALS": true, "_SERVER": true, "_GET": true, "_POST": true, "_FILES": true,
-	"_COOKIE": true, "_SESSION": true, "_REQUEST": true, "_ENV": true, "argv": true, "argc": true,
+// superglobal reports the variables that are always defined: PHP's
+// superglobals (ast.IsSuperglobal), and $argv and $argc for a script's top
+// level; see localArgs.
+func superglobal(name string) bool {
+	return ast.IsSuperglobal(name) || name == "argv" || name == "argc"
 }
 
 // localArgs reports whether $argv or $argc names a variable the code itself
@@ -142,12 +142,8 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 		return x.closure(e, env, expected)
 	case *ast.ArrowFunc:
 		return x.arrowFunc(e, env, expected)
-	case *ast.Concurrently:
-		// It rethrows the first failure of its tasks.
-		defer x.implicitThrow()
-		return x.concurrently(e, env, true)
-	case *ast.Spawn:
-		return x.spawn(e, env)
+	case *ast.Withdrawn:
+		return x.withdrawn(e, env)
 	case *ast.Match:
 		return x.match(e, env, expected)
 	case *ast.Yield:
@@ -244,7 +240,7 @@ func (x *fnCtx) variable(v *ast.Variable, env *state, lenient bool) types.Type {
 		}
 		return x.thisType
 	}
-	if superglobals[v.Name] && !localArgs(v.Name, env) {
+	if superglobal(v.Name) && !localArgs(v.Name, env) {
 		if v.Name == "argc" {
 			return types.TInt
 		}
@@ -1255,7 +1251,7 @@ func (x *fnCtx) undefinedRoot(e ast.Expr, env *state) bool {
 		case *ast.Paren:
 			e = n.Expr
 		case *ast.Variable:
-			if n.Name == "this" || superglobals[n.Name] {
+			if n.Name == "this" || superglobal(n.Name) {
 				return false
 			}
 			_, defined := env.get(n.Name)
@@ -2029,7 +2025,6 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		return vt
 	}
 	if e.Op == token.Kind('=') {
-		x.spawnEscapes(e, env)
 		expected := x.targetType(e.Target, env)
 		vt := x.expr(e.Value, env, expected)
 		if lit, ok := e.Target.(*ast.ArrayLit); ok {
@@ -2629,6 +2624,31 @@ func (x *fnCtx) removed(span ast.Span, what, instead string) {
 	if x.file.Mode == lexer.ModePhaenon {
 		x.report(span, P1001, "%s is not available in Phaenon; use %s", what, instead)
 	}
+}
+
+// withdrawn reports a `concurrently` block or a `spawn`, syntax that left
+// the language (P1001; design/roadmap.md D25, concurrency.md §17). The code
+// inside is checked as the closure the block compiled to, and what the
+// body assigned, like the construct's value, has the error type afterwards:
+// the rewrite to amp is the one finding.
+func (x *fnCtx) withdrawn(e *ast.Withdrawn, env *state) types.Type {
+	x.report(e.Kw, P1001, "`concurrently` blocks and `spawn` left the language (roadmap D25, concurrency.md §17); write amp's async() and await()")
+	x.argsOnly(e.Opts, env)
+	if e.Expr != nil {
+		x.expr(e.Expr, env, nil)
+		return types.TError
+	}
+	c := x.child(false)
+	c.generator = bodyHasYield(e.Body)
+	cenv := env.clone()
+	cenv.dead = false
+	c.stmts(e.Body, cenv)
+	for name, info := range cenv.vars {
+		if outer, ok := env.get(name); !ok || !types.Equal(outer.t, info.t) {
+			env.set(name, types.TError)
+		}
+	}
+	return types.TError
 }
 
 // arrayPlus types `$a + $b` on arrays: the left operand's entries, then the

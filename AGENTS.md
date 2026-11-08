@@ -20,7 +20,6 @@ The other repositories are sibling checkouts beside this one, reached as `../<na
 | **phaenon** | `.` | `phaenonlang/phaenon` | The compiler `phn`: lexer, parser, checker, emitter, migrate; embedded PHP signatures | [Build and test](#build-and-test) |
 | **design** | `../design` | `phaenonlang/design` | The language design and every decision: `language-overview.md` (scope), `generics.md` (decisions §11), `checker.md` (decisions §9, open §10), `roadmap.md` (decisions D1–D8, milestones M0–M7, working method §4) | Markdown only |
 | **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `Phaenon\Debug`, the line map reader (`LineMap`), a Monolog processor and a Sentry integration that point production errors at `.phn` positions (`../design/line-map.md` §4.3); `src/` is compiled from `stdlib/runtime/**/*.phn` | `composer install`, `composer test`, `composer stan` |
-| **concurrent** | `../concurrent` | `phaenonlang/concurrent` | Composer package `phaenon/concurrent`: `\Phaenon\Concurrent\Scope` behind `concurrently { }` and `spawn`, on amp v3 / Revolt; `src/Scope.php` is compiled from `stdlib/concurrent/Scope.phn` here | `composer install`, `composer test`, `composer stan` |
 | **jetbrains** | `../jetbrains` | `phaenonlang/jetbrains` | PhpStorm plugin: `.phn` read as PHP code without the open tag (Kotlin, Gradle); `phn lsp`'s diagnostics and build on save; Reformat Code ends with `phn fmt --stdin` | `./gradlew test` (`PHAENON_PHN=bin/phn` of this repo for the layout tests), `./gradlew buildPlugin` |
 | **vscode** | `../vscode` | `phaenonlang/vscode` | VS Code extension (TypeScript): the TextMate grammar, `source.php` plus injections for Phaenon's syntax (the PhpStorm plugin's TextMate bundle copies it); one `phn lsp` per project with §6.1's whole list; build, check and watch as tasks; `phn trace` of the selection or the terminal | `npm install`, `npm test` (`PHAENON_TREES` for whole trees), `PHAENON_PHN=../phaenon/bin/phn npm run test:e2e`, `npm run package` (`.vsix`) |
 | **website** | `../website` | `phaenonlang/website` | phaenon.dev: the landing page, the playground and the compiler's release binaries as public, immutable downloads under `/releases/{version}/{file}` (`tooling.md` §3.2), uploaded from each release once `release.yml` sends it the tag | its README |
@@ -35,7 +34,7 @@ output. `../design/roadmap.md` §3 names the milestones and what each one brings
 
 | Question | Look in |
 |---|---|
-| What the language is, and will be | `../design/language-overview.md`, then the feature's doc (`functions.md` for `fun` and closures in constant expressions, `concurrency.md` for `concurrently` and `spawn`) |
+| What the language is, and will be | `../design/language-overview.md`, then the feature's doc (`functions.md` for `fun` and closures in constant expressions) |
 | Why something is the way it is | The decision sections: `roadmap.md` §1, `checker.md` §9, `generics.md` §11 — they win over the draft text above them |
 | Milestone status and what is next | `../design/roadmap.md` §3 |
 | Open questions and deferred work | `../design/roadmap.md` §6, `checker.md` §10, `tooling.md` §13; the repository's issues |
@@ -68,7 +67,7 @@ internal/trace        `phn trace`: positions in compiled files → `.phn` positi
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
 internal/playground   one file checked and compiled in memory, the embedded stdlib alone: what cmd/phn-wasm answers (design/tooling.md §3.6)
 internal/conformance  suites over the php-src corpus with `php` as the oracle
-stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime and phaenon/concurrent sources (.phn), the amp/Revolt declarations;
+stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime sources (.phn);
                       suggested/: the Monolog and Sentry API the runtime's Debug integrations are checked against, loaded only by the stdlib's own programs
 stdlib/gen            generator of stdlib/php-src (the newest release branch's stubs), versions_gen.go (the release each symbol came in) and constants.php
 internal/distribution tests of the phaenon/phn Composer plugin under a real Composer (PHAENON_COMPOSER)
@@ -149,14 +148,13 @@ org map above and their READMEs.
 
 `phn` itself: `phn build|check|fix|fmt|lsp|watch|migrate|stdlib|trace|lex|print` — run `phn` without arguments for usage; the
 README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`, or, through the `phaenon/phn` plugin, this checkout's `bin/phn` (`go build -o bin/phn ./cmd/phn`; `PHN_BINARY` names another). `phn stdlib` writes the
-runtime package (`--out ../runtime/src`) and the concurrent package (`--concurrent-out
-../concurrent/src`) from `stdlib/runtime/**/*.phn` (a subdirectory there is one in `src/`:
-`Debug/LineMap.phn` → `src/Debug/LineMap.php`) and `stdlib/concurrent/Scope.phn`; the tests
-`TestRuntimePackageFresh` and `TestConcurrentPackageFresh` fail when a checkout is stale. They
-look for the checkouts beside the repository root (`../../../<repo>` from their package) and skip
-when there are none, as in a git worktree kept elsewhere: there, `phn stdlib … --check` with the
-sibling paths does the same check. `phn stdlib` writes and checks the files that have a source and
-removes none: a source deleted here is deleted from the package by hand.
+runtime package (`--out ../runtime/src`) from `stdlib/runtime/**/*.phn` (a subdirectory there is
+one in `src/`: `Debug/LineMap.phn` → `src/Debug/LineMap.php`); the test `TestRuntimePackageFresh`
+fails when the checkout is stale. It looks for the checkout beside the repository root
+(`../../../runtime` from its package) and skips when there is none, as in a git worktree kept
+elsewhere: there, `phn stdlib --out ../runtime/src --check` does the same check. `phn stdlib`
+writes and checks the files that have a source and removes none: a source deleted here is deleted
+from the package by hand.
 
 ## How work is done
 
@@ -223,7 +221,7 @@ removes none: a source deleted here is deleted from the package by hand.
   subject`, the scope a package or area (`feat(checker):`, `fix(emit):`, `docs(design):`), `!` for
   a breaking change to the language or the CLI, and a body that says what changed and why. **No
   attribution lines, no `Co-Authored-By`, no "Generated with"** — the repositories are open
-  source. The same rule holds in `design`, `runtime`, `concurrent`, `jetbrains` and `vscode`.
+  source. The same rule holds in `design`, `runtime`, `jetbrains` and `vscode`.
 - **A PR is squash-merged, so its title becomes the commit on `main` that release-please reads** to
   version the next release and write `CHANGELOG.md`: the title is a Conventional Commit header whose
   release impact (`!` or a `BREAKING CHANGE:` footer, then `feat`, then `fix` and `revert`, then the

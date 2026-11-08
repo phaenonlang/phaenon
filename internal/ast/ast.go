@@ -368,26 +368,17 @@ type (
 		ReturnType TypeExpr
 		Body       Expr
 	}
-	// Concurrently is `concurrently (opts) { .. }` (design/concurrency.md
-	// §4.1): an expression whose value is what `return` inside it returns;
-	// the tasks spawned in its body are joined when it ends.
-	Concurrently struct {
-		S     Span
-		Kw    Span     // the keyword
-		Opts  *ArgList // timeout:, cancellation:; nil without options
-		Open  Span     // the `{`
-		Body  []Stmt
-		Close Span // the `}`
-	}
-	// Spawn is `spawn expr` or `spawn { .. }`: a task of the enclosing
-	// concurrently block, evaluating to its Amp\Future handle.
-	Spawn struct {
-		S     Span
-		Kw    Span
-		Expr  Expr // nil for the block form
-		Open  Span
-		Body  []Stmt
-		Close Span
+	// Withdrawn is syntax that left the language and is parsed only so that
+	// the checker can name it (P1001): a `concurrently (opts) { .. }` block,
+	// `spawn expr` or `spawn { .. }` (design/roadmap.md D25, concurrency.md
+	// §17). The emitter refuses it.
+	Withdrawn struct {
+		S    Span
+		Kw   Span     // the word
+		Name string   // the word as written: concurrently or spawn
+		Opts *ArgList // a block's options; nil without
+		Body []Stmt   // a block's statements, when Expr is nil
+		Expr Expr     // spawn's operand; nil for a block
 	}
 	// Match is match(x) { .. }.
 	Match struct {
@@ -491,9 +482,8 @@ func (*Include) exprNode()             {}
 func (*Eval) exprNode()                {}
 func (*Closure) exprNode()             {}
 func (*ArrowFunc) exprNode()           {}
+func (*Withdrawn) exprNode()           {}
 func (*Match) exprNode()               {}
-func (*Concurrently) exprNode()        {}
-func (*Spawn) exprNode()               {}
 func (*Yield) exprNode()               {}
 func (*YieldFrom) exprNode()           {}
 func (*Throw) exprNode()               {}
@@ -543,9 +533,8 @@ func (n *Eval) Span() Span                { return n.S }
 func (n *Closure) Span() Span             { return n.S }
 func (n *ClosureUse) Span() Span          { return n.S }
 func (n *ArrowFunc) Span() Span           { return n.S }
+func (n *Withdrawn) Span() Span           { return n.S }
 func (n *Match) Span() Span               { return n.S }
-func (n *Concurrently) Span() Span        { return n.S }
-func (n *Spawn) Span() Span               { return n.S }
 func (n *MatchArm) Span() Span            { return n.S }
 func (n *Yield) Span() Span               { return n.S }
 func (n *YieldFrom) Span() Span           { return n.S }
@@ -1174,3 +1163,14 @@ func (a *ArgList) Partial() bool {
 // Closure reports whether the call creates a closure instead of calling:
 // a first-class callable or a partial application.
 func (a *ArgList) Closure() bool { return a != nil && (a.FirstClassCallable || a.Partial()) }
+
+// IsSuperglobal reports whether $name is one of PHP's superglobals, the
+// arrays every scope has without declaring them ($GLOBALS, $_SERVER, …):
+// no closure captures them, and PHP forbids them in use().
+func IsSuperglobal(name string) bool {
+	switch name {
+	case "GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV":
+		return true
+	}
+	return false
+}
