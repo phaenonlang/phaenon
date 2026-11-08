@@ -1218,7 +1218,7 @@ func (l *lowering) isExpr(n *ast.IsExpr, sc *scope) error {
 	if err != nil {
 		return err
 	}
-	return l.writeTest(n, n.Expr, rec.Cond, rec.Prec, sc)
+	return l.writeTest(n, n.Expr, "is", rec.Cond, rec.Prec, sc)
 }
 
 // asExpr writes `$x as T` as `test ? $x : throw new \TypeError(…)`, PHP
@@ -1228,11 +1228,12 @@ func (l *lowering) asExpr(n *ast.AsExpr, sc *scope) error {
 	if err != nil {
 		return err
 	}
-	fail := "null"
+	op, fail := "as?", "null"
 	if !n.Nullable {
+		op = "as"
 		fail = "throw new \\TypeError(" + program.PHPString("expected "+rec.Expected+", got ") + " . \\get_debug_type(" + program.TestOperand + "))"
 	}
-	return l.writeTest(n, n.Expr, rec.Cond+" ? "+program.TestOperand+" : "+fail, program.PrecTernary, sc)
+	return l.writeTest(n, n.Expr, op, rec.Cond+" ? "+program.TestOperand+" : "+fail, program.PrecTernary, sc)
 }
 
 // test is the checker's lowering of an `is` or `as`.
@@ -1247,11 +1248,13 @@ func (l *lowering) test(n ast.Expr) (*program.Test, error) {
 	return rec, nil
 }
 
-// writeTest replaces node with text, program.TestOperand in it standing
-// for the operand, in parentheses when the place needs them. An operand
-// written once keeps its source and its own lowering; one written more
-// than once is a variable or a property read (P3012), copied as it is.
-func (l *lowering) writeTest(node, operand ast.Expr, text string, prec program.Prec, sc *scope) error {
+// writeTest replaces node, the test op, with text, program.TestOperand in
+// it standing for the operand, in parentheses when the place needs them.
+// An operand written once keeps its source and its own lowering; one
+// written more than once is a variable or a property read, copied as it
+// is — anything else is refused, as the checker refused it (P3012), even
+// where the build goes on despite the findings.
+func (l *lowering) writeTest(node, operand ast.Expr, op, text string, prec program.Prec, sc *scope) error {
 	if prec < l.slot(node) || prec == program.PrecAnd && l.orOperand[node] {
 		text = "(" + text + ")"
 	}
@@ -1263,6 +1266,9 @@ func (l *lowering) writeTest(node, operand ast.Expr, text string, prec program.P
 		}
 		l.rewrite(ast.Span{Start: os.End, End: node.Span().End}, text[i+len(program.TestOperand):])
 		return l.walk(operand, sc)
+	}
+	if !program.ReadsTwice(operand) {
+		return l.errorf(node, "the operand of `%s` is evaluated twice; assign it to a variable first", op)
 	}
 	for {
 		p, ok := operand.(*ast.Paren)

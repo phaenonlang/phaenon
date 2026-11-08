@@ -780,59 +780,6 @@ func render(c *check) (string, program.Prec) {
 	return strings.Join(parts, sep), prec
 }
 
-// ------------------------------------------------------------------ the operand
-
-// readsTwice reports an operand a test may write twice (P3012): a
-// variable, a property or static property fetch, a constant-index read of
-// one of these, or a chain of them — never a call, a new, an operator or an
-// assignment, which the second reading would run again. The nullsafe
-// operator is one: after the test, PHPStan knows the chain is not null and
-// reports the second `?->`.
-func readsTwice(e ast.Expr) bool {
-	switch e := e.(type) {
-	case *ast.Paren:
-		return readsTwice(e.Expr)
-	case *ast.Variable:
-		return true
-	case *ast.PropertyFetch:
-		if e.NullSafe {
-			return false
-		}
-		switch e.Name.(type) {
-		case *ast.Ident, *ast.Variable:
-			return readsTwice(e.Object)
-		}
-	case *ast.StaticPropertyFetch:
-		if _, ok := e.Name.(*ast.Variable); !ok {
-			return false
-		}
-		if _, ok := e.Class.(*ast.Name); ok {
-			return true
-		}
-		return readsTwice(e.Class)
-	case *ast.Index:
-		return e.Index != nil && constantIndex(e.Index) && readsTwice(e.Array)
-	}
-	return false
-}
-
-func constantIndex(e ast.Expr) bool {
-	switch e := e.(type) {
-	case *ast.Paren:
-		return constantIndex(e.Expr)
-	case *ast.IntLit, *ast.StringLit, *ast.Name:
-		return true
-	case *ast.Unary:
-		_, lit := e.Expr.(*ast.IntLit)
-		return lit && (e.Op == '-' || e.Op == '+')
-	case *ast.ClassConstFetch:
-		_, name := e.Class.(*ast.Name)
-		_, ident := e.Name.(*ast.Ident)
-		return name && ident
-	}
-	return false
-}
-
 // ------------------------------------------------------------------ the test
 
 // testSeen accumulates, per test, the operand types of every visit: a
@@ -842,10 +789,9 @@ type testSeen struct{ t, nt types.Type }
 
 // lowerTest lowers the test of node (an `is`, `as` or `as?`) of operand
 // e against typ, records it for the emitter and reports P3011 and P3012.
-// t is the operand's type, nt what PHP guarantees of it; settled says the
-// checker found the test always true or always false (P2306). ok is false
-// when the type has no test.
-func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type, settled bool) (ok bool) {
+// t is the operand's type, nt what PHP guarantees of it. ok is false when
+// the type has no test.
+func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type) (ok bool) {
 	if x.c.testSeen == nil {
 		x.c.testSeen = map[ast.Expr]testSeen{}
 	}
@@ -865,8 +811,10 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, 
 	}
 	c, _, _, _, _ = x.simplify(c, testState{"": {t: nt}})
 	rec.Cond, rec.Prec = render(c)
+	// Reported whether or not the test is settled: `phn build
+	// --emit-on-error` writes the test all the same.
 	twice := strings.Count(rec.Cond, program.TestOperand) > 1 || op != "is"
-	if twice && !settled && !readsTwice(e) {
+	if twice && !program.ReadsTwice(e) {
 		x.report(e.Span(), P3012, "the operand of `%s` is evaluated twice; assign it to a variable first", op)
 	}
 	return true

@@ -158,3 +158,32 @@ func TestIsAsBehaviour(t *testing.T) {
 		t.Logf("compiled:\n%s", out)
 	}
 }
+
+// TestIsAsTwiceRefused: an operand a test writes more than once must read
+// the same twice (P3012). The checker reports it whether or not the test is
+// settled, and the emitter refuses to write such a test even where the
+// build goes on despite the findings (phn build --emit-on-error), rather
+// than call the function three times.
+func TestIsAsTwiceRefused(t *testing.T) {
+	src := []byte("fun f(): int\n{\n    return \\strlen('a') as int;\n}\n\nfun g(): bool\n{\n    return \\strlen('a') is int|string;\n}\n")
+	p := program.New()
+	if err := p.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := p.AddFile("twice.phn", src, lexer.ModePhaenon, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[int]bool{}
+	for _, d := range checker.New(p, checker.Options{}).Check() {
+		if d.Code == checker.P3012.ID {
+			found[d.Line] = true
+		}
+	}
+	if !found[3] || !found[8] {
+		t.Errorf("P3012 on lines %v, want 3 and 8", found)
+	}
+	if out, err := File(src, Options{SourceName: "twice.phn", StrictTypes: true, Program: p, File: f}); err == nil || !strings.Contains(err.Error(), "evaluated twice") {
+		t.Errorf("compiled despite the operand read twice (%v):\n%s", err, out)
+	}
+}

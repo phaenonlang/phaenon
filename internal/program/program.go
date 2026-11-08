@@ -524,6 +524,57 @@ type Test struct {
 // TestOperand stands for the operand in a Test's Cond.
 const TestOperand = "\x00"
 
+// ReadsTwice reports an operand a test may write twice (design/generics.md
+// §11.4, P3012): a variable, a property or static property fetch, a
+// constant-index read of one of these, or a chain of them — never a call, a
+// new, an operator or an assignment, which the second reading would run
+// again. The nullsafe operator is one: after the test, PHPStan knows the
+// chain is not null and reports the second `?->`.
+func ReadsTwice(e ast.Expr) bool {
+	switch e := e.(type) {
+	case *ast.Paren:
+		return ReadsTwice(e.Expr)
+	case *ast.Variable:
+		return true
+	case *ast.PropertyFetch:
+		if e.NullSafe {
+			return false
+		}
+		switch e.Name.(type) {
+		case *ast.Ident, *ast.Variable:
+			return ReadsTwice(e.Object)
+		}
+	case *ast.StaticPropertyFetch:
+		if _, ok := e.Name.(*ast.Variable); !ok {
+			return false
+		}
+		if _, ok := e.Class.(*ast.Name); ok {
+			return true
+		}
+		return ReadsTwice(e.Class)
+	case *ast.Index:
+		return e.Index != nil && constantIndex(e.Index) && ReadsTwice(e.Array)
+	}
+	return false
+}
+
+func constantIndex(e ast.Expr) bool {
+	switch e := e.(type) {
+	case *ast.Paren:
+		return constantIndex(e.Expr)
+	case *ast.IntLit, *ast.StringLit, *ast.Name:
+		return true
+	case *ast.Unary:
+		_, lit := e.Expr.(*ast.IntLit)
+		return lit && (e.Op == '-' || e.Op == '+')
+	case *ast.ClassConstFetch:
+		_, name := e.Class.(*ast.Name)
+		_, ident := e.Name.(*ast.Ident)
+		return name && ident
+	}
+	return false
+}
+
 // PHPString is s as a single-quoted PHP string literal.
 func PHPString(s string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
