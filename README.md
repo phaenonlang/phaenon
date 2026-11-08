@@ -1,6 +1,8 @@
 # Phaenon
 
-A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for PHP".
+A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for PHP". The compiled
+output depends on nothing but PHP (`design/roadmap.md` D24): the compiler adds a header,
+`declare(strict_types=1)` and docblocks, and nothing the programmer did not write.
 
 - `phn` — the compiler (this repository, Go)
 - `phaenon/debug` — opt-in source positions in production: the line map read for Monolog and

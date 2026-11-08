@@ -2,8 +2,11 @@
 
 Phaenon is a typed dialect of PHP 8.5+ that compiles to idiomatic PHP ("TypeScript for PHP"):
 the `.phn` sources of a Composer project compile into a sibling output directory (`src/` →
-`.src/`, named in `phaenon.json`) holding the PHP you would have written by hand. The type checker is the product. This repository is the compiler, `phn`, written in Go.
-Pre-alpha; MIT-licensed; GitHub org `phaenonlang`.
+`.src/`, named in `phaenon.json`) holding the PHP you would have written by hand. That output
+depends on nothing but PHP (`../design/roadmap.md` D24): the compiler adds a header,
+`declare(strict_types=1)` and docblocks, and nothing the programmer did not write. The type
+checker is the product. This repository is the compiler, `phn`, written in Go. Pre-alpha;
+MIT-licensed; GitHub org `phaenonlang`.
 
 **This repository is the entry point for agents.** Start here; the map below says where everything
 else lives. The language design and every decision are in the `design` repository. Milestone
