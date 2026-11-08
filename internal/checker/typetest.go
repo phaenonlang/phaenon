@@ -262,14 +262,6 @@ func (b *testBuilder) named(t *ast.NamedType, path []int) *check {
 		}
 		lower := strings.ToLower(name)
 		switch lower {
-		case "self", "static", "parent":
-		default:
-			if ar, ok := keywordArity[lower]; ok && (given > ar[1] || given < ar[0] && lower != "list") {
-				b.failed = true // P3001, reported with the type
-				return nil
-			}
-		}
-		switch lower {
 		case "int", "float", "string", "bool", "object", "callable", "scalar", "numeric", "resource":
 			return fn("is_"+lower, path, x.res.Native(t))
 		case "number":
@@ -292,10 +284,7 @@ func (b *testBuilder) named(t *ast.NamedType, path []int) *check {
 			}
 			return listTest(path)
 		case "array", "map":
-			if args := x.res.NativeArgs(t.TypeArgs); lower == "map" && !mapKeyOK(args[0], x) {
-				b.failed = true // P2518, reported with the type
-				return nil
-			} else if !anyEntries(args) {
+			if !anyEntries(x.res.NativeArgs(t.TypeArgs)) {
 				return b.cannot(t.S, quoted(b.src(t.S)), whyArray)
 			}
 			return fn("is_array", path, anyArray)
@@ -330,21 +319,6 @@ func (b *testBuilder) named(t *ast.NamedType, path []int) *check {
 		accepts = resolved // self or static outside a class: object, reported
 	}
 	return instanceOf(b.src(t.Name.S), path, accepts)
-}
-
-// mapKeyOK reports a map key the checker accepts (P2518 otherwise).
-func mapKeyOK(k types.Type, x *fnCtx) bool {
-	if k == nil || types.IsMixed(k) {
-		return true
-	}
-	if p, ok := k.(types.Param); ok {
-		if p.Bound == nil {
-			return true
-		}
-		k = p.Bound
-	}
-	_, unknown := k.(types.Unknown)
-	return unknown || types.IsSubtype(k, types.TArrayKey, x.p())
 }
 
 func (b *testBuilder) whyArgs(class string, path []int) string {
@@ -816,9 +790,10 @@ type testSeen struct{ t, nt types.Type }
 
 // lowerTest lowers the test of node (an `is`, `as` or `as?`) of operand
 // e against typ, records it for the emitter and reports P3011 and P3012.
-// t is the operand's type, nt what PHP guarantees of it. The result is the
-// test as emitted, nil when the type has none.
-func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type) *check {
+// t is the operand's type, nt what PHP guarantees of it; typeOK says the
+// type itself drew no finding. The result is the test as emitted, nil
+// when the type has none.
+func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type, typeOK bool) *check {
 	if x.c.testSeen == nil {
 		x.c.testSeen = map[ast.Expr]testSeen{}
 	}
@@ -831,6 +806,9 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, 
 		x.c.file.Tests = map[ast.Expr]*program.Test{}
 	}
 	x.c.file.Tests[node] = rec
+	if !typeOK {
+		return nil // the type's own finding says what is wrong (P3001, P2518, …)
+	}
 	b := &testBuilder{x: x, op: op, refined: t}
 	c := b.build(typ, nil)
 	if c == nil || b.failed {

@@ -375,3 +375,13 @@ function elseBranch((int, string)|int $t, list<int>|int $l, object|int $o, (int,
 
     return $n + $u->id; // a false === null leaves the User
 }
+
+// Only the names the operand is tested against may be a bare list: a type
+// argument keeps list's arity (P3001), and a class name is a member of a
+// tuple too.
+function arity(mixed $m): bool
+{
+    return $m is Box<list> // want P3001
+        || $m is class<list> // want P3001
+        || $m is (list, class, int);
+}

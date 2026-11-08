@@ -106,7 +106,7 @@ func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 			}
 		}
 		if ar, ok := keywordArity[lower]; ok {
-			if lower == "list" && given == 0 && x.inTest {
+			if lower == "list" && given == 0 && x.testedNames[t] {
 				return // `is list`: list<mixed> (design/generics.md §11.4)
 			}
 			if given < ar[0] || given > ar[1] {
@@ -505,13 +505,21 @@ func (x *fnCtx) checkTypeAlias(a *ast.TypeAlias) {
 // ------------------------------------------------------------------ is / as
 
 // testType resolves the right-hand side of `is` / `as`, where a bare
-// `list` is list<mixed>. A map with a mixed key is the array PHP's
-// is_array() narrows to: every key of a PHP array is an int or a string.
-// narrow is what a passing test narrows the operand to (testNarrowing).
-func (x *fnCtx) testType(t ast.TypeExpr) (target, narrow types.Type) {
-	x.inTest = true
+// `list` the operand is tested against is list<mixed>. A map with a mixed
+// key is the array PHP's is_array() narrows to: every key of a PHP array
+// is an int or a string. narrow is what a passing test narrows the operand
+// to (testNarrowing); ok says the type drew no finding of its own.
+func (x *fnCtx) testType(t ast.TypeExpr) (target, narrow types.Type, ok bool) {
+	x.testedNames = testedNames(t, nil)
+	// A dry run on a list of its own tells whether the type has a finding,
+	// whichever pass of a loop this is (the findings are reported once).
+	diags, seen := x.c.diags, x.c.seen
+	x.c.diags, x.c.seen = nil, map[string]bool{}
 	x.checkTypeExpr(t)
-	x.inTest = false
+	ok = len(x.c.diags) == 0
+	x.c.diags, x.c.seen = diags, seen
+	x.checkTypeExpr(t)
+	x.testedNames = nil
 	target = types.MapDeep(x.res.Native(t), func(m types.Type) types.Type {
 		if a, ok := m.(types.Array); ok && types.IsMixed(a.Key) {
 			a.Key = types.TArrayKey
@@ -519,7 +527,35 @@ func (x *fnCtx) testType(t ast.TypeExpr) (target, narrow types.Type) {
 		}
 		return m
 	})
-	return target, testNarrowing(target, false)
+	return target, testNarrowing(target, false), ok
+}
+
+// testedNames are the named types an operand, or one of a tuple's members,
+// is tested against: the members of unions, intersections, ?T and tuples,
+// not type arguments (`Box<list>`, `class<list>`).
+func testedNames(t ast.TypeExpr, into map[*ast.NamedType]bool) map[*ast.NamedType]bool {
+	if into == nil {
+		into = map[*ast.NamedType]bool{}
+	}
+	switch t := t.(type) {
+	case *ast.NamedType:
+		into[t] = true
+	case *ast.NullableType:
+		testedNames(t.Type, into)
+	case *ast.UnionType:
+		for _, m := range t.Types {
+			testedNames(m, into)
+		}
+	case *ast.IntersectionType:
+		for _, m := range t.Types {
+			testedNames(m, into)
+		}
+	case *ast.TupleType:
+		for _, m := range t.Elems {
+			testedNames(m, into)
+		}
+	}
+	return into
 }
 
 // testNarrowing is what PHPStan narrows the operand of a passing test to on
@@ -593,7 +629,7 @@ func (x *fnCtx) settles(t, nt, target types.Type) (always, never bool) {
 // isCond narrows on `$x is T`, exactly as instanceof does for classes.
 func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	t := x.expr(e.Expr, env, nil)
-	target, narrow := x.testType(e.Type)
+	target, narrow, typeOK := x.testType(e.Type)
 	x.condValueType = types.TBool
 	then, els = env.clone(), env.clone()
 	nt := x.nativeOr(e.Expr, t, env)
@@ -612,7 +648,7 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	case never:
 		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
 	}
-	c := x.lowerTest(e, e.Expr, e.Type, "is", t, nt, target)
+	c := x.lowerTest(e, e.Expr, e.Type, "is", t, nt, target, typeOK)
 	var nthen, nels types.Type
 	nold := x.nativeVar(e.Expr, env)
 	if nold != nil {
@@ -640,7 +676,7 @@ func (x *fnCtx) isType(e *ast.IsExpr, env *state) types.Type {
 // asExpr types `$x as T` (TypeError on failure) and `$x as? T` (null).
 func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	t := x.expr(e.Expr, env, nil)
-	target, narrow := x.testType(e.Type)
+	target, narrow, typeOK := x.testType(e.Type)
 	nt := x.nativeOr(e.Expr, t, env)
 	op := "as"
 	if e.Nullable {
@@ -653,7 +689,7 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	case never:
 		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
 	}
-	lowered := x.lowerTest(e, e.Expr, e.Type, op, t, nt, target) != nil
+	lowered := x.lowerTest(e, e.Expr, e.Type, op, t, nt, target, typeOK) != nil
 	result := narrow
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) && !never {
 		result = types.Intersect(t, narrow, x.p())

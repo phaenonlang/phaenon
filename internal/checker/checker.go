@@ -410,7 +410,6 @@ type fnCtx struct {
 	inConst      bool // checking a constant expression: an attribute argument, a constant, a default
 	constClosure bool // a closure inside a constant expression: static, capturing nothing (P2531)
 	nameOnly     bool // resolving a class name PHP does not load: X::class, instanceof X, catch (X)
-	inTest       bool // checking the type of an `is` or `as`, where a bare `list` is list<mixed>
 	inFinally    int  // depth of finally blocks around the statement being checked
 	// throwFrames collect the throw points of the try blocks and the body
 	// being checked, innermost last (design/tooling.md §9.1, throws.go);
@@ -443,6 +442,9 @@ type fnCtx struct {
 	// loopCond is set while a loop condition is evaluated: `while (true)`
 	// is idiomatic there and not an always-true finding.
 	loopCond bool
+	// testedNames are the names an `is` or `as` being checked tests its
+	// operand against, where a bare `list` is list<mixed> (testType).
+	testedNames map[*ast.NamedType]bool
 	// inScope lists the type parameters declared by the enclosing class
 	// and function; any other parameter met in a callee's signature is
 	// foreign and gets inferred at the call (as PHPStan does).
