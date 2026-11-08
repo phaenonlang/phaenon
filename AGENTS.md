@@ -132,7 +132,7 @@ PHPStan parity.
 | `PHAENON_COMPOSER` | `internal/distribution` | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects that install it alone; one of them builds `phn` and runs what it compiles |
 | `PHAENON_COMPOSER_PROJECT` | `TestComposer` (program) | A Composer project to exercise the vendor reader on |
 | `PHAENON_FMT_TREE` | `TestTree` (format) | Any Phaenon tree: each `.phn` must format, and to itself a second time (`-v` lists the files it would change) |
-| `PHAENON_LINEMAP_TREE` | `TestLineMapTree` (emit) | Any Phaenon tree: `TestLineMapProperty`'s invariant over every `.phn` in it |
+| `PHAENON_LINEMAP_TREE` | `TestLineMapTree` (emit) | Any Phaenon tree: `TestLineMapProperty`'s invariant over every `.phn` in it, and `TestOutputsDependOnPHPOnly`'s promise over every output (nothing under `Phaenon\`) |
 | `PHAENON_LINEMAP_OUT` | `TestLineMapTree` (emit) | A directory the compiled files of that tree are written to |
 | `PHAENON_LISTTYPES` | `TestListTypesMeasure` (`cmd/phn`) | Phaenon trees (each a `phaenon.json`'s directory, separated as `PATH` is) the `list-types` codemod is measured on |
 | `PHAENON_LISTTYPES_MIN` | `TestListTypesMeasure` | The floor, in percent, of declarations that must come back as written or narrower (0 by default) |
@@ -186,7 +186,8 @@ from the package by hand.
   lookup gives its source line. A position reported in compiled PHP goes through the map
   (`phn trace`), never by line number alone.
 - Emitted PHP must pass `php -l`, load under php (which links the classes it declares) and pass
-  PHPStan at level max.
+  PHPStan at level max, with nothing beside it: it names no class, function or constant under
+  `Phaenon\` (`TestOutputsDependOnPHPOnly`, `../design/roadmap.md` D24).
 
 ### Tests, fixtures, golden files
 

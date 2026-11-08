@@ -15,7 +15,9 @@ import (
 // TestLineMapTree runs the line map property over a project's sources:
 // PHAENON_LINEMAP_TREE names a directory of .phn files (a dogfood tree's
 // src), read with the Composer maps above it as phn build reads them. Every
-// file is compiled whatever the checker reports, as --emit-on-error does.
+// file is compiled whatever the checker reports, as --emit-on-error does,
+// and its output is held to TestOutputsDependOnPHPOnly's promise too: it
+// names nothing under Phaenon\ (design/roadmap.md D24).
 func TestLineMapTree(t *testing.T) {
 	root := os.Getenv("PHAENON_LINEMAP_TREE")
 	if root == "" {
@@ -61,6 +63,7 @@ func TestLineMapTree(t *testing.T) {
 		}
 		compiled++
 		checkLineMap(t, path, src, out, w)
+		expectPHPOnly(t, path, out)
 		if dir := os.Getenv("PHAENON_LINEMAP_OUT"); dir != "" {
 			rel, _ := filepath.Rel(root, path)
 			dst := filepath.Join(dir, strings.TrimSuffix(rel, ".phn")+".php")
@@ -68,5 +71,5 @@ func TestLineMapTree(t *testing.T) {
 			os.WriteFile(dst, out, 0o644)
 		}
 	}
-	t.Logf("%d of %d files compiled and checked", compiled, len(paths))
+	t.Logf("%d of %d files compiled, their maps and their dependencies checked", compiled, len(paths))
 }
