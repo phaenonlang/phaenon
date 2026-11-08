@@ -718,10 +718,11 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	c, untestable := x.lowerTest(e, e.Expr, e.Type, op, t, o.nt, target, typeOK, env)
 	lowered := c != nil
 	never := x.reportSettled(e.S, o, target, untestable)
-	result := narrow
+	result, kept := narrow, narrow
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) && !never {
 		// `$b as string` on bytes is the text the UTF-8 check let through.
 		result = types.Intersect(o.tt, narrow, x.p())
+		kept = x.keptAs(t, target, narrow)
 	}
 	if e.Nullable {
 		return types.Nullable(result)
@@ -730,16 +731,29 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 		return result
 	}
 	// `$x as T` throws unless $x is a T: after it, $x is one, as PHPStan
-	// reads `\is_int($x) ? $x : throw …`.
+	// reads `\is_int($x) ? $x : throw …`. A bytes operand stays bytes: the
+	// conversion types the result, and the value is the same bytes.
 	var nthen types.Type
 	if nold := x.nativeVar(e.Expr, env); nold != nil {
 		nthen = types.Intersect(nold, narrow, x.p())
 	}
-	x.narrowPathNative(env, e.Expr, result, nthen, true)
-	if !types.Equal(o.tt, t) {
-		keepBinary(env, e.Expr, t)
-	}
+	x.narrowPathNative(env, e.Expr, kept, nthen, true)
 	return result
+}
+
+// keptAs is what an `as` leaves of its operand of type t: the members the
+// test let through, a bytes member that passed as text kept as bytes.
+func (x *fnCtx) keptAs(t, target, narrow types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		text := asText(m, target)
+		if types.Equal(text, m) {
+			return types.Intersect(m, narrow, x.p())
+		}
+		if _, none := types.Intersect(text, narrow, x.p()).(types.Never); none {
+			return types.TNever
+		}
+		return m
+	})
 }
 
 // asFailure is what an `as` throws, as lowered: a TypeError, or a

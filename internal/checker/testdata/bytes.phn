@@ -162,7 +162,8 @@ function conversions(bytes $raw, bytes $data, ?bytes $maybe, ?bytes $absent, int
     takesBytes($raw); // the test changed no value: where the branches meet, the bytes are bytes
     $text = $data as string;
     takesString($text);
-    takesString($data); // `as` threw unless $data was text, as for any `as`
+    takesBytes($data); // the conversion types its result: $data is the same bytes
+    takesString($data); // want P2103 "bytes given"
     if ($maybe is string) {
         takesString($maybe);
     } else {
@@ -211,7 +212,10 @@ function takesText(string $s): string
 
 function nullable(?bytes $maybe): string
 {
-    return $maybe as string;
+    $text = $maybe as string;
+    takesBytes($maybe); // `as` threw on null: what is left is the bytes
+
+    return $text;
 }
 
 function either(int|bytes $either): string
