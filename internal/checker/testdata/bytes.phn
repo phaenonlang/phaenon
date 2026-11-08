@@ -247,6 +247,24 @@ function appended(bytes $b): bytes
     return $b; // want P2202 "returns non-empty-string|bytes"
 }
 
+final class Slot
+{
+    public mixed $value = null;
+}
+
+// A property that holds text or bytes on both sides holds them after the
+// meet; only the mix the meet itself makes is forgotten.
+function slotted(Slot $slot, string|bytes $x, string|bytes $y, bool $flag): string|bytes
+{
+    if ($flag) {
+        $slot->value = $x;
+    } else {
+        $slot->value = $y;
+    }
+
+    return $slot->value;
+}
+
 function nullable(?bytes $maybe): string
 {
     $text = $maybe as string;

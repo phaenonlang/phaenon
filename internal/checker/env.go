@@ -401,8 +401,9 @@ func join(a, b *state) *state {
 		if tb, ok := b.paths[k]; ok {
 			// A property or an offset seen as text on one side and as
 			// bytes on the other is the same value a UTF-8 test narrowed
-			// on one side: its declared type says what it is.
-			if u := types.MakeUnion(ta, tb); !textAndBytes(u) {
+			// on one side: its declared type says what it is. One that
+			// held both already on a side keeps what the sides say.
+			if u := types.MakeUnion(ta, tb); !textAndBytes(u) || textAndBytes(ta) || textAndBytes(tb) {
 				n.paths[k] = u
 			}
 		}
