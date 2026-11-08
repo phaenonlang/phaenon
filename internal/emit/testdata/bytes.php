@@ -6,11 +6,9 @@ declare(strict_types=1);
 
 namespace App;
 
-use Phaenon\Bytes;
-
 // bytes erases to string: the (bytes) cast disappears, PHP's functions
-// take bytes as they take strings, and \Phaenon\Bytes holds the checked
-// conversions (design/strings.md §2, §5).
+// take bytes as they take strings and are the conversions, and `as
+// string` is the checked one (design/strings.md §2, §5, §6).
 
 final class Token
 {
@@ -25,12 +23,17 @@ final class Token
 
     public static function fromHex(string $hex): self
     {
-        return new self(Bytes::fromHex($hex));
+        $secret = hex2bin($hex);
+        if ($secret === false) {
+            throw new \ValueError('not a hexadecimal string');
+        }
+
+        return new self($secret);
     }
 
     public function hex(): string
     {
-        return Bytes::hex($this->secret);
+        return bin2hex($this->secret);
     }
 
     public function matches(string $candidate): bool
@@ -42,7 +45,7 @@ final class Token
     {
         return hash('sha256', $this->secret, true)
             |> (fn (string $h) => substr($h, 0, 8))
-            |> Bytes::hex(...);
+            |> bin2hex(...);
     }
 }
 
@@ -58,7 +61,7 @@ function toBinary(string $raw): string
 
 function label(string $id): string
 {
-    return 'id-' . Bytes::hex($id) . ' (' . strlen($id) . ' bytes)';
+    return 'id-' . bin2hex($id) . ' (' . strlen($id) . ' bytes)';
 }
 
 /**
@@ -67,7 +70,14 @@ function label(string $id): string
  */
 function keys(array $keys): array
 {
-    return array_map(fn (string $k) => Bytes::base64($k, urlSafe: true), $keys);
+    return array_map(fn (string $k) => rtrim(strtr(base64_encode($k), '+/', '-_'), '='), $keys);
+}
+
+function fromBase64(string $b64): string
+{
+    $raw = base64_decode($b64, true);
+
+    return $raw === false ? throw new \ValueError('not base64') : $raw;
 }
 
 // `as string` checks that bytes are UTF-8 text and throws a ValueError
@@ -121,8 +131,8 @@ function frame(string $header, array $chunks): string
     return $header . $out;
 }
 
-// Written tags erase as the generated ones do (strings.md §5): with
-// `use Phaenon\Bytes;` above, a `bytes` left in a tag would be that class.
+// Written tags erase as the generated ones do (strings.md §5): a `bytes`
+// left in a tag would reach PHPStan as a class of the namespace.
 final class Archive
 {
     /** @var list<string> */
@@ -165,4 +175,4 @@ final class Archive
         return $from[0] ?? '';
     }
 }
-// phaenon-map v1 bytes.phn 1-6=1 7:1 64-67=58 68:58 111-113=101 114:101 159-162=146 163:147
+// phaenon-map v1 bytes.phn 1-6=1 7:1 67-70=61 71:61 121-123=111 124:111 169-172=156 173:157

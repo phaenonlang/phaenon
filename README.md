@@ -3,8 +3,7 @@
 A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for PHP".
 
 - `phn` — the compiler (this repository, Go)
-- `phaenon/runtime` — the PHP runtime package (the checked conversions of `\Phaenon\Bytes`, the
-  line map for Monolog and Sentry)
+- `phaenon/runtime` — the PHP runtime package (the line map for Monolog and Sentry)
 - [`phaenonlang/design`](https://github.com/phaenonlang/design) — the language design documents, a
   repository of their own: a path such as `design/checker.md` below is a file there
 
@@ -431,7 +430,7 @@ phn fmt --stdin                                       # Phaenon's layout of stan
 phn lsp                                               # the language server: diagnostics, hover, definition, completion, build on save
 phn watch [--no-build] [--interval D]                 # check and build the roots each time a file changes
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
-phn stdlib --out DIR [--check]                         # the compiled stdlib (Bytes, Debug/…), as phaenon/runtime ships it
+phn stdlib --out DIR [--check]                         # the compiled stdlib (Debug/…), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
 phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them
 phn trace [--root PREFIX=LOCAL]... [text...]  # positions in compiled files → .phn: text, workflow commands, XML reports on stdin

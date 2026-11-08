@@ -1,11 +1,9 @@
 namespace Bin;
 
-use Phaenon\Bytes;
-
-// bytes: binary data kept apart from text (design/strings.md §2, §5). The
-// overlay types PHP's producers and consumers, (bytes) retypes a string,
-// (string) is the unchecked way back, \Phaenon\Bytes holds the checked
-// conversions, and text never mixes with binary silently.
+// bytes: binary data kept apart from text (design/strings.md §2, §5, §6).
+// The overlay types PHP's producers and consumers, (bytes) retypes a
+// string, (string) is the unchecked way back, `as string` is the checked
+// one, and text never mixes with binary silently.
 
 function takesString(string $s): void
 {
@@ -56,17 +54,10 @@ function text(bytes $raw, string $name): void
     takesString((string) $raw);
     takesBytes((bytes) $name);
     takesBytes((bytes) 42); // want P2309
-    takesString(Bytes::hex($raw));
-    takesString(Bytes::base64($raw, urlSafe: true));
     takesInt(strlen($raw));
     takesBytes(substr($raw, 0, 16));
-    takesString(Bytes::text($raw));
-    takesString(Bytes::textLossy($raw));
     takesInt(ord($raw[0]));
-    takesBytes(Bytes::fromHex('00ff'));
-    takesBytes(Bytes::fromBase64('AP8'));
     takesBytes($raw . (bytes) $name);
-    takesBytes(Bytes::text($raw)); // want P2103
     $raw->upper(); // want P2105 "cannot call method upper() on bytes"
     $buf = (bytes) '';
     $buf .= $raw . $name->bytes(); // want P2105 "cannot call method bytes() on string"

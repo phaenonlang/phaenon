@@ -102,8 +102,8 @@ usage:
                                                            maps from the values they hold;
                                                            --php writes the target into phaenon.json
   phn stdlib [--out DIR] [--concurrent-out DIR] [--check]
-                                                           write the compiled phaenon/runtime sources (Bytes.php,
-                                                           Debug/LineMap.php, …) into DIR, the compiled
+                                                           write the compiled phaenon/runtime sources
+                                                           (Debug/LineMap.php, …) into DIR, the compiled
                                                            phaenon/concurrent package into the second
   phn trace [--root PREFIX=LOCAL]... [<text>...]           rewrite the positions in compiled files (stack traces,
                                                            PHPUnit, PHPStan --error-format=raw or github) into .phn

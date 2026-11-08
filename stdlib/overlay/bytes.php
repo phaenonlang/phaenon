@@ -2,9 +2,13 @@
 
 /**
  * Phaenon overlay: PHP's binary producers and consumers typed with bytes
- * (design/strings.md §2, §5). A producer returns bytes; a consumer that
+ * (design/strings.md §2, §5, §6). A producer returns bytes; a consumer that
  * works on text and binary alike takes string|bytes; one whose result is
- * binary when its input is binary says so with a conditional return.
+ * binary when its input is binary says so with a conditional return. These
+ * are the conversions between bytes and text: hex2bin() and
+ * base64_decode() decode text into bytes, bin2hex() and base64_encode()
+ * spell bytes out as text, mb_scrub() makes text of them by replacing what
+ * is not UTF-8, and `$b as string` is the checked conversion.
  */
 
 /**
