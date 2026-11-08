@@ -112,7 +112,7 @@ function maybeDecode(?string $payload): ?string
 
 function decodePresent(?string $payload): string
 {
-    return \is_string($payload) && \mb_check_encoding($payload, 'UTF-8') ? $payload : throw (\is_string($payload) ? new \ValueError('not valid UTF-8') : new \TypeError('expected string, got ' . \get_debug_type($payload)));
+    return \is_string($payload) && \mb_check_encoding($payload, 'UTF-8') ? $payload : throw ($payload === null ? new \TypeError('expected string, got null') : new \ValueError('not valid UTF-8'));
 }
 
 // `.` joins binary to binary and erases unchanged (strings.md §2).

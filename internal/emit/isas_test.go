@@ -93,7 +93,9 @@ func TestIsAsBehaviour(t *testing.T) {
 	}
 	// On bytes, `as string` is the checked conversion to text
 	// (design/strings.md §6): the value when it is UTF-8, a ValueError when
-	// it is not, null from `as?`; a value of another type is a TypeError.
+	// the encoding is all that can fail, null from `as?`; null on ?bytes
+	// is a TypeError, and where anything else can fail too, one TypeError
+	// expects valid UTF-8.
 	text := []struct{ param, expr, value, want string }{
 		{"bytes", "$b as string", `(bytes) "\xFF"`, "ValueError: not valid UTF-8"},
 		{"bytes", "$b as string", `(bytes) "h\xC3\xA9llo"`, "'héllo'"},
@@ -110,7 +112,9 @@ func TestIsAsBehaviour(t *testing.T) {
 		{"?bytes", "$b is ?string", "null", "true"},
 		{"?bytes", "$b is ?string", `(bytes) "\xFF"`, "false"},
 		{"?bytes", "$b is string", "null", "false"},
-		{"int|bytes", "$b as string", "5", "TypeError: expected string, got int"},
+		{"int|bytes", "$b as string", "5", "TypeError: expected string with valid UTF-8, got int"},
+		{"int|bytes", "$b as string", `(bytes) "\xFF"`, "TypeError: expected string with valid UTF-8, got string"},
+		{"(bytes, int)", "$b as (string, int)", `[(bytes) "\xFF", 1]`, "TypeError: expected (string, int) with valid UTF-8, got array"},
 		{"int|bytes", "$b as int|string", `(bytes) "\xFF"`, "ValueError: not valid UTF-8"},
 		{"int|bytes", "$b as int|string", "7", "7"},
 	}

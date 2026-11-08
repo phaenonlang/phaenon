@@ -739,17 +739,20 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	return result
 }
 
-// asFailure is what an `as` throws, as lowered: a TypeError, or a
-// ValueError for bytes that are not UTF-8 (design/strings.md §6).
+// asFailure is what an `as` throws, as lowered: a TypeError, a ValueError
+// where only the encoding of bytes can fail, both where null can too
+// (program.Test, design/strings.md §6).
 func (x *fnCtx) asFailure(e *ast.AsExpr) types.Type {
 	typeError, notText := types.NewClass("TypeError"), types.NewClass("ValueError")
 	switch rec := x.c.file.Tests[e]; {
 	case rec == nil || !rec.UTF8:
 		return typeError
-	case rec.TypeCond == "":
+	case rec.EncodingOnly:
 		return notText
+	case rec.NullFirst:
+		return types.MakeUnion(typeError, notText)
 	}
-	return types.MakeUnion(typeError, notText)
+	return typeError
 }
 
 // ------------------------------------------------------------------ explicit type arguments

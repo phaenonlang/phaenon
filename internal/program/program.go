@@ -521,13 +521,12 @@ type Test struct {
 	// of the TypeError an `as` throws.
 	Expected string
 	// UTF8 marks a test that checks a bytes operand is UTF-8 text, the
-	// conversion `$b as string` makes (design/strings.md §6): an `as` it
-	// fails throws a ValueError. TypeCond is then the test without its
-	// UTF-8 checks, "" when the operand's type settles it, so that only
-	// the encoding can fail; where it holds and Cond does not, the value
-	// had the type and failed its encoding.
-	UTF8     bool
-	TypeCond string
+	// conversion `$b as string` makes (design/strings.md §6). An `as` it
+	// fails throws a ValueError where the encoding is the only way to fail
+	// (EncodingOnly); on ?bytes that only null or the encoding can fail
+	// (NullFirst), a TypeError for null and a ValueError otherwise; in any
+	// other shape one TypeError that expects valid UTF-8.
+	UTF8, EncodingOnly, NullFirst bool
 }
 
 // TestOperand stands for the operand in a Test's Cond.
@@ -545,17 +544,22 @@ func (t *Test) As(nullable bool) string {
 	return t.Cond + " ? " + TestOperand + " : " + fail
 }
 
-// failure is what an `as` throws when its test fails.
+// failure is what an `as` throws when its test fails. It reads the operand
+// once, as get_debug_type() or as the null test of ?bytes.
 func (t *Test) failure() string {
 	const notText = "new \\ValueError('not valid UTF-8')"
-	typeError := "new \\TypeError(" + PHPString("expected "+t.Expected+", got ") + " . \\get_debug_type(" + TestOperand + "))"
+	typeError := func(expected string) string {
+		return "new \\TypeError(" + PHPString("expected "+expected+", got ") + " . \\get_debug_type(" + TestOperand + "))"
+	}
 	switch {
 	case !t.UTF8:
-		return typeError
-	case t.TypeCond == "":
+		return typeError(t.Expected)
+	case t.EncodingOnly:
 		return notText
+	case t.NullFirst:
+		return "(" + TestOperand + " === null ? new \\TypeError(" + PHPString("expected "+t.Expected+", got null") + ") : " + notText + ")"
 	}
-	return "(" + t.TypeCond + " ? " + notText + " : " + typeError + ")"
+	return typeError(t.Expected + " with valid UTF-8")
 }
 
 // ReadsTwice reports an operand a test may write twice (design/generics.md

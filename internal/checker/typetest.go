@@ -846,23 +846,6 @@ func hasUTF8(c *check) bool {
 	return false
 }
 
-// withoutUTF8 is c with every UTF-8 check taken as true: the test of the
-// operand's type alone.
-func withoutUTF8(c *check) *check {
-	if c.utf8 {
-		return &check{before: "true", noOperand: true, prec: program.PrecAtom, accepts: types.TMixed}
-	}
-	if len(c.args) == 0 {
-		return c
-	}
-	out := *c
-	out.args = make([]*check, len(c.args))
-	for i, a := range c.args {
-		out.args[i] = withoutUTF8(a)
-	}
-	return &out
-}
-
 // elseType is what the operand of type t is where the emitted test c is
 // false, as PHPStan narrows it on the output: a leaf that narrows when
 // false takes its type out, the sides of a || are false one after the
@@ -951,16 +934,13 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, o opera
 	if c == nil || b.failed {
 		return nil, true
 	}
-	start := testState{"": {t: nt}}
-	c, _, _, _, _ = x.simplify(c, start)
+	c, _, _, _, _ = x.simplify(c, testState{"": {t: nt}})
 	rec.Cond, rec.Prec = render(c)
 	if hasUTF8(c) {
-		// What an `as` throws depends on what failed: the type, or only
-		// the encoding of bytes that are not UTF-8.
+		// What an `as` throws depends on what can fail: the encoding of
+		// bytes alone, null or the encoding, or anything else.
 		rec.UTF8 = true
-		if typeOnly, _, _, always, _ := x.simplify(withoutUTF8(c), start); !always {
-			rec.TypeCond, _ = render(typeOnly)
-		}
+		rec.EncodingOnly, rec.NullFirst = x.utf8Failure(o, target)
 	}
 	// Reported whether or not the test is settled: `phn build
 	// --emit-on-error` writes the test all the same.
@@ -981,6 +961,21 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, o opera
 		}
 	}
 	return c, false
+}
+
+// utf8Failure says how a UTF-8 test can fail: encodingOnly when every value
+// the operand may hold, as inferred and as PHP guarantees it, has the
+// tested type once its bytes are text; nullFirst when that holds of all
+// but null, which the type rejects. Anything else fails on its type too.
+func (x *fnCtx) utf8Failure(o operand, target types.Type) (encodingOnly, nullFirst bool) {
+	passes := func(tt, ntt types.Type) bool {
+		return !types.IsMixed(ntt) && types.IsSubtype(tt, target, x.p()) && types.IsSubtype(ntt, target, x.p())
+	}
+	if passes(o.tt, o.ntt) {
+		return true, false
+	}
+	nullable := types.IsNullable(o.t) && !types.IsSubtype(types.TNull, target, x.p())
+	return false, nullable && passes(types.StripNull(o.tt), types.StripNull(o.ntt))
 }
 
 // hookedRead is the first property along an operand's chain of reads
