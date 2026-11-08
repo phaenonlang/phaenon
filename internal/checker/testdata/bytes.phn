@@ -121,10 +121,14 @@ function inlineVar(string $text): void
 function decoding(string $hex, string $b64, bytes $raw): void
 {
     takesBytes(hex2bin($hex) ?: throw new \ValueError('not hex'));
-    takesBytes(base64_decode($b64, true) ?: throw new \ValueError('not base64'));
-    takesBytes(base64_decode($b64) ?: (bytes) '');
     takesString(hex2bin($hex) ?: ''); // want P2103
-    takesString(base64_decode($b64, true) ?: ''); // want P2103
+    // base64 carries text as often as binary: PHP's string, which
+    // (bytes) retypes; only the strict mode returns false.
+    takesString(base64_decode($b64));
+    takesString(base64_decode($b64, true) ?: '');
+    takesString(base64_decode($b64, true)); // want P2103 "false|string given"
+    takesBytes((bytes) base64_decode($b64));
+    takesBytes(base64_decode($b64)); // want P2103 "string given"
     takesString(bin2hex($raw));
     takesString(base64_encode($raw));
     takesString(mb_scrub($raw, 'UTF-8'));
@@ -134,10 +138,8 @@ function decoding(string $hex, string $b64, bytes $raw): void
     takesBool(mb_check_encoding($raw, 'UTF-8'));
     takesBool(hash_equals($raw, $raw));
     takesBool(hash_equals($hex, $raw));
-    $signature = base64_decode($b64, true);
-    if ($signature !== false) {
-        takesInt(openssl_verify($hex, $signature, $hex, \OPENSSL_ALGO_SHA256) ?: 0);
-    }
+    takesInt(openssl_verify($hex, $raw, $hex, \OPENSSL_ALGO_SHA256) ?: 0);
+    takesInt(openssl_verify($raw, base64_decode($b64), $hex, \OPENSSL_ALGO_SHA256) ?: 0);
 }
 
 function takesBool(bool $b): void

@@ -75,9 +75,7 @@ function keys(array $keys): array
 
 function fromBase64(string $b64): string
 {
-    $raw = base64_decode($b64, true);
-
-    return $raw === false ? throw new \ValueError('not base64') : $raw;
+    return base64_decode(strtr($b64, '-_', '+/'));
 }
 
 // `as string` checks that bytes are UTF-8 text and throws a ValueError
@@ -175,4 +173,4 @@ final class Archive
         return $from[0] ?? '';
     }
 }
-// phaenon-map v1 bytes.phn 1-6=1 7:1 67-70=61 71:61 121-123=111 124:111 169-172=156 173:157
+// phaenon-map v1 bytes.phn 1-6=1 7:1 67-70=61 71:61 119-121=109 122:109 167-170=154 171:155

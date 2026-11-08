@@ -377,9 +377,11 @@ so is `is string` on a value that may be either. On a `bytes` operand, `as strin
 conversion to text,
 `\mb_check_encoding($b, 'UTF-8') ? $b : throw new \ValueError('not valid UTF-8')`; `as? string`
 gives `null` and `is string` is the test alone. `(bytes) $s` retypes a string as binary data and
-`(string) $b` is the unchecked way back, both free; `hex2bin()`, `base64_decode()`, `bin2hex()`,
-`base64_encode()` and `mb_scrub()` are typed for `bytes`. The check needs `ext-mbstring`, or
-`symfony/polyfill-mbstring` where it is missing. Design: `design/strings.md` §6.
+`(string) $b` is the unchecked way back, both free. `hex2bin()` returns `bytes`, and `bin2hex()`,
+`base64_encode()` and `mb_scrub()` take them; `base64_decode()` keeps PHP's `string`, as base64
+carries text as often as binary, and `(bytes) base64_decode($s)` retypes the binary case. The
+check needs `ext-mbstring`, or `symfony/polyfill-mbstring` where it is missing. Design:
+`design/strings.md` §6.
 
 A generic declaration's docblock adds lines to the output (PHPStan reads one tag per line);
 every other edit keeps line numbers exact. Design: `design/generics.md`, decisions in §11.

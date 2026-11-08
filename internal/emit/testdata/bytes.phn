@@ -65,9 +65,7 @@ function keys(list<bytes> $keys): list<string>
 
 function fromBase64(string $b64): bytes
 {
-    $raw = base64_decode($b64, true);
-
-    return $raw === false ? throw new \ValueError('not base64') : $raw;
+    return (bytes) base64_decode(strtr($b64, '-_', '+/'));
 }
 
 // `as string` checks that bytes are UTF-8 text and throws a ValueError

@@ -5,10 +5,11 @@
  * (design/strings.md §2, §5, §6). A producer returns bytes; a consumer that
  * works on text and binary alike takes string|bytes; one whose result is
  * binary when its input is binary says so with a conditional return. These
- * are the conversions between bytes and text: hex2bin() and
- * base64_decode() decode text into bytes, bin2hex() and base64_encode()
- * spell bytes out as text, mb_scrub() makes text of them by replacing what
- * is not UTF-8, and `$b as string` is the checked conversion.
+ * are the conversions between bytes and text: hex2bin() decodes text into
+ * bytes, bin2hex() and base64_encode() spell bytes out as text, mb_scrub()
+ * makes text of them by replacing what is not UTF-8, and `$b as string` is
+ * the checked conversion. base64_decode() stays text, which (bytes)
+ * retypes where it is binary.
  */
 
 /**
@@ -98,7 +99,14 @@ function unpack(string $format, string $string, int $offset = 0): array|false {}
 /** @return bytes|false */
 function hex2bin(string $string): string|false {}
 
-/** @return bytes|false */
+/**
+ * Text as often as binary: base64 carries JSON, PEM and secrets, and
+ * `(bytes) base64_decode(…)` retypes the binary case (strings.md §6).
+ * Only the strict mode refuses input; without it PHP skips what is not
+ * base64 and returns a string, as PHPStan types it.
+ *
+ * @return ($strict is true ? string|false : string)
+ */
 function base64_decode(string $string, bool $strict = false): string|false {}
 
 /** @param string|bytes $string */
