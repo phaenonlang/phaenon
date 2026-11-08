@@ -214,6 +214,7 @@ func TestPHPStanParity(t *testing.T) {
 
 // skipParity are the golden files PHPStan cannot judge, with the reason.
 var skipParity = map[string]string{
+	"concurrency-withdrawn.phn": "syntax that left the language (P1001), which neither PHP nor the emitter reads",
 	"library-guards.phn": "PHPStan runs on one PHP: on 8.5 the 8.6 side of each version guard does not exist " +
 		"(unknown symbols, PHP_VERSION_ID < 80600 always true), on 8.6 the 8.5 side is dead code",
 }

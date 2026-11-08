@@ -296,8 +296,10 @@ func (p *Parser) prefix() ast.Expr {
 
 // startsExpr reports whether the current token can begin an expression
 // (used after `yield`, `return`, `break`, …): `yield * 2` is `(yield) * 2`.
-func (p *Parser) startsExpr() bool {
-	k := p.kind()
+func (p *Parser) startsExpr() bool { return startsExprKind(p.kind()) }
+
+// startsExprKind reports whether a token of kind k can begin an expression.
+func startsExprKind(k token.Kind) bool {
 	switch k {
 	case token.T_VARIABLE, token.Kind('$'), token.T_LNUMBER, token.T_DNUMBER, token.T_CONSTANT_ENCAPSED_STRING,
 		token.Kind('"'), token.Kind('`'), token.T_START_HEREDOC, token.Kind('['), token.Kind('('),
@@ -407,6 +409,8 @@ func (p *Parser) primary() ast.Expr {
 		}
 		ex.S = p.span(start)
 		return ex
+	case k == token.T_STRING && (p.concurrentlyAhead() || p.spawnAhead()):
+		return p.withdrawn()
 	case k == token.T_MATCH && p.peekKind(1) == token.Kind('('):
 		return p.matchExpr()
 	case k == token.T_FUNCTION || k == token.T_FN || k == token.T_ATTRIBUTE ||

@@ -334,6 +334,17 @@ func (p *Printer) expr(e ast.Expr) {
 		p.returnType(e.ReturnType)
 		p.w(" => ")
 		p.expr(e.Body)
+	case *ast.Withdrawn:
+		p.w(e.Name + " ")
+		if e.Opts != nil {
+			p.argList(e.Opts)
+			p.w(" ")
+		}
+		if e.Expr != nil {
+			p.expr(e.Expr)
+		} else {
+			p.block(e.Body)
+		}
 	case *ast.Match:
 		p.w("match (")
 		p.expr(e.Subject)

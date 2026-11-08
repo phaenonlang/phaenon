@@ -142,6 +142,8 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 		return x.closure(e, env, expected)
 	case *ast.ArrowFunc:
 		return x.arrowFunc(e, env, expected)
+	case *ast.Withdrawn:
+		return x.withdrawn(e, env)
 	case *ast.Match:
 		return x.match(e, env, expected)
 	case *ast.Yield:
@@ -2622,6 +2624,31 @@ func (x *fnCtx) removed(span ast.Span, what, instead string) {
 	if x.file.Mode == lexer.ModePhaenon {
 		x.report(span, P1001, "%s is not available in Phaenon; use %s", what, instead)
 	}
+}
+
+// withdrawn reports a `concurrently` block or a `spawn`, syntax that left
+// the language (P1001; design/roadmap.md D25, concurrency.md §17). The code
+// inside is checked as the closure the block compiled to, and what the
+// body assigned, like the construct's value, has the error type afterwards:
+// the rewrite to amp is the one finding.
+func (x *fnCtx) withdrawn(e *ast.Withdrawn, env *state) types.Type {
+	x.report(e.Kw, P1001, "`concurrently` blocks and `spawn` left the language (roadmap D25, concurrency.md §17); write amp's async() and await()")
+	x.argsOnly(e.Opts, env)
+	if e.Expr != nil {
+		x.expr(e.Expr, env, nil)
+		return types.TError
+	}
+	c := x.child(false)
+	c.generator = bodyHasYield(e.Body)
+	cenv := env.clone()
+	cenv.dead = false
+	c.stmts(e.Body, cenv)
+	for name, info := range cenv.vars {
+		if outer, ok := env.get(name); !ok || !types.Equal(outer.t, info.t) {
+			env.set(name, types.TError)
+		}
+	}
+	return types.TError
 }
 
 // arrayPlus types `$a + $b` on arrays: the left operand's entries, then the

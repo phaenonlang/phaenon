@@ -130,6 +130,10 @@ func Inspect(n Node, f func(Node) bool) {
 		params(n.Params, f)
 		Inspect(n.ReturnType, f)
 		Inspect(n.Body, f)
+	case *Withdrawn:
+		Inspect(n.Opts, f)
+		stmts(n.Body, f)
+		Inspect(n.Expr, f)
 	case *Match:
 		Inspect(n.Subject, f)
 		for _, a := range n.Arms {

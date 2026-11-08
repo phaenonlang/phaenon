@@ -368,6 +368,18 @@ type (
 		ReturnType TypeExpr
 		Body       Expr
 	}
+	// Withdrawn is syntax that left the language and is parsed only so that
+	// the checker can name it (P1001): a `concurrently (opts) { .. }` block,
+	// `spawn expr` or `spawn { .. }` (design/roadmap.md D25, concurrency.md
+	// §17). The emitter refuses it.
+	Withdrawn struct {
+		S    Span
+		Kw   Span     // the word
+		Name string   // the word as written: concurrently or spawn
+		Opts *ArgList // a block's options; nil without
+		Body []Stmt   // a block's statements, when Expr is nil
+		Expr Expr     // spawn's operand; nil for a block
+	}
 	// Match is match(x) { .. }.
 	Match struct {
 		S       Span
@@ -470,6 +482,7 @@ func (*Include) exprNode()             {}
 func (*Eval) exprNode()                {}
 func (*Closure) exprNode()             {}
 func (*ArrowFunc) exprNode()           {}
+func (*Withdrawn) exprNode()           {}
 func (*Match) exprNode()               {}
 func (*Yield) exprNode()               {}
 func (*YieldFrom) exprNode()           {}
@@ -520,6 +533,7 @@ func (n *Eval) Span() Span                { return n.S }
 func (n *Closure) Span() Span             { return n.S }
 func (n *ClosureUse) Span() Span          { return n.S }
 func (n *ArrowFunc) Span() Span           { return n.S }
+func (n *Withdrawn) Span() Span           { return n.S }
 func (n *Match) Span() Span               { return n.S }
 func (n *MatchArm) Span() Span            { return n.S }
 func (n *Yield) Span() Span               { return n.S }
