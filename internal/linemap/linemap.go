@@ -12,7 +12,7 @@
 // land.
 //
 // The format has three readers — this package, the PhpStorm plugin and
-// phaenon/runtime — and one writer, the emitter. testdata/vectors.json is
+// phaenon/debug — and one writer, the emitter. testdata/vectors.json is
 // the reference all three test against; a map this package refuses is one
 // the others must refuse too.
 package linemap

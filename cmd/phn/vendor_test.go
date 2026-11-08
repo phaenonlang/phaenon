@@ -108,11 +108,3 @@ func TestBuildVendor(t *testing.T) {
 		t.Errorf("the root project should see Box<T> from the package's sources (%v):\n%s%s", err, stdout, stderr)
 	}
 }
-
-func TestReleaseMinor(t *testing.T) {
-	for v, want := range map[string]string{"0.4.2": "0.4", "v1.10.0": "1.10", "dev": "", "dev-main": "", "0.4.x-dev": "", "0.4": "", "1.2.3-RC1": "1.2"} {
-		if got := releaseMinor(v); got != want {
-			t.Errorf("releaseMinor(%q) = %q, want %q", v, got, want)
-		}
-	}
-}

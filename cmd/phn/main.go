@@ -101,7 +101,7 @@ usage:
                                                            --list-types types bare arrays as lists and
                                                            maps from the values they hold;
                                                            --php writes the target into phaenon.json
-  phn stdlib --out DIR [--check]                           write the compiled phaenon/runtime sources
+  phn stdlib --out DIR [--check]                           write the compiled phaenon/debug sources
                                                            (Debug/LineMap.php, …) into DIR
   phn trace [--root PREFIX=LOCAL]... [<text>...]           rewrite the positions in compiled files (stack traces,
                                                            PHPUnit, PHPStan --error-format=raw or github) into .phn
@@ -125,7 +125,7 @@ given) with --out. A file with type errors is not written unless --emit-on-error
 exit status still reports the errors). --check writes nothing and fails when any output is
 missing, stale or orphaned; with --emit-on-error, a file with errors passes when its output is
 what that build writes.
-stdlib materialises the classes written in Phaenon (stdlib/runtime) as the phaenon/runtime
+stdlib materialises the classes written in Phaenon (stdlib/runtime) as the phaenon/debug
 package ships them.
 check and build read vendor code through the nearest vendor/composer autoload maps, an installed
 package with a phaenon.json from its .phn sources.
@@ -349,9 +349,6 @@ func (j buildJob) run() buildResult {
 		prog = loadedProgram
 	} else {
 		diags = append(diags, j.diags...)
-	}
-	if !j.dependency {
-		diags = append(diags, installedDiags()...)
 	}
 	broken := map[string]bool{}
 	for _, d := range diags {
@@ -662,7 +659,6 @@ func checkCmd(args []string) {
 		files = append(files, f)
 	}
 	diags := append(tgt.Diags, typeCheck(files, tgt.Version, proj.checkerOptions(checker.Options{Deprecations: !*noDeprecations}))...)
-	diags = append(diags, installedDiags()...)
 	errors, warnings := 0, 0
 	for _, d := range diags {
 		if d.Severity == checker.Error {

@@ -1,9 +1,13 @@
 # Phaenon
 
-A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for PHP".
+A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for PHP". The compiled
+output depends on nothing but PHP (`design/roadmap.md` D24): the compiler adds the header,
+`declare(strict_types=1)`, docblocks, and PHP's own functions and classes where the source used
+`is`, `as` or a construct it lowers, and never a call into a package.
 
 - `phn` — the compiler (this repository, Go)
-- `phaenon/runtime` — the PHP runtime package (the line map for Monolog and Sentry)
+- `phaenon/debug` — opt-in source positions in production: the line map read for Monolog and
+  Sentry
 - [`phaenonlang/design`](https://github.com/phaenonlang/design) — the language design documents, a
   repository of their own: a path such as `design/checker.md` below is a file there
 
@@ -220,7 +224,7 @@ annotation on a file the repository lacks, and the compiled outputs are gitignor
 annotations show only once traced. A report on stdin — Checkstyle, JUnit (PHPUnit's
 `--log-junit`, PHPStan's `junit`), Clover or Cobertura — is read whole and rewritten as that
 report, byte for byte where nothing points into a compiled file. In coverage, the compiled lines
-that come from one source line count as that line: covered when any of them is. In production, `phaenon/runtime`'s Monolog processor and
+that come from one source line count as that line: covered when any of them is. In production, `phaenon/debug`'s Monolog processor and
 Sentry integration do the same for logged exceptions, and the PhpStorm plugin reads the map for
 navigation and debugging (`design/line-map.md` §4).
 
@@ -286,6 +290,10 @@ it as `vendor/bin/phn`. When Composer writes the autoloader, it compiles every i
 that has a `phaenon.json` (each for its own target, its findings shown as warnings, skipped while
 nothing changed: `phn build --vendor`), then the project itself (`phn build`), so that
 `--classmap-authoritative` finds the outputs. With no `phaenon.json` anywhere it does nothing.
+It requires no other package, since the compiled output needs none, and suggests
+`phaenon/debug`, which points production errors at `.phn` positions (`design/line-map.md` §4.3).
+It conflicts with `phaenon/runtime` below 0.4, that package's name until then, which declares the
+same classes.
 
 - `PHN_BINARY=/path/to/phn` uses another binary, such as one built from a checkout.
 - `"extra": {"phaenon": {"binary-url": "https://mirror/{version}/{file}"}}` fetches the binary from
@@ -397,7 +405,7 @@ phn fmt --stdin                                       # Phaenon's layout of stan
 phn lsp                                               # the language server: diagnostics, hover, definition, completion, build on save
 phn watch [--no-build] [--interval D]                 # check and build the roots each time a file changes
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
-phn stdlib --out DIR [--check]                         # the compiled stdlib (Debug/…), as phaenon/runtime ships it
+phn stdlib --out DIR [--check]                         # the compiled stdlib (Debug/…), as phaenon/debug ships it
 phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them
 phn trace [--root PREFIX=LOCAL]... [text...]  # positions in compiled files → .phn: text, workflow commands, XML reports on stdin
 phn version                               # the version a release sets, dev otherwise
@@ -414,7 +422,8 @@ The language's other parts live beside this repository in the
 its site.
 
 - [`design`](https://github.com/phaenonlang/design) — the language design and every decision
-- [`runtime`](https://github.com/phaenonlang/runtime) — the Composer package `phaenon/runtime`
+- [`debug`](https://github.com/phaenonlang/debug) — the Composer package `phaenon/debug`, source
+  positions in production for Monolog and Sentry
 - [`jetbrains`](https://github.com/phaenonlang/jetbrains) — the PhpStorm plugin
 - [`vscode`](https://github.com/phaenonlang/vscode) — the VS Code extension
 - [`website`](https://github.com/phaenonlang/website) — phaenon.dev: the landing page, the

@@ -233,4 +233,14 @@ function checked(mixed $m, mixed $l, mixed $p, mixed $u, mixed $o): string
 
     return $s . \count($list) . ($pair === null ? '' : $pair[1]) . ($user === null ? '' : $user->id) . ($owner === null ? '' : $owner->id);
 }
+
+// `as?` is the operator only when its `?` touches `as`: `as ?int` is `as`
+// with the nullable type ?int, which throws on anything else.
+function spellings(mixed $a, mixed $b): int
+{
+    $maybe = $a === null || \is_int($a) ? $a : throw new \TypeError('expected ?int, got ' . \get_debug_type($a));
+    $orNull = \is_int($b) ? $b : null;
+
+    return ($maybe ?? 0) + ($orNull ?? 0);
+}
 // phaenon-map v1 is-as.phn 1-6=1 7:1 31-33=25 34:25 36-38=27 39:28 42:33 46-48=37 49:38 86-86=74 87:76 168-172=157 173:157 206-208=190 209:190

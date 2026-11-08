@@ -12,7 +12,7 @@ import (
 )
 
 // TestSuggestedStaysOutOfProjects: the Monolog and Sentry declarations the
-// runtime package's integrations are checked against load only on request
+// debug package's integrations are checked against load only on request
 // (LoadSuggested), never with LoadStubs. A project's program reads those
 // libraries from its vendor directory, and an embedded declaration of the
 // few members the integrations use would shadow the real classes.

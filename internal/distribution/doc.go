@@ -7,11 +7,12 @@
 // The tests run a real Composer, named by PHAENON_COMPOSER, and are skipped
 // without it. Each one builds temporary root projects that install a copy of
 // the package, so that a test can pin binaries of its own in the copy's
-// checksums.json, and the phaenon/runtime checkout beside the repository, both
-// through path repositories with Packagist switched off. COMPOSER_HOME and the
-// cache live in the test's directory. A shell script stands in for phn: it
-// records where and how it ran, and the tests serve it as the release asset
-// when they exercise the download.
+// checksums.json, through a path repository with Packagist switched off: the
+// package requires no other (design/tooling.md T16), and the projects install
+// nothing else of Phaenon's. COMPOSER_HOME and the cache live in the test's
+// directory. A shell script stands in for phn: it records where and how it
+// ran, and the tests serve it as the release asset when they exercise the
+// download. One test builds the real phn instead, and runs what it compiles.
 //
 // The package holds no Go code; it exists for its tests.
 package distribution

@@ -11,9 +11,9 @@ import (
 )
 
 // overlayOutsidePHPSrc are the overlay files that refine declarations no
-// php-src stub makes: PECL extensions, PHPUnit, the phaenon/runtime package.
+// php-src stub makes: PECL extensions and PHPUnit.
 var overlayOutsidePHPSrc = map[string]bool{
-	"overlay/mongodb.php": true, "overlay/redis.php": true, "overlay/phpunit.php": true, "overlay/runtime.php": true,
+	"overlay/mongodb.php": true, "overlay/redis.php": true, "overlay/phpunit.php": true,
 }
 
 // overlayAdditions are members the overlay declares on purpose although

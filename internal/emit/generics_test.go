@@ -17,7 +17,6 @@ import (
 	"github.com/phaenonlang/phaenon/internal/linemap"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
-	"github.com/phaenonlang/phaenon/stdlib"
 )
 
 // reTargets reads the targets a golden file is compiled for from its first
@@ -58,10 +57,10 @@ func phpFor(v phpversion.Version) string {
 // target (PHAENON_PHP86 names one for 8.6) and, when the file declares
 // only classes, functions and constants, load under it: php links a class
 // as it declares it, so a signature `php -l` accepts and PHP rejects (an
-// override narrowing a parameter) fails here, without PHPStan. The
-// declarations of phaenon/runtime are autoloaded beside the output.
-// PHPStan runs at level max when PHAENON_PHPSTAN names the binary and that
-// PHPStan parses the output. A file compiled for several targets runs every
+// override narrowing a parameter) fails here, without PHPStan. Nothing is
+// autoloaded beside the output, and PHPStan reads nothing else: the output
+// depends on PHP alone (design/roadmap.md D24). PHPStan runs at level max
+// when PHAENON_PHPSTAN names the binary and that PHPStan parses the output. A file compiled for several targets runs every
 // output under PHP 8.6 and the 8.5 one under the php on PATH too: they must
 // print the same. PHAENON_UPDATE=1 rewrites the expected files.
 func TestGenerics(t *testing.T) {
@@ -70,29 +69,6 @@ func TestGenerics(t *testing.T) {
 		t.Skip("no testdata")
 	}
 	phpstan := os.Getenv("PHAENON_PHPSTAN")
-	php, _ := exec.LookPath("php")
-	// PHPStan reads the runtime package's declarations beside the output;
-	// the stubs written in Phaenon are compiled first, as the package is.
-	var runtimeStubs []string
-	var runtimeDir string
-	if phpstan != "" || php != "" {
-		dir := t.TempDir()
-		runtimeDir = dir
-		compiled, err := Stdlib()
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, s := range stdlib.Runtime() {
-			name, src := packagePath(s.Path), s.Src
-			if strings.HasSuffix(s.Path, ".phn") {
-				src = compiled[name]
-			}
-			path := filepath.Join(dir, filepath.FromSlash(name))
-			os.MkdirAll(filepath.Dir(path), 0o755)
-			os.WriteFile(path, src, 0o644)
-			runtimeStubs = append(runtimeStubs, path)
-		}
-	}
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			src, err := os.ReadFile(path)
@@ -107,7 +83,7 @@ func TestGenerics(t *testing.T) {
 					wantPath = strings.TrimSuffix(path, ".phn") + "." + target.String() + ".php"
 				}
 				outputs[target] = wantPath
-				compileGolden(t, path, src, target, wantPath, phpstan, runtimeDir, runtimeStubs)
+				compileGolden(t, path, src, target, wantPath, phpstan)
 			}
 			if len(targets) > 1 {
 				sameBehaviour(t, targets, outputs)
@@ -119,7 +95,7 @@ func TestGenerics(t *testing.T) {
 // compileGolden compiles one golden file for a target and checks the
 // output against wantPath, php -l, loading it under php where it declares
 // only, and PHPStan.
-func compileGolden(t *testing.T, path string, src []byte, target phpversion.Version, wantPath, phpstan, runtimeDir string, runtimeStubs []string) {
+func compileGolden(t *testing.T, path string, src []byte, target phpversion.Version, wantPath, phpstan string) {
 	t.Helper()
 	p := program.New()
 	if err := p.LoadStubs(); err != nil {
@@ -152,7 +128,7 @@ func compileGolden(t *testing.T, path string, src []byte, target phpversion.Vers
 		if err != nil {
 			t.Errorf("php -l (target %s): %s", target, out)
 		} else if declarationsOnly(f.AST.Stmts) {
-			loadOutput(t, php, target, path, wantPath, got, runtimeDir)
+			loadOutput(t, php, target, path, wantPath, got)
 		}
 	}
 	if phpstan != "" && target.AtLeast(phpversion.PHP86) && f.Partials != nil {
@@ -162,7 +138,7 @@ func compileGolden(t *testing.T, path string, src []byte, target phpversion.Vers
 	}
 	if phpstan != "" {
 		cfg := filepath.Join(t.TempDir(), "phpstan.neon")
-		os.WriteFile(cfg, []byte("parameters:\n    level: max\n    scanFiles:\n        - "+strings.Join(runtimeStubs, "\n        - ")+"\n"), 0o644)
+		os.WriteFile(cfg, []byte("parameters:\n    level: max\n"), 0o644)
 		out, err := exec.Command(phpstan, "analyse", "--no-progress", "--error-format=raw", "-c", cfg, wantPath).CombinedOutput()
 		if err != nil {
 			// Raw findings are `path.php:N:message`; the map turns N into the
@@ -244,20 +220,10 @@ func declarationsOnly(stmts []ast.Stmt) bool {
 	return true
 }
 
-// loader is the script that loads one output: `php loader.php output.php
-// runtimeDir`. It autoloads the Phaenon\ classes from the compiled runtime
-// package laid out in runtimeDir as its src/ is, and requires the output,
-// which declares its classes and links them.
+// loader is the script that loads one output: `php loader.php output.php`.
+// It requires the output, which declares its classes and links them, with
+// no autoloader: an output that needed a class from elsewhere fails here.
 const loader = `<?php
-spl_autoload_register(function (string $class): void {
-    if (!str_starts_with($class, 'Phaenon\\')) {
-        return;
-    }
-    $file = $_SERVER['argv'][2] . '/' . str_replace('\\', '/', substr($class, strlen('Phaenon\\'))) . '.php';
-    if (is_file($file)) {
-        require $file;
-    }
-});
 require $_SERVER['argv'][1];
 `
 
@@ -267,7 +233,7 @@ var reErrorLine = regexp.MustCompile(` in (\S+) on line (\d+)`)
 // loadOutput requires the compiled file under php and reports what php
 // prints, which must be nothing, with its output lines mapped back to the
 // golden's.
-func loadOutput(t *testing.T, php string, target phpversion.Version, path, wantPath string, got []byte, runtimeDir string) {
+func loadOutput(t *testing.T, php string, target phpversion.Version, path, wantPath string, got []byte) {
 	t.Helper()
 	script := filepath.Join(t.TempDir(), "loader.php")
 	if err := os.WriteFile(script, []byte(loader), 0o644); err != nil {
@@ -279,7 +245,7 @@ func loadOutput(t *testing.T, php string, target phpversion.Version, path, wantP
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command(php, "-n", "-d", "display_errors=1", "-d", "error_reporting=-1", script, absPath, runtimeDir).CombinedOutput()
+	out, err := exec.Command(php, "-n", "-d", "display_errors=1", "-d", "error_reporting=-1", script, absPath).CombinedOutput()
 	if err == nil && len(bytes.TrimSpace(out)) == 0 {
 		return
 	}

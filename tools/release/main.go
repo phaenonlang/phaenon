@@ -18,11 +18,12 @@
 //
 // The release PR's workflow (release-checksums.yml) runs the first and
 // commits the checksums; release.yml runs the second on the merged release
-// PR before the release is tagged and published. Both keep the lockstep of
-// design/tooling.md §3.4: composer.json requires phaenon/runtime at the
-// release's minor version, and the main line's branch alias names that
-// minor version (dev-main is X.Y.x-dev), which the first writes and the
-// second checks.
+// PR before the release is tagged and published. Both keep the main line's
+// branch alias at the release's minor version (dev-main is X.Y.x-dev,
+// design/tooling.md §3.4), which the first writes and the second checks.
+// composer.json requires no package (T16), so no other version moves with
+// the release: the phaenon/debug it suggests reads the line map format,
+// v1, whichever release wrote it.
 package main
 
 import (
@@ -76,12 +77,8 @@ type checksums struct {
 
 const checksumsPath = "composer/checksums.json"
 
-// lockstep finds the version constraint of the runtime package in
-// composer.json's requirements.
-var lockstep = regexp.MustCompile(`("phaenon/runtime":\s*")(\d+\.\d+\.\*)`)
-
 // branchAlias finds the main line's alias in composer.json, which moves to
-// the release's minor version with the constraint.
+// the release's minor version.
 var branchAlias = regexp.MustCompile(`("dev-main":\s*")(\d+\.\d+\.x-dev)`)
 
 var toolchainLine = regexp.MustCompile(`(?m)^toolchain (go\d+\.\d+\.\d+)$`)
@@ -123,30 +120,19 @@ func main() {
 	}
 	fmt.Printf("toolchain %s\n", toolchain)
 	parts := strings.SplitN(*version, ".", 3)
-	minor := parts[0] + "." + parts[1] + ".*"
 	alias := parts[0] + "." + parts[1] + ".x-dev"
 	manifest, err := os.ReadFile("composer.json")
 	if err != nil {
 		fail("release: %v", err)
 	}
-	found := lockstep.FindAllSubmatch(manifest, -1)
-	if len(found) == 0 {
-		fail("release: composer.json names no phaenon/runtime constraint X.Y.*")
-	}
 	aliases := branchAlias.FindAllSubmatch(manifest, -1)
 	if len(aliases) != 1 {
 		fail("release: composer.json must name one branch alias \"dev-main\": \"X.Y.x-dev\", not %d", len(aliases))
-	}
-	for _, m := range found {
-		if *verify && string(m[2]) != minor {
-			fail("release: composer.json has %s%s\", the release needs %s", m[1], m[2], minor)
-		}
 	}
 	if *verify && string(aliases[0][2]) != alias {
 		fail("release: composer.json has %s%s\", the release needs %s", aliases[0][1], aliases[0][2], alias)
 	}
 	if !*verify {
-		manifest = lockstep.ReplaceAll(manifest, []byte("${1}"+minor))
 		manifest = branchAlias.ReplaceAll(manifest, []byte("${1}"+alias))
 		if err := os.WriteFile("composer.json", manifest, 0o644); err != nil {
 			fail("%v", err)

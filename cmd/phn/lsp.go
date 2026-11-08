@@ -174,7 +174,7 @@ func (h *projectHost) Options(opts checker.Options) checker.Options {
 }
 
 func (h *projectHost) ProjectDiagnostics(p *program.Program, files []string) []checker.Diagnostic {
-	return append(append([]checker.Diagnostic(nil), h.tgt.Diags...), installedDiags()...)
+	return append([]checker.Diagnostic(nil), h.tgt.Diags...)
 }
 
 func (h *projectHost) Build(p *program.Program, diags []checker.Diagnostic) (res lsp.BuildParams, err error) {

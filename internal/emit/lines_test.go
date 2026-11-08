@@ -22,6 +22,9 @@ import (
 // the stdlib written in Phaenon and the checker's corpus (each file that
 // compiles), and checks the map itself: valid, naming the source, covering
 // the output, with reverse targets that look up forward to their line.
+// Each output is held to TestOutputsDependOnPHPOnly's promise too: it names
+// nothing under Phaenon\, unless it is the stdlib's, in a namespace of its
+// own there.
 func TestLineMapProperty(t *testing.T) {
 	type input struct {
 		path string
@@ -70,6 +73,9 @@ func TestLineMapProperty(t *testing.T) {
 		compiled++
 		checkLineMap(t, in.path, in.src, out, w)
 		checkVerbatim(t, in.path, in.src, out, w.verbatim())
+		if expectPHPOnly(t, in.path, out) && !strings.HasPrefix(in.path, "<stub>/") {
+			t.Errorf("%s: a namespace under Phaenon\\ goes unscanned outside the stdlib", in.path)
+		}
 	}
 	if compiled < 50 {
 		t.Errorf("only %d files compiled: the property needs a corpus", compiled)

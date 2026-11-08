@@ -87,6 +87,11 @@ func TestIsAsBehaviour(t *testing.T) {
 		{"$m as int", "7", "7"},
 		{"$m as? int", "'s'", "NULL"},
 		{"$m as? Suit", "Suit::Hearts", "Hearts"},
+		// `as ?int` is `as` with a nullable type, `as?` only where the `?`
+		// touches `as`: null passes, a string throws.
+		{"$m as ?int", "'s'", "expected ?int, got string"},
+		{"$m as ? int", "'s'", "expected ?int, got string"},
+		{"$m as ?int", "null", "NULL"},
 	}
 	for i, c := range as {
 		fmt.Fprintf(&src, "fun as%d(mixed $m): string\n{\n    try {\n        $v = %s;\n    } catch (\\TypeError $e) {\n        return $e->getMessage();\n    }\n\n    return show($v);\n}\n\n", i, c.expr)

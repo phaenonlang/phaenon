@@ -85,7 +85,7 @@ func TestVectors(t *testing.T) {
 }
 
 // TestVectorCopiesFresh compares the reference vectors with the copies the
-// other readers test against: the PhpStorm plugin's and phaenon/runtime's,
+// other readers test against: the PhpStorm plugin's and phaenon/debug's,
 // in the sibling checkouts. A copy whose checkout or file is absent is
 // skipped.
 func TestVectorCopiesFresh(t *testing.T) {
@@ -96,7 +96,7 @@ func TestVectorCopiesFresh(t *testing.T) {
 	workspace := filepath.Join("..", "..", "..")
 	copies := map[string]string{
 		"jetbrains": filepath.Join("src", "test", "resources", "linemap", "vectors.json"),
-		"runtime":   filepath.Join("tests", "Debug", "vectors.json"),
+		"debug":     filepath.Join("tests", "Debug", "vectors.json"),
 	}
 	for repo, rel := range copies {
 		t.Run(repo, func(t *testing.T) {

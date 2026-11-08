@@ -5,7 +5,7 @@
 // What it answers is what phn build writes and phn check reports for the
 // same files in a directory without phaenon.json or Composer. The program
 // holds the embedded standard library (php-src's stubs, the overlay, the
-// runtime package's declarations) and the files given, nothing else: no
+// debug package's declarations) and the files given, nothing else: no
 // vendor code, no extensions of a local php, no disk, so a class declared
 // nowhere among them is unknown, as phn check says. Every file given is
 // checked, as phn check checks the files it is given; the main file alone

@@ -11,11 +11,11 @@
 #     generated from the runner's extensions, ext-mongodb's included
 #     (TestExtensionStubsParse, TestLoadExtensions), and `phn check` and
 #     `phn build` in cmd/phn and the playground read them too.
-#   - Composer is on PATH and PHAENON_COMPOSER names it, yet the plugin's
-#     suite (internal/distribution) skips: it installs the phaenon/runtime
-#     checkout beside the repository, and for now this workflow checks out
-#     this repository alone. TestRuntimePackageFresh and
-#     TestVectorCopiesFresh skip for their sibling checkouts likewise.
+#   - Composer is on PATH and PHAENON_COMPOSER names it, so the plugin's
+#     suite (internal/distribution) runs: the plugin requires no package,
+#     and its projects install it alone, one of them with the phn this
+#     commit builds. TestDebugPackageFresh and TestVectorCopiesFresh skip
+#     for their sibling checkouts, which this workflow does not check out.
 #   - Skipped for want of their variables, which name a php-src corpus, a
 #     PHPStan install, a PHP 8.6 or Phaenon trees to run over: conformance
 #     (PHAENON_PHP_SRC, PHAENON_EXEC), the stubs' freshness (PHAENON_PHP_SRC),

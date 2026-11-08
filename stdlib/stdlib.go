@@ -90,20 +90,20 @@ func EmbeddedExtensions() map[string]bool {
 	return out
 }
 
-// Runtime returns the declarations of the phaenon/runtime package, the
+// Runtime returns the declarations of the phaenon/debug package, the
 // stdlib written in Phaenon (the `Phaenon\Debug` line-map support). A file's path below runtime/ is its path below the
 // package's src/.
 func Runtime() []Stub {
 	return append(walk(runtime, "runtime", ".php"), walk(runtime, "runtime", ".phn")...)
 }
 
-// Suggested returns Phaenon's declarations of the libraries phaenon/runtime
+// Suggested returns Phaenon's declarations of the libraries phaenon/debug
 // suggests — Monolog 3 and the Sentry SDK 4 — limited to the API its
 // integrations in runtime/Debug are written against. Unlike Runtime they
 // never enter a project's program (program.LoadStubs): a project that logs
 // with Monolog has the real library in its vendor directory, and an
 // embedded declaration would shadow it. Only the programs that check and
-// compile the stdlib itself load them (program.LoadSuggested). The runtime
+// compile the stdlib itself load them (program.LoadSuggested). The debug
 // package's PHPStan run, against the real libraries, is what keeps them
 // honest.
 func Suggested() []Stub {

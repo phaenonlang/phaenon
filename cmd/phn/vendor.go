@@ -19,9 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
-
-	"github.com/phaenonlang/phaenon/internal/checker"
 )
 
 // stampFile records, in each output directory of an installed package, what
@@ -32,7 +29,6 @@ const stampFile = ".phn-build"
 // installedPackage is one package of installed.json.
 type installedPackage struct {
 	Name        string `json:"name"`
-	Version     string `json:"version"`
 	InstallPath string `json:"install-path"`
 	dir         string // where it is installed, relative to the working directory when under it
 }
@@ -249,46 +245,4 @@ func treeDigest(root string) string {
 		io.WriteString(h, "\x00")
 	}
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-// releaseMinor is the X.Y of a release version (0.4.2, v0.4.2), "" for a
-// development version (dev, dev-main, 0.4.x-dev).
-func releaseMinor(v string) string {
-	v = strings.TrimPrefix(v, "v")
-	parts := strings.Split(v, ".")
-	if len(parts) < 3 || strings.Contains(v, "dev") {
-		return ""
-	}
-	for _, p := range parts[:2] {
-		if p == "" || strings.Trim(p, "0123456789") != "" {
-			return ""
-		}
-	}
-	return parts[0] + "." + parts[1]
-}
-
-// installedDiags are the findings about the packages a project's compiled
-// code calls (design/tooling.md §3.4), from the installed.json of the
-// working directory's project; none without one. P4014: a release of phn
-// writes calls into the phaenon/runtime of its own minor version, lockstep
-// until 1.0; a development build or a development runtime is not compared.
-func installedDiags() []checker.Diagnostic {
-	dir := vendorComposerDir()
-	pkgs, err := installedPackages(dir)
-	if err != nil || pkgs == nil {
-		return nil
-	}
-	installed := map[string]string{}
-	for _, pkg := range pkgs {
-		installed[pkg.Name] = pkg.Version
-	}
-	var diags []checker.Diagnostic
-	if rt, ok := installed["phaenon/runtime"]; ok {
-		if want, got := releaseMinor(version), releaseMinor(rt); want != "" && got != "" && want != got {
-			diags = append(diags, checker.Diagnostic{File: filepath.Join(dir, "installed.json"), Line: 1, Col: 1, EndLine: 1, EndCol: 1,
-				Severity: checker.P4014.Severity, Code: checker.P4014.ID,
-				Message: fmt.Sprintf("phaenon/runtime %s is installed, but phn %s writes calls into the runtime of version %s.*: composer require phaenon/runtime:%s.*", rt, version, want, want)})
-		}
-	}
-	return diags
 }
