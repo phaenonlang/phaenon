@@ -7,25 +7,42 @@ declare(strict_types=1);
 namespace App\Report;
 
 use DateTimeImmutable;
-use Phaenon\Type;
+use Traversable;
 
 use function sprintf;
 
 // Function imports form their own group after the class imports: the import
 // the compiler adds is a class import and joins the class group, sorted after
-// DateTimeImmutable (roadmap D11).
+// DateTimeImmutable (roadmap D11). It is Traversable, the class the
+// override-erasure rule widens label()'s parameter to (design/generics.md
+// §4.3).
 
-final class Stamp
+/**
+ * @template T of \Traversable
+ */
+interface Labeller
+{
+    /**
+     * @param T $tags
+     */
+    public function label(string $who, \Traversable $tags): string;
+}
+
+/**
+ * @implements Labeller<\ArrayIterator<int, string>>
+ */
+final class Stamp implements Labeller
 {
     public function __construct(private readonly DateTimeImmutable $at)
     {
     }
 
-    public function label(string $who, mixed $tags): string
+    /**
+     * @param \ArrayIterator<int, string> $tags
+     */
+    public function label(string $who, Traversable $tags): string
     {
-        $listed = Type::list(Type::string())->check($tags) ? \implode(', ', $tags) : '-';
-
-        return sprintf('%s at %s (%s)', $who, $this->at->format('H:i'), $listed);
+        return sprintf('%s at %s (%d)', $who, $this->at->format('H:i'), \iterator_count($tags));
     }
 }
-// phaenon-map v1 imports-function.phn 1-6=1 7:1 10-10=3 11:4
+// phaenon-map v1 imports-function.phn 1-6=1 7:1 10-10=3 11:4 20-22=13 23:13 25-27=15 28:15 31-33=18 34:18 40-42=24 43:24

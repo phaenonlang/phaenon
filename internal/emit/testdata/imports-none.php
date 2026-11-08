@@ -6,18 +6,35 @@ declare(strict_types=1);
 
 namespace App\Report;
 
-use Phaenon\Type;
+use Countable;
+
+// A file without imports: the one the compiler adds opens a use block of its
+// own after the namespace, a blank line before and after it (roadmap D11,
+// D19). Countable is the class the override-erasure rule widens of()'s
+// parameter to (design/generics.md §4.3).
 
 /**
- * A file without imports: the one the compiler adds opens a use block of its
- * own after the namespace, a blank line before and after it (roadmap D11,
- * D19).
+ * @template T of \Countable
  */
-final class Slug
+interface Sizer
 {
-    public static function of(mixed $words): string
+    /**
+     * @param T $words
+     */
+    public function of(\Countable $words): int;
+}
+
+/**
+ * @implements Sizer<\ArrayObject<int, string>>
+ */
+final class Slug implements Sizer
+{
+    /**
+     * @param \ArrayObject<int, string> $words
+     */
+    public function of(Countable $words): int
     {
-        return Type::list(Type::string())->check($words) ? \strtolower(\implode('-', $words)) : '';
+        return \count($words);
     }
 }
-// phaenon-map v1 imports-none.phn 1-6=1 7:1 8-9=1 10:2
+// phaenon-map v1 imports-none.phn 1-6=1 7:1 8-9=1 10:2 16-18=8 19:8 21-23=10 24:10 27-29=13 30:13 32-34=15 35:15

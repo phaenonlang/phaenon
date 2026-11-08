@@ -4,19 +4,29 @@ use Stringable;
 use ArrayObject;
 
 // An unsorted use block has no alphabetical place to offer: the import the
-// compiler adds goes after its last class import (roadmap D11).
+// compiler adds, Countable, which the override-erasure rule widens
+// size()'s parameter to (design/generics.md §4.3), goes after its last
+// class import (roadmap D11).
 
-final class Heading implements Stringable
+interface Sizer<T of \Countable>
 {
-    /** @param ArrayObject<int, mixed> $words */
+    public function size(T $words): int;
+}
+
+final class Heading implements Stringable, Sizer<ArrayObject<int, string>>
+{
+    /** @param ArrayObject<int, string> $words */
     public function __construct(private readonly ArrayObject $words)
     {
     }
 
+    public function size(ArrayObject<int, string> $words): int
+    {
+        return \count($words);
+    }
+
     public function __toString(): string
     {
-        $words = $this->words->getArrayCopy();
-
-        return $words is list<string> ? \strtoupper(\implode(' ', $words)) : '';
+        return \strtoupper(\implode(' ', $this->words->getArrayCopy())) . $this->size($this->words);
     }
 }
