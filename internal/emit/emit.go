@@ -145,7 +145,6 @@ func compile(src []byte, f *ast.File, opts Options) ([]byte, *lineWriter, error)
 		return nil, nil, err
 	}
 	e.lowerFunctions(f)
-	e.lowerConcurrency(f)
 	if opts.File != nil {
 		e.translateWrittenDocs()
 	}

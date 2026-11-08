@@ -9,13 +9,12 @@ namespace App\Report;
 use ArrayObject;
 use Countable;
 use DateTimeImmutable;
-use Phaenon\Concurrent\Scope;
 use Stringable;
 
-// A sorted use block: the imports the compiler adds (Scope for
-// `concurrently`, Countable for the parameter the override-erasure rule
-// widens, design/generics.md §4.3) join it in their alphabetical place,
-// each on a line of its own (roadmap D11, D19).
+// A sorted use block: the import the compiler adds (Countable for the
+// parameter the override-erasure rule widens, design/generics.md §4.3)
+// joins it in its alphabetical place, on a line of its own (roadmap D11,
+// D19).
 
 /**
  * @template T of \Countable
@@ -52,12 +51,5 @@ final class Summary implements Stringable, Sizer
     {
         return \count($lines);
     }
-
-    public function warm(): void
-    {
-        Scope::run(function () {
-            Scope::spawn(fn() => $this->lines->count());
-        });
-    }
 }
-// phaenon-map v1 imports-sorted.phn 1-6=1 7:1 10-10=3 11:4 12-12=4 13:5 20-22=12 23:12 25-27=14 28:14 31-33=17 34:17 48-50=31 51:31
+// phaenon-map v1 imports-sorted.phn 1-6=1 7:1 10-10=3 11:4 19-21=12 22:12 24-26=14 27:14 30-32=17 33:17 47-49=31 50:31

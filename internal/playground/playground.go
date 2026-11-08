@@ -5,13 +5,12 @@
 // What it answers is what phn build writes and phn check reports for the
 // same files in a directory without phaenon.json or Composer. The program
 // holds the embedded standard library (php-src's stubs, the overlay, the
-// runtime and concurrent packages' declarations) and the files given,
-// nothing else: no vendor code, no extensions of a local php, no disk, so a
-// class declared nowhere among them is unknown, as phn check says. Every
-// file given is checked, as phn check checks the files it is given; the
-// main file alone is compiled, its output withheld when it has an error
-// unless the request says otherwise (D10), and never written when it does
-// not parse.
+// runtime package's declarations) and the files given, nothing else: no
+// vendor code, no extensions of a local php, no disk, so a class declared
+// nowhere among them is unknown, as phn check says. Every file given is
+// checked, as phn check checks the files it is given; the main file alone
+// is compiled, its output withheld when it has an error unless the request
+// says otherwise (D10), and never written when it does not parse.
 //
 // A panic never escapes Compile: it becomes one finding, P0000, and the
 // result is not OK. A WebAssembly instance whose Go program panicked is

@@ -156,13 +156,9 @@ var (
 	P2530 = Code{"P2530", Error, "bytes used as text"}
 	P2531 = Code{"P2531", Error, "closure in a constant expression captures its scope"}
 
-	// P26xx — concurrency (design/concurrency.md §7)
-	P2601 = Code{"P2601", Error, "spawn outside of a concurrently block"}
-	P2602 = Code{"P2602", Error, "task handle leaves its block"}
-	P2603 = Code{"P2603", Error, "control flow crosses a concurrently or spawn block"}
-	P2604 = Code{"P2604", Error, "spawn body writes to a variable of the enclosing scope"}
-	P2605 = Code{"P2605", Error, "blocking sleep inside a concurrently block"}
-	P2606 = Code{"P2606", Error, "bad concurrently option"}
+	// P2601–P2606 belonged to `concurrently` blocks and `spawn`, which left
+	// the language on 2026-11-08 (design/roadmap.md D25, concurrency.md
+	// §17); the codes stay reserved.
 
 	// P3 — generics
 	P3001 = Code{"P3001", Error, "wrong number of type arguments"}
@@ -202,10 +198,11 @@ var (
 	// P4012: the php whose extensions are reflected is older than the
 	// target, so their newer signatures are unknown (php-versions.md §6).
 	P4012 = Code{"P4012", Warning, "local php older than the target"}
-	// P4013 and P4014 are about the installed packages the compiled code
-	// calls (design/tooling.md §3.4), read from vendor/composer/installed.json:
-	// `concurrently` and `spawn` compile to phaenon/concurrent, and the
-	// runtime must be of phn's own minor version.
-	P4013 = Code{"P4013", Error, "phaenon/concurrent is not installed"}
+	// P4013 reported a `concurrently` block or a `spawn` in a project without
+	// phaenon/concurrent installed; retired with the syntax on 2026-11-08
+	// (design/roadmap.md D25), the code stays reserved. P4014 is about the
+	// installed packages the compiled code calls (design/tooling.md §3.4),
+	// read from vendor/composer/installed.json: the runtime must be of phn's
+	// own minor version.
 	P4014 = Code{"P4014", Error, "phaenon/runtime of another minor version"}
 )

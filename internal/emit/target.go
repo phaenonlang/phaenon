@@ -475,6 +475,14 @@ func captured(call ast.Expr, args *ast.ArgList) []string {
 	return out
 }
 
+func superglobal(name string) bool {
+	switch name {
+	case "GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV":
+		return true
+	}
+	return false
+}
+
 // editedWithin reports whether an edit already touches the span.
 func (e *emitter) editedWithin(s ast.Span) bool {
 	for _, ed := range e.edits {

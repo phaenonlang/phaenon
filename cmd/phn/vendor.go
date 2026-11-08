@@ -21,9 +21,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/checker"
-	"github.com/phaenonlang/phaenon/internal/program"
 )
 
 // stampFile records, in each output directory of an installed package, what
@@ -271,13 +269,10 @@ func releaseMinor(v string) string {
 
 // installedDiags are the findings about the packages a project's compiled
 // code calls (design/tooling.md §3.4), from the installed.json of the
-// working directory's project; none without one.
-//   - P4013: `concurrently` and `spawn` compile to phaenon/concurrent's
-//     Scope, so a file that uses them needs the package installed.
-//   - P4014: a release of phn writes calls into the phaenon/runtime of its
-//     own minor version, lockstep until 1.0; a development build or a
-//     development runtime is not compared.
-func installedDiags(files []string, p *program.Program) []checker.Diagnostic {
+// working directory's project; none without one. P4014: a release of phn
+// writes calls into the phaenon/runtime of its own minor version, lockstep
+// until 1.0; a development build or a development runtime is not compared.
+func installedDiags() []checker.Diagnostic {
 	dir := vendorComposerDir()
 	pkgs, err := installedPackages(dir)
 	if err != nil || pkgs == nil {
@@ -288,31 +283,6 @@ func installedDiags(files []string, p *program.Program) []checker.Diagnostic {
 		installed[pkg.Name] = pkg.Version
 	}
 	var diags []checker.Diagnostic
-	if _, ok := installed["phaenon/concurrent"]; !ok {
-		for _, path := range files {
-			f := p.File(path)
-			if f == nil || f.AST == nil {
-				continue
-			}
-			ast.Inspect(f.AST, func(n ast.Node) bool {
-				var kw ast.Span
-				var what string
-				switch n := n.(type) {
-				case *ast.Concurrently:
-					kw, what = n.Kw, "concurrently"
-				case *ast.Spawn:
-					kw, what = n.Kw, "spawn"
-				default:
-					return true
-				}
-				line, col := f.Position(kw.Start)
-				diags = append(diags, checker.Diagnostic{File: path, Line: line, Col: col, EndLine: line, EndCol: col + len(what),
-					Severity: checker.P4013.Severity, Code: checker.P4013.ID,
-					Message: fmt.Sprintf("`%s` compiles to calls of phaenon/concurrent, which is not installed: composer require phaenon/concurrent", what)})
-				return true
-			})
-		}
-	}
 	if rt, ok := installed["phaenon/runtime"]; ok {
 		if want, got := releaseMinor(version), releaseMinor(rt); want != "" && got != "" && want != got {
 			diags = append(diags, checker.Diagnostic{File: filepath.Join(dir, "installed.json"), Line: 1, Col: 1, EndLine: 1, EndCol: 1,

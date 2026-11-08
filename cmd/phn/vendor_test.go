@@ -109,25 +109,6 @@ func TestBuildVendor(t *testing.T) {
 	}
 }
 
-// installed.json decides what P4013 and P4014 report.
-func TestInstalledDiags(t *testing.T) {
-	bin := phnBinary(t)
-	root := vendorTree(t)
-	writeTree(t, root, map[string]string{
-		"src/Fan.phn": "namespace App;\n\nfun both(): list<int> {\n    concurrently {\n        $a = spawn 1;\n        $b = spawn 2;\n    }\n    return [$a, $b];\n}\n",
-	})
-	_, stderr, err := run(t, root, bin, "check")
-	if err == nil || strings.Count(stderr, "error P4013") != 3 {
-		t.Errorf("concurrently and spawn without phaenon/concurrent should be P4013 (%v):\n%s", err, stderr)
-	}
-	writeTree(t, root, map[string]string{"vendor/composer/installed.json": `{"packages": [
-		{"name": "acme/lib", "version": "1.2.0", "install-path": "../acme/lib"},
-		{"name": "phaenon/concurrent", "version": "0.1.0", "install-path": "../phaenon/concurrent"}]}`})
-	if _, stderr, _ := run(t, root, bin, "check"); strings.Contains(stderr, "P4013") {
-		t.Errorf("phaenon/concurrent is installed:\n%s", stderr)
-	}
-}
-
 func TestReleaseMinor(t *testing.T) {
 	for v, want := range map[string]string{"0.4.2": "0.4", "v1.10.0": "1.10", "dev": "", "dev-main": "", "0.4.x-dev": "", "0.4": "", "1.2.3-RC1": "1.2"} {
 		if got := releaseMinor(v); got != want {

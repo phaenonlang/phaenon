@@ -10,18 +10,18 @@ import (
 )
 
 // TestRuntimeStubs type-checks the stdlib written in Phaenon
-// (stdlib/runtime/**/*.phn, stdlib/concurrent/*.phn): it is read as the
-// compiler's own declaration of the Phaenon\Debug classes and the
-// concurrency scope, and compiled into the runtime and concurrent packages,
-// so its bodies must satisfy the checker like any Phaenon source. The Debug integrations are checked against the embedded
-// Monolog and Sentry declarations (stdlib.Suggested).
+// (stdlib/runtime/**/*.phn): it is read as the compiler's own declaration
+// of the Phaenon\Debug classes, and compiled into the runtime package, so
+// its bodies must satisfy the checker like any Phaenon source. The Debug
+// integrations are checked against the embedded Monolog and Sentry
+// declarations (stdlib.Suggested).
 func TestRuntimeStubs(t *testing.T) {
 	p := program.New()
 	if err := p.LoadSuggested(); err != nil {
 		t.Fatal(err)
 	}
 	n := 0
-	for _, s := range append(stdlib.Runtime(), stdlib.Concurrent()...) {
+	for _, s := range stdlib.Runtime() {
 		if !strings.HasSuffix(s.Path, ".phn") {
 			continue
 		}

@@ -14,9 +14,8 @@
 #   - Composer is on PATH and PHAENON_COMPOSER names it, yet the plugin's
 #     suite (internal/distribution) skips: it installs the phaenon/runtime
 #     checkout beside the repository, and for now this workflow checks out
-#     this repository alone. TestRuntimePackageFresh,
-#     TestConcurrentPackageFresh and TestVectorCopiesFresh skip for their
-#     sibling checkouts likewise.
+#     this repository alone. TestRuntimePackageFresh and
+#     TestVectorCopiesFresh skip for their sibling checkouts likewise.
 #   - Skipped for want of their variables, which name a php-src corpus, a
 #     PHPStan install, a PHP 8.6 or Phaenon trees to run over: conformance
 #     (PHAENON_PHP_SRC, PHAENON_EXEC), the stubs' freshness (PHAENON_PHP_SRC),

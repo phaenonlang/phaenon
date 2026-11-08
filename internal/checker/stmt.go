@@ -73,13 +73,11 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 	case *ast.Switch:
 		x.switchStmt(s, env)
 	case *ast.Break:
-		x.blockExit(s.S, s.Levels, "break")
 		if s.Levels != nil {
 			x.expr(s.Levels, env, nil)
 		}
 		x.jump(env, s.Levels, false)
 	case *ast.Continue:
-		x.blockExit(s.S, s.Levels, "continue")
 		if s.Levels != nil {
 			x.expr(s.Levels, env, nil)
 		}
@@ -184,10 +182,6 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 			*env = *then
 			return
 		}
-	}
-	if c, ok := s.Expr.(*ast.Concurrently); ok {
-		x.concurrently(c, env, false)
-		return
 	}
 	if s.Doc == "" {
 		x.expr(s.Expr, env, nil)
@@ -1089,7 +1083,6 @@ func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
 		returned(x.file, s, t)
 	}
 	x.returnTypes = append(x.returnTypes, t)
-	x.blockReturn(s, t)
 	if !x.hasReturn {
 		return
 	}
@@ -1210,8 +1203,8 @@ func bodyHasYield(stmts []ast.Stmt) bool {
 			switch n.(type) {
 			case *ast.Yield, *ast.YieldFrom:
 				found = true
-			case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl, *ast.FunctionDecl, *ast.Concurrently, *ast.Spawn:
-				return false // closures in the output: a yield inside is theirs (and P2603)
+			case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl, *ast.FunctionDecl:
+				return false
 			}
 			return !found
 		})
@@ -1302,7 +1295,7 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 
 // child creates the context of a closure declared in x.
 func (x *fnCtx) child(static bool) *fnCtx {
-	c := &fnCtx{c: x.c, file: x.file, class: x.class, static: x.static || static, res: x.res, byRef: map[string]bool{}, thisType: x.thisType, inScope: x.inScope, inBlock: x.inBlock}
+	c := &fnCtx{c: x.c, file: x.file, class: x.class, static: x.static || static, res: x.res, byRef: map[string]bool{}, thisType: x.thisType, inScope: x.inScope}
 	c.name = "closure"
 	if b := x.bindThis; b != nil {
 		x.bindThis = nil

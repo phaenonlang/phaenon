@@ -15,8 +15,8 @@
 //   - the spacing of Phaenon's own syntax: type parameters and type
 //     arguments (`class Box<T of Item>`, `map<string, list<int>>`), tuple
 //     and closure types (`(int, string)`, `Closure(int, string...): bool`),
-//     `throws A|B`, `x is T`, `x as? T`, `=>` of an expression body,
-//     `concurrently (…) {` and `spawn`, and type aliases.
+//     `throws A|B`, `x is T`, `x as? T`, `=>` of an expression body, and
+//     type aliases.
 //
 // Everything else is the project's PHP style, which the second layer, the
 // project's fixer run through phn fix, writes. The spacing changes only
@@ -191,17 +191,6 @@ func (s *spacer) node(n ast.Node) {
 			} else {
 				s.set(kw, " ")
 			}
-		}
-	case *ast.Concurrently:
-		if kw := s.at(n.Kw.Start); kw >= 0 {
-			s.set(kw, " ")
-		}
-		if n.Opts != nil {
-			s.set(s.last(n.Opts.S.End), " ")
-		}
-	case *ast.Spawn:
-		if kw := s.at(n.Kw.Start); kw >= 0 {
-			s.set(kw, " ")
 		}
 	}
 }

@@ -59,12 +59,11 @@ func phpFor(v phpversion.Version) string {
 // only classes, functions and constants, load under it: php links a class
 // as it declares it, so a signature `php -l` accepts and PHP rejects (an
 // override narrowing a parameter) fails here, without PHPStan. The
-// declarations of phaenon/runtime and phaenon/concurrent are autoloaded
-// beside the output. PHPStan runs at level max when PHAENON_PHPSTAN names
-// the binary and that PHPStan parses the output. A file compiled for
-// several targets runs every output under PHP 8.6 and the 8.5 one under
-// the php on PATH too: they must print the same. PHAENON_UPDATE=1 rewrites
-// the expected files.
+// declarations of phaenon/runtime are autoloaded beside the output.
+// PHPStan runs at level max when PHAENON_PHPSTAN names the binary and that
+// PHPStan parses the output. A file compiled for several targets runs every
+// output under PHP 8.6 and the 8.5 one under the php on PATH too: they must
+// print the same. PHAENON_UPDATE=1 rewrites the expected files.
 func TestGenerics(t *testing.T) {
 	files, _ := filepath.Glob("testdata/*.phn")
 	if len(files) == 0 {
@@ -83,14 +82,7 @@ func TestGenerics(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		concurrent, err := Concurrent()
-		if err != nil {
-			t.Fatal(err)
-		}
-		for name, src := range concurrent {
-			compiled[name] = src
-		}
-		for _, s := range append(stdlib.Runtime(), stdlib.Concurrent()...) {
+		for _, s := range stdlib.Runtime() {
 			name, src := packagePath(s.Path), s.Src
 			if strings.HasSuffix(s.Path, ".phn") {
 				src = compiled[name]
@@ -254,19 +246,16 @@ func declarationsOnly(stmts []ast.Stmt) bool {
 
 // loader is the script that loads one output: `php loader.php output.php
 // runtimeDir`. It autoloads the Phaenon\ classes from the compiled runtime
-// and concurrent packages laid out in runtimeDir as their src/ are, and
-// requires the output, which declares its classes and links them.
+// package laid out in runtimeDir as its src/ is, and requires the output,
+// which declares its classes and links them.
 const loader = `<?php
 spl_autoload_register(function (string $class): void {
-    foreach (['Phaenon\\Concurrent\\', 'Phaenon\\'] as $prefix) {
-        if (!str_starts_with($class, $prefix)) {
-            continue;
-        }
-        $file = $_SERVER['argv'][2] . '/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
-        if (is_file($file)) {
-            require $file;
-        }
+    if (!str_starts_with($class, 'Phaenon\\')) {
         return;
+    }
+    $file = $_SERVER['argv'][2] . '/' . str_replace('\\', '/', substr($class, strlen('Phaenon\\'))) . '.php';
+    if (is_file($file)) {
+        require $file;
     }
 });
 require $_SERVER['argv'][1];

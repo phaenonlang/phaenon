@@ -39,7 +39,7 @@ func TestLineMapProperty(t *testing.T) {
 			inputs = append(inputs, input{path, src})
 		}
 	}
-	for _, s := range append(stdlib.Runtime(), stdlib.Concurrent()...) {
+	for _, s := range stdlib.Runtime() {
 		if strings.HasSuffix(s.Path, ".phn") {
 			inputs = append(inputs, input{"<stub>/" + s.Path, s.Src})
 		}

@@ -78,8 +78,8 @@ usage:
                                                            and Rector; --check reports and writes no source
   phn fmt [--check] [<file>...] | --stdin                  lay .phn files out: Phaenon's layout (spaces for tabs,
                                                            braces, {}, one-line docblocks, the spacing of type
-                                                           parameters and arguments, throws, is, as, concurrently,
-                                                           spawn), then the project's fixer through phn fix
+                                                           parameters and arguments, throws, is, as), then the
+                                                           project's fixer through phn fix
                                                            (phaenon.json "fmt", or tools/php-cs-fixer or
                                                            vendor/bin/php-cs-fixer); no files:
                                                            the roots; --check writes nothing and fails on a change;
@@ -101,10 +101,8 @@ usage:
                                                            --list-types types bare arrays as lists and
                                                            maps from the values they hold;
                                                            --php writes the target into phaenon.json
-  phn stdlib [--out DIR] [--concurrent-out DIR] [--check]
-                                                           write the compiled phaenon/runtime sources
-                                                           (Debug/LineMap.php, …) into DIR, the compiled
-                                                           phaenon/concurrent package into the second
+  phn stdlib --out DIR [--check]                           write the compiled phaenon/runtime sources
+                                                           (Debug/LineMap.php, …) into DIR
   phn trace [--root PREFIX=LOCAL]... [<text>...]           rewrite the positions in compiled files (stack traces,
                                                            PHPUnit, PHPStan --error-format=raw or github) into .phn
                                                            positions; reads the arguments, or stdin without them,
@@ -127,8 +125,8 @@ given) with --out. A file with type errors is not written unless --emit-on-error
 exit status still reports the errors). --check writes nothing and fails when any output is
 missing, stale or orphaned; with --emit-on-error, a file with errors passes when its output is
 what that build writes.
-stdlib materialises the classes written in Phaenon (stdlib/runtime, stdlib/concurrent) as the
-phaenon/runtime and phaenon/concurrent packages ship them.
+stdlib materialises the classes written in Phaenon (stdlib/runtime) as the phaenon/runtime
+package ships them.
 check and build read vendor code through the nearest vendor/composer autoload maps, an installed
 package with a phaenon.json from its .phn sources.
 Every compiled file ends with a line map (// phaenon-map v1 …) that trace reads: file.php:42,
@@ -353,7 +351,7 @@ func (j buildJob) run() buildResult {
 		diags = append(diags, j.diags...)
 	}
 	if !j.dependency {
-		diags = append(diags, installedDiags(files, prog)...)
+		diags = append(diags, installedDiags()...)
 	}
 	broken := map[string]bool{}
 	for _, d := range diags {
@@ -442,26 +440,16 @@ func mapSource(src, dst string) string {
 func stdlibCmd(args []string) {
 	fs := flag.NewFlagSet("stdlib", flag.ExitOnError)
 	out := fs.String("out", "", "directory to write the compiled stdlib into")
-	concurrentOut := fs.String("concurrent-out", "", "directory to write the compiled phaenon/concurrent package into")
 	check := fs.Bool("check", false, "verify the files there are up to date; write nothing")
 	fs.Parse(args)
-	if (*out == "" && *concurrentOut == "") || fs.NArg() != 0 {
+	if *out == "" || fs.NArg() != 0 {
 		usage()
 	}
-	if *out != "" {
-		compiled, err := emit.Stdlib()
-		if err != nil {
-			fail("%v", err)
-		}
-		materialise("stdlib", compiled, *out, *check)
+	compiled, err := emit.Stdlib()
+	if err != nil {
+		fail("%v", err)
 	}
-	if *concurrentOut != "" {
-		compiled, err := emit.Concurrent()
-		if err != nil {
-			fail("%v", err)
-		}
-		materialise("concurrent package", compiled, *concurrentOut, *check)
-	}
+	materialise("stdlib", compiled, *out, *check)
 }
 
 // materialise writes the generated files into dir, or with check only
@@ -674,7 +662,7 @@ func checkCmd(args []string) {
 		files = append(files, f)
 	}
 	diags := append(tgt.Diags, typeCheck(files, tgt.Version, proj.checkerOptions(checker.Options{Deprecations: !*noDeprecations}))...)
-	diags = append(diags, installedDiags(files, loadedProgram)...)
+	diags = append(diags, installedDiags()...)
 	errors, warnings := 0, 0
 	for _, d := range diags {
 		if d.Severity == checker.Error {

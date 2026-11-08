@@ -35,7 +35,7 @@ output. `../design/roadmap.md` §3 names the milestones and what each one brings
 
 | Question | Look in |
 |---|---|
-| What the language is, and will be | `../design/language-overview.md`, then the feature's doc (`functions.md` for `fun` and closures in constant expressions, `concurrency.md` for `concurrently` and `spawn`) |
+| What the language is, and will be | `../design/language-overview.md`, then the feature's doc (`functions.md` for `fun` and closures in constant expressions) |
 | Why something is the way it is | The decision sections: `roadmap.md` §1, `checker.md` §9, `generics.md` §11 — they win over the draft text above them |
 | Milestone status and what is next | `../design/roadmap.md` §3 |
 | Open questions and deferred work | `../design/roadmap.md` §6, `checker.md` §10, `tooling.md` §13; the repository's issues |
@@ -68,7 +68,7 @@ internal/trace        `phn trace`: positions in compiled files → `.phn` positi
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
 internal/playground   one file checked and compiled in memory, the embedded stdlib alone: what cmd/phn-wasm answers (design/tooling.md §3.6)
 internal/conformance  suites over the php-src corpus with `php` as the oracle
-stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime and phaenon/concurrent sources (.phn), the amp/Revolt declarations;
+stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/runtime sources (.phn);
                       suggested/: the Monolog and Sentry API the runtime's Debug integrations are checked against, loaded only by the stdlib's own programs
 stdlib/gen            generator of stdlib/php-src (the newest release branch's stubs), versions_gen.go (the release each symbol came in) and constants.php
 internal/distribution tests of the phaenon/phn Composer plugin under a real Composer (PHAENON_COMPOSER)
@@ -149,14 +149,13 @@ org map above and their READMEs.
 
 `phn` itself: `phn build|check|fix|fmt|lsp|watch|migrate|stdlib|trace|lex|print` — run `phn` without arguments for usage; the
 README explains the Composer workflow and `phaenon.json` (roots → sibling output directories). Dogfood targets call `phn` from `PATH`, or, through the `phaenon/phn` plugin, this checkout's `bin/phn` (`go build -o bin/phn ./cmd/phn`; `PHN_BINARY` names another). `phn stdlib` writes the
-runtime package (`--out ../runtime/src`) and the concurrent package (`--concurrent-out
-../concurrent/src`) from `stdlib/runtime/**/*.phn` (a subdirectory there is one in `src/`:
-`Debug/LineMap.phn` → `src/Debug/LineMap.php`) and `stdlib/concurrent/Scope.phn`; the tests
-`TestRuntimePackageFresh` and `TestConcurrentPackageFresh` fail when a checkout is stale. They
-look for the checkouts beside the repository root (`../../../<repo>` from their package) and skip
-when there are none, as in a git worktree kept elsewhere: there, `phn stdlib … --check` with the
-sibling paths does the same check. `phn stdlib` writes and checks the files that have a source and
-removes none: a source deleted here is deleted from the package by hand.
+runtime package (`--out ../runtime/src`) from `stdlib/runtime/**/*.phn` (a subdirectory there is
+one in `src/`: `Debug/LineMap.phn` → `src/Debug/LineMap.php`); the test `TestRuntimePackageFresh`
+fails when the checkout is stale. It looks for the checkout beside the repository root
+(`../../../runtime` from its package) and skips when there is none, as in a git worktree kept
+elsewhere: there, `phn stdlib --out ../runtime/src --check` does the same check. `phn stdlib`
+writes and checks the files that have a source and removes none: a source deleted here is deleted
+from the package by hand.
 
 ## How work is done
 

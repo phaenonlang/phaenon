@@ -78,7 +78,7 @@ func firstYield(e ast.Expr) ast.Node {
 		switch n.(type) {
 		case *ast.Yield, *ast.YieldFrom:
 			found = n
-		case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl, *ast.Concurrently, *ast.Spawn:
+		case *ast.Closure, *ast.ArrowFunc, *ast.ClassDecl:
 			return false
 		}
 		return found == nil

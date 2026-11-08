@@ -18,33 +18,18 @@ import (
 // libraries the runtime suggests (stdlib.Suggested), which the Debug
 // integrations are written against.
 func Stdlib() (map[string][]byte, error) {
-	return compilePackage(stdlib.Runtime(), true)
-}
-
-// Concurrent compiles the Phaenon sources of the phaenon/concurrent package
-// (`Scope.phn`) the same way; the amp declarations beside them are the
-// package's dependency, not its contents.
-func Concurrent() (map[string][]byte, error) {
-	return compilePackage(stdlib.Concurrent(), false)
-}
-
-func compilePackage(stubs []stdlib.Stub, suggested bool) (map[string][]byte, error) {
 	p := program.New()
-	load := p.LoadStubs
-	if suggested {
-		load = p.LoadSuggested
-	}
-	if err := load(); err != nil {
+	if err := p.LoadSuggested(); err != nil {
 		return nil, err
 	}
 	out := map[string][]byte{}
-	for _, s := range stubs {
+	for _, s := range stdlib.Runtime() {
 		if !strings.HasSuffix(s.Path, ".phn") {
 			continue
 		}
 		f := p.File("<stub>/" + s.Path)
-		// No line map: the packages ship without their .phn sources, so
-		// their positions are meant as the PHP they are.
+		// No line map: the package ships without its .phn sources, so its
+		// positions are meant as the PHP it is.
 		php, err := Tree(s.Src, f.AST, Options{SourceName: filepath.Base(s.Path), StrictTypes: true, NoMap: true, Program: p, File: f})
 		if err != nil {
 			return nil, err
