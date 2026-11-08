@@ -466,3 +466,10 @@ final class Hooked
         return $a + ($b ? 1 : 0) + ($c ? 1 : 0) + $d + ($e ?? 0);
     }
 }
+
+// The key of a read on the left of ?? is typed once: the `as` in it
+// narrows $k after it, not before it.
+function coalescedKey(mixed $k, map<int, string> $names): string
+{
+    return $names[$k as int] ?? '';
+}

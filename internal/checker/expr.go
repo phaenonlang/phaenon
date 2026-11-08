@@ -218,10 +218,7 @@ func (x *fnCtx) exprLenient(e ast.Expr, env *state) types.Type {
 			return t
 		}
 		base := x.exprLenient(e.Array, env)
-		if e.Index != nil {
-			x.expr(e.Index, env, nil)
-		}
-		return x.indexType(base, e, env, true)
+		return x.indexType(base, e, env, true) // types the key, once
 	case *ast.PropertyFetch:
 		return x.propertyFetch(e, env, true)
 	case *ast.Paren:
