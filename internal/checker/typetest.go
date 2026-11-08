@@ -16,8 +16,10 @@ import (
 // test that writes its operand twice takes only an operand that reads the
 // same twice (P3012). A check the operand's PHP type already settles is left
 // out, as PHPStan would report it on the output: on an array, `is list` is
-// `\array_is_list($x)` alone. The lowering is recorded on the file
-// (program.Test), and the emitter writes it as recorded.
+// `\array_is_list($x)` alone. A bytes operand tested as a string is tested
+// for UTF-8 (design/strings.md §6): `\mb_check_encoding($b, 'UTF-8')`. The
+// lowering is recorded on the file (program.Test), and the emitter writes
+// it as recorded.
 
 // checkKind says what a node of a test is.
 type checkKind uint8
@@ -42,6 +44,10 @@ type check struct {
 	// is_*() type check, instanceof, === of a constant. It does not for
 	// array_is_list(), a count, is_a() or class_exists().
 	narrowsElse bool
+	// utf8 marks the leaf `\mb_check_encoding(operand, 'UTF-8')`, which
+	// tells text from binary data by its value: no type settles it, and
+	// PHPStan narrows nothing on it either way.
+	utf8 bool
 	// accepts is the type of the values a leaf is true for, given the
 	// checks before it. An And or Or with accepts is simplified as a leaf
 	// (`\class_exists($x) || \interface_exists($x)`). narrow, when set,
@@ -101,9 +107,82 @@ func instanceOf(class string, path []int, accepts types.Type) *check {
 }
 
 var (
-	anyArray = types.Array{Key: types.TArrayKey, Value: types.TMixed}
-	anyList  = types.Array{Key: types.TInt, Value: types.TMixed, List: true}
+	anyArray      = types.Array{Key: types.TArrayKey, Value: types.TMixed}
+	anyList       = types.Array{Key: types.TInt, Value: types.TMixed, List: true}
+	stringOrBytes = types.MakeUnion(types.TString, types.TBytes)
 )
+
+// isText is the test of a string at path. PHP's is_string() is true for
+// bytes too, which are PHP strings, so on an operand that may be bytes the
+// test is the conversion `$b as string` makes (design/strings.md §6): a
+// string, then UTF-8. An operand that may be either bytes or text cannot
+// be told apart at runtime (P3011, through fail).
+func (b *testBuilder) isText(path []int, fail func(why string) *check) *check {
+	at := b.refinedAt(path)
+	if !hasBytes(at) {
+		return fn("is_string", path, types.TString)
+	}
+	for _, m := range types.Members(at) {
+		if _, binary := m.(types.Bytes); !binary && types.Overlaps(m, types.TString, b.x.p()) {
+			return fail(" on " + b.x.typeName(at) + whyEither)
+		}
+	}
+	return joinChecks(checkAnd, fn("is_string", path, stringOrBytes),
+		&check{before: "\\mb_check_encoding(", after: ", 'UTF-8')", path: path, prec: program.PrecAtom, accepts: types.TString, utf8: true})
+}
+
+// asText is an operand's type t as a test against target sees it: where
+// target tests for a string, a bytes member that passes is string&bytes,
+// bytes that are UTF-8 text, in a tuple's members too.
+func asText(t, target types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		switch v := m.(type) {
+		case types.Bytes:
+			for _, tm := range types.Members(target) {
+				if _, ok := tm.(types.String); ok {
+					return types.TTextBytes
+				}
+			}
+		case types.Shape:
+			if !tuple(v) {
+				return m
+			}
+			var elems [][]types.Type
+			for _, tm := range types.Members(target) {
+				if ts, ok := tm.(types.Shape); ok && tuple(ts) && len(ts.Entries) == len(v.Entries) {
+					for i, e := range ts.Entries {
+						if i == len(elems) {
+							elems = append(elems, nil)
+						}
+						elems[i] = append(elems[i], e.Type)
+					}
+				}
+			}
+			if elems == nil {
+				return m
+			}
+			entries := make([]types.ShapeEntry, len(v.Entries))
+			for i, e := range v.Entries {
+				e.Type = asText(e.Type, types.MakeUnion(elems[i]...))
+				entries[i] = e
+			}
+			v.Entries = entries
+			return v
+		}
+		return m
+	})
+}
+
+// textOnly is t with string&bytes as plain text: what `as string` gives
+// is a string converted from bytes, not the bytes.
+func textOnly(t types.Type) types.Type {
+	return types.MapDeep(t, func(m types.Type) types.Type {
+		if types.IsTextBytes(m) {
+			return types.TextSide(m)
+		}
+		return m
+	})
+}
 
 func listTest(path []int) *check {
 	return joinChecks(checkAnd, fn("is_array", path, anyArray), fn("array_is_list", path, anyList))
@@ -189,7 +268,8 @@ const (
 	whyArray    = " in O(1): test `is array` and build the typed value, or check the entries yourself"
 	whyIterable = " in O(1): test `is iterable` and check the values where they are read"
 	whyClosure  = ": test `is Closure`; PHP checks a closure's parameters and result when it is called"
-	whyBytes    = ": bytes is a PHP string; test `is string` and convert it with (bytes)"
+	whyBytes    = ": PHP cannot tell bytes from string; (bytes) retypes a string as binary data, (string) is the unchecked way back"
+	whyEither   = ": PHP cannot tell bytes from string; (bytes) retypes a string as binary data, (string) is the unchecked way back, and `as string` checks the UTF-8 of bytes"
 	whyClass    = " in O(1): test `is class` and check the class with is_a()"
 	whyNoValue  = ": no value has this type"
 	whyOther    = " in O(1): test a type PHP checks, and check the rest yourself"
@@ -262,8 +342,10 @@ func (b *testBuilder) named(t *ast.NamedType, path []int) *check {
 		}
 		lower := strings.ToLower(name)
 		switch lower {
-		case "int", "float", "string", "bool", "object", "callable", "scalar", "numeric", "resource":
+		case "int", "float", "bool", "object", "callable", "scalar", "numeric", "resource":
 			return fn("is_"+lower, path, x.res.Native(t))
+		case "string":
+			return b.isText(path, func(why string) *check { return b.cannot(t.S, quoted(b.src(t.S)), why) })
 		case "number":
 			return joinChecks(checkOr, fn("is_int", path, types.TInt), fn("is_float", path, types.TFloat))
 		case "null", "true", "false":
@@ -402,7 +484,7 @@ func (b *testBuilder) typed(t types.Type, path []int, span ast.Span, written str
 		return fn("is_float", path, v)
 	case types.String:
 		if v == (types.String{}) {
-			return fn("is_string", path, v)
+			return b.isText(path, cannot)
 		}
 	case types.StringLit:
 		return identical(program.PHPString(v.V), path, v)
@@ -684,6 +766,10 @@ func (x *fnCtx) simplify(c *check, s testState) (out *check, then, els testState
 		if c.noOperand {
 			return c, s, s, true, false
 		}
+		if c.utf8 {
+			then := types.Intersect(asText(t, types.TString), types.TString, h)
+			return c, s.with(c.path, then), s, false, !types.Overlaps(t, stringOrBytes, h)
+		}
 		always = types.IsSubtype(t, c.accepts, h)
 		never = !types.Overlaps(t, c.accepts, h)
 		then := types.Intersect(t, c.accepts, h)
@@ -694,13 +780,19 @@ func (x *fnCtx) simplify(c *check, s testState) (out *check, then, els testState
 	}
 	var kept []*check
 	var last *check
+	// A conjunct always true never fails, a disjunct never true never
+	// holds: the state it would leave is no branch of the whole.
 	var branches []testState
+	var lastBranch testState
 	cur := s
 	if c.kind == checkAnd {
 		always = true
 		for _, a := range c.args {
 			o, th, el, alw, nev := x.simplify(a, cur)
-			branches = append(branches, el)
+			if !alw {
+				branches = append(branches, el)
+			}
+			lastBranch = el
 			last = o
 			if !alw {
 				kept = append(kept, o)
@@ -712,12 +804,18 @@ func (x *fnCtx) simplify(c *check, s testState) (out *check, then, els testState
 		if len(kept) == 0 {
 			kept = []*check{last}
 		}
+		if len(branches) == 0 {
+			branches = []testState{lastBranch}
+		}
 		return joinChecks(checkAnd, kept...), cur, joinStates(branches...), always, never
 	}
 	never = true
 	for _, a := range c.args {
 		o, th, el, alw, nev := x.simplify(a, cur)
-		branches = append(branches, th)
+		if !nev {
+			branches = append(branches, th)
+		}
+		lastBranch = th
 		last = o
 		if !nev {
 			kept = append(kept, o)
@@ -729,7 +827,23 @@ func (x *fnCtx) simplify(c *check, s testState) (out *check, then, els testState
 	if len(kept) == 0 {
 		kept = []*check{last}
 	}
+	if len(branches) == 0 {
+		branches = []testState{lastBranch}
+	}
 	return joinChecks(checkOr, kept...), joinStates(branches...), cur, always, never
+}
+
+// hasUTF8 reports a test with a UTF-8 check in it.
+func hasUTF8(c *check) bool {
+	if c.utf8 {
+		return true
+	}
+	for _, a := range c.args {
+		if hasUTF8(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // elseType is what the operand of type t is where the emitted test c is
@@ -794,16 +908,18 @@ type testSeen struct{ t, nt types.Type }
 
 // lowerTest lowers the test of node (an `is`, `as` or `as?`) of operand
 // e against typ, records it for the emitter and reports P3011 and P3012.
-// t is the operand's type, nt what PHP guarantees of it; typeOK says the
-// type itself drew no finding. The result is the test as emitted, nil
-// when the type has none.
-func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type, typeOK bool, env *state) *check {
+// o is the operand's type, what PHP guarantees of it and their text view;
+// typeOK says the type itself drew no finding. The result is the test as
+// emitted, nil when the type has none; untestable says the type has no
+// test, which was reported (P3011, P3003).
+func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, o operand, target types.Type, typeOK bool, env *state) (c *check, untestable bool) {
 	if x.c.testSeen == nil {
 		x.c.testSeen = map[ast.Expr]testSeen{}
 	}
 	if prev, ok := x.c.testSeen[node]; ok {
-		t, nt = types.MakeUnion(prev.t, t), types.MakeUnion(prev.nt, nt)
+		o = newOperand(types.MakeUnion(prev.t, o.t), types.MakeUnion(prev.nt, o.nt), target)
 	}
+	t, nt := o.t, o.nt
 	x.c.testSeen[node] = testSeen{t, nt}
 	rec := &program.Test{Expected: types.PrintPhaenon(target)}
 	if x.c.file.Tests == nil {
@@ -811,15 +927,21 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, 
 	}
 	x.c.file.Tests[node] = rec
 	if !typeOK {
-		return nil // the type's own finding says what is wrong (P3001, P2518, …)
+		return nil, false // the type's own finding says what is wrong (P3001, P2518, …)
 	}
 	b := &testBuilder{x: x, op: op, refined: t}
-	c := b.build(typ, nil)
+	c = b.build(typ, nil)
 	if c == nil || b.failed {
-		return nil
+		return nil, true
 	}
 	c, _, _, _, _ = x.simplify(c, testState{"": {t: nt}})
 	rec.Cond, rec.Prec = render(c)
+	if hasUTF8(c) {
+		// What an `as` throws depends on what can fail: the encoding of
+		// bytes alone, null or the encoding, or anything else.
+		rec.UTF8 = true
+		rec.EncodingOnly, rec.NullFirst = x.utf8Failure(o, target)
+	}
 	// Reported whether or not the test is settled: `phn build
 	// --emit-on-error` writes the test all the same.
 	// The operand is counted in what the emitter writes: an `as` writes it
@@ -836,9 +958,35 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, 
 	default:
 		if pr := x.hookedRead(e, env); pr != nil {
 			x.report(e.Span(), P3012, "the operand of `%s` reads the hooked property %s::$%s twice, and its get hook runs each time; assign it to a variable first", op, pr.Class.Name, pr.Name)
+		} else if x.stringifiesObject(e, env) {
+			x.report(e.Span(), P3012, "the operand of `%s` converts a value that may be an object twice, and its __toString() runs each time; assign it to a variable first", op)
 		}
 	}
-	return c
+	return c, false
+}
+
+// stringifiesObject reports a (string) cast operand of what may be an
+// object: each copy of it calls __toString() again.
+func (x *fnCtx) stringifiesObject(e ast.Expr, env *state) bool {
+	inner, stringCast := program.TestOperandOf(e)
+	return stringCast && mayBeObject(x.pathType(inner, env))
+}
+
+// utf8Failure says how a UTF-8 test can fail: encodingOnly when every value
+// the operand may hold, as inferred and as PHP guarantees it, has the
+// tested type once its bytes are text; nullFirst when that holds of all
+// but null, which the type rejects. Anything else fails on its type too.
+// Null counts where either type admits it: a property guarded against
+// null is bytes to the checker and still ?string to PHP.
+func (x *fnCtx) utf8Failure(o operand, target types.Type) (encodingOnly, nullFirst bool) {
+	passes := func(tt, ntt types.Type) bool {
+		return !types.IsMixed(ntt) && types.IsSubtype(tt, target, x.p()) && types.IsSubtype(ntt, target, x.p())
+	}
+	if passes(o.tt, o.ntt) {
+		return true, false
+	}
+	nullable := (types.IsNullable(o.t) || types.IsNullable(o.nt)) && !types.IsSubtype(types.TNull, target, x.p())
+	return false, nullable && passes(types.StripNull(o.tt), types.StripNull(o.ntt))
 }
 
 // hookedRead is the first property along an operand's chain of reads
@@ -846,6 +994,7 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, 
 // knows say; nil when there is none. A plain property reads the same
 // twice; a magic __get cannot be known, and is not looked for.
 func (x *fnCtx) hookedRead(e ast.Expr, env *state) *program.Property {
+	e, _ = program.TestOperandOf(e)
 	for {
 		switch v := e.(type) {
 		case *ast.Paren:

@@ -6,11 +6,9 @@ declare(strict_types=1);
 
 namespace App;
 
-use Phaenon\Bytes;
-
 // bytes erases to string: the (bytes) cast disappears, PHP's functions
-// take bytes as they take strings, and \Phaenon\Bytes holds the checked
-// conversions (design/strings.md §2, §5).
+// take bytes as they take strings and are the conversions, and `as
+// string` is the checked one (design/strings.md §2, §5, §6).
 
 final class Token
 {
@@ -25,12 +23,17 @@ final class Token
 
     public static function fromHex(string $hex): self
     {
-        return new self(Bytes::fromHex($hex));
+        $secret = hex2bin($hex);
+        if ($secret === false) {
+            throw new \ValueError('not a hexadecimal string');
+        }
+
+        return new self($secret);
     }
 
     public function hex(): string
     {
-        return Bytes::hex($this->secret);
+        return bin2hex($this->secret);
     }
 
     public function matches(string $candidate): bool
@@ -42,7 +45,7 @@ final class Token
     {
         return hash('sha256', $this->secret, true)
             |> (fn (string $h) => substr($h, 0, 8))
-            |> Bytes::hex(...);
+            |> bin2hex(...);
     }
 }
 
@@ -51,9 +54,14 @@ function fromBinary(string $raw): string
     return $raw;
 }
 
+function toBinary(string $raw): string
+{
+    return (string) $raw;
+}
+
 function label(string $id): string
 {
-    return 'id-' . Bytes::hex($id) . ' (' . strlen($id) . ' bytes)';
+    return 'id-' . bin2hex($id) . ' (' . strlen($id) . ' bytes)';
 }
 
 /**
@@ -62,7 +70,55 @@ function label(string $id): string
  */
 function keys(array $keys): array
 {
-    return array_map(fn (string $k) => Bytes::base64($k, urlSafe: true), $keys);
+    return array_map(fn (string $k) => rtrim(strtr(base64_encode($k), '+/', '-_'), '='), $keys);
+}
+
+function fromBase64(string $b64): string
+{
+    return base64_decode(strtr($b64, '-_', '+/'));
+}
+
+// `as string` checks that bytes are UTF-8 text and throws a ValueError
+// when they are not; `as?` gives null, `is string` is the test alone
+// (strings.md §6). Where a type may fail too, the error says which.
+function decode(string $payload): string
+{
+    return \mb_check_encoding($payload, 'UTF-8') ? $payload : throw new \ValueError('not valid UTF-8');
+}
+
+function tryDecode(string $payload): ?string
+{
+    return \mb_check_encoding($payload, 'UTF-8') ? $payload : null;
+}
+
+function describe(string $payload): string
+{
+    if (\mb_check_encoding($payload, 'UTF-8')) {
+        return "text: $payload";
+    }
+
+    return 'binary: ' . bin2hex($payload) . ', read as ' . mb_scrub($payload, 'UTF-8');
+}
+
+function maybeText(?string $payload): bool
+{
+    return $payload === null || \mb_check_encoding($payload, 'UTF-8');
+}
+
+function maybeDecode(?string $payload): ?string
+{
+    return (\is_string($payload) && \mb_check_encoding($payload, 'UTF-8')) || $payload === null ? $payload : throw new \ValueError('not valid UTF-8');
+}
+
+function decodePresent(?string $payload): string
+{
+    return \is_string($payload) && \mb_check_encoding($payload, 'UTF-8') ? $payload : throw ($payload === null ? new \TypeError('expected string, got null') : new \ValueError('not valid UTF-8'));
+}
+
+// The (bytes) cast is erased from each copy of the operand it retypes.
+function decodeRaw(string $raw): string
+{
+    return \mb_check_encoding($raw, 'UTF-8') ? $raw : throw new \ValueError('not valid UTF-8');
 }
 
 // `.` joins binary to binary and erases unchanged (strings.md §2).
@@ -79,8 +135,8 @@ function frame(string $header, array $chunks): string
     return $header . $out;
 }
 
-// Written tags erase as the generated ones do (strings.md §5): with
-// `use Phaenon\Bytes;` above, a `bytes` left in a tag would be that class.
+// Written tags erase as the generated ones do (strings.md §5): a `bytes`
+// left in a tag would reach PHPStan as a class of the namespace.
 final class Archive
 {
     /** @var list<string> */
@@ -123,4 +179,4 @@ final class Archive
         return $from[0] ?? '';
     }
 }
-// phaenon-map v1 bytes.phn 1-6=1 7:1 59-62=53 63:53 69-71=59 72:59 117-120=104 121:105
+// phaenon-map v1 bytes.phn 1-6=1 7:1 67-70=61 71:61 125-127=115 128:115 173-176=160 177:161

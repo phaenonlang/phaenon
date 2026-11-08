@@ -3,8 +3,7 @@
 A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for PHP".
 
 - `phn` — the compiler (this repository, Go)
-- `phaenon/runtime` — the PHP runtime package (the checked conversions of `\Phaenon\Bytes`, the
-  line map for Monolog and Sentry)
+- `phaenon/runtime` — the PHP runtime package (the line map for Monolog and Sentry)
 - [`phaenonlang/design`](https://github.com/phaenonlang/design) — the language design documents, a
   repository of their own: a path such as `design/checker.md` below is a file there
 
@@ -373,6 +372,17 @@ never adds parameters or members: the output contains no identifier you did not 
 `\array_all($x, fn ($v) => \is_int($v))`, where the cost shows. A test that writes its operand
 twice takes a variable or a property, not a call (`P3012`). Design: `design/generics.md` §11.4.
 
+`bytes` is a PHP string at runtime, so PHP cannot tell it from text: `is bytes` is `P3011`, and
+so is `is string` on a value that may be either. On a `bytes` operand, `as string` is the checked
+conversion to text,
+`\mb_check_encoding($b, 'UTF-8') ? $b : throw new \ValueError('not valid UTF-8')`; `as? string`
+gives `null` and `is string` is the test alone. `(bytes) $s` retypes a string as binary data and
+`(string) $b` is the unchecked way back, both free. `hex2bin()` returns `bytes|false`, and
+`bin2hex()`, `base64_encode()` and `mb_scrub()` take bytes; `base64_decode()` keeps PHP's
+`string`, as base64 carries text as often as binary, and `(bytes) base64_decode($s)` retypes the
+binary case. The check needs `ext-mbstring`, or `symfony/polyfill-mbstring` where it is missing.
+Design: `design/strings.md` §6.
+
 A generic declaration's docblock adds lines to the output (PHPStan reads one tag per line);
 every other edit keeps line numbers exact. Design: `design/generics.md`, decisions in §11.
 
@@ -422,7 +432,7 @@ phn fmt --stdin                                       # Phaenon's layout of stan
 phn lsp                                               # the language server: diagnostics, hover, definition, completion, build on save
 phn watch [--no-build] [--interval D]                 # check and build the roots each time a file changes
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
-phn stdlib --out DIR [--check]                         # the compiled stdlib (Bytes, Debug/…), as phaenon/runtime ships it
+phn stdlib --out DIR [--check]                         # the compiled stdlib (Debug/…), as phaenon/runtime ships it
 phn stdlib --concurrent-out DIR [--check]              # the compiled Scope, as phaenon/concurrent ships it
 phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them
 phn trace [--root PREFIX=LOCAL]... [text...]  # positions in compiled files → .phn: text, workflow commands, XML reports on stdin

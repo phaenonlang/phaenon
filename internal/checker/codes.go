@@ -176,9 +176,10 @@ var (
 	P3009 = Code{"P3009", Error, "type arguments on a non-generic callee"}
 	P3010 = Code{"P3010", Warning, "type argument not inferable"}
 	// P3011: `is` or `as` on a type PHP has no O(1) test for — list<int>,
-	// a Closure signature, bytes, Foo<Bar> the operand does not fix — and
-	// P3012: a test that writes its operand twice on an operand that must
-	// not be evaluated twice (design/generics.md §11.4).
+	// a Closure signature, bytes, string on an operand that may be bytes
+	// or text, Foo<Bar> the operand does not fix — and P3012: a test that
+	// writes its operand twice on an operand that must not be evaluated
+	// twice (design/generics.md §11.4, strings.md §6).
 	P3011 = Code{"P3011", Error, "type cannot be tested at runtime"}
 	P3012 = Code{"P3012", Error, "operand of a test evaluated twice"}
 

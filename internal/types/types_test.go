@@ -235,3 +235,88 @@ func TestNative(t *testing.T) {
 		}
 	}
 }
+
+// TestTextBytes: string&bytes, what `is string` makes of bytes
+// (design/strings.md §6), is a value of both types, absorbed by either in
+// a union, disjoint from what neither is, and a string to PHP.
+func TestTextBytes(t *testing.T) {
+	tb := TTextBytes
+	if got := Print(tb); got != "string&bytes" {
+		t.Errorf("Print = %q", got)
+	}
+	if !Equal(MakeIntersection(TBytes, TString), tb) || !Equal(MakeIntersection(TString, TBytes), tb) {
+		t.Errorf("MakeIntersection(string, bytes) = %s", Print(MakeIntersection(TString, TBytes)))
+	}
+	for _, super := range []Type{TString, TBytes, MakeUnion(TString, TNull), MakeUnion(TString, TBytes), TMixed} {
+		if !IsSubtype(tb, super, nil) {
+			t.Errorf("string&bytes is not a subtype of %s", Print(super))
+		}
+	}
+	for _, sub := range []Type{TString, TBytes, StringLit{V: ""}} {
+		if IsSubtype(sub, tb, nil) {
+			t.Errorf("%s is a subtype of string&bytes", Print(sub))
+		}
+	}
+	for _, c := range []struct {
+		u    Type
+		want string
+	}{
+		{MakeUnion(tb, TBytes), "bytes"},
+		{MakeUnion(TBytes, tb), "bytes"},
+		{MakeUnion(tb, TString), "string"},
+		{MakeUnion(tb, TNull), "(string&bytes)|null"},
+	} {
+		if got := Print(c.u); got != c.want {
+			t.Errorf("union = %q, want %q", got, c.want)
+		}
+	}
+	for _, y := range []Type{TString, TBytes, StringLit{V: ""}, TMixed} {
+		if !Overlaps(tb, y, nil) || !Overlaps(y, tb, nil) {
+			t.Errorf("string&bytes does not overlap %s", Print(y))
+		}
+	}
+	for _, y := range []Type{TInt, TNull, NewClass("Foo"), TArray} {
+		if Overlaps(tb, y, nil) || Overlaps(y, tb, nil) {
+			t.Errorf("string&bytes overlaps %s", Print(y))
+		}
+	}
+	if got := Intersect(tb, TString, nil); !Equal(got, tb) {
+		t.Errorf("Intersect(string&bytes, string) = %s", Print(got))
+	}
+	if got := Intersect(tb, TInt, nil); !Equal(got, TNever) {
+		t.Errorf("Intersect(string&bytes, int) = %s", Print(got))
+	}
+	if got := Intersect(TBytes, TString, nil); !Equal(got, TNever) {
+		t.Errorf("Intersect(bytes, string) = %s: is_string() checks no UTF-8", Print(got))
+	}
+	// Met with more text, it stays one intersection of text and bytes.
+	lit := StringLit{V: "x"}
+	for _, c := range []struct {
+		got  Type
+		want string
+	}{
+		{MakeIntersection(tb, lit), "'x'&bytes"},
+		{MakeIntersection(lit, tb), "'x'&bytes"},
+		{Intersect(tb, lit, nil), "'x'&bytes"},
+		{MakeIntersection(tb, String{NonEmpty: true}), "non-empty-string&bytes"},
+		{MakeIntersection(tb, TBytes), "string&bytes"},
+		{MakeIntersection(tb, tb), "string&bytes"},
+		{MakeIntersection(tb, TInt), "never"},
+	} {
+		if Print(c.got) != c.want {
+			t.Errorf("meet = %s, want %s", Print(c.got), c.want)
+		}
+		if c.want != "never" && !IsTextBytes(c.got) {
+			t.Errorf("%s is not text and bytes", c.want)
+		}
+	}
+	if got := TextSide(MakeIntersection(tb, lit)); !Equal(got, lit) {
+		t.Errorf("TextSide = %s", Print(got))
+	}
+	if got := Erase(tb); !Equal(got, TString) {
+		t.Errorf("Erase = %s", Print(got))
+	}
+	if got, ok := Native(tb); !ok || got != "string" {
+		t.Errorf("Native = %q, %v", got, ok)
+	}
+}

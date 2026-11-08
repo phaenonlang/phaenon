@@ -123,6 +123,14 @@ func overlap2(x, y Type, h Hierarchy) bool {
 	if IsMixed(x) || IsMixed(y) {
 		return true
 	}
+	// string&bytes is a string and bytes: it shares a value with what
+	// either of them does.
+	if IsTextBytes(y) {
+		x, y = y, x
+	}
+	if in, ok := x.(Intersection); ok && IsTextBytes(in) {
+		return overlap2(in.Types[0], y, h) || overlap2(in.Types[1], y, h)
+	}
 	// 'github.client' is no class-string: a literal decides by itself.
 	if lit, cs, ok := literalAndClassString(x, y); ok {
 		return h != nil && h.Exists(lit.V) && (cs.Of == nil || subtype(Class{Name: lit.V}, cs.Of, h, 0))

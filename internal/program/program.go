@@ -17,6 +17,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 	"github.com/phaenonlang/phaenon/stdlib"
 )
@@ -505,7 +506,8 @@ type PartialParam struct {
 
 // Test is the checker's lowering of an `is`, `as` or `as?` to the test PHP
 // makes itself (design/generics.md §11.4): `\is_int($x)`, `$x instanceof
-// Foo`, `\is_array($x) && \array_is_list($x)`, without the checks the
+// Foo`, `\is_array($x) && \array_is_list($x)`, `\mb_check_encoding($b,
+// 'UTF-8')` for a bytes operand tested as a string, without the checks the
 // operand's PHP type already settles. The emitter writes it as recorded and
 // derives no test of its own, so what runs is what the checker narrowed on.
 type Test struct {
@@ -519,33 +521,92 @@ type Test struct {
 	// Expected is the tested type in Phaenon's spelling, for the message
 	// of the TypeError an `as` throws.
 	Expected string
+	// UTF8 marks a test that checks a bytes operand is UTF-8 text, the
+	// conversion `$b as string` makes (design/strings.md §6). An `as` it
+	// fails throws a ValueError where the encoding is the only way to fail
+	// (EncodingOnly); on ?bytes that only null or the encoding can fail
+	// (NullFirst), a TypeError for null and a ValueError otherwise; in any
+	// other shape one TypeError that expects valid UTF-8.
+	UTF8, EncodingOnly, NullFirst bool
 }
 
 // TestOperand stands for the operand in a Test's Cond.
 const TestOperand = "\x00"
 
 // As is the whole of the `as` the test lowers, nullable for `as?`: the
-// operand where Cond holds, else a TypeError naming the expected type, or
-// null. TestOperand stands for the operand.
+// operand where Cond holds, else a TypeError naming the expected type, a
+// ValueError for bytes that are not UTF-8, or null. TestOperand stands for
+// the operand.
 func (t *Test) As(nullable bool) string {
 	fail := "null"
 	if !nullable {
-		fail = "throw new \\TypeError(" + PHPString("expected "+t.Expected+", got ") + " . \\get_debug_type(" + TestOperand + "))"
+		fail = "throw " + t.failure()
 	}
 	return t.Cond + " ? " + TestOperand + " : " + fail
 }
 
+// failure is what an `as` throws when its test fails. It reads the operand
+// once, as get_debug_type() or as the null test of ?bytes.
+func (t *Test) failure() string {
+	const notText = "new \\ValueError('not valid UTF-8')"
+	typeError := func(expected string) string {
+		return "new \\TypeError(" + PHPString("expected "+expected+", got ") + " . \\get_debug_type(" + TestOperand + "))"
+	}
+	switch {
+	case !t.UTF8:
+		return typeError(t.Expected)
+	case t.EncodingOnly:
+		return notText
+	case t.NullFirst:
+		return "(" + TestOperand + " === null ? new \\TypeError(" + PHPString("expected "+t.Expected+", got null") + ") : " + notText + ")"
+	}
+	return typeError(t.Expected + " with valid UTF-8")
+}
+
+// TestOperandOf is what a test reads of its operand e: the expression
+// beneath the parentheses, (bytes) casts and (string) casts around it, and
+// whether a (string) is among them. The output erases (bytes) and writes
+// (string) again before each copy of what is beneath; the checker refuses
+// a (string) of what may be an object, whose __toString() would run once
+// per copy. Only the operand's own wrapping counts: a cast inside a chain
+// (`((bytes) $s)[0]`) is part of the expression the output copies.
+func TestOperandOf(e ast.Expr) (inner ast.Expr, stringCast bool) {
+	for {
+		switch v := e.(type) {
+		case *ast.Paren:
+			e = v.Expr
+			continue
+		case *ast.Cast:
+			switch v.Op {
+			case token.T_BYTES_CAST:
+				e = v.Expr
+				continue
+			case token.T_STRING_CAST:
+				e, stringCast = v.Expr, true
+				continue
+			}
+		}
+		return e, stringCast
+	}
+}
+
 // ReadsTwice reports an operand a test may write twice (design/generics.md
-// §11.4, P3012): a variable, a property or static property fetch, a
-// constant-index read of one of these, or a chain of them — never a call, a
-// new, an operator or an assignment, which the second reading would run
-// again. The nullsafe operator is one: after the test, PHPStan knows the
-// chain is not null and reports the second `?->`. A constant reads the same
-// value every time, so it is one too (`Limits::MAX as int`).
+// §11.4, P3012): beneath its own wrapping (TestOperandOf), a variable, a
+// property or static property fetch, a constant-index read of one of
+// these, or a chain of them — never a call, a new, an operator or an
+// assignment, which the second reading would run again. The nullsafe
+// operator is one: after the test, PHPStan knows the chain is not null and
+// reports the second `?->`. A constant reads the same value every time, so
+// it is one too (`Limits::MAX as int`).
 func ReadsTwice(e ast.Expr) bool {
+	inner, _ := TestOperandOf(e)
+	return readsSame(inner)
+}
+
+func readsSame(e ast.Expr) bool {
 	switch e := e.(type) {
 	case *ast.Paren:
-		return ReadsTwice(e.Expr)
+		return readsSame(e.Expr)
 	case *ast.Variable, *ast.ConstFetch, *ast.Name:
 		return true
 	case *ast.ClassConstFetch:
@@ -555,14 +616,14 @@ func ReadsTwice(e ast.Expr) bool {
 		if _, ok := e.Class.(*ast.Name); ok {
 			return true
 		}
-		return ReadsTwice(e.Class)
+		return readsSame(e.Class)
 	case *ast.PropertyFetch:
 		if e.NullSafe {
 			return false
 		}
 		switch e.Name.(type) {
 		case *ast.Ident, *ast.Variable:
-			return ReadsTwice(e.Object)
+			return readsSame(e.Object)
 		}
 	case *ast.StaticPropertyFetch:
 		if _, ok := e.Name.(*ast.Variable); !ok {
@@ -571,9 +632,9 @@ func ReadsTwice(e ast.Expr) bool {
 		if _, ok := e.Class.(*ast.Name); ok {
 			return true
 		}
-		return ReadsTwice(e.Class)
+		return readsSame(e.Class)
 	case *ast.Index:
-		return e.Index != nil && constantIndex(e.Index) && ReadsTwice(e.Array)
+		return e.Index != nil && constantIndex(e.Index) && readsSame(e.Array)
 	}
 	return false
 }

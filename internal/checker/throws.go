@@ -396,6 +396,9 @@ func (x *fnCtx) propertyThrows(obj types.Type, name string) {
 // offsetGet): the point is then implicit.
 func mayBeObject(t types.Type) bool {
 	for _, m := range types.Members(t) {
+		if types.IsTextBytes(m) {
+			continue // string&bytes: a string
+		}
 		switch m.(type) {
 		case types.Array, types.Shape, types.String, types.StringLit, types.ClassString, types.Bytes,
 			types.Int, types.Float, types.FloatLit, types.Bool, types.BoolLit, types.Null, types.Never, types.Void, types.EnumCase:

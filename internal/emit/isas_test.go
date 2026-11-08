@@ -16,7 +16,8 @@ import (
 
 // TestIsAsBehaviour runs the tests `is` and `as` compile to under php
 // (design/generics.md §11.4): each type against every value, each `as`
-// against a value that fails it. want has a digit per value, 1 where the
+// against a value that fails it, and the UTF-8 check of bytes tested as a
+// string (design/strings.md §6). want has a digit per value, 1 where the
 // test holds.
 func TestIsAsBehaviour(t *testing.T) {
 	php, err := exec.LookPath("php")
@@ -57,7 +58,7 @@ func TestIsAsBehaviour(t *testing.T) {
 		{"numeric", "1100000000000010"},
 	}
 	var src strings.Builder
-	src.WriteString("namespace App;\n\ninterface Model\n{\n}\n\nfinal class User implements Model\n{\n}\n\nenum Suit\n{\n    case Hearts;\n}\n\n")
+	src.WriteString("namespace App;\n\ninterface Model\n{\n}\n\nfinal class User implements Model\n{\n}\n\nenum Suit\n{\n    case Hearts;\n}\n\nfinal class Blob\n{\n    public function __construct(public ?bytes $data)\n    {\n    }\n}\n\n")
 	for i, c := range tests {
 		fmt.Fprintf(&src, "fun is%d(mixed $m): bool => $m is %s;\n\n", i, c.typ)
 	}
@@ -90,6 +91,42 @@ func TestIsAsBehaviour(t *testing.T) {
 	for i, c := range as {
 		fmt.Fprintf(&src, "fun as%d(mixed $m): string\n{\n    try {\n        $v = %s;\n    } catch (\\TypeError $e) {\n        return $e->getMessage();\n    }\n\n    return show($v);\n}\n\n", i, c.expr)
 	}
+	// On bytes, `as string` is the checked conversion to text
+	// (design/strings.md §6): the value when it is UTF-8, a ValueError when
+	// the encoding is all that can fail, null from `as?`; null on ?bytes
+	// is a TypeError, and where anything else can fail too, one TypeError
+	// expects valid UTF-8.
+	text := []struct{ param, expr, value, want string }{
+		{"bytes", "$b as string", `(bytes) "\xFF"`, "ValueError: not valid UTF-8"},
+		{"bytes", "$b as string", `(bytes) "h\xC3\xA9llo"`, "'héllo'"},
+		{"bytes", "$b as string", "(bytes) ''", "''"},
+		{"bytes", "$b as? string", `(bytes) "\xFF"`, "NULL"},
+		{"bytes", "$b as? string", "(bytes) 'ok'", "'ok'"},
+		{"bytes", "$b is string", `(bytes) "a\xC0\x80"`, "false"},
+		{"bytes", "$b is string", "(bytes) 'ok'", "true"},
+		{"?bytes", "$b as string", "null", "TypeError: expected string, got null"},
+		{"?bytes", "$b as string", `(bytes) "\xFF"`, "ValueError: not valid UTF-8"},
+		{"?bytes", "$b as string|null", "null", "NULL"},
+		{"?bytes", "$b as string|null", `(bytes) "\xED\xA0\x80"`, "ValueError: not valid UTF-8"},
+		{"?bytes", "$b as? string", "null", "NULL"},
+		{"?bytes", "$b is ?string", "null", "true"},
+		{"?bytes", "$b is ?string", `(bytes) "\xFF"`, "false"},
+		{"?bytes", "$b is string", "null", "false"},
+		{"int|bytes", "$b as string", "5", "TypeError: expected string with valid UTF-8, got int"},
+		{"int|bytes", "$b as string", `(bytes) "\xFF"`, "TypeError: expected string with valid UTF-8, got string"},
+		{"(bytes, int)", "$b as (string, int)", `[(bytes) "\xFF", 1]`, "TypeError: expected (string, int) with valid UTF-8, got array"},
+		{"string", "((bytes) $b) as string", `"\xFF"`, "ValueError: not valid UTF-8"},
+		{"string", "((bytes) $b) as string", "'ok'", "'ok'"},
+		// A property guarded against null is bytes to the checker and
+		// ?string to PHP: null is the one other failure, as unguarded.
+		{"Blob", "$b->data === null ? 'none' : $b->data as string", `new Blob((bytes) "\xFF")`, "ValueError: not valid UTF-8"},
+		{"Blob", "$b->data === null ? 'none' : $b->data as string", "new Blob(null)", "'none'"},
+		{"int|bytes", "$b as int|string", `(bytes) "\xFF"`, "ValueError: not valid UTF-8"},
+		{"int|bytes", "$b as int|string", "7", "7"},
+	}
+	for i, c := range text {
+		fmt.Fprintf(&src, "fun text%d(%s $b): string\n{\n    try {\n        $v = %s;\n    } catch (\\ValueError|\\TypeError $e) {\n        return $e::class . ': ' . $e->getMessage();\n    }\n\n    return show($v);\n}\n\n", i, c.param, c.expr)
+	}
 	src.WriteString("fun show(mixed $v): string => $v instanceof Suit ? $v->name : \\var_export($v, true);\n\n")
 	for i := range tests {
 		fmt.Fprintf(&src, "echo")
@@ -114,6 +151,9 @@ func TestIsAsBehaviour(t *testing.T) {
 	for i, c := range as {
 		fmt.Fprintf(&src, "echo as%d(%s), \"\\n\";\n", i, c.value)
 	}
+	for i, c := range text {
+		fmt.Fprintf(&src, "echo text%d(%s), \"\\n\";\n", i, c.value)
+	}
 
 	p := program.New()
 	if err := p.LoadStubs(); err != nil {
@@ -136,7 +176,8 @@ func TestIsAsBehaviour(t *testing.T) {
 	if err := os.WriteFile(path, out, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ran, err := exec.Command(php, "-n", "-d", "display_errors=1", "-d", "error_reporting=-1", path).CombinedOutput()
+	args := append([]string{"-n", "-d", "display_errors=1", "-d", "error_reporting=-1"}, mbstring(t, php)...)
+	ran, err := exec.Command(php, append(args, path)...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("php: %v\n%s\n%s", err, ran, out)
 	}
@@ -147,6 +188,9 @@ func TestIsAsBehaviour(t *testing.T) {
 	}
 	want = append(want, "0001", "100", "0101", "0101", "1001")
 	for _, c := range as {
+		want = append(want, c.want)
+	}
+	for _, c := range text {
 		want = append(want, c.want)
 	}
 	if len(lines) != len(want) {
@@ -160,6 +204,9 @@ func TestIsAsBehaviour(t *testing.T) {
 		switch {
 		case i < len(tests):
 			what = "is " + tests[i].typ
+		case i >= len(tests)+5+len(as):
+			c := text[i-len(tests)-5-len(as)]
+			what = c.expr + " on " + c.param + " " + c.value
 		case i >= len(tests)+5:
 			what = as[i-len(tests)-5].expr
 		}
@@ -168,6 +215,27 @@ func TestIsAsBehaviour(t *testing.T) {
 	if t.Failed() {
 		t.Logf("compiled:\n%s", out)
 	}
+}
+
+// mbstring is the option that loads ext-mbstring into php -n, nothing when
+// it is built in: the UTF-8 test of bytes calls mb_check_encoding()
+// (design/strings.md §6), and a php that shares the extension, as
+// setup-php's does, loads it only from an ini file. A php without it
+// skips the test, as one missing from PATH does.
+func mbstring(t *testing.T, php string) []string {
+	t.Helper()
+	probe := func(args ...string) bool {
+		args = append(append([]string{"-n"}, args...), "-r", "exit(extension_loaded('mbstring') ? 0 : 1);")
+		return exec.Command(php, args...).Run() == nil
+	}
+	if probe() {
+		return nil
+	}
+	if probe("-d", "extension=mbstring") {
+		return []string{"-d", "extension=mbstring"}
+	}
+	t.Skipf("%s has no ext-mbstring, which the UTF-8 test of bytes needs", php)
+	return nil
 }
 
 // TestIsAsTwiceRefused: an operand a test writes more than once must read
@@ -243,4 +311,40 @@ func TestIsAsMultiLineOperand(t *testing.T) {
 		}
 	}
 	t.Errorf("output line %d copies the operand in place:\n%s", copied, out)
+}
+
+// TestIsAsStringCastCopies: a (string) cast operand copied before an
+// index keeps its parentheses, and one written once keeps the source's.
+// No golden holds it: a test on a string against a tuple or a class is
+// settled (P2306), and a golden checks clean; `phn build --emit-on-error`
+// writes it all the same.
+func TestIsAsStringCastCopies(t *testing.T) {
+	src := []byte("fun pair(string $s): bool\n{\n    return ((string) $s) is (int, string);\n}\n\nfun counted(string $s): bool\n{\n    return ((string) $s) is \\Countable&\\Traversable;\n}\n")
+	p := program.New()
+	if err := p.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := p.AddFile("cast.phn", src, lexer.ModePhaenon, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checker.New(p, checker.Options{}).Check()
+	out, err := File(src, Options{SourceName: "cast.phn", StrictTypes: true, Program: p, File: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"\\is_int(((string) $s)[0])", "\\is_string(((string) $s)[1])", "\\is_array((string) $s)", "return ((string) $s) instanceof \\Countable;"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("no %s in:\n%s", want, out)
+		}
+	}
+	if php, err := exec.LookPath("php"); err == nil {
+		path := filepath.Join(t.TempDir(), "cast.php")
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if lint, err := exec.Command(php, "-n", "-l", path).CombinedOutput(); err != nil {
+			t.Errorf("php -l: %s\n%s", lint, out)
+		}
+	}
 }

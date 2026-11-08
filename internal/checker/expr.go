@@ -171,7 +171,7 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 		return x.isType(e, env)
 	case *ast.AsExpr:
 		if !e.Nullable {
-			defer x.explicitThrow(types.NewClass("TypeError"), false, e.S) // `as?` gives null instead
+			defer func() { x.explicitThrow(x.asFailure(e), false, e.S) }() // `as?` gives null instead
 		}
 		return x.asExpr(e, env)
 	case *ast.Name:
@@ -325,7 +325,7 @@ func (x *fnCtx) checkStringable(t types.Type, span ast.Span) {
 			return
 		case types.Bytes:
 			// design/strings.md §2: text and binary never mix silently.
-			x.report(span, P2530, "bytes is not text: \\Phaenon\\Bytes::text() decodes it as UTF-8, Bytes::hex() or Bytes::base64() spells it out")
+			x.report(span, P2530, "bytes is not text: `as string` checks it is UTF-8, bin2hex() or base64_encode() spells it out")
 			return
 		case types.Array, types.Shape:
 			x.report(span, P2312, "array cannot be converted to string")
@@ -1123,6 +1123,12 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 	}
 	var out []types.Type
 	for _, m := range types.Members(base) {
+		if types.IsTextBytes(m) {
+			// One byte of UTF-8 text is binary data: it may be part of a
+			// character, as `$b[$i]` on bytes is (strings.md §2).
+			out = append(out, types.TBytes)
+			continue
+		}
 		switch m := m.(type) {
 		case types.Shape:
 			t, found, certain := shapeOffset(m, idx)
@@ -1372,6 +1378,9 @@ func (x *fnCtx) cast(e *ast.Cast, env *state) types.Type {
 		// how a PHP API's binary-in-a-string enters the typed world and
 		// how the stdlib builds a bytes value (design/strings.md §2).
 		for _, m := range types.Members(t) {
+			if types.IsTextBytes(m) {
+				continue // string&bytes: bytes already
+			}
 			switch m.(type) {
 			case types.String, types.StringLit, types.ClassString, types.Bytes, types.Unknown, types.Mixed:
 			default:
@@ -1540,9 +1549,14 @@ func bytesAgainstText(l, r types.Type) bool {
 
 // concatBytes reports an operand of `.` that is binary data: bytes, maybe
 // null (which `.` reads as the empty string), or a value already reported.
+// string&bytes, bytes that are text, is binary data too.
 func concatBytes(t types.Type) bool {
 	found := false
 	for _, m := range types.Members(t) {
+		if types.IsTextBytes(m) {
+			found = true
+			continue
+		}
 		switch m.(type) {
 		case types.Bytes:
 			found = true
@@ -1556,6 +1570,16 @@ func concatBytes(t types.Type) bool {
 		}
 	}
 	return found
+}
+
+// allTextBytes reports a type whose every member is string&bytes.
+func allTextBytes(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		if !types.IsTextBytes(m) {
+			return false
+		}
+	}
+	return true
 }
 
 // hasBytes reports a type with a bytes member.
@@ -1582,10 +1606,13 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		// reported (`$s->bytes()` on a string) joins the other side's kind.
 		lb, rb := concatBytes(l), concatBytes(r)
 		if (lb || types.Equal(l, types.TError)) && (rb || types.Equal(r, types.TError)) && (lb || rb) {
+			if allTextBytes(l) && allTextBytes(r) {
+				return types.TTextBytes // UTF-8 joined to UTF-8 is UTF-8
+			}
 			return types.TBytes
 		}
 		if hasBytes(l) || hasBytes(r) {
-			x.report(span, P2530, "cannot concatenate bytes and text: \\Phaenon\\Bytes::text() decodes bytes as UTF-8, (bytes) takes text as its UTF-8 bytes, (bytes) '' starts a binary buffer")
+			x.report(span, P2530, "cannot concatenate bytes and text: `as string` checks bytes are UTF-8 text, (bytes) takes text as its UTF-8 bytes, (bytes) '' starts a binary buffer")
 			x.checkStringable(types.Subtract(l, types.TBytes, x.p()), span)
 			x.checkStringable(types.Subtract(r, types.TBytes, x.p()), span)
 			return types.TError

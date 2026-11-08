@@ -616,20 +616,49 @@ func containsTuple(t types.Type) bool {
 	return found
 }
 
-// settles reports the test of an operand of type t, which PHP holds to nt,
-// against target when the types decide it: always or never true, as both
-// the inferred and the PHP type say (P2306). A test against mixed is
-// always true.
-func (x *fnCtx) settles(t, nt, target types.Type) (always, never bool) {
+// operand is the operand of a test: its type t, nt what PHP guarantees of
+// it, and tt and ntt the two as a test for text sees them (asText): a
+// bytes member where the target tests for a string passes as text.
+type operand struct{ t, nt, tt, ntt types.Type }
+
+func newOperand(t, nt, target types.Type) operand {
+	return operand{t: t, nt: nt, tt: asText(t, target), ntt: asText(nt, target)}
+}
+
+// utf8 reports a test that checks the operand's UTF-8.
+func (o operand) utf8() bool { return !types.Equal(o.tt, o.t) || !types.Equal(o.ntt, o.nt) }
+
+// settles reports the test of an operand against target when the types
+// decide it: always or never true, as both the inferred and the PHP type
+// say (P2306). A test against mixed is always true. A bytes operand
+// tested as a string is never settled: its UTF-8 is (design/strings.md
+// §6).
+func (x *fnCtx) settles(o operand, target types.Type) (always, never bool) {
 	if types.IsMixed(target) {
 		return true, false
 	}
+	t, nt := o.t, o.nt
 	if types.IsMixed(t) || isParamType(t) || isParamType(target) {
 		return false, false
 	}
-	always = types.IsSubtype(t, target, x.p()) && !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p())
-	never = !types.Overlaps(t, target, x.p()) && !types.IsMixed(nt) && !types.Overlaps(nt, target, x.p())
+	always = !o.utf8() && types.IsSubtype(t, target, x.p()) && !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p())
+	never = !types.Overlaps(o.tt, target, x.p()) && !types.IsMixed(nt) && !types.Overlaps(o.ntt, target, x.p())
 	return always, never
+}
+
+// reportSettled reports a test the types settle (P2306), unless the type
+// has no test at all: that is the one finding (P3011).
+func (x *fnCtx) reportSettled(span ast.Span, o operand, target types.Type, untestable bool) (never bool) {
+	t := o.t
+	always, never := x.settles(o, target)
+	switch {
+	case untestable:
+	case always:
+		x.report(span, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
+	case never:
+		x.report(span, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
+	}
+	return never
 }
 
 // isCond narrows on `$x is T`, exactly as instanceof does for classes.
@@ -638,29 +667,25 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	target, narrow, typeOK := x.testType(e.Type)
 	x.condValueType = types.TBool
 	then, els = env.clone(), env.clone()
-	nt := x.guaranteedOr(e.Expr, t, env)
+	// A bytes operand that passes `is string` is string&bytes, bytes that
+	// are UTF-8 text (strings.md §6).
+	o := newOperand(t, x.guaranteedOr(e.Expr, t, env), target)
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) {
 		switch {
-		case types.IsSubtype(t, target, x.p()):
+		case !o.utf8() && types.IsSubtype(t, target, x.p()):
 			x.condValueType = types.TTrue
-		case !types.Overlaps(t, target, x.p()):
+		case !types.Overlaps(o.tt, target, x.p()):
 			x.condValueType = types.TFalse
 		}
 	}
-	always, never := x.settles(t, nt, target)
-	switch {
-	case always:
-		x.report(e.S, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
-	case never:
-		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
-	}
-	c := x.lowerTest(e, e.Expr, e.Type, "is", t, nt, target, typeOK, env)
+	c, untestable := x.lowerTest(e, e.Expr, e.Type, "is", o, target, typeOK, env)
+	x.reportSettled(e.S, o, target, untestable)
 	var nthen, nels types.Type
 	nold := x.nativeVar(e.Expr, env)
 	if nold != nil {
 		nthen = types.Intersect(nold, narrow, x.p())
 	}
-	x.narrowPathNative(then, e.Expr, types.Intersect(t, narrow, x.p()), nthen, true)
+	x.narrowPathNative(then, e.Expr, types.Intersect(o.tt, narrow, x.p()), nthen, true)
 	// The else branch narrows as PHPStan does on the emitted test, which
 	// is less than the whole type for a test joined with && (elseType).
 	if c != nil {
@@ -683,27 +708,25 @@ func (x *fnCtx) isType(e *ast.IsExpr, env *state) types.Type {
 func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	t := x.expr(e.Expr, env, nil)
 	target, narrow, typeOK := x.testType(e.Type)
-	nt := x.guaranteedOr(e.Expr, t, env)
+	o := newOperand(t, x.guaranteedOr(e.Expr, t, env), target)
 	op := "as"
 	if e.Nullable {
 		op = "as?"
 	}
-	always, never := x.settles(t, nt, target)
-	switch {
-	case always:
-		x.report(e.S, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
-	case never:
-		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
-	}
-	lowered := x.lowerTest(e, e.Expr, e.Type, op, t, nt, target, typeOK, env) != nil
+	c, untestable := x.lowerTest(e, e.Expr, e.Type, op, o, target, typeOK, env)
+	lowered := c != nil
+	never := x.reportSettled(e.S, o, target, untestable)
 	result := narrow
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) && !never {
-		result = types.Intersect(t, narrow, x.p())
+		// `$b as string` on bytes is the text the UTF-8 check let through,
+		// a string converted from the bytes.
+		result = textOnly(types.Intersect(o.tt, narrow, x.p()))
 	}
 	if e.Nullable {
 		return types.Nullable(result)
 	}
-	if !lowered {
+	if !lowered || o.utf8() {
+		// A conversion types its result and leaves its operand.
 		return result
 	}
 	// `$x as T` throws unless $x is a T: after it, $x is one, as PHPStan
@@ -714,6 +737,22 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	}
 	x.narrowPathNative(env, e.Expr, result, nthen, true)
 	return result
+}
+
+// asFailure is what an `as` throws, as lowered: a TypeError, a ValueError
+// where only the encoding of bytes can fail, both where null can too
+// (program.Test, design/strings.md §6).
+func (x *fnCtx) asFailure(e *ast.AsExpr) types.Type {
+	typeError, notText := types.NewClass("TypeError"), types.NewClass("ValueError")
+	switch rec := x.c.file.Tests[e]; {
+	case rec == nil || !rec.UTF8:
+		return typeError
+	case rec.EncodingOnly:
+		return notText
+	case rec.NullFirst:
+		return types.MakeUnion(typeError, notText)
+	}
+	return typeError
 }
 
 // ------------------------------------------------------------------ explicit type arguments

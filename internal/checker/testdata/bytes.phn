@@ -1,11 +1,9 @@
 namespace Bin;
 
-use Phaenon\Bytes;
-
-// bytes: binary data kept apart from text (design/strings.md §2, §5). The
-// overlay types PHP's producers and consumers, (bytes) retypes a string,
-// (string) is the unchecked way back, \Phaenon\Bytes holds the checked
-// conversions, and text never mixes with binary silently.
+// bytes: binary data kept apart from text (design/strings.md §2, §5, §6).
+// The overlay types PHP's producers and consumers, (bytes) retypes a
+// string, (string) is the unchecked way back, `as string` is the checked
+// one, and text never mixes with binary silently.
 
 function takesString(string $s): void
 {
@@ -49,24 +47,17 @@ function producers(int $n): void
 
 function text(bytes $raw, string $name): void
 {
-    takesString("hello $raw"); // want P2530
-    takesString('x' . $raw); // want P2530
+    takesString("hello $raw"); // want P2530 "`as string` checks it is UTF-8"
+    takesString('x' . $raw); // want P2530 "`as string` checks bytes are UTF-8 text"
     $s = 'id-';
     $s .= $raw; // want P2530
     takesString((string) $raw);
     takesBytes((bytes) $name);
     takesBytes((bytes) 42); // want P2309
-    takesString(Bytes::hex($raw));
-    takesString(Bytes::base64($raw, urlSafe: true));
     takesInt(strlen($raw));
     takesBytes(substr($raw, 0, 16));
-    takesString(Bytes::text($raw));
-    takesString(Bytes::textLossy($raw));
     takesInt(ord($raw[0]));
-    takesBytes(Bytes::fromHex('00ff'));
-    takesBytes(Bytes::fromBase64('AP8'));
     takesBytes($raw . (bytes) $name);
-    takesBytes(Bytes::text($raw)); // want P2103
     $raw->upper(); // want P2105 "cannot call method upper() on bytes"
     $buf = (bytes) '';
     $buf .= $raw . $name->bytes(); // want P2105 "cannot call method bytes() on string"
@@ -123,6 +114,273 @@ function inlineVar(string $text): void
     takesBytes($raw);
     /** @var bytes $retyped */
     $retyped = strtoupper($text); // want P2212
+}
+
+// PHP's own functions are the conversions between bytes and text, typed
+// for bytes by the overlay (strings.md §6).
+function decoding(string $hex, string $b64, bytes $raw): void
+{
+    takesBytes(hex2bin($hex) ?: throw new \ValueError('not hex'));
+    takesString(hex2bin($hex) ?: ''); // want P2103
+    // base64 carries text as often as binary: PHP's string, which
+    // (bytes) retypes; only the strict mode returns false.
+    takesString(base64_decode($b64));
+    takesString(base64_decode($b64, true) ?: '');
+    takesString(base64_decode($b64, true)); // want P2103 "false|string given"
+    takesBytes((bytes) base64_decode($b64));
+    takesBytes(base64_decode($b64)); // want P2103 "string given"
+    takesString(bin2hex($raw));
+    takesString(base64_encode($raw));
+    takesString(mb_scrub($raw, 'UTF-8'));
+    takesString(mb_scrub($hex));
+    takesBytes(mb_scrub($raw)); // want P2103
+    takesString(strtoupper($raw)); // want P2103
+    takesBool(mb_check_encoding($raw, 'UTF-8'));
+    takesBool(hash_equals($raw, $raw));
+    takesBool(hash_equals($hex, $raw));
+    takesInt(openssl_verify($hex, $raw, $hex, \OPENSSL_ALGO_SHA256) ?: 0);
+    takesInt(openssl_verify($raw, base64_decode($b64), $hex, \OPENSSL_ALGO_SHA256) ?: 0);
+}
+
+function takesBool(bool $b): void
+{
+}
+
+// `as string` is the checked conversion to text: the UTF-8 test, a
+// ValueError when it fails; `as?` gives null and `is string` the test
+// alone. What passes `is string` is string&bytes, bytes that are text:
+// both, until it is assigned. What fails stays bytes.
+function conversions(bytes $raw, bytes $data, ?bytes $maybe, ?bytes $absent, int|bytes $either, bytes $payload): void
+{
+    takesString($raw as? string ?? '');
+    if ($raw is string) {
+        takesString($raw);
+        takesBytes($raw);
+        takesInt($raw); // want P2103 "string&bytes given"
+        takesBool($raw is string); // want P2306 "string&bytes is always string"
+        takesString("text: $raw");
+        takesBytes($raw . $data);
+        takesString($raw . ' and text');
+        takesBytes($raw[0]); // a byte of the text is binary data
+        takesBytes((bytes) $raw);
+        if ($raw === 'ok') {
+            takesBytes($raw . $data); // 'ok'&bytes is bytes too
+            takesBytes($raw[0]);
+            takesBool($raw is string); // want P2306 "'ok'&bytes is always string"
+        }
+    } else {
+        takesBytes($raw);
+        takesString($raw); // want P2103 "bytes given"
+    }
+    takesBytes($raw); // string&bytes|bytes is bytes
+    $text = $data as string;
+    takesString($text);
+    takesBytes($data); // the conversion types its result: $data is the same bytes
+    takesString($data); // want P2103 "bytes given"
+    if ($maybe is string) {
+        takesString($maybe);
+    } else {
+        takesString($maybe); // want P2103 "null|bytes given"
+    }
+    if ($absent is string|null) {
+        takesString($absent ?? '');
+    } else {
+        takesBytes($absent);
+    }
+    if ($either is int|string) {
+        takesString((string) $either);
+    }
+    takesString($payload as? string); // want P2103 "string|null given"
+}
+
+// Nor does a loop that comes round again, or a property: string&bytes
+// meeting bytes is bytes.
+function rejoined(list<bytes> $chunks, bytes $raw, Frame $frame): int
+{
+    $n = 0;
+    foreach ($chunks as $chunk) {
+        if ($raw is string) {
+            $n += \strlen(takesText($raw));
+        }
+        $n += \strlen($chunk) + \strlen(takesText($raw as string));
+    }
+    takesBytes($raw);
+    if ($frame->buf is string) {
+        $n += \strlen(takesText($frame->buf));
+    }
+    takesBytes($frame->buf);
+    $raw = 'now text';
+    if ($n > 0) {
+        $raw = (bytes) 'binary';
+    }
+    takesBytes($raw); // want P2103 "'now text'|bytes given"
+
+    return $n;
+}
+
+function takesText(string $s): string
+{
+    return $s;
+}
+
+// An assignment gives the variable the assigned value's type, and the
+// meet is the union: string&bytes meeting text is text, meeting fresh
+// bytes it is bytes, and text meeting bytes is both.
+function reassigned(bytes $b, bool $flag): string
+{
+    if (!($b is string)) {
+        throw new \ValueError('not text');
+    }
+    if ($flag) {
+        $b = 'default';
+    }
+
+    return $b;
+}
+
+function trimmed(bytes $b, bool $more): string
+{
+    if (!($b is string)) {
+        throw new \ValueError('not text');
+    }
+    while ($more) {
+        $b = \trim($b);
+        $more = $b !== '';
+    }
+
+    return $b;
+}
+
+function refilled(bytes $b, bool $flag): string
+{
+    if (!($b is string)) {
+        throw new \ValueError('not text');
+    }
+    if ($flag) {
+        $b = random_bytes(4);
+    }
+
+    return $b; // want P2202 "returns bytes"
+}
+
+function appended(bytes $b): bytes
+{
+    if ($b is string) {
+        $b .= '!';
+    }
+
+    return $b; // want P2202 "returns non-empty-string|bytes"
+}
+
+// A test kept in a variable narrows where the variable is tested, as the
+// test does in place.
+function stored(bytes $b, bytes $c): string
+{
+    $text = $b is string;
+    if ($text) {
+        return $b;
+    }
+    takesBytes($b);
+    $valid = $c is string;
+    if (!$valid) {
+        takesString($c); // want P2103 "bytes given"
+
+        return '';
+    }
+
+    return $c;
+}
+
+final class Slot
+{
+    public mixed $value = null;
+}
+
+// A property narrows and meets like a variable: what it holds on both
+// sides it holds after the meet, text and bytes alike.
+function slotted(Slot $slot, string|bytes $x, string|bytes $y, bool $flag): string|bytes
+{
+    if ($flag) {
+        $slot->value = $x;
+    } else {
+        $slot->value = $y;
+    }
+
+    return $slot->value;
+}
+
+function mixedSlot(Slot $slot, bool $flag): string
+{
+    if ($flag) {
+        $slot->value = 'text';
+    } else {
+        $slot->value = (bytes) 'bin';
+    }
+
+    return 'x' . $slot->value; // want P2530
+}
+
+function nullable(?bytes $maybe): string
+{
+    $text = $maybe as string;
+    takesBytes($maybe); // want P2103 "null|bytes given"
+
+    return $text;
+}
+
+function either(int|bytes $either): string
+{
+    return $either as string;
+}
+
+function converted(bytes $raw): bytes
+{
+    takesString(random_bytes(4) as string); // want P3012 "the operand of `as` is evaluated twice"
+    takesBool(random_bytes(4) is string); // one call: the UTF-8 test reads it once
+
+    return $raw;
+}
+
+// The erased (bytes) cast reads its operand as written, and (string) of a
+// string converts the same each time: the operand of `as` is beneath them.
+// A (string) of an object calls __toString() again for every copy.
+function retyped(string $s): string
+{
+    return ((bytes) $s) as string;
+}
+
+final class Packet
+{
+    public function __construct(private string $raw, private \Stringable $label)
+    {
+    }
+
+    public function text(): string
+    {
+        return (bytes) $this->raw as string;
+    }
+
+    public function label(): int|string
+    {
+        return (string) $this->label as int|string; // want P2306,P3012 "__toString() runs each time"
+    }
+}
+
+type Blob = string|bytes;
+
+// PHP cannot tell bytes from string at runtime: `is bytes`, and `is string`
+// on a value that may be either, have no test (P3011, generics.md §11.4).
+function untestable(mixed $m, string $s, bytes $b, string|bytes $either, (Blob, int) $pair): void
+{
+    takesBool($m is bytes); // want P3011 "`bytes` cannot be tested at runtime: PHP cannot tell bytes from string; (bytes) retypes a string"
+    takesBool($s is bytes); // want P3011
+    takesBool($b is bytes); // want P3011
+    takesBool($m is ?bytes); // want P3011
+    takesBytes($m as bytes); // want P3011
+    takesBool($either is string); // want P3011 "`string` cannot be tested at runtime on string|bytes: PHP cannot tell bytes from string"
+    takesString($either as string); // want P3011
+    takesBool($pair is (string, int)); // want P3011 "on string|bytes"
+    takesBool($either is int); // want P2306 "string|bytes is never int"
 }
 
 function equality(bytes $a, string $b, bytes $c): void
