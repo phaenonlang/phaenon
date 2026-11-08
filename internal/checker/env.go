@@ -25,11 +25,6 @@ type varInfo struct {
 	// PHPStan's conditional expressions do. Dropped when the variable or
 	// one the condition narrowed is assigned again.
 	conds []condHolder
-	// binary is the bytes type of a variable `$b is string` narrowed to
-	// text (design/strings.md §6): the value is still those bytes, so where
-	// the branch meets one that holds the untested bytes, it gives them
-	// back as binary data. Dropped when the variable is assigned.
-	binary types.Type
 }
 
 // condHolder is one branch of a condition a variable was assigned from:
@@ -38,10 +33,6 @@ type varInfo struct {
 type condHolder struct {
 	whenType types.Type
 	narrowed map[string]types.Type
-	// text marks the variables a UTF-8 test narrowed from bytes to text
-	// (`$ok = $b is string`, design/strings.md §6): applied, they are
-	// narrowed as the test narrows them, and remember their bytes.
-	text map[string]bool
 }
 
 // condBranch records the narrowings of one branch of a condition against
@@ -53,19 +44,12 @@ func condBranch(whenType types.Type, branch, before *state) *condHolder {
 		return nil
 	}
 	narrowed := map[string]types.Type{}
-	var text map[string]bool
 	for k, v := range branch.vars {
 		if b, ok := before.vars[k]; ok && !types.Equal(b.t, v.t) {
 			narrowed[k] = v.t
-			if v.binary != nil && b.binary == nil {
-				if text == nil {
-					text = map[string]bool{}
-				}
-				text[k] = true
-			}
 		}
 	}
-	return &condHolder{whenType: whenType, narrowed: narrowed, text: text}
+	return &condHolder{whenType: whenType, narrowed: narrowed}
 }
 
 // setConds attaches the condition branches to a variable just assigned;
@@ -111,16 +95,9 @@ func (e *state) applyConds(name string, t types.Type, p *program.Program) {
 		if !ok {
 			continue
 		}
-		text := taken[0].text[k]
 		r := types.Intersect(cur.t, nt, p)
-		if text {
-			r = types.Intersect(asText(cur.t, nt), nt, p)
-		}
 		if _, never := r.(types.Never); never {
 			continue
-		}
-		if text && cur.binary == nil && !types.Equal(r, cur.t) {
-			cur.binary = cur.t
 		}
 		cur.t = r
 		cur.native = narrowNative(cur.native, r, p)
@@ -391,39 +368,19 @@ func join(a, b *state) *state {
 	n := newEnv()
 	for k, va := range a.vars {
 		if vb, ok := b.vars[k]; ok {
-			info := varInfo{maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds)}
-			// A side that saw the bytes as text gives them back to a side
-			// that still holds them untested; meeting text the other side
-			// assigned, it is text too.
-			switch {
-			case va.binary != nil && vb.binary != nil:
-				info.t, info.binary = types.MakeUnion(va.t, vb.t), types.MakeUnion(va.binary, vb.binary)
-			case va.binary != nil && hasBytes(vb.t):
-				info.t = types.MakeUnion(va.binary, vb.t)
-			case vb.binary != nil && hasBytes(va.t):
-				info.t = types.MakeUnion(va.t, vb.binary)
-			default:
-				info.t = types.MakeUnion(va.t, vb.t)
-			}
-			n.vars[k] = info
+			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds)}
 		} else {
-			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native, binary: va.binary}
+			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native}
 		}
 	}
 	for k, vb := range b.vars {
 		if _, ok := a.vars[k]; !ok {
-			n.vars[k] = varInfo{t: vb.t, maybe: true, native: vb.native, binary: vb.binary}
+			n.vars[k] = varInfo{t: vb.t, maybe: true, native: vb.native}
 		}
 	}
 	for k, ta := range a.paths {
 		if tb, ok := b.paths[k]; ok {
-			// A property or an offset seen as text on one side and as
-			// bytes on the other is the same value a UTF-8 test narrowed
-			// on one side: its declared type says what it is. One that
-			// held both already on a side keeps what the sides say.
-			if u := types.MakeUnion(ta, tb); !textAndBytes(u) || textAndBytes(ta) || textAndBytes(tb) {
-				n.paths[k] = u
-			}
+			n.paths[k] = types.MakeUnion(ta, tb)
 		}
 	}
 	for k := range a.inits {
@@ -432,20 +389,6 @@ func join(a, b *state) *state {
 		}
 	}
 	return n
-}
-
-// textAndBytes reports a type with both text and bytes among its members.
-func textAndBytes(t types.Type) bool {
-	var text, binary bool
-	for _, m := range types.Members(t) {
-		switch m.(type) {
-		case types.Bytes:
-			binary = true
-		case types.String, types.StringLit, types.ClassString:
-			text = true
-		}
-	}
-	return text && binary
 }
 
 // joinAll merges several environments.

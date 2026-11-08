@@ -318,7 +318,7 @@ func withoutTypeArgs(t types.Type) types.Type {
 	// narrow to: `@var bytes $out` over a bytes value is no contradiction,
 	// over a string it is (the (bytes) cast retypes, strings.md §2).
 	return types.Map(t, func(m types.Type) types.Type {
-		if _, ok := m.(types.Bytes); ok {
+		if _, ok := m.(types.Bytes); ok || types.IsTextBytes(m) {
 			return m
 		}
 		return types.Erase(m)

@@ -132,15 +132,15 @@ func (b *testBuilder) isText(path []int, fail func(why string) *check) *check {
 }
 
 // asText is an operand's type t as a test against target sees it: where
-// target tests for a string, a bytes member passes as the string its UTF-8
-// makes it, in a tuple's members too.
+// target tests for a string, a bytes member that passes is string&bytes,
+// bytes that are UTF-8 text, in a tuple's members too.
 func asText(t, target types.Type) types.Type {
 	return types.Map(t, func(m types.Type) types.Type {
 		switch v := m.(type) {
 		case types.Bytes:
 			for _, tm := range types.Members(target) {
 				if _, ok := tm.(types.String); ok {
-					return types.TString
+					return types.TTextBytes
 				}
 			}
 		case types.Shape:
@@ -168,6 +168,17 @@ func asText(t, target types.Type) types.Type {
 			}
 			v.Entries = entries
 			return v
+		}
+		return m
+	})
+}
+
+// textOnly is t with string&bytes as plain text: what `as string` gives
+// is a string converted from bytes, not the bytes.
+func textOnly(t types.Type) types.Type {
+	return types.MapDeep(t, func(m types.Type) types.Type {
+		if types.IsTextBytes(m) {
+			return types.TString
 		}
 		return m
 	})
@@ -914,17 +925,18 @@ type testSeen struct{ t, nt types.Type }
 
 // lowerTest lowers the test of node (an `is`, `as` or `as?`) of operand
 // e against typ, records it for the emitter and reports P3011 and P3012.
-// t is the operand's type, nt what PHP guarantees of it; typeOK says the
-// type itself drew no finding. The result is the test as emitted, nil
-// when the type has none; untestable says the type has no test, which
-// was reported (P3011, P3003).
-func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type, typeOK bool, env *state) (c *check, untestable bool) {
+// o is the operand's type, what PHP guarantees of it and their text view;
+// typeOK says the type itself drew no finding. The result is the test as
+// emitted, nil when the type has none; untestable says the type has no
+// test, which was reported (P3011, P3003).
+func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, o operand, target types.Type, typeOK bool, env *state) (c *check, untestable bool) {
 	if x.c.testSeen == nil {
 		x.c.testSeen = map[ast.Expr]testSeen{}
 	}
 	if prev, ok := x.c.testSeen[node]; ok {
-		t, nt = types.MakeUnion(prev.t, t), types.MakeUnion(prev.nt, nt)
+		o = newOperand(types.MakeUnion(prev.t, o.t), types.MakeUnion(prev.nt, o.nt), target)
 	}
+	t, nt := o.t, o.nt
 	x.c.testSeen[node] = testSeen{t, nt}
 	rec := &program.Test{Expected: types.PrintPhaenon(target)}
 	if x.c.file.Tests == nil {

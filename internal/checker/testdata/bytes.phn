@@ -148,18 +148,25 @@ function takesBool(bool $b): void
 
 // `as string` is the checked conversion to text: the UTF-8 test, a
 // ValueError when it fails; `as?` gives null and `is string` the test
-// alone. What passes is a string, what fails stays bytes.
+// alone. What passes `is string` is string&bytes, bytes that are text:
+// both, until it is assigned. What fails stays bytes.
 function conversions(bytes $raw, bytes $data, ?bytes $maybe, ?bytes $absent, int|bytes $either, bytes $payload): void
 {
     takesString($raw as? string ?? '');
     if ($raw is string) {
         takesString($raw);
-        takesBytes($raw); // want P2103 "string given"
+        takesBytes($raw);
+        takesInt($raw); // want P2103 "string&bytes given"
+        takesBool($raw is string); // want P2306 "string&bytes is always string"
+        takesString("text: $raw");
+        takesBytes($raw . $data);
+        takesString($raw . ' and text');
+        takesBytes($raw[0]); // a byte of the text is binary data
     } else {
         takesBytes($raw);
         takesString($raw); // want P2103 "bytes given"
     }
-    takesBytes($raw); // the test changed no value: where the branches meet, the bytes are bytes
+    takesBytes($raw); // string&bytes|bytes is bytes
     $text = $data as string;
     takesString($text);
     takesBytes($data); // the conversion types its result: $data is the same bytes
@@ -180,8 +187,8 @@ function conversions(bytes $raw, bytes $data, ?bytes $maybe, ?bytes $absent, int
     takesString($payload as? string); // want P2103 "string|null given"
 }
 
-// Nor does a loop that comes round again, or a property: what a UTF-8 test
-// let through as text is the same bytes after it.
+// Nor does a loop that comes round again, or a property: string&bytes
+// meeting bytes is bytes.
 function rejoined(list<bytes> $chunks, bytes $raw, Frame $frame): int
 {
     $n = 0;
@@ -210,9 +217,9 @@ function takesText(string $s): string
     return $s;
 }
 
-// Bytes come back only where the branch meets the untested bytes. A
-// branch that assigns the variable holds another value: text meeting
-// text stays text, and text meeting the bytes is both.
+// An assignment gives the variable the assigned value's type, and the
+// meet is the union: string&bytes meeting text is text, meeting fresh
+// bytes it is bytes, and text meeting bytes is both.
 function reassigned(bytes $b, bool $flag): string
 {
     if (!($b is string)) {
@@ -236,6 +243,18 @@ function trimmed(bytes $b, bool $more): string
     }
 
     return $b;
+}
+
+function refilled(bytes $b, bool $flag): string
+{
+    if (!($b is string)) {
+        throw new \ValueError('not text');
+    }
+    if ($flag) {
+        $b = random_bytes(4);
+    }
+
+    return $b; // want P2202 "returns bytes"
 }
 
 function appended(bytes $b): bytes
@@ -271,8 +290,8 @@ final class Slot
     public mixed $value = null;
 }
 
-// A property that holds text or bytes on both sides holds them after the
-// meet; only the mix the meet itself makes is forgotten.
+// A property narrows and meets like a variable: what it holds on both
+// sides it holds after the meet, text and bytes alike.
 function slotted(Slot $slot, string|bytes $x, string|bytes $y, bool $flag): string|bytes
 {
     if ($flag) {
@@ -284,10 +303,21 @@ function slotted(Slot $slot, string|bytes $x, string|bytes $y, bool $flag): stri
     return $slot->value;
 }
 
+function mixedSlot(Slot $slot, bool $flag): string
+{
+    if ($flag) {
+        $slot->value = 'text';
+    } else {
+        $slot->value = (bytes) 'bin';
+    }
+
+    return 'x' . $slot->value; // want P2530
+}
+
 function nullable(?bytes $maybe): string
 {
     $text = $maybe as string;
-    takesBytes($maybe); // `as` threw on null: what is left is the bytes
+    takesBytes($maybe); // want P2103 "null|bytes given"
 
     return $text;
 }

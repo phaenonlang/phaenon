@@ -667,7 +667,8 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	target, narrow, typeOK := x.testType(e.Type)
 	x.condValueType = types.TBool
 	then, els = env.clone(), env.clone()
-	// A bytes operand that passes `is string` is text (strings.md §6).
+	// A bytes operand that passes `is string` is string&bytes, bytes that
+	// are UTF-8 text (strings.md §6).
 	o := newOperand(t, x.guaranteedOr(e.Expr, t, env), target)
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) {
 		switch {
@@ -677,7 +678,7 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 			x.condValueType = types.TFalse
 		}
 	}
-	c, untestable := x.lowerTest(e, e.Expr, e.Type, "is", t, o.nt, target, typeOK, env)
+	c, untestable := x.lowerTest(e, e.Expr, e.Type, "is", o, target, typeOK, env)
 	x.reportSettled(e.S, o, target, untestable)
 	var nthen, nels types.Type
 	nold := x.nativeVar(e.Expr, env)
@@ -685,9 +686,6 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 		nthen = types.Intersect(nold, narrow, x.p())
 	}
 	x.narrowPathNative(then, e.Expr, types.Intersect(o.tt, narrow, x.p()), nthen, true)
-	if !types.Equal(o.tt, t) {
-		keepBinary(then, e.Expr, t)
-	}
 	// The else branch narrows as PHPStan does on the emitted test, which
 	// is less than the whole type for a test joined with && (elseType).
 	if c != nil {
@@ -715,45 +713,30 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	if e.Nullable {
 		op = "as?"
 	}
-	c, untestable := x.lowerTest(e, e.Expr, e.Type, op, t, o.nt, target, typeOK, env)
+	c, untestable := x.lowerTest(e, e.Expr, e.Type, op, o, target, typeOK, env)
 	lowered := c != nil
 	never := x.reportSettled(e.S, o, target, untestable)
-	result, kept := narrow, narrow
+	result := narrow
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) && !never {
-		// `$b as string` on bytes is the text the UTF-8 check let through.
-		result = types.Intersect(o.tt, narrow, x.p())
-		kept = x.keptAs(t, target, narrow)
+		// `$b as string` on bytes is the text the UTF-8 check let through,
+		// a string converted from the bytes.
+		result = textOnly(types.Intersect(o.tt, narrow, x.p()))
 	}
 	if e.Nullable {
 		return types.Nullable(result)
 	}
-	if !lowered {
+	if !lowered || o.utf8() {
+		// A conversion types its result and leaves its operand.
 		return result
 	}
 	// `$x as T` throws unless $x is a T: after it, $x is one, as PHPStan
-	// reads `\is_int($x) ? $x : throw …`. A bytes operand stays bytes: the
-	// conversion types the result, and the value is the same bytes.
+	// reads `\is_int($x) ? $x : throw …`.
 	var nthen types.Type
 	if nold := x.nativeVar(e.Expr, env); nold != nil {
 		nthen = types.Intersect(nold, narrow, x.p())
 	}
-	x.narrowPathNative(env, e.Expr, kept, nthen, true)
+	x.narrowPathNative(env, e.Expr, result, nthen, true)
 	return result
-}
-
-// keptAs is what an `as` leaves of its operand of type t: the members the
-// test let through, a bytes member that passed as text kept as bytes.
-func (x *fnCtx) keptAs(t, target, narrow types.Type) types.Type {
-	return types.Map(t, func(m types.Type) types.Type {
-		text := asText(m, target)
-		if types.Equal(text, m) {
-			return types.Intersect(m, narrow, x.p())
-		}
-		if _, none := types.Intersect(text, narrow, x.p()).(types.Never); none {
-			return types.TNever
-		}
-		return m
-	})
 }
 
 // asFailure is what an `as` throws, as lowered: a TypeError, or a
@@ -767,19 +750,6 @@ func (x *fnCtx) asFailure(e *ast.AsExpr) types.Type {
 		return notText
 	}
 	return types.MakeUnion(typeError, notText)
-}
-
-// keepBinary records that a UTF-8 test narrowed the variable e, bytes of
-// type t, to text: where the branches meet, it is t again (state.binary).
-func keepBinary(env *state, e ast.Expr, t types.Type) {
-	v, ok := variableOf(e)
-	if !ok {
-		return
-	}
-	if info, ok := env.get(v.Name); ok && info.binary == nil {
-		info.binary = t
-		env.vars[v.Name] = info
-	}
 }
 
 // ------------------------------------------------------------------ explicit type arguments

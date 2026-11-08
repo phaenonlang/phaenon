@@ -1123,6 +1123,12 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 	}
 	var out []types.Type
 	for _, m := range types.Members(base) {
+		if types.IsTextBytes(m) {
+			// One byte of UTF-8 text is binary data: it may be part of a
+			// character, as `$b[$i]` on bytes is (strings.md §2).
+			out = append(out, types.TBytes)
+			continue
+		}
 		switch m := m.(type) {
 		case types.Shape:
 			t, found, certain := shapeOffset(m, idx)
@@ -1540,9 +1546,14 @@ func bytesAgainstText(l, r types.Type) bool {
 
 // concatBytes reports an operand of `.` that is binary data: bytes, maybe
 // null (which `.` reads as the empty string), or a value already reported.
+// string&bytes, bytes that are text, is binary data too.
 func concatBytes(t types.Type) bool {
 	found := false
 	for _, m := range types.Members(t) {
+		if types.IsTextBytes(m) {
+			found = true
+			continue
+		}
 		switch m.(type) {
 		case types.Bytes:
 			found = true
@@ -1556,6 +1567,16 @@ func concatBytes(t types.Type) bool {
 		}
 	}
 	return found
+}
+
+// allTextBytes reports a type whose every member is string&bytes.
+func allTextBytes(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		if !types.IsTextBytes(m) {
+			return false
+		}
+	}
+	return true
 }
 
 // hasBytes reports a type with a bytes member.
@@ -1582,6 +1603,9 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		// reported (`$s->bytes()` on a string) joins the other side's kind.
 		lb, rb := concatBytes(l), concatBytes(r)
 		if (lb || types.Equal(l, types.TError)) && (rb || types.Equal(r, types.TError)) && (lb || rb) {
+			if allTextBytes(l) && allTextBytes(r) {
+				return types.TTextBytes // UTF-8 joined to UTF-8 is UTF-8
+			}
 			return types.TBytes
 		}
 		if hasBytes(l) || hasBytes(r) {
