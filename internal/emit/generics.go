@@ -1228,12 +1228,11 @@ func (l *lowering) asExpr(n *ast.AsExpr, sc *scope) error {
 	if err != nil {
 		return err
 	}
-	op, fail := "as?", "null"
-	if !n.Nullable {
-		op = "as"
-		fail = "throw new \\TypeError(" + program.PHPString("expected "+rec.Expected+", got ") + " . \\get_debug_type(" + program.TestOperand + "))"
+	op := "as"
+	if n.Nullable {
+		op = "as?"
 	}
-	return l.writeTest(n, n.Expr, op, rec.Cond+" ? "+program.TestOperand+" : "+fail, program.PrecTernary, sc)
+	return l.writeTest(n, n.Expr, op, rec.As(n.Nullable), program.PrecTernary, sc)
 }
 
 // test is the checker's lowering of an `is` or `as`.

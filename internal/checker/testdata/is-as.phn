@@ -334,8 +334,10 @@ function settled(int $i, string $s, mixed $m): int
         return 0;
     }
     $c = \strlen('a') as int; // want P2306,P3012
+    $d = value() as? mixed; // want P2306
+    $e = value() as mixed; // want P2306,P3012
 
-    return $a + ($b ?? 0) + $c;
+    return $a + ($b ?? 0) + $c + (\is_int($d) ? $d : 0) + (\is_int($e) ? $e : 0);
 }
 
 // The else branch narrows as PHPStan narrows the emitted test: a false

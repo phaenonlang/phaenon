@@ -822,7 +822,13 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, 
 	rec.Cond, rec.Prec = render(c)
 	// Reported whether or not the test is settled: `phn build
 	// --emit-on-error` writes the test all the same.
-	twice := strings.Count(rec.Cond, program.TestOperand) > 1 || op != "is"
+	// The operand is counted in what the emitter writes: an `as` writes it
+	// again as the value and in the TypeError's message.
+	written := rec.Cond
+	if op != "is" {
+		written = rec.As(op == "as?")
+	}
+	twice := strings.Count(written, program.TestOperand) > 1
 	switch {
 	case !twice:
 	case !program.ReadsTwice(e):

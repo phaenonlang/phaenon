@@ -524,6 +524,17 @@ type Test struct {
 // TestOperand stands for the operand in a Test's Cond.
 const TestOperand = "\x00"
 
+// As is the whole of the `as` the test lowers, nullable for `as?`: the
+// operand where Cond holds, else a TypeError naming the expected type, or
+// null. TestOperand stands for the operand.
+func (t *Test) As(nullable bool) string {
+	fail := "null"
+	if !nullable {
+		fail = "throw new \\TypeError(" + PHPString("expected "+t.Expected+", got ") + " . \\get_debug_type(" + TestOperand + "))"
+	}
+	return t.Cond + " ? " + TestOperand + " : " + fail
+}
+
 // ReadsTwice reports an operand a test may write twice (design/generics.md
 // §11.4, P3012): a variable, a property or static property fetch, a
 // constant-index read of one of these, or a chain of them — never a call, a
