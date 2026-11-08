@@ -19,10 +19,11 @@
 // The release PR's workflow (release-checksums.yml) runs the first and
 // commits the checksums; release.yml runs the second on the merged release
 // PR before the release is tagged and published. Both keep the lockstep of
-// design/tooling.md §3.4: composer.json requires phaenon/runtime at the
-// release's minor version, and the main line's branch alias names that
-// minor version (dev-main is X.Y.x-dev), which the first writes and the
-// second checks.
+// design/tooling.md §3.4 and T16: composer.json suggests phaenon/debug at
+// the release's minor version, since that package reads the line map this
+// release writes, and the main line's branch alias names that minor
+// version (dev-main is X.Y.x-dev), which the first writes and the second
+// checks.
 package main
 
 import (
@@ -76,9 +77,9 @@ type checksums struct {
 
 const checksumsPath = "composer/checksums.json"
 
-// lockstep finds the version constraint of the runtime package in
-// composer.json's requirements.
-var lockstep = regexp.MustCompile(`("phaenon/runtime":\s*")(\d+\.\d+\.\*)`)
+// lockstep finds the version constraint that opens composer.json's
+// suggestion of the debug package ("0.4.*: the line map reader…").
+var lockstep = regexp.MustCompile(`("phaenon/debug":\s*")(\d+\.\d+\.\*)`)
 
 // branchAlias finds the main line's alias in composer.json, which moves to
 // the release's minor version with the constraint.
@@ -131,7 +132,7 @@ func main() {
 	}
 	found := lockstep.FindAllSubmatch(manifest, -1)
 	if len(found) == 0 {
-		fail("release: composer.json names no phaenon/runtime constraint X.Y.*")
+		fail("release: composer.json suggests no phaenon/debug of a version X.Y.*")
 	}
 	aliases := branchAlias.FindAllSubmatch(manifest, -1)
 	if len(aliases) != 1 {

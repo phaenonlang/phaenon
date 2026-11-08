@@ -200,9 +200,8 @@ var (
 	P4012 = Code{"P4012", Warning, "local php older than the target"}
 	// P4013 reported a `concurrently` block or a `spawn` in a project without
 	// phaenon/concurrent installed; retired with the syntax on 2026-11-08
-	// (design/roadmap.md D25), the code stays reserved. P4014 is about the
-	// installed packages the compiled code calls (design/tooling.md §3.4),
-	// read from vendor/composer/installed.json: the runtime must be of phn's
-	// own minor version.
-	P4014 = Code{"P4014", Error, "phaenon/runtime of another minor version"}
+	// (design/roadmap.md D25). P4014 reported an installed phaenon/runtime of
+	// another minor version than phn's, which the compiled code called;
+	// retired on 2026-11-08, when the output stopped depending on any package
+	// (design/roadmap.md D24, tooling.md T16). Both codes stay reserved.
 )

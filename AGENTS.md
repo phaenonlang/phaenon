@@ -109,8 +109,8 @@ archive` only; `go run ./stdlib/gen -php /path/to/php8.6` also rewrites `stdlib/
 a php of the newest release.
 
 CI (`.github/workflows/ci.yml`) runs `gofmt -l`, `go vet` (native and wasm) and `go test ./...` with
-PHP 8.5 and Composer on the runner; the suites gated by a variable skip there, and so does the
-plugin's suite, which needs the `runtime` checkout beside the repository.
+PHP 8.5 and Composer on the runner; the suites gated by a variable skip there, while the plugin's
+suite runs, `PHAENON_COMPOSER` naming the runner's Composer.
 
 ### Test variables
 
@@ -129,7 +129,7 @@ PHPStan parity.
 | `PHAENON_PHPSTAN` | `TestPHPStanParity` (checker), `TestGenerics` (emit) | Path to a PHPStan binary (`/path/to/phpstan`), run at level max with `treatPhpDocTypesAsCertain: false` (`../design/checker.md` §9) |
 | `PHAENON_UPDATE` | the emit, format, migrate and trace goldens | Rewrites the expected files from the current output |
 | `PHAENON_GOLDEN` | `TestGolden` (checker) | Only the golden files whose name contains this substring |
-| `PHAENON_COMPOSER` | `internal/distribution` | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects; needs the `runtime` checkout beside the repository |
+| `PHAENON_COMPOSER` | `internal/distribution` | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects that install it alone; one of them builds `phn` and runs what it compiles |
 | `PHAENON_COMPOSER_PROJECT` | `TestComposer` (program) | A Composer project to exercise the vendor reader on |
 | `PHAENON_FMT_TREE` | `TestTree` (format) | Any Phaenon tree: each `.phn` must format, and to itself a second time (`-v` lists the files it would change) |
 | `PHAENON_LINEMAP_TREE` | `TestLineMapTree` (emit) | Any Phaenon tree: `TestLineMapProperty`'s invariant over every `.phn` in it |

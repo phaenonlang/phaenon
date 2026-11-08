@@ -350,9 +350,6 @@ func (j buildJob) run() buildResult {
 	} else {
 		diags = append(diags, j.diags...)
 	}
-	if !j.dependency {
-		diags = append(diags, installedDiags()...)
-	}
 	broken := map[string]bool{}
 	for _, d := range diags {
 		if excluded(d.File) {
@@ -662,7 +659,6 @@ func checkCmd(args []string) {
 		files = append(files, f)
 	}
 	diags := append(tgt.Diags, typeCheck(files, tgt.Version, proj.checkerOptions(checker.Options{Deprecations: !*noDeprecations}))...)
-	diags = append(diags, installedDiags()...)
 	errors, warnings := 0, 0
 	for _, d := range diags {
 		if d.Severity == checker.Error {

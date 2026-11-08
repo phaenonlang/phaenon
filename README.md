@@ -286,6 +286,9 @@ it as `vendor/bin/phn`. When Composer writes the autoloader, it compiles every i
 that has a `phaenon.json` (each for its own target, its findings shown as warnings, skipped while
 nothing changed: `phn build --vendor`), then the project itself (`phn build`), so that
 `--classmap-authoritative` finds the outputs. With no `phaenon.json` anywhere it does nothing.
+It requires no other package, since the compiled output needs none, and suggests
+`phaenon/debug` of its own minor version, which points production errors at `.phn` positions
+(`design/line-map.md` §4.3).
 
 - `PHN_BINARY=/path/to/phn` uses another binary, such as one built from a checkout.
 - `"extra": {"phaenon": {"binary-url": "https://mirror/{version}/{file}"}}` fetches the binary from

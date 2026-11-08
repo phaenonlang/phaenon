@@ -21,17 +21,12 @@ import (
 type world struct {
 	t        *testing.T
 	composer string
-	runtime  string // the phaenon/runtime checkout
 	base     string // the test's directory, symlinks resolved
 	plugin   string // the copy of the package the projects install
 	home     string // COMPOSER_HOME
 	cache    string // COMPOSER_CACHE_DIR
 	fake     string // the fake phn
 	log      string // the fake's record of its runs
-
-	// runtimeVersion is the version the runtime checkout is given, whatever
-	// branch it is on: the line the plugin requires, X.Y.x-dev.
-	runtimeVersion string
 }
 
 // newWorld prepares a test's world. The fake phn exits with status 2 when it
@@ -52,7 +47,6 @@ func newWorld(t *testing.T, failOn string) *world {
 	w := &world{
 		t:        t,
 		composer: composer,
-		runtime:  runtimeCheckout(t),
 		base:     base,
 		plugin:   filepath.Join(base, "phaenon-phn"),
 		home:     filepath.Join(base, "composer-home"),
@@ -62,7 +56,6 @@ func newWorld(t *testing.T, failOn string) *world {
 	}
 	root := repositoryRoot(t)
 	copyFile(t, filepath.Join(root, "composer.json"), filepath.Join(w.plugin, "composer.json"))
-	w.runtimeVersion = requiredLine(t, filepath.Join(root, "composer.json"), "phaenon/runtime")
 	copyTree(t, filepath.Join(root, "composer"), filepath.Join(w.plugin, "composer"))
 	// The repository pins its last release; a world starts with no release
 	// pinned, as the repository did before the first one, and a test that
@@ -202,6 +195,7 @@ type project struct {
 	baseURL       bool           // binary-url as a base URL rather than a template
 	override      bool           // PHN_BINARY names the fake
 	symlinkPlugin bool           // the package is symlinked into vendor, not copied
+	binary        string         // PHN_BINARY names this binary, a real phn, instead
 }
 
 // newProject writes the root project p describes into a directory of its own.
@@ -218,11 +212,11 @@ func (w *world) newProject(name string, p project) *project {
 func (p *project) write() {
 	t := p.w.t
 	t.Helper()
+	// With Packagist switched off, the plugin's own package is all there is
+	// to install: it requires none (design/tooling.md T16).
 	repositories := []any{
 		map[string]any{"packagist.org": false},
 		pathRepository(p.w.plugin, "phaenon/phn", "0.1.x-dev", p.symlinkPlugin),
-		// The runtime is symlinked, and its version given whatever branch the checkout is on.
-		pathRepository(p.w.runtime, "phaenon/runtime", p.w.runtimeVersion, true),
 	}
 	require := map[string]string{"phaenon/phn": "*"}
 	for _, name := range p.libraries {
@@ -373,7 +367,10 @@ func (p *project) environ() []string {
 		"COMPOSER_NO_AUDIT=1",
 		"COMPOSER_ROOT_VERSION=1.0.0",
 	)
-	if p.override {
+	switch {
+	case p.binary != "":
+		env = append(env, "PHN_BINARY="+p.binary)
+	case p.override:
 		env = append(env, "PHN_BINARY="+p.w.fake)
 	}
 	return env
@@ -406,49 +403,6 @@ func repositoryRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
-}
-
-// requiredLine is the development line of the version a package's
-// composer.json requires of a dependency: "0.2.*" gives "0.2.x-dev". Every
-// release moves the plugin's runtime constraint to its own minor version
-// (design/tooling.md §3.4), and the checkout must stay installable.
-func requiredLine(t *testing.T, manifest, dependency string) string {
-	t.Helper()
-	data, err := os.ReadFile(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var m struct {
-		Require map[string]string `json:"require"`
-	}
-	if err := json.Unmarshal(data, &m); err != nil {
-		t.Fatalf("%s: %v", manifest, err)
-	}
-	line, ok := strings.CutSuffix(m.Require[dependency], ".*")
-	if !ok {
-		t.Fatalf("%s requires %s %q, not X.Y.*", manifest, dependency, m.Require[dependency])
-	}
-	return line + ".x-dev"
-}
-
-// runtimeCheckout returns the phaenon/runtime checkout beside the repository,
-// or beside its main checkout when the repository is a git worktree kept
-// elsewhere, skipping the test when there is none.
-func runtimeCheckout(t *testing.T) string {
-	t.Helper()
-	root := repositoryRoot(t)
-	candidates := []string{filepath.Join(root, "..", "runtime")}
-	common, err := exec.Command("git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
-	if err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(strings.TrimSpace(string(common))), "..", "runtime"))
-	}
-	for _, dir := range candidates {
-		if _, err := os.Stat(filepath.Join(dir, "composer.json")); err == nil {
-			return filepath.Clean(dir)
-		}
-	}
-	t.Skip("no phaenon/runtime checkout beside the repository")
-	return ""
 }
 
 func writeJSON(t *testing.T, path string, value any) {
