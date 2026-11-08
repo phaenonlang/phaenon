@@ -1010,9 +1010,24 @@ func meet2(a, b Type) Type {
 	if Equal(a, b) {
 		return a
 	}
-	// Text and bytes meet in the value that is both, string&bytes.
+	// Text and bytes meet in the value that is both, string&bytes, and
+	// string&bytes meets another type with its text side: it stays bytes
+	// ('x'&bytes, non-empty-string&bytes), one intersection, not nested.
 	if s, ok := textOf(a, b); ok {
 		return Intersection{[]Type{s, TBytes}}
+	}
+	if IsTextBytes(b) {
+		a, b = b, a
+	}
+	if IsTextBytes(a) {
+		other := b
+		if IsTextBytes(b) {
+			other = TextSide(b)
+		}
+		if _, ok := other.(Bytes); ok {
+			return a
+		}
+		return meet2(meet2(TextSide(a), other), TBytes)
 	}
 	if structuralSub(a, b) {
 		return a
@@ -1148,6 +1163,16 @@ func textOf(a, b Type) (Type, bool) {
 		return b, true
 	}
 	return nil, false
+}
+
+// TextSide is the text a string&bytes is, t itself for any other type.
+func TextSide(t Type) Type {
+	if in, ok := t.(Intersection); ok && len(in.Types) == 2 {
+		if s, ok := textOf(in.Types[0], in.Types[1]); ok {
+			return s
+		}
+	}
+	return t
 }
 
 // IsTextBytes reports an intersection of text and bytes (TTextBytes).

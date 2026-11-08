@@ -289,6 +289,30 @@ func TestTextBytes(t *testing.T) {
 	if got := Intersect(TBytes, TString, nil); !Equal(got, TNever) {
 		t.Errorf("Intersect(bytes, string) = %s: is_string() checks no UTF-8", Print(got))
 	}
+	// Met with more text, it stays one intersection of text and bytes.
+	lit := StringLit{V: "x"}
+	for _, c := range []struct {
+		got  Type
+		want string
+	}{
+		{MakeIntersection(tb, lit), "'x'&bytes"},
+		{MakeIntersection(lit, tb), "'x'&bytes"},
+		{Intersect(tb, lit, nil), "'x'&bytes"},
+		{MakeIntersection(tb, String{NonEmpty: true}), "non-empty-string&bytes"},
+		{MakeIntersection(tb, TBytes), "string&bytes"},
+		{MakeIntersection(tb, tb), "string&bytes"},
+		{MakeIntersection(tb, TInt), "never"},
+	} {
+		if Print(c.got) != c.want {
+			t.Errorf("meet = %s, want %s", Print(c.got), c.want)
+		}
+		if c.want != "never" && !IsTextBytes(c.got) {
+			t.Errorf("%s is not text and bytes", c.want)
+		}
+	}
+	if got := TextSide(MakeIntersection(tb, lit)); !Equal(got, lit) {
+		t.Errorf("TextSide = %s", Print(got))
+	}
 	if got := Erase(tb); !Equal(got, TString) {
 		t.Errorf("Erase = %s", Print(got))
 	}

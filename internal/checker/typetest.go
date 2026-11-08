@@ -179,7 +179,7 @@ func asText(t, target types.Type) types.Type {
 func textOnly(t types.Type) types.Type {
 	return types.MapDeep(t, func(m types.Type) types.Type {
 		if types.IsTextBytes(m) {
-			return types.TString
+			return types.TextSide(m)
 		}
 		return m
 	})
