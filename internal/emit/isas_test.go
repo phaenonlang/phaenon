@@ -166,7 +166,8 @@ func TestIsAsBehaviour(t *testing.T) {
 	if err := os.WriteFile(path, out, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ran, err := exec.Command(php, "-n", "-d", "display_errors=1", "-d", "error_reporting=-1", path).CombinedOutput()
+	args := append([]string{"-n", "-d", "display_errors=1", "-d", "error_reporting=-1"}, mbstring(t, php)...)
+	ran, err := exec.Command(php, append(args, path)...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("php: %v\n%s\n%s", err, ran, out)
 	}
@@ -204,6 +205,26 @@ func TestIsAsBehaviour(t *testing.T) {
 	if t.Failed() {
 		t.Logf("compiled:\n%s", out)
 	}
+}
+
+// mbstring is the option that loads ext-mbstring into php -n, nothing when
+// it is built in: the UTF-8 test of bytes calls mb_check_encoding()
+// (design/strings.md §6), and a php that shares the extension, as
+// setup-php's does, loads it only from an ini file.
+func mbstring(t *testing.T, php string) []string {
+	t.Helper()
+	probe := func(args ...string) bool {
+		args = append(append([]string{"-n"}, args...), "-r", "exit(extension_loaded('mbstring') ? 0 : 1);")
+		return exec.Command(php, args...).Run() == nil
+	}
+	if probe() {
+		return nil
+	}
+	if probe("-d", "extension=mbstring") {
+		return []string{"-d", "extension=mbstring"}
+	}
+	t.Fatalf("%s has no ext-mbstring, which the UTF-8 test of bytes needs", php)
+	return nil
 }
 
 // TestIsAsTwiceRefused: an operand a test writes more than once must read
