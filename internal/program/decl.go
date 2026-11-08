@@ -120,6 +120,10 @@ type Function struct {
 	Name   string // fully qualified
 	Params []*Param
 	Return types.Type
+	// NativeReturn is the declared PHP return type (nil when absent), which
+	// the overlay or a docblock may refine into Return: array_values()
+	// returns an array to PHP and a list<V> to the checker.
+	NativeReturn types.Type
 	// Throws is what the declaration says it lets escape: its `throws`
 	// clause, else its @throws tags; nil when it declares nothing, TVoid
 	// for `@throws void` (design/tooling.md §9.1).

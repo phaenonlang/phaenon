@@ -143,16 +143,17 @@ function compound(mixed $m, object $o, string $s): int
     return $n;
 }
 
-// A check the operand's PHP type settles is left out.
-function settled(map<int|string, int> $ints, ?Repository<User> $repo, string|int $key): int
+// A check the operand's PHP type settles is left out: PHP's type, not a
+// refinement a docblock or the overlay gives it (array_values() returns an
+// array to PHP), which a PHP caller need not respect.
+function settled(map<int|string, int> $ints, array<mixed> $pair, ?Repository<User> $repo, string|int $key): int
 {
     $n = 0;
     if ($ints is list) {
         $n += \count($ints);
     }
-    $list = \array_values($ints);
-    if ($list is (int, int)) {
-        $n += $list[0] + $list[1];
+    if ($pair is (int, int)) {
+        $n += $pair[0] + $pair[1];
     }
     if ($repo is Repository<User>) {
         $n += \count($repo->items);

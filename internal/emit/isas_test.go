@@ -64,6 +64,11 @@ func TestIsAsBehaviour(t *testing.T) {
 	// class<User>'s is is_a() alone.
 	src.WriteString("fun pair(array<mixed> $a): bool => $a is (int, string);\n\n")
 	src.WriteString("fun named(string $s): bool => $s is class<User>;\n\n")
+	// What a docblock or the overlay refines is no PHP guarantee: a PHP
+	// caller hands any array through an erased signature, and anything
+	// can land in a static property, so the checks stay.
+	src.WriteString("fun fromValues(map<int|string, int> $ints): bool\n{\n    $list = \\array_values($ints);\n\n    return $list is (int, int);\n}\n\n")
+	src.WriteString("final class Ids\n{\n    /** @var list<int> */\n    public static array $ids = [];\n\n    public static fun pair(): bool => self::$ids is (int, int);\n}\n\n")
 	// `as` gives the value, or throws the TypeError PHP's own check would.
 	as := []struct{ expr, value, want string }{
 		{"$m as int", "'s'", "expected int, got string"},
@@ -92,6 +97,9 @@ func TestIsAsBehaviour(t *testing.T) {
 	}
 	src.WriteString("echo pair([]) ? '1' : '0', pair([1, 2]) ? '1' : '0', pair(['a' => 1, 'b' => 's']) ? '1' : '0', pair([1, 's']) ? '1' : '0', \"\\n\";\n")
 	src.WriteString("echo named('App\\\\User') ? '1' : '0', named('App\\\\Model') ? '1' : '0', named('s') ? '1' : '0', \"\\n\";\n")
+	src.WriteString("echo \\call_user_func('App\\\\fromValues', ['a' => 'x', 'b' => 'y']) ? '1' : '0', fromValues([3, 4]) ? '1' : '0';\n")
+	src.WriteString("(new \\ReflectionProperty(Ids::class, 'ids'))->setValue(null, ['a' => 1, 'b' => 2]);\n")
+	src.WriteString("echo Ids::pair() ? '1' : '0';\nIds::$ids = [1, 2];\necho Ids::pair() ? '1' : '0', \"\\n\";\n")
 	for i, c := range as {
 		fmt.Fprintf(&src, "echo as%d(%s), \"\\n\";\n", i, c.value)
 	}
@@ -126,7 +134,7 @@ func TestIsAsBehaviour(t *testing.T) {
 	for _, c := range tests {
 		want = append(want, c.want)
 	}
-	want = append(want, "0001", "100")
+	want = append(want, "0001", "100", "0101")
 	for _, c := range as {
 		want = append(want, c.want)
 	}
@@ -137,12 +145,12 @@ func TestIsAsBehaviour(t *testing.T) {
 		if lines[i] == w {
 			continue
 		}
-		what := "pair/named"
+		what := "pair, named, fromValues and Ids"
 		switch {
 		case i < len(tests):
 			what = "is " + tests[i].typ
-		case i >= len(tests)+2:
-			what = as[i-len(tests)-2].expr
+		case i >= len(tests)+3:
+			what = as[i-len(tests)-3].expr
 		}
 		t.Errorf("%s: got %s, want %s", what, lines[i], w)
 	}

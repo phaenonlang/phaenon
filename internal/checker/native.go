@@ -65,6 +65,39 @@ func (x *fnCtx) nativeOf(e ast.Expr, env *state) types.Type {
 			}
 			return nil, nil, nil
 		})
+	case *ast.Call:
+		// A function the overlay or a docblock refines: array_values()
+		// returns a list<V> to the checker and an array to PHP.
+		n, ok := e.Callee.(*ast.Name)
+		if !ok {
+			return nil
+		}
+		fn := x.lookupFunction(n)
+		if fn == nil {
+			return nil
+		}
+		fn.Signature()
+		return refinedNative(fn.NativeReturn, fn.Return)
+	case *ast.StaticCall:
+		name, ok := identName(e.Name)
+		cl := x.namedClass(e.Class)
+		if !ok || cl == nil {
+			return nil
+		}
+		cl.Signature()
+		if m := cl.FindMethod(name); m != nil {
+			return refinedNative(m.NativeReturn, m.Return)
+		}
+	case *ast.StaticPropertyFetch:
+		v, ok := e.Name.(*ast.Variable)
+		cl := x.namedClass(e.Class)
+		if !ok || cl == nil {
+			return nil
+		}
+		cl.Signature()
+		if pr := cl.FindProperty(v.Name); pr != nil {
+			return refinedNative(pr.NativeType, pr.Type)
+		}
 	case *ast.Index:
 		// An element of a refined array (`@param array{body: string}` over
 		// a native `array`) is as uncertain as the array: PHP knows mixed.
@@ -82,6 +115,39 @@ func (x *fnCtx) nativeOf(e ast.Expr, env *state) types.Type {
 		}
 	}
 	return nil
+}
+
+// refinedNative is what PHP holds a declaration to, native erased, when
+// its declared type refines it; nil when the two are the same.
+func refinedNative(native, refined types.Type) types.Type {
+	if native == nil {
+		native = types.TMixed
+	}
+	native = types.Erase(native)
+	if refined == nil || types.Equal(native, refined) {
+		return nil
+	}
+	return native
+}
+
+// namedClass is the class a static access names (`Foo::`, `self::`,
+// `parent::`); nil for an expression or an unknown class, which the
+// access itself reports.
+func (x *fnCtx) namedClass(e ast.Expr) *program.Class {
+	n, ok := e.(*ast.Name)
+	if !ok {
+		return nil
+	}
+	switch specialClassName(n) {
+	case "self", "static":
+		return x.class
+	case "parent":
+		if x.class != nil {
+			return x.class.ParentClass()
+		}
+		return nil
+	}
+	return x.p().Class(x.res.ClassName(n))
 }
 
 // nativeOr is nativeOf with the inferred type as the fallback.

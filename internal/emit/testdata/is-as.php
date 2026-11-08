@@ -154,20 +154,22 @@ function compound(mixed $m, object $o, string $s): int
     return $n;
 }
 
-// A check the operand's PHP type settles is left out.
+// A check the operand's PHP type settles is left out: PHP's type, not a
+// refinement a docblock or the overlay gives it (array_values() returns an
+// array to PHP), which a PHP caller need not respect.
 /**
  * @param array<int|string, int> $ints
+ * @param array<mixed> $pair
  * @param ?Repository<User> $repo
  */
-function settled(array $ints, ?Repository $repo, string|int $key): int
+function settled(array $ints, array $pair, ?Repository $repo, string|int $key): int
 {
     $n = 0;
     if (\array_is_list($ints)) {
         $n += \count($ints);
     }
-    $list = \array_values($ints);
-    if (\count($list) === 2) {
-        $n += $list[0] + $list[1];
+    if (\array_is_list($pair) && \count($pair) === 2 && \is_int($pair[0]) && \is_int($pair[1])) {
+        $n += $pair[0] + $pair[1];
     }
     if ($repo instanceof Repository) {
         $n += \count($repo->items);
@@ -202,4 +204,4 @@ function checked(mixed $m, mixed $l, mixed $p, mixed $u, mixed $o): string
 
     return $s . \count($list) . ($pair === null ? '' : $pair[1]) . ($user === null ? '' : $user->id) . ($owner === null ? '' : $owner->id);
 }
-// phaenon-map v1 is-as.phn 1-6=1 7:1 31-33=25 34:25 36-38=27 39:28 42:33 46-48=37 49:38 158-161=147 162:147
+// phaenon-map v1 is-as.phn 1-6=1 7:1 31-33=25 34:25 36-38=27 39:28 42:33 46-48=37 49:38 160-164=149 165:149

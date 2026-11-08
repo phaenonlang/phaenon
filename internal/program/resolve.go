@@ -901,6 +901,7 @@ func (fn *Function) ensure() {
 	ImplyMapKeyBounds(fn.TypeParams, signatureNodes(fn.Decl.Params, fn.Decl.ReturnType)...)
 	r = r.withParams(fn.TypeParams)
 	fn.Params = r.buildParams(fn.Decl.Params, fn.Doc)
+	fn.NativeReturn = r.native(fn.Decl.ReturnType)
 	fn.Return = r.buildReturn(fn.Decl.ReturnType, fn.Doc)
 	fn.Throws = r.buildThrows(fn.Decl.Throws, fn.Doc)
 	if fn.Doc != nil {
