@@ -231,9 +231,12 @@ var (
 	TObject   Type = Object{}
 	TResource Type = Resource{}
 	// TBytes is bytes.
-	TBytes    Type = Bytes{}
-	TCallable Type = Callable{}
-	TClosure  Type = Callable{Closure: true}
+	TBytes Type = Bytes{}
+	// TTextBytes is string&bytes: bytes `is string` found to be UTF-8 text
+	// (design/strings.md §6), a value of both types. It erases to string.
+	TTextBytes Type = Intersection{[]Type{TString, TBytes}}
+	TCallable  Type = Callable{}
+	TClosure   Type = Callable{Closure: true}
 	// TArray is array<array-key, mixed>.
 	TArray Type = Array{Key: TArrayKey, Value: TMixed}
 	// TArrayKey is int|string.
@@ -1007,6 +1010,10 @@ func meet2(a, b Type) Type {
 	if Equal(a, b) {
 		return a
 	}
+	// Text and bytes meet in the value that is both, string&bytes.
+	if s, ok := textOf(a, b); ok {
+		return Intersection{[]Type{s, TBytes}}
+	}
 	if structuralSub(a, b) {
 		return a
 	}
@@ -1126,6 +1133,31 @@ func kindOf(t Type) kind {
 		return kindIterable
 	}
 	return kindAny
+}
+
+// textOf is the text side of a pair of text and bytes, in either order.
+func textOf(a, b Type) (Type, bool) {
+	if _, ok := b.(Bytes); ok {
+		a, b = b, a
+	}
+	if _, ok := a.(Bytes); !ok {
+		return nil, false
+	}
+	switch b.(type) {
+	case String, StringLit:
+		return b, true
+	}
+	return nil, false
+}
+
+// IsTextBytes reports an intersection of text and bytes (TTextBytes).
+func IsTextBytes(t Type) bool {
+	in, ok := t.(Intersection)
+	if !ok || len(in.Types) != 2 {
+		return false
+	}
+	_, ok = textOf(in.Types[0], in.Types[1])
+	return ok
 }
 
 // ------------------------------------------------------------------ queries
