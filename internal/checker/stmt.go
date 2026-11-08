@@ -218,9 +218,8 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 	vt := x.expr(assign.Value, env, declared)
 	// A literal value must fit the tag; any other value's PHP type must be
 	// narrowed by it, never widened or contradicted (PHPStan's
-	// varTag.nativeType). A tag that narrows the type a declaration refines
-	// PHP's to narrows PHP's as well: `@var bytes` over random_bytes(),
-	// bytes to the overlay and a string to PHP.
+	// varTag.nativeType), unless the tag narrows a refinement that leaves
+	// PHP's type (refinesOutside).
 	native := x.nativeOf(assign.Value, env)
 	if native == nil {
 		native = vt
@@ -230,13 +229,22 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 		if !types.IsAcceptable(vt, declared, x.p()) {
 			x.report(s.S, P2212, "@var %s does not accept the assigned %s", x.typeName(declared), x.typeName(vt))
 		}
-	case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native), x.p()) && !types.IsSubtype(declared, vt, x.p()):
+	case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native), x.p()) && !refinesOutside(declared, vt, native, x.p()):
 		x.report(s.S, P2212, "@var %s is not a subtype of the assigned %s", x.typeName(declared), x.typeName(native))
 	}
 	x.assignTo(assign.Target, declared, env, s.S)
 	if isVar {
 		env.setNative(v.Name, native)
 	}
+}
+
+// refinesOutside reports a @var tag that narrows a value's refined type
+// where that refinement itself leaves PHP's type: `@var bytes` over
+// random_bytes(), bytes to the overlay and a string to PHP, which the
+// lattice keeps apart. Such a tag narrows PHP's type as well. A refined
+// type of mixed says nothing and excuses nothing.
+func refinesOutside(declared, refined, native types.Type, h types.Hierarchy) bool {
+	return !types.IsMixed(refined) && types.IsSubtype(declared, refined, h) && !types.IsSubtype(refined, withoutTypeArgs(native), h)
 }
 
 // varTags applies the named `@var T $x` tags of a docblock above a
@@ -1067,7 +1075,7 @@ func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
 			if !types.IsAcceptable(t, declared, x.p()) {
 				x.report(s.S, P2212, "@var %s does not accept the returned %s", x.typeName(declared), x.typeName(t))
 			}
-		case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native), x.p()) && !types.IsSubtype(declared, t, x.p()):
+		case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native), x.p()) && !refinesOutside(declared, t, native, x.p()):
 			x.report(s.S, P2212, "@var %s is not a subtype of the returned %s", x.typeName(declared), x.typeName(native))
 		}
 		t = declared
