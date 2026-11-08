@@ -989,6 +989,8 @@ func (x *fnCtx) stringifiesObject(e ast.Expr, env *state) bool {
 // the operand may hold, as inferred and as PHP guarantees it, has the
 // tested type once its bytes are text; nullFirst when that holds of all
 // but null, which the type rejects. Anything else fails on its type too.
+// Null counts where either type admits it: a property guarded against
+// null is bytes to the checker and still ?string to PHP.
 func (x *fnCtx) utf8Failure(o operand, target types.Type) (encodingOnly, nullFirst bool) {
 	passes := func(tt, ntt types.Type) bool {
 		return !types.IsMixed(ntt) && types.IsSubtype(tt, target, x.p()) && types.IsSubtype(ntt, target, x.p())
@@ -996,7 +998,7 @@ func (x *fnCtx) utf8Failure(o operand, target types.Type) (encodingOnly, nullFir
 	if passes(o.tt, o.ntt) {
 		return true, false
 	}
-	nullable := types.IsNullable(o.t) && !types.IsSubtype(types.TNull, target, x.p())
+	nullable := (types.IsNullable(o.t) || types.IsNullable(o.nt)) && !types.IsSubtype(types.TNull, target, x.p())
 	return false, nullable && passes(types.StripNull(o.tt), types.StripNull(o.ntt))
 }
 

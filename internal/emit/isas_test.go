@@ -58,7 +58,7 @@ func TestIsAsBehaviour(t *testing.T) {
 		{"numeric", "1100000000000010"},
 	}
 	var src strings.Builder
-	src.WriteString("namespace App;\n\ninterface Model\n{\n}\n\nfinal class User implements Model\n{\n}\n\nenum Suit\n{\n    case Hearts;\n}\n\n")
+	src.WriteString("namespace App;\n\ninterface Model\n{\n}\n\nfinal class User implements Model\n{\n}\n\nenum Suit\n{\n    case Hearts;\n}\n\nfinal class Blob\n{\n    public function __construct(public ?bytes $data)\n    {\n    }\n}\n\n")
 	for i, c := range tests {
 		fmt.Fprintf(&src, "fun is%d(mixed $m): bool => $m is %s;\n\n", i, c.typ)
 	}
@@ -117,6 +117,10 @@ func TestIsAsBehaviour(t *testing.T) {
 		{"(bytes, int)", "$b as (string, int)", `[(bytes) "\xFF", 1]`, "TypeError: expected (string, int) with valid UTF-8, got array"},
 		{"string", "((bytes) $b) as string", `"\xFF"`, "ValueError: not valid UTF-8"},
 		{"string", "((bytes) $b) as string", "'ok'", "'ok'"},
+		// A property guarded against null is bytes to the checker and
+		// ?string to PHP: null is the one other failure, as unguarded.
+		{"Blob", "$b->data === null ? 'none' : $b->data as string", `new Blob((bytes) "\xFF")`, "ValueError: not valid UTF-8"},
+		{"Blob", "$b->data === null ? 'none' : $b->data as string", "new Blob(null)", "'none'"},
 		{"int|bytes", "$b as int|string", `(bytes) "\xFF"`, "ValueError: not valid UTF-8"},
 		{"int|bytes", "$b as int|string", "7", "7"},
 	}
