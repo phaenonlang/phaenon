@@ -529,13 +529,22 @@ const TestOperand = "\x00"
 // constant-index read of one of these, or a chain of them — never a call, a
 // new, an operator or an assignment, which the second reading would run
 // again. The nullsafe operator is one: after the test, PHPStan knows the
-// chain is not null and reports the second `?->`.
+// chain is not null and reports the second `?->`. A constant reads the same
+// value every time, so it is one too (`Limits::MAX as int`).
 func ReadsTwice(e ast.Expr) bool {
 	switch e := e.(type) {
 	case *ast.Paren:
 		return ReadsTwice(e.Expr)
-	case *ast.Variable:
+	case *ast.Variable, *ast.ConstFetch, *ast.Name:
 		return true
+	case *ast.ClassConstFetch:
+		if _, ok := e.Name.(*ast.Ident); !ok {
+			return false
+		}
+		if _, ok := e.Class.(*ast.Name); ok {
+			return true
+		}
+		return ReadsTwice(e.Class)
 	case *ast.PropertyFetch:
 		if e.NullSafe {
 			return false

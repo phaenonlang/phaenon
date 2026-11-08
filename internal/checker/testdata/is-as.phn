@@ -412,3 +412,29 @@ function varTags(): string
 
     return $s . $t;
 }
+
+// A constant reads the same value twice: no P3012, only the P2306 its
+// value's type settles.
+class Limits
+{
+    public const N = 3;
+    public const int|string KEY = 'a';
+    public const mixed DEFAULT = null;
+
+    public function read(): int
+    {
+        $d = static::DEFAULT as? int; // want P2306 "null is never int"
+        $e = self::DEFAULT is ?int; // want P2306
+
+        return ($d ?? 0) + ($e ? 1 : 0);
+    }
+}
+
+function constants(): int
+{
+    $n = Limits::N as int; // want P2306 "is always int"
+    $m = \PHP_INT_MAX as? int; // want P2306
+    $k = Limits::KEY as int|string; // want P2306
+
+    return $n + ($m ?? 0) + \strlen((string) $k);
+}
