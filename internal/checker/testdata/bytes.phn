@@ -49,8 +49,8 @@ function producers(int $n): void
 
 function text(bytes $raw, string $name): void
 {
-    takesString("hello $raw"); // want P2530
-    takesString('x' . $raw); // want P2530
+    takesString("hello $raw"); // want P2530 "`as string` checks it is UTF-8"
+    takesString('x' . $raw); // want P2530 "`as string` checks bytes are UTF-8 text"
     $s = 'id-';
     $s .= $raw; // want P2530
     takesString((string) $raw);
@@ -151,6 +151,104 @@ function decoding(string $hex, string $b64, bytes $raw): void
 
 function takesBool(bool $b): void
 {
+}
+
+// `as string` is the checked conversion to text: the UTF-8 test, a
+// ValueError when it fails; `as?` gives null and `is string` the test
+// alone. What passes is a string, what fails stays bytes.
+function conversions(bytes $raw, bytes $data, ?bytes $maybe, ?bytes $absent, int|bytes $either, bytes $payload): void
+{
+    takesString($raw as? string ?? '');
+    if ($raw is string) {
+        takesString($raw);
+        takesBytes($raw); // want P2103 "string given"
+    } else {
+        takesBytes($raw);
+        takesString($raw); // want P2103 "bytes given"
+    }
+    takesBytes($raw); // the test changed no value: where the branches meet, the bytes are bytes
+    $text = $data as string;
+    takesString($text);
+    takesString($data); // `as` threw unless $data was text, as for any `as`
+    if ($maybe is string) {
+        takesString($maybe);
+    } else {
+        takesString($maybe); // want P2103 "null|bytes given"
+    }
+    if ($absent is string|null) {
+        takesString($absent ?? '');
+    } else {
+        takesBytes($absent);
+    }
+    if ($either is int|string) {
+        takesString((string) $either);
+    }
+    takesString($payload as? string); // want P2103 "string|null given"
+}
+
+// Nor does a loop that comes round again, or a property: what a UTF-8 test
+// let through as text is the same bytes after it.
+function rejoined(list<bytes> $chunks, bytes $raw, Frame $frame): int
+{
+    $n = 0;
+    foreach ($chunks as $chunk) {
+        if ($raw is string) {
+            $n += \strlen(takesText($raw));
+        }
+        $n += \strlen($chunk) + \strlen(takesText($raw as string));
+    }
+    takesBytes($raw);
+    if ($frame->buf is string) {
+        $n += \strlen(takesText($frame->buf));
+    }
+    takesBytes($frame->buf);
+    $raw = 'now text';
+    if ($n > 0) {
+        $raw = (bytes) 'binary';
+    }
+    takesBytes($raw); // want P2103 "'now text'|bytes given"
+
+    return $n;
+}
+
+function takesText(string $s): string
+{
+    return $s;
+}
+
+function nullable(?bytes $maybe): string
+{
+    return $maybe as string;
+}
+
+function either(int|bytes $either): string
+{
+    return $either as string;
+}
+
+function converted(bytes $raw): bytes
+{
+    takesString(random_bytes(4) as string); // want P3012 "the operand of `as` is evaluated twice"
+    takesBool(random_bytes(4) is string); // one call: the UTF-8 test reads it once
+
+    return $raw;
+}
+
+type Blob = string|bytes;
+
+// PHP cannot tell bytes from string at runtime: `is bytes`, and `is string`
+// on a value that may be either, have no test (P3011, generics.md §11.4).
+function untestable(mixed $m, string $s, bytes $b, string|bytes $either, (Blob, int) $pair): void
+{
+    takesBool($m is bytes); // want P3011 "`bytes` cannot be tested at runtime: PHP cannot tell bytes from string; (bytes) retypes a string"
+    takesBool($s is bytes); // want P3011
+    takesBool($b is bytes); // want P3011
+    takesBool($m is ?bytes); // want P3011
+    takesBytes($m as bytes); // want P3011
+    takesBool($either is string); // want P3011 "`string` cannot be tested at runtime on string|bytes: PHP cannot tell bytes from string"
+    takesString($either as string); // want P3011
+    takesBool($pair is (string, int)); // want P3011 "on string|bytes"
+    takesBool($either is int); // want P2306 "string|bytes is never int"
 }
 
 function equality(bytes $a, string $b, bytes $c): void

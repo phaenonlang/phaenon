@@ -25,6 +25,11 @@ type varInfo struct {
 	// PHPStan's conditional expressions do. Dropped when the variable or
 	// one the condition narrowed is assigned again.
 	conds []condHolder
+	// binary is the bytes type of a variable a UTF-8 test narrowed to text
+	// (`$b is string`, `$b as string`, design/strings.md §6): the value is
+	// still those bytes, so where the branches meet, the side that knew it
+	// as text gives it back as binary data. Dropped when it is assigned.
+	binary types.Type
 }
 
 // condHolder is one branch of a condition a variable was assigned from:
@@ -368,19 +373,35 @@ func join(a, b *state) *state {
 	n := newEnv()
 	for k, va := range a.vars {
 		if vb, ok := b.vars[k]; ok {
-			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds)}
+			info := varInfo{maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds)}
+			switch {
+			case va.binary != nil && vb.binary != nil:
+				info.t, info.binary = types.MakeUnion(va.t, vb.t), types.MakeUnion(va.binary, vb.binary)
+			case va.binary != nil:
+				info.t = types.MakeUnion(va.binary, vb.t)
+			case vb.binary != nil:
+				info.t = types.MakeUnion(va.t, vb.binary)
+			default:
+				info.t = types.MakeUnion(va.t, vb.t)
+			}
+			n.vars[k] = info
 		} else {
-			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native}
+			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native, binary: va.binary}
 		}
 	}
 	for k, vb := range b.vars {
 		if _, ok := a.vars[k]; !ok {
-			n.vars[k] = varInfo{t: vb.t, maybe: true, native: vb.native}
+			n.vars[k] = varInfo{t: vb.t, maybe: true, native: vb.native, binary: vb.binary}
 		}
 	}
 	for k, ta := range a.paths {
 		if tb, ok := b.paths[k]; ok {
-			n.paths[k] = types.MakeUnion(ta, tb)
+			// A property or an offset seen as text on one side and as
+			// bytes on the other is the same value a UTF-8 test narrowed
+			// on one side: its declared type says what it is.
+			if u := types.MakeUnion(ta, tb); !textAndBytes(u) {
+				n.paths[k] = u
+			}
 		}
 	}
 	for k := range a.inits {
@@ -389,6 +410,20 @@ func join(a, b *state) *state {
 		}
 	}
 	return n
+}
+
+// textAndBytes reports a type with both text and bytes among its members.
+func textAndBytes(t types.Type) bool {
+	var text, binary bool
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Bytes:
+			binary = true
+		case types.String, types.StringLit, types.ClassString:
+			text = true
+		}
+	}
+	return text && binary
 }
 
 // joinAll merges several environments.

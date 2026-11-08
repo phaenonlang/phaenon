@@ -145,7 +145,7 @@ function uncheckable(mixed $m, ?Repository<User> $r): int
     if ($m is Closure(int): string) { // want P3011 "test `is Closure`"
         $n++;
     }
-    if ($m is bytes) { // want P3011 "test `is string`"
+    if ($m is bytes) { // want P3011 "PHP cannot tell bytes from string"
         $n++;
     }
     if ($m is (int, list<string>)) { // want P3011 "`list<string>`"

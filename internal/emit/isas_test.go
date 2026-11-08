@@ -16,7 +16,8 @@ import (
 
 // TestIsAsBehaviour runs the tests `is` and `as` compile to under php
 // (design/generics.md §11.4): each type against every value, each `as`
-// against a value that fails it. want has a digit per value, 1 where the
+// against a value that fails it, and the UTF-8 check of bytes tested as a
+// string (design/strings.md §6). want has a digit per value, 1 where the
 // test holds.
 func TestIsAsBehaviour(t *testing.T) {
 	php, err := exec.LookPath("php")
@@ -90,6 +91,32 @@ func TestIsAsBehaviour(t *testing.T) {
 	for i, c := range as {
 		fmt.Fprintf(&src, "fun as%d(mixed $m): string\n{\n    try {\n        $v = %s;\n    } catch (\\TypeError $e) {\n        return $e->getMessage();\n    }\n\n    return show($v);\n}\n\n", i, c.expr)
 	}
+	// On bytes, `as string` is the checked conversion to text
+	// (design/strings.md §6): the value when it is UTF-8, a ValueError when
+	// it is not, null from `as?`; a value of another type is a TypeError.
+	text := []struct{ param, expr, value, want string }{
+		{"bytes", "$b as string", `(bytes) "\xFF"`, "ValueError: not valid UTF-8"},
+		{"bytes", "$b as string", `(bytes) "h\xC3\xA9llo"`, "'héllo'"},
+		{"bytes", "$b as string", "(bytes) ''", "''"},
+		{"bytes", "$b as? string", `(bytes) "\xFF"`, "NULL"},
+		{"bytes", "$b as? string", "(bytes) 'ok'", "'ok'"},
+		{"bytes", "$b is string", `(bytes) "a\xC0\x80"`, "false"},
+		{"bytes", "$b is string", "(bytes) 'ok'", "true"},
+		{"?bytes", "$b as string", "null", "TypeError: expected string, got null"},
+		{"?bytes", "$b as string", `(bytes) "\xFF"`, "ValueError: not valid UTF-8"},
+		{"?bytes", "$b as string|null", "null", "NULL"},
+		{"?bytes", "$b as string|null", `(bytes) "\xED\xA0\x80"`, "ValueError: not valid UTF-8"},
+		{"?bytes", "$b as? string", "null", "NULL"},
+		{"?bytes", "$b is ?string", "null", "true"},
+		{"?bytes", "$b is ?string", `(bytes) "\xFF"`, "false"},
+		{"?bytes", "$b is string", "null", "false"},
+		{"int|bytes", "$b as string", "5", "TypeError: expected string, got int"},
+		{"int|bytes", "$b as int|string", `(bytes) "\xFF"`, "ValueError: not valid UTF-8"},
+		{"int|bytes", "$b as int|string", "7", "7"},
+	}
+	for i, c := range text {
+		fmt.Fprintf(&src, "fun text%d(%s $b): string\n{\n    try {\n        $v = %s;\n    } catch (\\ValueError|\\TypeError $e) {\n        return $e::class . ': ' . $e->getMessage();\n    }\n\n    return show($v);\n}\n\n", i, c.param, c.expr)
+	}
 	src.WriteString("fun show(mixed $v): string => $v instanceof Suit ? $v->name : \\var_export($v, true);\n\n")
 	for i := range tests {
 		fmt.Fprintf(&src, "echo")
@@ -113,6 +140,9 @@ func TestIsAsBehaviour(t *testing.T) {
 	src.WriteString("echo classPair([1, User::class]) ? '1' : '0', classPair([1, 's']) ? '1' : '0', classPair([1, 'nope']) ? '1' : '0', classPair([1, 5]) ? '1' : '0', \"\\n\";\n")
 	for i, c := range as {
 		fmt.Fprintf(&src, "echo as%d(%s), \"\\n\";\n", i, c.value)
+	}
+	for i, c := range text {
+		fmt.Fprintf(&src, "echo text%d(%s), \"\\n\";\n", i, c.value)
 	}
 
 	p := program.New()
@@ -149,6 +179,9 @@ func TestIsAsBehaviour(t *testing.T) {
 	for _, c := range as {
 		want = append(want, c.want)
 	}
+	for _, c := range text {
+		want = append(want, c.want)
+	}
 	if len(lines) != len(want) {
 		t.Fatalf("php printed %d lines, want %d:\n%s", len(lines), len(want), ran)
 	}
@@ -160,6 +193,9 @@ func TestIsAsBehaviour(t *testing.T) {
 		switch {
 		case i < len(tests):
 			what = "is " + tests[i].typ
+		case i >= len(tests)+5+len(as):
+			c := text[i-len(tests)-5-len(as)]
+			what = c.expr + " on " + c.param + " " + c.value
 		case i >= len(tests)+5:
 			what = as[i-len(tests)-5].expr
 		}

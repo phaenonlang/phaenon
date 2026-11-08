@@ -373,6 +373,15 @@ never adds parameters or members: the output contains no identifier you did not 
 `\array_all($x, fn ($v) => \is_int($v))`, where the cost shows. A test that writes its operand
 twice takes a variable or a property, not a call (`P3012`). Design: `design/generics.md` §11.4.
 
+`bytes` is a PHP string at runtime, so PHP cannot tell it from text: `is bytes` is `P3011`, and
+so is `is string` on a value that may be either. On a `bytes` operand, `as string` is the checked
+conversion to text,
+`\mb_check_encoding($b, 'UTF-8') ? $b : throw new \ValueError('not valid UTF-8')`; `as? string`
+gives `null` and `is string` is the test alone. `(bytes) $s` retypes a string as binary data and
+`(string) $b` is the unchecked way back, both free; `hex2bin()`, `base64_decode()`, `bin2hex()`,
+`base64_encode()` and `mb_scrub()` are typed for `bytes`. The check needs `ext-mbstring`, or
+`symfony/polyfill-mbstring` where it is missing. Design: `design/strings.md` §6.
+
 A generic declaration's docblock adds lines to the output (PHPStan reads one tag per line);
 every other edit keeps line numbers exact. Design: `design/generics.md`, decisions in §11.
 

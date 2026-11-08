@@ -619,7 +619,8 @@ func containsTuple(t types.Type) bool {
 // settles reports the test of an operand of type t, which PHP holds to nt,
 // against target when the types decide it: always or never true, as both
 // the inferred and the PHP type say (P2306). A test against mixed is
-// always true.
+// always true. A bytes operand tested as a string is never settled: its
+// UTF-8 is (design/strings.md §6).
 func (x *fnCtx) settles(t, nt, target types.Type) (always, never bool) {
 	if types.IsMixed(target) {
 		return true, false
@@ -627,8 +628,10 @@ func (x *fnCtx) settles(t, nt, target types.Type) (always, never bool) {
 	if types.IsMixed(t) || isParamType(t) || isParamType(target) {
 		return false, false
 	}
-	always = types.IsSubtype(t, target, x.p()) && !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p())
-	never = !types.Overlaps(t, target, x.p()) && !types.IsMixed(nt) && !types.Overlaps(nt, target, x.p())
+	tt, ntt := asText(t, target), asText(nt, target)
+	utf8 := !types.Equal(tt, t) || !types.Equal(ntt, nt)
+	always = !utf8 && types.IsSubtype(t, target, x.p()) && !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p())
+	never = !types.Overlaps(tt, target, x.p()) && !types.IsMixed(nt) && !types.Overlaps(ntt, target, x.p())
 	return always, never
 }
 
@@ -653,11 +656,13 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	x.condValueType = types.TBool
 	then, els = env.clone(), env.clone()
 	nt := x.guaranteedOr(e.Expr, t, env)
+	// A bytes operand that passes `is string` is text (strings.md §6).
+	tt := asText(t, target)
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) {
 		switch {
-		case types.IsSubtype(t, target, x.p()):
+		case types.Equal(tt, t) && types.IsSubtype(t, target, x.p()):
 			x.condValueType = types.TTrue
-		case !types.Overlaps(t, target, x.p()):
+		case !types.Overlaps(tt, target, x.p()):
 			x.condValueType = types.TFalse
 		}
 	}
@@ -668,7 +673,10 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	if nold != nil {
 		nthen = types.Intersect(nold, narrow, x.p())
 	}
-	x.narrowPathNative(then, e.Expr, types.Intersect(t, narrow, x.p()), nthen, true)
+	x.narrowPathNative(then, e.Expr, types.Intersect(tt, narrow, x.p()), nthen, true)
+	if !types.Equal(tt, t) {
+		keepBinary(then, e.Expr, t)
+	}
 	// The else branch narrows as PHPStan does on the emitted test, which
 	// is less than the whole type for a test joined with && (elseType).
 	if c != nil {
@@ -701,7 +709,8 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	never := x.reportSettled(e.S, t, nt, target, untestable)
 	result := narrow
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) && !never {
-		result = types.Intersect(t, narrow, x.p())
+		// `$b as string` on bytes is the text the UTF-8 check let through.
+		result = types.Intersect(asText(t, target), narrow, x.p())
 	}
 	if e.Nullable {
 		return types.Nullable(result)
@@ -716,7 +725,36 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 		nthen = types.Intersect(nold, narrow, x.p())
 	}
 	x.narrowPathNative(env, e.Expr, result, nthen, true)
+	if !types.Equal(asText(t, target), t) {
+		keepBinary(env, e.Expr, t)
+	}
 	return result
+}
+
+// asFailure is what an `as` throws, as lowered: a TypeError, or a
+// ValueError for bytes that are not UTF-8 (design/strings.md §6).
+func (x *fnCtx) asFailure(e *ast.AsExpr) types.Type {
+	typeError, notText := types.NewClass("TypeError"), types.NewClass("ValueError")
+	switch rec := x.c.file.Tests[e]; {
+	case rec == nil || !rec.UTF8:
+		return typeError
+	case rec.TypeCond == "":
+		return notText
+	}
+	return types.MakeUnion(typeError, notText)
+}
+
+// keepBinary records that a UTF-8 test narrowed the variable e, bytes of
+// type t, to text: where the branches meet, it is t again (state.binary).
+func keepBinary(env *state, e ast.Expr, t types.Type) {
+	v, ok := variableOf(e)
+	if !ok {
+		return
+	}
+	if info, ok := env.get(v.Name); ok && info.binary == nil {
+		info.binary = t
+		env.vars[v.Name] = info
+	}
 }
 
 // ------------------------------------------------------------------ explicit type arguments

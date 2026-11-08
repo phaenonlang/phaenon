@@ -235,7 +235,7 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 			return
 		}
 		// Narrowing keeps the member paths: the object is the same one.
-		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define, native: narrowNative(info.native, t, x.p()), conds: info.conds}
+		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define, native: narrowNative(info.native, t, x.p()), conds: info.conds, binary: info.binary}
 		if ok {
 			env.applyConds(p.Name, t, x.p())
 		}

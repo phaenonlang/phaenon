@@ -171,7 +171,7 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 		return x.isType(e, env)
 	case *ast.AsExpr:
 		if !e.Nullable {
-			defer x.explicitThrow(types.NewClass("TypeError"), false, e.S) // `as?` gives null instead
+			defer func() { x.explicitThrow(x.asFailure(e), false, e.S) }() // `as?` gives null instead
 		}
 		return x.asExpr(e, env)
 	case *ast.Name:
@@ -325,7 +325,7 @@ func (x *fnCtx) checkStringable(t types.Type, span ast.Span) {
 			return
 		case types.Bytes:
 			// design/strings.md §2: text and binary never mix silently.
-			x.report(span, P2530, "bytes is not text: \\Phaenon\\Bytes::text() decodes it as UTF-8, Bytes::hex() or Bytes::base64() spells it out")
+			x.report(span, P2530, "bytes is not text: `as string` checks it is UTF-8, bin2hex() or base64_encode() spells it out")
 			return
 		case types.Array, types.Shape:
 			x.report(span, P2312, "array cannot be converted to string")
@@ -1585,7 +1585,7 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 			return types.TBytes
 		}
 		if hasBytes(l) || hasBytes(r) {
-			x.report(span, P2530, "cannot concatenate bytes and text: \\Phaenon\\Bytes::text() decodes bytes as UTF-8, (bytes) takes text as its UTF-8 bytes, (bytes) '' starts a binary buffer")
+			x.report(span, P2530, "cannot concatenate bytes and text: `as string` checks bytes are UTF-8 text, (bytes) takes text as its UTF-8 bytes, (bytes) '' starts a binary buffer")
 			x.checkStringable(types.Subtract(l, types.TBytes, x.p()), span)
 			x.checkStringable(types.Subtract(r, types.TBytes, x.p()), span)
 			return types.TError

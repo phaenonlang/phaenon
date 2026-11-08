@@ -505,7 +505,8 @@ type PartialParam struct {
 
 // Test is the checker's lowering of an `is`, `as` or `as?` to the test PHP
 // makes itself (design/generics.md §11.4): `\is_int($x)`, `$x instanceof
-// Foo`, `\is_array($x) && \array_is_list($x)`, without the checks the
+// Foo`, `\is_array($x) && \array_is_list($x)`, `\mb_check_encoding($b,
+// 'UTF-8')` for a bytes operand tested as a string, without the checks the
 // operand's PHP type already settles. The emitter writes it as recorded and
 // derives no test of its own, so what runs is what the checker narrowed on.
 type Test struct {
@@ -519,20 +520,42 @@ type Test struct {
 	// Expected is the tested type in Phaenon's spelling, for the message
 	// of the TypeError an `as` throws.
 	Expected string
+	// UTF8 marks a test that checks a bytes operand is UTF-8 text, the
+	// conversion `$b as string` makes (design/strings.md §6): an `as` it
+	// fails throws a ValueError. TypeCond is then the test without its
+	// UTF-8 checks, "" when the operand's type settles it, so that only
+	// the encoding can fail; where it holds and Cond does not, the value
+	// had the type and failed its encoding.
+	UTF8     bool
+	TypeCond string
 }
 
 // TestOperand stands for the operand in a Test's Cond.
 const TestOperand = "\x00"
 
 // As is the whole of the `as` the test lowers, nullable for `as?`: the
-// operand where Cond holds, else a TypeError naming the expected type, or
-// null. TestOperand stands for the operand.
+// operand where Cond holds, else a TypeError naming the expected type, a
+// ValueError for bytes that are not UTF-8, or null. TestOperand stands for
+// the operand.
 func (t *Test) As(nullable bool) string {
 	fail := "null"
 	if !nullable {
-		fail = "throw new \\TypeError(" + PHPString("expected "+t.Expected+", got ") + " . \\get_debug_type(" + TestOperand + "))"
+		fail = "throw " + t.failure()
 	}
 	return t.Cond + " ? " + TestOperand + " : " + fail
+}
+
+// failure is what an `as` throws when its test fails.
+func (t *Test) failure() string {
+	const notText = "new \\ValueError('not valid UTF-8')"
+	typeError := "new \\TypeError(" + PHPString("expected "+t.Expected+", got ") + " . \\get_debug_type(" + TestOperand + "))"
+	switch {
+	case !t.UTF8:
+		return typeError
+	case t.TypeCond == "":
+		return notText
+	}
+	return "(" + t.TypeCond + " ? " + notText + " : " + typeError + ")"
 }
 
 // ReadsTwice reports an operand a test may write twice (design/generics.md

@@ -51,6 +51,11 @@ function fromBinary(string $raw): string
     return $raw;
 }
 
+function toBinary(string $raw): string
+{
+    return (string) $raw;
+}
+
 function label(string $id): string
 {
     return 'id-' . Bytes::hex($id) . ' (' . strlen($id) . ' bytes)';
@@ -63,6 +68,43 @@ function label(string $id): string
 function keys(array $keys): array
 {
     return array_map(fn (string $k) => Bytes::base64($k, urlSafe: true), $keys);
+}
+
+// `as string` checks that bytes are UTF-8 text and throws a ValueError
+// when they are not; `as?` gives null, `is string` is the test alone
+// (strings.md §6). Where a type may fail too, the error says which.
+function decode(string $payload): string
+{
+    return \mb_check_encoding($payload, 'UTF-8') ? $payload : throw new \ValueError('not valid UTF-8');
+}
+
+function tryDecode(string $payload): ?string
+{
+    return \mb_check_encoding($payload, 'UTF-8') ? $payload : null;
+}
+
+function describe(string $payload): string
+{
+    if (\mb_check_encoding($payload, 'UTF-8')) {
+        return "text: $payload";
+    }
+
+    return 'binary: ' . bin2hex($payload) . ', read as ' . mb_scrub($payload, 'UTF-8');
+}
+
+function maybeText(?string $payload): bool
+{
+    return $payload === null || \mb_check_encoding($payload, 'UTF-8');
+}
+
+function maybeDecode(?string $payload): ?string
+{
+    return (\is_string($payload) && \mb_check_encoding($payload, 'UTF-8')) || $payload === null ? $payload : throw new \ValueError('not valid UTF-8');
+}
+
+function decodePresent(?string $payload): string
+{
+    return \is_string($payload) && \mb_check_encoding($payload, 'UTF-8') ? $payload : throw (\is_string($payload) ? new \ValueError('not valid UTF-8') : new \TypeError('expected string, got ' . \get_debug_type($payload)));
 }
 
 // `.` joins binary to binary and erases unchanged (strings.md §2).
@@ -123,4 +165,4 @@ final class Archive
         return $from[0] ?? '';
     }
 }
-// phaenon-map v1 bytes.phn 1-6=1 7:1 59-62=53 63:53 69-71=59 72:59 117-120=104 121:105
+// phaenon-map v1 bytes.phn 1-6=1 7:1 64-67=58 68:58 111-113=101 114:101 159-162=146 163:147

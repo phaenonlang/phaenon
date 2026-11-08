@@ -45,6 +45,11 @@ function fromBinary(string $raw): bytes
     return (bytes) $raw;
 }
 
+function toBinary(bytes $raw): string
+{
+    return (string) $raw;
+}
+
 function label(bytes $id): string
 {
     return 'id-' . Bytes::hex($id) . ' (' . strlen($id) . ' bytes)';
@@ -53,6 +58,43 @@ function label(bytes $id): string
 function keys(list<bytes> $keys): list<string>
 {
     return array_map(fn (bytes $k) => Bytes::base64($k, urlSafe: true), $keys);
+}
+
+// `as string` checks that bytes are UTF-8 text and throws a ValueError
+// when they are not; `as?` gives null, `is string` is the test alone
+// (strings.md §6). Where a type may fail too, the error says which.
+function decode(bytes $payload): string
+{
+    return $payload as string;
+}
+
+function tryDecode(bytes $payload): ?string
+{
+    return $payload as? string;
+}
+
+function describe(bytes $payload): string
+{
+    if ($payload is string) {
+        return "text: $payload";
+    }
+
+    return 'binary: ' . bin2hex($payload) . ', read as ' . mb_scrub($payload, 'UTF-8');
+}
+
+function maybeText(?bytes $payload): bool
+{
+    return $payload is ?string;
+}
+
+function maybeDecode(?bytes $payload): ?string
+{
+    return $payload as string|null;
+}
+
+function decodePresent(?bytes $payload): string
+{
+    return $payload as string;
 }
 
 // `.` joins binary to binary and erases unchanged (strings.md §2).
