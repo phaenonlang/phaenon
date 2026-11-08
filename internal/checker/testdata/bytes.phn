@@ -247,6 +247,25 @@ function appended(bytes $b): bytes
     return $b; // want P2202 "returns non-empty-string|bytes"
 }
 
+// A test kept in a variable narrows where the variable is tested, as the
+// test does in place.
+function stored(bytes $b, bytes $c): string
+{
+    $text = $b is string;
+    if ($text) {
+        return $b;
+    }
+    takesBytes($b);
+    $valid = $c is string;
+    if (!$valid) {
+        takesString($c); // want P2103 "bytes given"
+
+        return '';
+    }
+
+    return $c;
+}
+
 final class Slot
 {
     public mixed $value = null;

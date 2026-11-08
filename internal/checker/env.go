@@ -38,6 +38,10 @@ type varInfo struct {
 type condHolder struct {
 	whenType types.Type
 	narrowed map[string]types.Type
+	// text marks the variables a UTF-8 test narrowed from bytes to text
+	// (`$ok = $b is string`, design/strings.md §6): applied, they are
+	// narrowed as the test narrows them, and remember their bytes.
+	text map[string]bool
 }
 
 // condBranch records the narrowings of one branch of a condition against
@@ -49,12 +53,19 @@ func condBranch(whenType types.Type, branch, before *state) *condHolder {
 		return nil
 	}
 	narrowed := map[string]types.Type{}
+	var text map[string]bool
 	for k, v := range branch.vars {
 		if b, ok := before.vars[k]; ok && !types.Equal(b.t, v.t) {
 			narrowed[k] = v.t
+			if v.binary != nil && b.binary == nil {
+				if text == nil {
+					text = map[string]bool{}
+				}
+				text[k] = true
+			}
 		}
 	}
-	return &condHolder{whenType: whenType, narrowed: narrowed}
+	return &condHolder{whenType: whenType, narrowed: narrowed, text: text}
 }
 
 // setConds attaches the condition branches to a variable just assigned;
@@ -100,9 +111,16 @@ func (e *state) applyConds(name string, t types.Type, p *program.Program) {
 		if !ok {
 			continue
 		}
+		text := taken[0].text[k]
 		r := types.Intersect(cur.t, nt, p)
+		if text {
+			r = types.Intersect(asText(cur.t, nt), nt, p)
+		}
 		if _, never := r.(types.Never); never {
 			continue
+		}
+		if text && cur.binary == nil && !types.Equal(r, cur.t) {
+			cur.binary = cur.t
 		}
 		cur.t = r
 		cur.native = narrowNative(cur.native, r, p)
