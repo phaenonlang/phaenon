@@ -56,6 +56,15 @@ function strcmp(string $string1, string $string2): int {}
 function openssl_sign(string $data, &$signature, #[\SensitiveParameter] $private_key, string|int $algorithm = OPENSSL_ALGO_SHA1, int $padding = 0, int $salt_length = OPENSSL_RSA_PSS_SALTLEN_AUTO): bool {}
 
 /**
+ * The signature it checks is binary, as openssl_sign() writes it.
+ *
+ * @param string|bytes $data
+ * @param string|bytes $signature
+ * @param OpenSSLAsymmetricKey|OpenSSLCertificate|array|string $public_key
+ */
+function openssl_verify(string $data, string $signature, $public_key, string|int $algorithm = OPENSSL_ALGO_SHA1, int $padding = 0, int $salt_length = OPENSSL_RSA_PSS_SALTLEN_AUTO): int|false {}
+
+/**
  * @param string|bytes $string1
  * @param string|bytes $string2
  */
@@ -84,6 +93,9 @@ function unpack(string $format, string $string, int $offset = 0): array|false {}
 
 /** @return bytes|false */
 function hex2bin(string $string): string|false {}
+
+/** @return bytes|false */
+function base64_decode(string $string, bool $strict = false): string|false {}
 
 /** @param string|bytes $string */
 function bin2hex(string $string): string {}

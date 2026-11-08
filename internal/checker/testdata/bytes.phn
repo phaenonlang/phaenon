@@ -125,6 +125,34 @@ function inlineVar(string $text): void
     $retyped = strtoupper($text); // want P2212
 }
 
+// PHP's own functions are the conversions between bytes and text, typed
+// for bytes by the overlay (strings.md §6).
+function decoding(string $hex, string $b64, bytes $raw): void
+{
+    takesBytes(hex2bin($hex) ?: throw new \ValueError('not hex'));
+    takesBytes(base64_decode($b64, true) ?: throw new \ValueError('not base64'));
+    takesBytes(base64_decode($b64) ?: (bytes) '');
+    takesString(hex2bin($hex) ?: ''); // want P2103
+    takesString(base64_decode($b64, true) ?: ''); // want P2103
+    takesString(bin2hex($raw));
+    takesString(base64_encode($raw));
+    takesString(mb_scrub($raw, 'UTF-8'));
+    takesString(mb_scrub($hex));
+    takesBytes(mb_scrub($raw)); // want P2103
+    takesString(strtoupper($raw)); // want P2103
+    takesBool(mb_check_encoding($raw, 'UTF-8'));
+    takesBool(hash_equals($raw, $raw));
+    takesBool(hash_equals($hex, $raw));
+    $signature = base64_decode($b64, true);
+    if ($signature !== false) {
+        takesInt(openssl_verify($hex, $signature, $hex, \OPENSSL_ALGO_SHA256) ?: 0);
+    }
+}
+
+function takesBool(bool $b): void
+{
+}
+
 function equality(bytes $a, string $b, bytes $c): void
 {
     if ($a === $b) { // want P2305
