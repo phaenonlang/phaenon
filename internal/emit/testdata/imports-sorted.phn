@@ -5,23 +5,32 @@ use DateTimeImmutable;
 use Stringable;
 
 // A sorted use block: the imports the compiler adds (Scope for
-// `concurrently`, Type for `is`) join it in their alphabetical place, each on
-// a line of its own (roadmap D11, D19).
+// `concurrently`, Countable for the parameter the override-erasure rule
+// widens, design/generics.md §4.3) join it in their alphabetical place,
+// each on a line of its own (roadmap D11, D19).
 
-final class Summary implements Stringable
+interface Sizer<T of \Countable>
 {
-    /** @param ArrayObject<int, mixed> $lines */
+    public function size(T $lines): int;
+}
+
+final class Summary implements Stringable, Sizer<ArrayObject<int, string>>
+{
+    /** @param ArrayObject<int, string> $lines */
     public function __construct(private readonly ArrayObject $lines, private readonly DateTimeImmutable $at)
     {
     }
 
     public function __toString(): string
     {
-        $lines = \array_values($this->lines->getArrayCopy());
-
-        $text = $lines is list<string> ? \implode(', ', \array_map(\trim(...), $lines)) : '-';
+        $text = $this->size($this->lines) > 0 ? \implode(', ', \array_map(\trim(...), $this->lines->getArrayCopy())) : '-';
 
         return $this->at->format('Y-m-d') . ' ' . $text;
+    }
+
+    public function size(ArrayObject<int, string> $lines): int
+    {
+        return \count($lines);
     }
 
     public function warm(): void

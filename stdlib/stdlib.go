@@ -93,10 +93,10 @@ func EmbeddedExtensions() map[string]bool {
 	return out
 }
 
-// Runtime returns the declarations of the phaenon/runtime package
-// (`\Phaenon\Type`, the stdlib written in Phaenon, the `Phaenon\Debug`
-// line-map support), which compiled code may depend on. A file's path below
-// runtime/ is its path below the package's src/.
+// Runtime returns the declarations of the phaenon/runtime package, the
+// stdlib written in Phaenon (`\Phaenon\Bytes`, the `Phaenon\Debug`
+// line-map support). A file's path below runtime/ is its path below the
+// package's src/.
 func Runtime() []Stub {
 	return append(walk(runtime, "runtime", ".php"), walk(runtime, "runtime", ".phn")...)
 }

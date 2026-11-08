@@ -29,7 +29,6 @@ func TestStdlibPackagePaths(t *testing.T) {
 	}
 	for stub, want := range map[string]string{
 		"runtime/Bytes.phn":         "Bytes.php",
-		"runtime/Type.php":          "Type.php",
 		"runtime/Debug/LineMap.phn": "Debug/LineMap.php",
 		"concurrent/Scope.phn":      "Scope.php",
 		"concurrent/amp/Amp.php":    "amp/Amp.php",

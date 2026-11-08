@@ -776,9 +776,10 @@ func (e *emitter) importShort(fqcn string, res *program.Resolver) string {
 // in a docblock, begins with the segment short. An import of that short
 // name would take the name over: PHP and PHPStan resolve the first segment
 // of a qualified name through the file's imports, so after `use
-// Phaenon\Type;` the `Type\Helper` the programmer meant as a class of the
-// current namespace becomes Phaenon\Type\Helper. Only whole segments count
-// (`TypeHelper\X` does not begin with `Type`); fully qualified and
+// Random\Engine;` (the class the override-erasure rule widens a parameter
+// to) the `Engine\Check` the programmer meant as a class of the current
+// namespace becomes Random\Engine\Check. Only whole segments count
+// (`Engines\X` does not begin with `Engine`); fully qualified and
 // `namespace\` names and the names of use statements never go through an
 // import. An unqualified name needs no check here: it names a class of the
 // namespace, which importShort already looks up.

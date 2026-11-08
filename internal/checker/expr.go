@@ -176,7 +176,7 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 		return x.asExpr(e, env)
 	case *ast.Name:
 		// The parser leaves constants as bare names. A type parameter's
-		// name denotes its runtime descriptor.
+		// name has no runtime value (P3003).
 		if tp := x.typeParamRef(e); tp != nil {
 			return x.paramAsValue(tp, e.S)
 		}
@@ -218,10 +218,7 @@ func (x *fnCtx) exprLenient(e ast.Expr, env *state) types.Type {
 			return t
 		}
 		base := x.exprLenient(e.Array, env)
-		if e.Index != nil {
-			x.expr(e.Index, env, nil)
-		}
-		return x.indexType(base, e, env, true)
+		return x.indexType(base, e, env, true) // types the key, once
 	case *ast.PropertyFetch:
 		return x.propertyFetch(e, env, true)
 	case *ast.Paren:
@@ -2014,7 +2011,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		}
 		x.assignTo(e.Target, vt, env, e.S)
 		if v, ok := e.Target.(*ast.Variable); ok {
-			env.setNative(v.Name, x.nativeOf(e.Value, env))
+			env.setNative(v.Name, x.guaranteedOf(e.Value, env))
 			x.rememberCondition(v.Name, e.Value, env)
 		}
 		return vt

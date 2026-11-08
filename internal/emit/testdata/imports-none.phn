@@ -1,14 +1,19 @@
 namespace App\Report;
 
-/**
- * A file without imports: the one the compiler adds opens a use block of its
- * own after the namespace, a blank line before and after it (roadmap D11,
- * D19).
- */
-final class Slug
+// A file without imports: the one the compiler adds opens a use block of its
+// own after the namespace, a blank line before and after it (roadmap D11,
+// D19). Countable is the class the override-erasure rule widens of()'s
+// parameter to (design/generics.md §4.3).
+
+interface Sizer<T of \Countable>
 {
-    public static function of(mixed $words): string
+    public function of(T $words): int;
+}
+
+final class Slug implements Sizer<\ArrayObject<int, string>>
+{
+    public function of(\ArrayObject<int, string> $words): int
     {
-        return $words is list<string> ? \strtolower(\implode('-', $words)) : '';
+        return \count($words);
     }
 }

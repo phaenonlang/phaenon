@@ -7,13 +7,11 @@ declare(strict_types=1);
 namespace App;
 
 use Closure;
-use Phaenon\Type;
 
 // Lists, maps and strings go through PHP's functions, chained left to
 // right with pipes (roadmap D20): list<T> and map<K, V> erase to array with
 // their types in docblocks, a tuple (A, B) to the shape array{A, B}, and
-// the compiler imports \Phaenon\Type for `is` beside the file's own
-// imports (design/collections.md §2, roadmap D11).
+// `is` to PHP's own test (design/collections.md §2, generics.md §11.4).
 
 final class User
 {
@@ -160,11 +158,11 @@ function firstPair(array $pairs): ?array
 }
 
 // json_decode() gives mixed: an offset is read once the value is known to be
-// a map (P2302 before, PHPStan's offsetAccess.nonOffsetAccessible).
+// an array (P2302 before, PHPStan's offsetAccess.nonOffsetAccessible).
 function port(string $json): int
 {
     $config = \json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-    if (Type::map(Type::string(), Type::mixed())->check($config) && \is_int($config['port'] ?? null)) {
+    if (\is_array($config) && \is_int($config['port'] ?? null)) {
         return $config['port'];
     }
 
@@ -174,16 +172,16 @@ function port(string $json): int
 // A member of `object` is called once method_exists() proved it (P2006
 // before, PHPStan's method.notFound); its result is mixed until checked.
 /**
- * @return array<string, mixed>
+ * @return array<mixed>
  */
 function exported(object $value): array
 {
     if (\method_exists($value, 'toArray')) {
         $data = $value->toArray();
 
-        return Type::map(Type::string(), Type::mixed())->check($data) ? $data : [];
+        return \is_array($data) ? $data : [];
     }
 
     return [];
 }
-// phaenon-map v1 collections.phn 1-6=1 7:1 10-10=3 11:4 25-28=18 29:18 36-39=25 40:25 50-52=35 53:35 60-64=42 65:42 75-77=52 78:52 88-91=62 92:62 99-101=69 102:69 113:82 153-156=122 157:122 176-178=141 179:141
+// phaenon-map v1 collections.phn 1-6=1 7:1 23-26=17 27:17 34-37=24 38:24 48-50=34 51:34 58-62=41 63:41 73-75=51 76:51 86-89=61 90:61 97-99=68 100:68 111:81 151-154=121 155:121 174-176=140 177:140

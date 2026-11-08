@@ -3,8 +3,8 @@
 A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for PHP".
 
 - `phn` — the compiler (this repository, Go)
-- `phaenon/runtime` — the PHP runtime package (`\Phaenon\Type` behind `is` / `as`, the checked
-  conversions of `\Phaenon\Bytes`, the line map for Monolog and Sentry)
+- `phaenon/runtime` — the PHP runtime package (the checked conversions of `\Phaenon\Bytes`, the
+  line map for Monolog and Sentry)
 - [`phaenonlang/design`](https://github.com/phaenonlang/design) — the language design documents, a
   repository of their own: a path such as `design/checker.md` below is a file there
 
@@ -361,9 +361,17 @@ Type parameters are erased: `first()` compiles to `function first(array $items):
 caller see ordinary typed PHP. A type parameter has no runtime value; when a class needs its `T`
 at runtime it takes a `class<T>` — the type of `User::class`, a plain string — the way PHP
 projects already write it, and `UserRepository` is an ordinary autowirable service. The compiler
-never adds parameters or members: the output contains no identifier you did not write. `$x is
-list<int>` compiles to `\Phaenon\Type::list(\Phaenon\Type::int())->check($x)`; `$x is int` to
-`\is_int($x)`. Only code that tests a structural type depends on `phaenon/runtime`.
+never adds parameters or members: the output contains no identifier you did not write.
+
+`is` and `as` test what PHP tests itself, in O(1), and compile to that test: `$x is int` to
+`\is_int($x)`, `$x is ?User` to `$x === null || $x instanceof User`, `$x is list` to
+`\is_array($x) && \array_is_list($x)` (on an `array`, `\array_is_list($x)` alone), a tuple
+`(int, string)` to its count and members. `$x as int` is
+`\is_int($x) ? $x : throw new \TypeError('expected int, got ' . \get_debug_type($x))`, and
+`$x as? User` is `$x instanceof User ? $x : null`. A type PHP cannot test in O(1) is an error
+(`P3011`): `$x is list<int>` would walk the list, so the check of the elements is written out,
+`\array_all($x, fn ($v) => \is_int($v))`, where the cost shows. A test that writes its operand
+twice takes a variable or a property, not a call (`P3012`). Design: `design/generics.md` §11.4.
 
 A generic declaration's docblock adds lines to the output (PHPStan reads one tag per line);
 every other edit keeps line numbers exact. Design: `design/generics.md`, decisions in §11.

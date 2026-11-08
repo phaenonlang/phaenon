@@ -22,11 +22,35 @@ import (
 
 // nativeOf returns the PHP-declared type behind an expression — a variable
 // a docblock or generic refined, a property, a method result — or nil when
-// the expression's type is certain as inferred.
+// the expression's type is certain as inferred. A function, static method
+// or static property PHP gives no type is taken at its docblock's word
+// here, as the @var checks want it; guaranteedOf does not.
 func (x *fnCtx) nativeOf(e ast.Expr, env *state) types.Type {
+	return x.phpType(e, env, false)
+}
+
+// guaranteedOf is nativeOf for what PHP guarantees at run time: a call or
+// a static property whose declaration has no PHP type guarantees nothing
+// (mixed), whatever its docblock says, as a PHP caller or a wrong docblock
+// can hand over anything. It decides which checks of an `is` or `as` the
+// operand's type settles, and what a variable assigned the value holds.
+func (x *fnCtx) guaranteedOf(e ast.Expr, env *state) types.Type {
+	return x.phpType(e, env, true)
+}
+
+// guaranteedOr is guaranteedOf with the inferred type as the fallback.
+func (x *fnCtx) guaranteedOr(e ast.Expr, t types.Type, env *state) types.Type {
+	if n := x.guaranteedOf(e, env); n != nil {
+		return n
+	}
+	return t
+}
+
+// phpType is nativeOf, or guaranteedOf with guaranteed set.
+func (x *fnCtx) phpType(e ast.Expr, env *state, guaranteed bool) types.Type {
 	switch e := e.(type) {
 	case *ast.Paren:
-		return x.nativeOf(e.Expr, env)
+		return x.phpType(e.Expr, env, guaranteed)
 	case *ast.Variable:
 		if v, ok := env.get(e.Name); ok {
 			return v.native
@@ -65,10 +89,43 @@ func (x *fnCtx) nativeOf(e ast.Expr, env *state) types.Type {
 			}
 			return nil, nil, nil
 		})
+	case *ast.Call:
+		// A function the overlay or a docblock refines: array_values()
+		// returns a list<V> to the checker and an array to PHP.
+		n, ok := e.Callee.(*ast.Name)
+		if !ok {
+			return nil
+		}
+		fn := x.lookupFunction(n)
+		if fn == nil {
+			return nil
+		}
+		fn.Signature()
+		return refinedNative(fn.NativeReturn, fn.Return, guaranteed)
+	case *ast.StaticCall:
+		name, ok := identName(e.Name)
+		cl := x.namedClass(e.Class)
+		if !ok || cl == nil {
+			return nil
+		}
+		cl.Signature()
+		if m := cl.FindMethod(name); m != nil {
+			return refinedNative(m.NativeReturn, m.Return, guaranteed)
+		}
+	case *ast.StaticPropertyFetch:
+		v, ok := e.Name.(*ast.Variable)
+		cl := x.namedClass(e.Class)
+		if !ok || cl == nil {
+			return nil
+		}
+		cl.Signature()
+		if pr := cl.FindProperty(v.Name); pr != nil {
+			return refinedNative(pr.NativeType, pr.Type, guaranteed)
+		}
 	case *ast.Index:
 		// An element of a refined array (`@param array{body: string}` over
 		// a native `array`) is as uncertain as the array: PHP knows mixed.
-		if n := x.nativeOf(e.Array, env); n != nil {
+		if n := x.phpType(e.Array, env, guaranteed); n != nil {
 			return types.TMixed
 		}
 	case *ast.Binary:
@@ -76,12 +133,50 @@ func (x *fnCtx) nativeOf(e ast.Expr, env *state) types.Type {
 			// Either side refined makes the result uncertain. The sides are
 			// not typed again here: typing has effects (a `?? throw` ends
 			// the flow), and PHP's own type of the result is not needed.
-			if x.nativeOf(e.Left, env) != nil || x.nativeOf(e.Right, env) != nil {
+			if x.phpType(e.Left, env, guaranteed) != nil || x.phpType(e.Right, env, guaranteed) != nil {
 				return types.TMixed
 			}
 		}
 	}
 	return nil
+}
+
+// refinedNative is what PHP holds a declaration to, native erased, when
+// its declared type refines it; nil when the two are the same. Where PHP
+// declares no type, the docblock is all there is: taken as the
+// declaration's type (nil), or, guaranteed, as no guarantee at all (mixed).
+func refinedNative(native, refined types.Type, guaranteed bool) types.Type {
+	if native == nil {
+		if guaranteed && refined != nil && !types.IsMixed(refined) {
+			return types.TMixed
+		}
+		return nil
+	}
+	native = types.Erase(native)
+	if refined == nil || types.Equal(native, refined) {
+		return nil
+	}
+	return native
+}
+
+// namedClass is the class a static access names (`Foo::`, `self::`,
+// `parent::`); nil for an expression or an unknown class, which the
+// access itself reports.
+func (x *fnCtx) namedClass(e ast.Expr) *program.Class {
+	n, ok := e.(*ast.Name)
+	if !ok {
+		return nil
+	}
+	switch specialClassName(n) {
+	case "self", "static":
+		return x.class
+	case "parent":
+		if x.class != nil {
+			return x.class.ParentClass()
+		}
+		return nil
+	}
+	return x.p().Class(x.res.ClassName(n))
 }
 
 // nativeOr is nativeOf with the inferred type as the fallback.

@@ -6,18 +6,23 @@ use function sprintf;
 
 // Function imports form their own group after the class imports: the import
 // the compiler adds is a class import and joins the class group, sorted after
-// DateTimeImmutable (roadmap D11).
+// DateTimeImmutable (roadmap D11). It is Traversable, the class the
+// override-erasure rule widens label()'s parameter to (design/generics.md
+// §4.3).
 
-final class Stamp
+interface Labeller<T of \Traversable>
+{
+    public function label(string $who, T $tags): string;
+}
+
+final class Stamp implements Labeller<\ArrayIterator<int, string>>
 {
     public function __construct(private readonly DateTimeImmutable $at)
     {
     }
 
-    public function label(string $who, mixed $tags): string
+    public function label(string $who, \ArrayIterator<int, string> $tags): string
     {
-        $listed = $tags is list<string> ? \implode(', ', $tags) : '-';
-
-        return sprintf('%s at %s (%s)', $who, $this->at->format('H:i'), $listed);
+        return sprintf('%s at %s (%d)', $who, $this->at->format('H:i'), \iterator_count($tags));
     }
 }

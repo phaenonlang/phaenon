@@ -2,7 +2,6 @@ package emit
 
 import (
 	"bytes"
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -15,19 +14,22 @@ import (
 
 // This file lowers Phaenon's generics to PHP: type parameters and
 // arguments are erased from the native signatures and restated in
-// PHPStan docblocks; `is` / `as` become native checks where PHP has them
-// and \Phaenon\Type checks elsewhere; `type` aliases are expanded. The
+// PHPStan docblocks; `is` / `as` become PHP's own checks, as the checker
+// lowered them; `type` aliases are expanded. The
 // output contains no identifier the programmer did not write (roadmap D9):
 // a type parameter has no runtime value, a `class<T>` parameter does. See
 // design/generics.md §4 and §11.2.
-
-// RuntimeType is the fully qualified runtime descriptor class.
-const RuntimeType = "\\Phaenon\\Type"
 
 type lowering struct {
 	e *emitter
 	p *program.Program
 	f *program.File
+	// slots is the loosest precedence an expression may have where an
+	// `is` or `as` stands (slot), filled on the first one; orOperand marks
+	// the operands of ||, where a test joined with && is parenthesised for
+	// the reader.
+	slots     map[ast.Expr]program.Prec
+	orOperand map[ast.Expr]bool
 }
 
 // scope is what a body needs to lower its expressions.
@@ -1208,301 +1210,201 @@ func (l *lowering) arrowFunc(n *ast.ArrowFunc, sc *scope) error {
 
 // ------------------------------------------------------------------ is / as
 
-// classTest tests operand against `class` or `class<Foo>` the way PHP code
-// does: a string that names a class, or one that is_a() the argument. The
-// operand is repeated, so it must be simple; a type argument that is not a
-// plain class (object, a type parameter, a union) is left to the runtime.
-func (l *lowering) classTest(t *ast.NamedType, operand string, simple bool, sc *scope) (string, bool) {
-	if !simple {
-		return "", false
-	}
-	if len(t.TypeArgs) == 0 {
-		return "\\is_string(" + operand + ") && (\\class_exists(" + operand + ") || \\interface_exists(" + operand + "))", true
-	}
-	if c, ok := sc.res.Native(t.TypeArgs[0]).(types.Class); ok && len(c.Args) == 0 {
-		return "\\is_string(" + operand + ") && \\is_a(" + operand + ", \\" + c.Name + "::class, true)", true
-	}
-	return "", false
-}
-
-// simpleOperand reports whether an expression can be repeated in the
-// output without changing behaviour.
-func simpleOperand(e ast.Expr) bool {
-	switch e := e.(type) {
-	case *ast.Variable:
-		return true
-	case *ast.PropertyFetch:
-		return !e.NullSafe && simpleOperand(e.Object) && isIdent(e.Name)
-	case *ast.StaticPropertyFetch:
-		_, isName := e.Class.(*ast.Name)
-		return isName
-	case *ast.ConstFetch, *ast.Name, *ast.ClassConstFetch:
-		return true
-	case *ast.Paren:
-		return simpleOperand(e.Expr)
-	}
-	return false
-}
-
-func isIdent(e ast.Expr) bool {
-	_, ok := e.(*ast.Ident)
-	return ok
-}
-
-// nativeTest returns a PHP expression testing operand against a type, when
-// PHP has a native way: `instanceof`, `is_int()`, `=== null`.
-func (l *lowering) nativeTest(t ast.TypeExpr, operand string, simple bool, sc *scope) (string, bool) {
-	switch t := t.(type) {
-	case *ast.NamedType:
-		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified && strings.EqualFold(t.Name.Parts[0], "class") {
-			return l.classTest(t, operand, simple, sc)
-		}
-		if len(t.TypeArgs) > 0 {
-			return "", false
-		}
-		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
-			name := t.Name.Parts[0]
-			if _, isParam := sc.params[name]; isParam {
-				return "", false
-			}
-			if sc.class != nil {
-				for _, tp := range sc.class.TypeParams {
-					if tp.Name == name {
-						return "", false
-					}
-				}
-			}
-			if sc.res.FileAlias(name) != nil {
-				return "", false
-			}
-			switch strings.ToLower(name) {
-			case "int":
-				return "\\is_int(" + operand + ")", true
-			case "float":
-				return "\\is_float(" + operand + ")", true
-			case "string":
-				return "\\is_string(" + operand + ")", true
-			case "bool":
-				return "\\is_bool(" + operand + ")", true
-			case "array":
-				return "\\is_array(" + operand + ")", true
-			case "object":
-				return "\\is_object(" + operand + ")", true
-			case "iterable":
-				return "\\is_iterable(" + operand + ")", true
-			case "callable":
-				return "\\is_callable(" + operand + ")", true
-			case "null":
-				return operand + " === null", true
-			case "true":
-				return operand + " === true", true
-			case "false":
-				return operand + " === false", true
-			case "mixed":
-				return "true", true
-			case "void", "never", "list", "map", "class", "closure", "scalar", "numeric":
-				return "", false
-			}
-		}
-		return operand + " instanceof " + l.text(t.Name.S), true
-	case *ast.NullableType:
-		if !simple {
-			return "", false
-		}
-		inner, ok := l.nativeTest(t.Type, operand, simple, sc)
-		if !ok {
-			return "", false
-		}
-		return "(" + operand + " === null || " + inner + ")", true
-	case *ast.UnionType:
-		if !simple {
-			return "", false
-		}
-		var parts []string
-		for _, m := range t.Types {
-			p, ok := l.nativeTest(m, operand, simple, sc)
-			if !ok {
-				return "", false
-			}
-			parts = append(parts, p)
-		}
-		return "(" + strings.Join(parts, " || ") + ")", true
-	}
-	return "", false
-}
-
+// isExpr writes an `is` as the test the checker recorded: PHP's own check
+// of the operand, `\is_int($x)`, `$x instanceof Foo`, `\is_array($x) &&
+// \array_is_list($x)` (design/generics.md §11.4).
 func (l *lowering) isExpr(n *ast.IsExpr, sc *scope) error {
-	operand := l.text(n.Expr.Span())
-	simple := simpleOperand(n.Expr)
-	if test, ok := l.nativeTest(n.Type, operand, simple, sc); ok {
-		// `if ($x is ?Foo)` needs no second pair of parentheses.
-		if strings.HasPrefix(test, "(") && n.S.Start > 0 && l.e.src[n.S.Start-1] == '(' && n.S.End < len(l.e.src) && l.e.src[n.S.End] == ')' {
-			test = test[1 : len(test)-1]
+	rec, err := l.test(n)
+	if err != nil {
+		return err
+	}
+	return l.writeTest(n, n.Expr, "is", rec.Cond, rec.Prec, sc)
+}
+
+// asExpr writes `$x as T` as `test ? $x : throw new \TypeError(…)`, PHP
+// 8's idiom for a checked value, and `$x as? T` as `test ? $x : null`.
+func (l *lowering) asExpr(n *ast.AsExpr, sc *scope) error {
+	rec, err := l.test(n)
+	if err != nil {
+		return err
+	}
+	op := "as"
+	if n.Nullable {
+		op = "as?"
+	}
+	return l.writeTest(n, n.Expr, op, rec.As(n.Nullable), program.PrecTernary, sc)
+}
+
+// test is the checker's lowering of an `is` or `as`.
+func (l *lowering) test(n ast.Expr) (*program.Test, error) {
+	rec := l.f.Tests[n]
+	if rec == nil {
+		return nil, l.errorf(n, "the test was not type-checked: compile with phn build")
+	}
+	if rec.Cond == "" {
+		return nil, l.errorf(n, "%s cannot be tested at runtime", rec.Expected)
+	}
+	return rec, nil
+}
+
+// writeTest replaces node, the test op, with text, program.TestOperand in
+// it standing for the operand, in parentheses when the place needs them.
+// An operand written once keeps its source and its own lowering; one
+// written more than once is a variable or a property read, copied as it
+// is — anything else is refused, as the checker refused it (P3012), even
+// where the build goes on despite the findings.
+func (l *lowering) writeTest(node, operand ast.Expr, op, text string, prec program.Prec, sc *scope) error {
+	if prec < l.slot(node) || prec == program.PrecAnd && l.orOperand[node] {
+		text = "(" + text + ")"
+	}
+	if strings.Count(text, program.TestOperand) == 1 {
+		i := strings.Index(text, program.TestOperand)
+		os := operand.Span()
+		if i > 0 {
+			l.e.insert(os.Start, text[:i])
 		}
-		// Keep the operand's own edits by wrapping instead of replacing
-		// when the test starts with it.
-		if strings.HasPrefix(test, operand+" ") && !strings.HasPrefix(test, "(") {
-			l.e.replace(ast.Span{Start: n.Expr.Span().End, End: n.S.End}, test[len(operand):])
-			return l.walk(n.Expr, sc)
+		l.rewrite(ast.Span{Start: os.End, End: node.Span().End}, text[i+len(program.TestOperand):])
+		return l.walk(operand, sc)
+	}
+	if !program.ReadsTwice(operand) {
+		return l.errorf(node, "the operand of `%s` is evaluated twice; assign it to a variable first", op)
+	}
+	for {
+		p, ok := operand.(*ast.Paren)
+		if !ok {
+			break
 		}
-		if strings.HasPrefix(test, "\\is_") || strings.HasPrefix(test, "(") {
-			if idx := strings.Index(test, operand); idx >= 0 && !simple {
-				l.e.insert(n.Expr.Span().Start, test[:idx])
-				l.e.replace(ast.Span{Start: n.Expr.Span().End, End: n.S.End}, test[idx+len(operand):])
-				return l.walk(n.Expr, sc)
-			}
-		}
-		l.e.replace(n.S, test)
+		operand = p.Expr
+	}
+	src := l.text(operand.Span())
+	text = strings.ReplaceAll(text, program.TestOperand, src)
+	if strings.Contains(src, "\n") {
+		// The copies of an operand written over several lines would sit on
+		// lines that stand for other source lines: the compiler lays the
+		// test out as text of its own.
+		l.e.replaceFree(node.Span(), text)
 		return nil
 	}
-	desc, err := l.typeValue(sc.res.Native(n.Type), sc, n)
-	if err != nil {
-		return err
-	}
-	l.e.insert(n.Expr.Span().Start, desc+"->check(")
-	l.e.replace(ast.Span{Start: n.Expr.Span().End, End: n.S.End}, ")")
-	return l.walk(n.Expr, sc)
+	l.rewrite(node.Span(), text)
+	return nil
 }
 
-func (l *lowering) asExpr(n *ast.AsExpr, sc *scope) error {
-	desc, err := l.typeValue(sc.res.Native(n.Type), sc, n)
-	if err != nil {
-		return err
+// rewrite replaces a span in place, or as a free edit when the text does
+// not keep its line breaks.
+func (l *lowering) rewrite(s ast.Span, text string) {
+	if strings.Count(text, "\n") == bytes.Count(l.e.src[s.Start:s.End], []byte("\n")) {
+		l.e.replace(s, text)
+		return
 	}
-	method := "assert"
-	if n.Nullable {
-		method = "orNull"
-	}
-	l.e.insert(n.Expr.Span().Start, desc+"->"+method+"(")
-	l.e.replace(ast.Span{Start: n.Expr.Span().End, End: n.S.End}, ")")
-	return l.walk(n.Expr, sc)
+	l.e.replaceFree(s, text)
 }
 
-// ------------------------------------------------------------------ runtime descriptors
-
-// typeValue renders a type as a \Phaenon\Type expression.
-func (l *lowering) typeValue(t types.Type, sc *scope, at ast.Node) (string, error) {
-	rt := l.e.importShort(strings.TrimPrefix(RuntimeType, "\\"), sc.res)
-	switch v := t.(type) {
-	case nil:
-		return rt + "::mixed()", nil
-	case types.Param:
-		name := types.ParamName(v.Name)
-		return "", l.errorf(at, "type parameter %s is erased and has no runtime value; test against a class<%s> value instead", name, name)
-	case types.Class:
-		if strings.EqualFold(v.Name, "Closure") {
-			return rt + "::of(\\Closure::class)", nil
-		}
-		var args []string
-		for _, a := range v.Args {
-			s, err := l.typeValue(a, sc, at)
-			if err != nil {
-				return "", err
-			}
-			args = append(args, s)
-		}
-		s := rt + "::of(\\" + v.Name + "::class"
-		if len(args) > 0 {
-			s += ", " + strings.Join(args, ", ")
-		}
-		return s + ")", nil
-	case types.Static:
-		return rt + "::of(static::class)", nil
-	case types.This:
-		return rt + "::of(static::class)", nil
-	case types.Mixed:
-		return rt + "::mixed()", nil
-	case types.Null:
-		return rt + "::null()", nil
-	case types.Bool:
-		return rt + "::bool()", nil
-	case types.BoolLit:
-		if v.V {
-			return rt + "::literal(true)", nil
-		}
-		return rt + "::literal(false)", nil
-	case types.Int:
-		return rt + "::int()", nil
-	case types.Float, types.FloatLit:
-		return rt + "::float()", nil
-	case types.String:
-		return rt + "::string()", nil
-	case types.StringLit:
-		return rt + "::literal(" + phpString(v.V) + ")", nil
-	case types.ClassString:
-		if v.Of == nil {
-			return rt + "::classString(" + rt + "::object())", nil
-		}
-		of, err := l.typeValue(v.Of, sc, at)
-		if err != nil {
-			return "", err
-		}
-		return rt + "::classString(" + of + ")", nil
-	case types.Object:
-		return rt + "::object()", nil
-	case types.Resource:
-		return rt + "::resource()", nil
-	case types.Callable:
-		if v.Closure {
-			return rt + "::of(\\Closure::class)", nil
-		}
-		return rt + "::callable()", nil
-	case types.Iterable:
-		return rt + "::iterable()", nil
-	case types.EnumCase:
-		return rt + "::literal(\\" + v.Class + "::" + v.Case + ")", nil
-	case types.Array:
-		val, err := l.typeValue(v.Value, sc, at)
-		if err != nil {
-			return "", err
-		}
-		if v.List {
-			return rt + "::list(" + val + ")", nil
-		}
-		key, err := l.typeValue(v.Key, sc, at)
-		if err != nil {
-			return "", err
-		}
-		return rt + "::map(" + key + ", " + val + ")", nil
-	case types.Shape:
-		return "", l.errorf(at, "an array shape cannot be tested at runtime; test its entries, or use array")
-	case types.Union:
-		if len(v.Types) == 2 {
-			for i, m := range v.Types {
-				if _, isNull := m.(types.Null); isNull {
-					other, err := l.typeValue(v.Types[1-i], sc, at)
-					if err != nil {
-						return "", err
-					}
-					return rt + "::nullable(" + other + ")", nil
-				}
-			}
-		}
-		var parts []string
-		for _, m := range v.Types {
-			s, err := l.typeValue(m, sc, at)
-			if err != nil {
-				return "", err
-			}
-			parts = append(parts, s)
-		}
-		return rt + "::union(" + strings.Join(parts, ", ") + ")", nil
-	case types.Intersection:
-		var parts []string
-		for _, m := range v.Types {
-			s, err := l.typeValue(m, sc, at)
-			if err != nil {
-				return "", err
-			}
-			parts = append(parts, s)
-		}
-		return rt + "::intersection(" + strings.Join(parts, ", ") + ")", nil
+// slot is the loosest precedence an expression may have where node
+// stands without parentheses of its own.
+func (l *lowering) slot(node ast.Expr) program.Prec {
+	if l.slots == nil {
+		l.slots = map[ast.Expr]program.Prec{}
+		l.orOperand = map[ast.Expr]bool{}
+		ast.Inspect(l.e.opts.File.AST, func(n ast.Node) bool {
+			l.slotsOf(n)
+			return true
+		})
 	}
-	return "", l.errorf(at, "%s cannot be tested at runtime", types.Print(t))
+	if p, ok := l.slots[node]; ok {
+		return p
+	}
+	return program.PrecAtom
 }
 
-func phpString(s string) string {
-	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+// slotsOf records the places among a node's direct children that take a
+// looser expression than an operand of instanceof does.
+func (l *lowering) slotsOf(n ast.Node) {
+	set := func(e ast.Expr, p program.Prec) {
+		if e != nil {
+			l.slots[e] = p
+		}
+	}
+	free := func(es ...ast.Expr) {
+		for _, e := range es {
+			set(e, program.PrecTernary)
+		}
+	}
+	switch n := n.(type) {
+	case *ast.Arg:
+		free(n.Value)
+	case *ast.Assign:
+		free(n.Value)
+	case *ast.Return:
+		free(n.Expr)
+	case *ast.ExprStmt:
+		free(n.Expr)
+	case *ast.Echo:
+		free(n.Exprs...)
+	case *ast.Print:
+		free(n.Expr)
+	case *ast.Throw:
+		free(n.Expr)
+	case *ast.Yield:
+		free(n.Key, n.Value)
+	case *ast.Paren:
+		free(n.Expr)
+	case *ast.ArrayItem:
+		free(n.Key, n.Value)
+	case *ast.If:
+		free(n.Cond)
+	case *ast.ElseIf:
+		free(n.Cond)
+	case *ast.While:
+		free(n.Cond)
+	case *ast.DoWhile:
+		free(n.Cond)
+	case *ast.For:
+		free(n.Init...)
+		free(n.Cond...)
+		free(n.Step...)
+	case *ast.Match:
+		free(n.Subject)
+	case *ast.Switch:
+		free(n.Subject)
+	case *ast.Case:
+		free(n.Cond)
+	case *ast.Index:
+		free(n.Index)
+	case *ast.MatchArm:
+		free(n.Conds...)
+		free(n.Body)
+	case *ast.ArrowFunc:
+		free(n.Body)
+	case *ast.Ternary:
+		// A test reads well as a condition; an `as`, itself a ternary,
+		// gets parentheses.
+		set(n.Cond, program.PrecOr)
+		set(n.Then, program.PrecOr)
+		set(n.Else, program.PrecOr)
+	case *ast.Unary:
+		if n.Op == token.Kind('!') {
+			set(n.Expr, program.PrecInstanceof)
+		}
+	case *ast.Binary:
+		var p program.Prec
+		switch n.Op {
+		case token.T_LOGICAL_AND, token.T_LOGICAL_OR, token.T_LOGICAL_XOR:
+			p = program.PrecTernary
+		case token.T_BOOLEAN_OR:
+			p = program.PrecOr
+			l.orOperand[n.Left], l.orOperand[n.Right] = true, true
+		case token.T_COALESCE:
+			p = program.PrecOr
+		case token.T_BOOLEAN_AND:
+			p = program.PrecAnd
+		case token.Kind('|'), token.Kind('^'), token.Kind('&'):
+			p = program.PrecEquality
+		case token.T_POW, token.T_PIPE:
+			p = program.PrecAtom
+		default:
+			p = program.PrecInstanceof // comparisons, arithmetic, concatenation
+		}
+		set(n.Left, p)
+		set(n.Right, p)
+	}
 }
-
-var _ = fmt.Sprintf

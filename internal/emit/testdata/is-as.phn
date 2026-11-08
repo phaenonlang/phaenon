@@ -1,0 +1,216 @@
+namespace App\Tests;
+
+// `is` and `as` compile to the tests PHP makes itself, and to nothing else
+// (design/generics.md §11.4, roadmap D23 and D24): a check the operand's PHP
+// type already settles is left out, a compound test gets the parentheses
+// its place needs, `as` is PHP 8's `test ? $x : throw`.
+
+interface Model
+{
+}
+
+final class User implements Model
+{
+    public function __construct(public readonly int $id)
+    {
+    }
+}
+
+enum Suit
+{
+    case Hearts;
+    case Spades;
+}
+
+class Repository<T of Model>
+{
+    /** the items */
+    public list<T> $items = [];
+}
+
+type Key = int|string;
+
+class Node
+{
+    public static mixed $cache = null;
+
+    /** the row */
+    public map<string, mixed> $row = [];
+
+    public ?Node $next = null;
+
+    public function __construct(public readonly mixed $value)
+    {
+    }
+
+    public function is(mixed $other): bool
+    {
+        return $other is self;
+    }
+
+    public function like(mixed $other): bool
+    {
+        return $other is static;
+    }
+
+    public function id(): int
+    {
+        return $this->row['id'] as int;
+    }
+
+    public function nextValue(): ?User
+    {
+        return $this->next === null ? null : $this->next->value as? User;
+    }
+
+    public static function cached(): ?Node
+    {
+        return self::$cache as? Node;
+    }
+
+    // An operand written twice over more than one line is laid out anew.
+    public function valueUser(): ?User
+    {
+        return $this
+            ->value as?
+            User;
+    }
+}
+
+function value(): mixed
+{
+    return 1;
+}
+
+// One PHP function, or instanceof, or ===: any operand.
+function single(mixed $m): int
+{
+    $n = 0;
+    $n += $m is int ? 1 : 0;
+    $n += $m is float ? 1 : 0;
+    $n += $m is string ? 1 : 0;
+    $n += $m is bool ? 1 : 0;
+    $n += $m is array ? 1 : 0;
+    $n += $m is object ? 1 : 0;
+    $n += $m is callable ? 1 : 0;
+    $n += $m is iterable ? 1 : 0;
+    $n += $m is scalar ? 1 : 0;
+    $n += $m is numeric ? 1 : 0;
+    $n += $m is resource ? 1 : 0;
+    $n += $m is map<mixed, mixed> ? 1 : 0;
+    $n += $m is User ? 1 : 0;
+    $n += $m is Model ? 1 : 0;
+    $n += $m is Suit ? 1 : 0;
+    $n += $m is Closure ? 1 : 0;
+    $n += $m is true ? 1 : 0;
+    $n += value() is null ? 1 : 0;
+    $n += value() is int ? 1 : 0;
+    $n += value() is User ? 1 : 0;
+
+    return $n;
+}
+
+// Unions, intersections, ?T, class names, lists and tuples.
+function compound(mixed $m, object $o, string $s): int
+{
+    $n = 0;
+    if ($m is ?User) {
+        $n += $m === null ? 0 : $m->id;
+    }
+    if ($m is int|string|Suit) {
+        $n++;
+    }
+    if ($m is number) {
+        $n++;
+    }
+    if ($o is \Countable&\Traversable) {
+        $n += \count($o);
+    }
+    if ($m is class<User>) {
+        $n += \strlen($m);
+    }
+    if ($m is class) {
+        $n += \strlen($m);
+    }
+    if ($s is class<User> || $s is class) {
+        $n++;
+    }
+    if ($m is list) {
+        $n += \count($m);
+    }
+    if ($m is (int, ?string)) {
+        $n += $m[0] + \strlen($m[1] ?? '');
+    }
+    if ($m is ?(string, (int, bool))) {
+        $n += $m === null ? 0 : \count($m);
+    }
+    if ($m is Key) {
+        $n++;
+    }
+
+    return $n;
+}
+
+// A check the operand's PHP type settles is left out: PHP's type, not a
+// refinement a docblock or the overlay gives it (array_values() returns an
+// array to PHP), which a PHP caller need not respect.
+function settled(map<int|string, int> $ints, array<mixed> $pair, ?Repository<User> $repo, string|int $key): int
+{
+    $n = 0;
+    if ($ints is list) {
+        $n += \count($ints);
+    }
+    if ($pair is (int, int)) {
+        $n += $pair[0] + $pair[1];
+    }
+    if ($repo is Repository<User>) {
+        $n += \count($repo->items);
+    }
+    if ($key is class<User>) {
+        $n++;
+    }
+
+    return $n;
+}
+
+// Parentheses where the place needs them, none where it does not.
+function places(mixed $a, mixed $b, mixed $c, mixed $d, mixed $e, mixed $f, bool $flag): bool
+{
+    $r = !$a is null;
+    $r = $flag && $b is ?User;
+    $r = $r || $c is list;
+    $r = $flag === $d is null;
+    $r = ($e is ?User) && $r;
+
+    return $r || !($f is int|string);
+}
+
+// A switch's subject and cases and an array's index take any expression:
+// no parentheses there.
+function kinds(mixed $m, mixed $n, mixed $k, map<int, string> $names): string
+{
+    switch ($n is ?int) {
+        case true:
+            return 'maybe int';
+    }
+    switch (true) {
+        case $m is ?User:
+            return 'maybe user';
+        case $m is list:
+            return 'list';
+    }
+
+    return $names[$k as int] ?? '';
+}
+
+// `as` throws a TypeError naming the type, `as?` gives null.
+function checked(mixed $m, mixed $l, mixed $p, mixed $u, mixed $o): string
+{
+    $s = $m as string;
+    $list = $l as list;
+    $pair = $p as? (int, string);
+    $user = $u as? User;
+    $owner = $o as User|null;
+
+    return $s . \count($list) . ($pair === null ? '' : $pair[1]) . ($user === null ? '' : $user->id) . ($owner === null ? '' : $owner->id);
+}

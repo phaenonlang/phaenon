@@ -7,29 +7,50 @@ declare(strict_types=1);
 namespace App\Report;
 
 use ArrayObject;
+use Countable;
 use DateTimeImmutable;
 use Phaenon\Concurrent\Scope;
-use Phaenon\Type;
 use Stringable;
 
 // A sorted use block: the imports the compiler adds (Scope for
-// `concurrently`, Type for `is`) join it in their alphabetical place, each on
-// a line of its own (roadmap D11, D19).
+// `concurrently`, Countable for the parameter the override-erasure rule
+// widens, design/generics.md §4.3) join it in their alphabetical place,
+// each on a line of its own (roadmap D11, D19).
 
-final class Summary implements Stringable
+/**
+ * @template T of \Countable
+ */
+interface Sizer
 {
-    /** @param ArrayObject<int, mixed> $lines */
+    /**
+     * @param T $lines
+     */
+    public function size(\Countable $lines): int;
+}
+
+/**
+ * @implements Sizer<ArrayObject<int, string>>
+ */
+final class Summary implements Stringable, Sizer
+{
+    /** @param ArrayObject<int, string> $lines */
     public function __construct(private readonly ArrayObject $lines, private readonly DateTimeImmutable $at)
     {
     }
 
     public function __toString(): string
     {
-        $lines = \array_values($this->lines->getArrayCopy());
-
-        $text = Type::list(Type::string())->check($lines) ? \implode(', ', \array_map(\trim(...), $lines)) : '-';
+        $text = $this->size($this->lines) > 0 ? \implode(', ', \array_map(\trim(...), $this->lines->getArrayCopy())) : '-';
 
         return $this->at->format('Y-m-d') . ' ' . $text;
+    }
+
+    /**
+     * @param ArrayObject<int, string> $lines
+     */
+    public function size(Countable $lines): int
+    {
+        return \count($lines);
     }
 
     public function warm(): void
@@ -39,4 +60,4 @@ final class Summary implements Stringable
         });
     }
 }
-// phaenon-map v1 imports-sorted.phn 1-6=1 7:1 11-12=4 13:5
+// phaenon-map v1 imports-sorted.phn 1-6=1 7:1 10-10=3 11:4 12-12=4 13:5 20-22=12 23:12 25-27=14 28:14 31-33=17 34:17 48-50=31 51:31

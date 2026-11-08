@@ -13,10 +13,6 @@ import (
 // type-argument arity and bounds, variance positions, what an erased type
 // parameter may be used for, `is` / `as`, explicit type arguments on calls.
 
-// RuntimeType is the descriptor class behind structural `is` / `as`
-// (the `phaenon/runtime` package).
-const RuntimeType = "Phaenon\\Type"
-
 // typeParamRef reports whether a name in an expression position refers to
 // a type parameter in scope (`new T`, `T::class`, `$x instanceof T`, `T`).
 func (x *fnCtx) typeParamRef(n *ast.Name) *program.TypeParam {
@@ -110,6 +106,9 @@ func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 			}
 		}
 		if ar, ok := keywordArity[lower]; ok {
+			if lower == "list" && given == 0 && x.testedNames[t] {
+				return // `is list`: list<mixed> (design/generics.md §11.4)
+			}
 			if given < ar[0] || given > ar[1] {
 				x.report(t.S, P3001, "%s takes %s, %d given", lower, arityText(ar[0], ar[1]), given)
 			} else if lower == "map" && given == 2 {
@@ -505,49 +504,171 @@ func (x *fnCtx) checkTypeAlias(a *ast.TypeAlias) {
 
 // ------------------------------------------------------------------ is / as
 
-// testType resolves the right-hand side of `is` / `as`: the type, with
-// every erased type parameter in it reported.
-func (x *fnCtx) testType(t ast.TypeExpr, op string) types.Type {
+// testType resolves the right-hand side of `is` / `as`, where a bare
+// `list` the operand is tested against is list<mixed>. A map with a mixed
+// key is the array PHP's is_array() narrows to: every key of a PHP array
+// is an int or a string. narrow is what a passing test narrows the operand
+// to (testNarrowing); ok says the type drew no finding of its own.
+func (x *fnCtx) testType(t ast.TypeExpr) (target, narrow types.Type, ok bool) {
+	x.testedNames = testedNames(t, nil)
+	mark := x.c.mark()
 	x.checkTypeExpr(t)
-	target := x.res.Native(t)
-	types.Walk(target, func(m types.Type) {
-		p, ok := m.(types.Param)
-		if !ok {
-			return
+	x.testedNames = nil
+	// A finding is reported once: a pass that meets it again, unless the
+	// first pass was rolled back, finds it seen and reports nothing.
+	// Whether the type has one is kept from the pass that first saw it.
+	if x.c.typeFindings == nil {
+		x.c.typeFindings = map[ast.TypeExpr]bool{}
+	}
+	found, known := x.c.typeFindings[t]
+	if !known {
+		found = len(x.c.diags) > mark
+		x.c.typeFindings[t] = found
+	}
+	ok = !found
+	target = types.MapDeep(x.res.Native(t), func(m types.Type) types.Type {
+		if a, ok := m.(types.Array); ok && types.IsMixed(a.Key) {
+			a.Key = types.TArrayKey
+			return a
 		}
-		if tp := x.res.TypeParam(types.ParamName(p.Name)); tp != nil {
-			x.paramValue(tp, t.Span(), "`"+op+"`")
+		return m
+	})
+	return target, testNarrowing(target, false), ok
+}
+
+// testedNames are the named types an operand, or one of a tuple's members,
+// is tested against: the members of unions, intersections, ?T and tuples,
+// not type arguments (`Box<list>`, `class<list>`).
+func testedNames(t ast.TypeExpr, into map[*ast.NamedType]bool) map[*ast.NamedType]bool {
+	if into == nil {
+		into = map[*ast.NamedType]bool{}
+	}
+	switch t := t.(type) {
+	case *ast.NamedType:
+		into[t] = true
+	case *ast.NullableType:
+		testedNames(t.Type, into)
+	case *ast.UnionType:
+		for _, m := range t.Types {
+			testedNames(m, into)
+		}
+	case *ast.IntersectionType:
+		for _, m := range t.Types {
+			testedNames(m, into)
+		}
+	case *ast.TupleType:
+		for _, m := range t.Elems {
+			testedNames(m, into)
+		}
+	}
+	return into
+}
+
+// testNarrowing is what PHPStan narrows the operand of a passing test to on
+// the output, which the checker may not exceed (design/checker.md §9): the
+// tested type, except a tuple whose test is one side of a || (`?(int,
+// string)`, `int|(int, string)`). PHPStan keeps such a tuple's count and
+// drops its members' types — and the count too when a member is a tuple —
+// as the branch where the other side held never read the members.
+func testNarrowing(t types.Type, underOr bool) types.Type {
+	switch v := t.(type) {
+	case types.Union:
+		ms := make([]types.Type, len(v.Types))
+		for i, m := range v.Types {
+			ms[i] = testNarrowing(m, true)
+		}
+		return types.MakeUnion(ms...)
+	case types.Intersection:
+		ms := make([]types.Type, len(v.Types))
+		for i, m := range v.Types {
+			ms[i] = testNarrowing(m, underOr)
+		}
+		return types.MakeIntersection(ms...)
+	case types.Shape:
+		if !tuple(v) {
+			return t
+		}
+		entries := make([]types.ShapeEntry, len(v.Entries))
+		for i, e := range v.Entries {
+			if underOr {
+				if containsTuple(e.Type) {
+					return anyArray
+				}
+				e.Type = types.TMixed
+			} else {
+				e.Type = testNarrowing(e.Type, false)
+			}
+			entries[i] = e
+		}
+		v.Entries = entries
+		return v
+	}
+	return t
+}
+
+func containsTuple(t types.Type) bool {
+	found := false
+	types.Walk(t, func(m types.Type) {
+		if s, ok := m.(types.Shape); ok && tuple(s) {
+			found = true
 		}
 	})
-	return target
+	return found
+}
+
+// settles reports the test of an operand of type t, which PHP holds to nt,
+// against target when the types decide it: always or never true, as both
+// the inferred and the PHP type say (P2306). A test against mixed is
+// always true.
+func (x *fnCtx) settles(t, nt, target types.Type) (always, never bool) {
+	if types.IsMixed(target) {
+		return true, false
+	}
+	if types.IsMixed(t) || isParamType(t) || isParamType(target) {
+		return false, false
+	}
+	always = types.IsSubtype(t, target, x.p()) && !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p())
+	never = !types.Overlaps(t, target, x.p()) && !types.IsMixed(nt) && !types.Overlaps(nt, target, x.p())
+	return always, never
 }
 
 // isCond narrows on `$x is T`, exactly as instanceof does for classes.
 func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	t := x.expr(e.Expr, env, nil)
-	target := x.testType(e.Type, "is")
+	target, narrow, typeOK := x.testType(e.Type)
 	x.condValueType = types.TBool
 	then, els = env.clone(), env.clone()
-	if nt := x.nativeOr(e.Expr, t, env); !types.IsMixed(t) && !isParamType(t) && !isParamType(target) {
+	nt := x.guaranteedOr(e.Expr, t, env)
+	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) {
 		switch {
 		case types.IsSubtype(t, target, x.p()):
 			x.condValueType = types.TTrue
-			if !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p()) {
-				x.report(e.S, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
-			}
 		case !types.Overlaps(t, target, x.p()):
 			x.condValueType = types.TFalse
-			if !types.IsMixed(nt) && !types.Overlaps(nt, target, x.p()) {
-				x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
-			}
 		}
 	}
-	var nthen, nels types.Type
-	if nold := x.nativeVar(e.Expr, env); nold != nil {
-		nthen, nels = types.Intersect(nold, target, x.p()), x.subtract(nold, target, x.p())
+	always, never := x.settles(t, nt, target)
+	switch {
+	case always:
+		x.report(e.S, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
+	case never:
+		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
 	}
-	x.narrowPathNative(then, e.Expr, types.Intersect(t, target, x.p()), nthen, true)
-	x.narrowPathNative(els, e.Expr, x.subtract(t, target, x.p()), nels, false)
+	c := x.lowerTest(e, e.Expr, e.Type, "is", t, nt, target, typeOK, env)
+	var nthen, nels types.Type
+	nold := x.nativeVar(e.Expr, env)
+	if nold != nil {
+		nthen = types.Intersect(nold, narrow, x.p())
+	}
+	x.narrowPathNative(then, e.Expr, types.Intersect(t, narrow, x.p()), nthen, true)
+	// The else branch narrows as PHPStan does on the emitted test, which
+	// is less than the whole type for a test joined with && (elseType).
+	if c != nil {
+		if nold != nil {
+			nels = x.elseType(c, nold)
+		}
+		x.narrowPathNative(els, e.Expr, x.elseType(c, t), nels, false)
+	}
 	return then, els
 }
 
@@ -561,18 +682,37 @@ func (x *fnCtx) isType(e *ast.IsExpr, env *state) types.Type {
 // asExpr types `$x as T` (TypeError on failure) and `$x as? T` (null).
 func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	t := x.expr(e.Expr, env, nil)
-	target := x.testType(e.Type, "as")
-	result := target
-	if nt := x.nativeOr(e.Expr, t, env); !types.IsMixed(t) && !isParamType(t) && !isParamType(target) {
-		if !types.Overlaps(t, target, x.p()) && !types.IsMixed(nt) && !types.Overlaps(nt, target, x.p()) {
-			x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
-		} else {
-			result = types.Intersect(t, target, x.p())
-		}
+	target, narrow, typeOK := x.testType(e.Type)
+	nt := x.guaranteedOr(e.Expr, t, env)
+	op := "as"
+	if e.Nullable {
+		op = "as?"
+	}
+	always, never := x.settles(t, nt, target)
+	switch {
+	case always:
+		x.report(e.S, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
+	case never:
+		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
+	}
+	lowered := x.lowerTest(e, e.Expr, e.Type, op, t, nt, target, typeOK, env) != nil
+	result := narrow
+	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) && !never {
+		result = types.Intersect(t, narrow, x.p())
 	}
 	if e.Nullable {
 		return types.Nullable(result)
 	}
+	if !lowered {
+		return result
+	}
+	// `$x as T` throws unless $x is a T: after it, $x is one, as PHPStan
+	// reads `\is_int($x) ? $x : throw …`.
+	var nthen types.Type
+	if nold := x.nativeVar(e.Expr, env); nold != nil {
+		nthen = types.Intersect(nold, narrow, x.p())
+	}
+	x.narrowPathNative(env, e.Expr, result, nthen, true)
 	return result
 }
 

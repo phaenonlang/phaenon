@@ -8,23 +8,45 @@ namespace App\Report;
 
 use Stringable;
 use ArrayObject;
-use Phaenon\Type;
+use Countable;
 
 // An unsorted use block has no alphabetical place to offer: the import the
-// compiler adds goes after its last class import (roadmap D11).
+// compiler adds, Countable, which the override-erasure rule widens
+// size()'s parameter to (design/generics.md §4.3), goes after its last
+// class import (roadmap D11).
 
-final class Heading implements Stringable
+/**
+ * @template T of \Countable
+ */
+interface Sizer
 {
-    /** @param ArrayObject<int, mixed> $words */
+    /**
+     * @param T $words
+     */
+    public function size(\Countable $words): int;
+}
+
+/**
+ * @implements Sizer<ArrayObject<int, string>>
+ */
+final class Heading implements Stringable, Sizer
+{
+    /** @param ArrayObject<int, string> $words */
     public function __construct(private readonly ArrayObject $words)
     {
     }
 
+    /**
+     * @param ArrayObject<int, string> $words
+     */
+    public function size(Countable $words): int
+    {
+        return \count($words);
+    }
+
     public function __toString(): string
     {
-        $words = $this->words->getArrayCopy();
-
-        return Type::list(Type::string())->check($words) ? \strtoupper(\implode(' ', $words)) : '';
+        return \strtoupper(\implode(' ', $this->words->getArrayCopy())) . $this->size($this->words);
     }
 }
-// phaenon-map v1 imports-unsorted.phn 1-6=1 7:1 11-11=4 12:5
+// phaenon-map v1 imports-unsorted.phn 1-6=1 7:1 11-11=4 12:5 18-20=11 21:11 23-25=13 26:13 29-31=16 32:16 39-41=23 42:23

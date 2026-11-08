@@ -146,7 +146,7 @@ function uses(mixed $m, Box<int> $box): void
     if ($m is ?User) {
         echo $user?->id, $fresh->id, $n, $s;
     }
-    if ($m is list<int>) {
+    if ($m is list) {
         echo count($m);
     }
     if ($m is class<User>) {
@@ -155,8 +155,8 @@ function uses(mixed $m, Box<int> $box): void
     if ($m is class) {
         echo $m;
     }
-    $t = $m as Table<string, int>;
     $u = $m as? User;
+    $t = $m as Table<int|string, mixed>;
     echo count($t), $u?->id, $repo->describe();
 }
 

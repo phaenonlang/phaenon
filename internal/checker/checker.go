@@ -134,6 +134,11 @@ type Checker struct {
 	// returns, and the classes checked, in order.
 	inits       map[*ast.MethodDecl]map[string]bool
 	initClasses []*program.Class
+	// testSeen holds the operand types of each `is` and `as` over the
+	// passes that reached it (typetest.go); typeFindings says whether the
+	// type it tests against drew a finding of its own (testType).
+	testSeen     map[ast.Expr]testSeen
+	typeFindings map[ast.TypeExpr]bool
 }
 
 // New creates a checker for the program.
@@ -439,6 +444,9 @@ type fnCtx struct {
 	// loopCond is set while a loop condition is evaluated: `while (true)`
 	// is idiomatic there and not an always-true finding.
 	loopCond bool
+	// testedNames are the names an `is` or `as` being checked tests its
+	// operand against, where a bare `list` is list<mixed> (testType).
+	testedNames map[*ast.NamedType]bool
 	// inScope lists the type parameters declared by the enclosing class
 	// and function; any other parameter met in a callee's signature is
 	// foreign and gets inferred at the call (as PHPStan does).

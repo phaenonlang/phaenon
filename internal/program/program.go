@@ -503,6 +503,116 @@ type PartialParam struct {
 	Arg *ast.Arg
 }
 
+// Test is the checker's lowering of an `is`, `as` or `as?` to the test PHP
+// makes itself (design/generics.md §11.4): `\is_int($x)`, `$x instanceof
+// Foo`, `\is_array($x) && \array_is_list($x)`, without the checks the
+// operand's PHP type already settles. The emitter writes it as recorded and
+// derives no test of its own, so what runs is what the checker narrowed on.
+type Test struct {
+	// Cond is the condition as PHP code with TestOperand wherever the
+	// operand is written (`\is_int(␀[0])` tests a tuple's first element);
+	// "" when the type has no test, which the checker reported.
+	Cond string
+	// Prec is how tightly Cond binds: written where an operand of a looser
+	// operator is expected, it needs no parentheses.
+	Prec Prec
+	// Expected is the tested type in Phaenon's spelling, for the message
+	// of the TypeError an `as` throws.
+	Expected string
+}
+
+// TestOperand stands for the operand in a Test's Cond.
+const TestOperand = "\x00"
+
+// As is the whole of the `as` the test lowers, nullable for `as?`: the
+// operand where Cond holds, else a TypeError naming the expected type, or
+// null. TestOperand stands for the operand.
+func (t *Test) As(nullable bool) string {
+	fail := "null"
+	if !nullable {
+		fail = "throw new \\TypeError(" + PHPString("expected "+t.Expected+", got ") + " . \\get_debug_type(" + TestOperand + "))"
+	}
+	return t.Cond + " ? " + TestOperand + " : " + fail
+}
+
+// ReadsTwice reports an operand a test may write twice (design/generics.md
+// §11.4, P3012): a variable, a property or static property fetch, a
+// constant-index read of one of these, or a chain of them — never a call, a
+// new, an operator or an assignment, which the second reading would run
+// again. The nullsafe operator is one: after the test, PHPStan knows the
+// chain is not null and reports the second `?->`. A constant reads the same
+// value every time, so it is one too (`Limits::MAX as int`).
+func ReadsTwice(e ast.Expr) bool {
+	switch e := e.(type) {
+	case *ast.Paren:
+		return ReadsTwice(e.Expr)
+	case *ast.Variable, *ast.ConstFetch, *ast.Name:
+		return true
+	case *ast.ClassConstFetch:
+		if _, ok := e.Name.(*ast.Ident); !ok {
+			return false
+		}
+		if _, ok := e.Class.(*ast.Name); ok {
+			return true
+		}
+		return ReadsTwice(e.Class)
+	case *ast.PropertyFetch:
+		if e.NullSafe {
+			return false
+		}
+		switch e.Name.(type) {
+		case *ast.Ident, *ast.Variable:
+			return ReadsTwice(e.Object)
+		}
+	case *ast.StaticPropertyFetch:
+		if _, ok := e.Name.(*ast.Variable); !ok {
+			return false
+		}
+		if _, ok := e.Class.(*ast.Name); ok {
+			return true
+		}
+		return ReadsTwice(e.Class)
+	case *ast.Index:
+		return e.Index != nil && constantIndex(e.Index) && ReadsTwice(e.Array)
+	}
+	return false
+}
+
+func constantIndex(e ast.Expr) bool {
+	switch e := e.(type) {
+	case *ast.Paren:
+		return constantIndex(e.Expr)
+	case *ast.IntLit, *ast.StringLit, *ast.Name:
+		return true
+	case *ast.Unary:
+		_, lit := e.Expr.(*ast.IntLit)
+		return lit && (e.Op == '-' || e.Op == '+')
+	case *ast.ClassConstFetch:
+		_, name := e.Class.(*ast.Name)
+		_, ident := e.Name.(*ast.Ident)
+		return name && ident
+	}
+	return false
+}
+
+// PHPString is s as a single-quoted PHP string literal.
+func PHPString(s string) string {
+	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+}
+
+// Prec orders the PHP operators a lowered test is written with, the
+// loosest first.
+type Prec uint8
+
+const (
+	PrecTernary    Prec = iota // cond ? a : b, the form of `as`
+	PrecOr                     // ||
+	PrecAnd                    // &&
+	PrecEquality               // ===
+	PrecInstanceof             // instanceof
+	PrecAtom                   // a call, a constant
+)
+
 // File is one parsed source file and its namespace scopes.
 type File struct {
 	Path    string
@@ -520,6 +630,9 @@ type File struct {
 	// calls (design/php-versions.md §5.3). A pipe the checker did not reach
 	// is absent.
 	Folds map[*ast.Binary]bool
+	// Tests holds the lowering of each checked `is`, `as` and `as?`, by
+	// its node (an *ast.IsExpr or *ast.AsExpr).
+	Tests map[ast.Expr]*Test
 	// Scopes maps statement ranges to the namespace scope in force there.
 	Scopes  []ScopedRange
 	lines   []int
