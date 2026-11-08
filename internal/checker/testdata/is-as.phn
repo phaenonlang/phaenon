@@ -178,6 +178,14 @@ function uncheckable(mixed $m, ?Repository<User> $r): int
     return $n + \count($u) + \count($v ?? []);
 }
 
+// A type without a test is the one finding, where the operand's type
+// settles the test as well.
+function settledUntestable(string $s): bool
+{
+    return $s is list<int> // want P3011
+        || $s is Closure(int): string; // want P3011
+}
+
 // The arguments a union's member fixes, and ones it does not: a Model may
 // be a Repository<Admin> too.
 function generic(Repository<User>|int $a, Repository<User>|Repository<Model> $b, Repository<Admin>|User $c, Repository<User>|Model $d): int

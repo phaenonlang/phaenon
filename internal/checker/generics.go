@@ -632,6 +632,20 @@ func (x *fnCtx) settles(t, nt, target types.Type) (always, never bool) {
 	return always, never
 }
 
+// reportSettled reports a test the types settle (P2306), unless the type
+// has no test at all: that is the one finding (P3011).
+func (x *fnCtx) reportSettled(span ast.Span, t, nt, target types.Type, untestable bool) (never bool) {
+	always, never := x.settles(t, nt, target)
+	switch {
+	case untestable:
+	case always:
+		x.report(span, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
+	case never:
+		x.report(span, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
+	}
+	return never
+}
+
 // isCond narrows on `$x is T`, exactly as instanceof does for classes.
 func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	t := x.expr(e.Expr, env, nil)
@@ -647,14 +661,8 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 			x.condValueType = types.TFalse
 		}
 	}
-	always, never := x.settles(t, nt, target)
-	switch {
-	case always:
-		x.report(e.S, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
-	case never:
-		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
-	}
-	c := x.lowerTest(e, e.Expr, e.Type, "is", t, nt, target, typeOK, env)
+	c, untestable := x.lowerTest(e, e.Expr, e.Type, "is", t, nt, target, typeOK, env)
+	x.reportSettled(e.S, t, nt, target, untestable)
 	var nthen, nels types.Type
 	nold := x.nativeVar(e.Expr, env)
 	if nold != nil {
@@ -688,14 +696,9 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	if e.Nullable {
 		op = "as?"
 	}
-	always, never := x.settles(t, nt, target)
-	switch {
-	case always:
-		x.report(e.S, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
-	case never:
-		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
-	}
-	lowered := x.lowerTest(e, e.Expr, e.Type, op, t, nt, target, typeOK, env) != nil
+	c, untestable := x.lowerTest(e, e.Expr, e.Type, op, t, nt, target, typeOK, env)
+	lowered := c != nil
+	never := x.reportSettled(e.S, t, nt, target, untestable)
 	result := narrow
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) && !never {
 		result = types.Intersect(t, narrow, x.p())

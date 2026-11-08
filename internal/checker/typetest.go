@@ -796,8 +796,9 @@ type testSeen struct{ t, nt types.Type }
 // e against typ, records it for the emitter and reports P3011 and P3012.
 // t is the operand's type, nt what PHP guarantees of it; typeOK says the
 // type itself drew no finding. The result is the test as emitted, nil
-// when the type has none.
-func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type, typeOK bool, env *state) *check {
+// when the type has none; untestable says the type has no test, which
+// was reported (P3011, P3003).
+func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type, typeOK bool, env *state) (c *check, untestable bool) {
 	if x.c.testSeen == nil {
 		x.c.testSeen = map[ast.Expr]testSeen{}
 	}
@@ -811,12 +812,12 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, 
 	}
 	x.c.file.Tests[node] = rec
 	if !typeOK {
-		return nil // the type's own finding says what is wrong (P3001, P2518, …)
+		return nil, false // the type's own finding says what is wrong (P3001, P2518, …)
 	}
 	b := &testBuilder{x: x, op: op, refined: t}
-	c := b.build(typ, nil)
+	c = b.build(typ, nil)
 	if c == nil || b.failed {
-		return nil
+		return nil, true
 	}
 	c, _, _, _, _ = x.simplify(c, testState{"": {t: nt}})
 	rec.Cond, rec.Prec = render(c)
@@ -838,7 +839,7 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, 
 			x.report(e.Span(), P3012, "the operand of `%s` reads the hooked property %s::$%s twice, and its get hook runs each time; assign it to a variable first", op, pr.Class.Name, pr.Name)
 		}
 	}
-	return c
+	return c, false
 }
 
 // hookedRead is the first property along an operand's chain of reads
