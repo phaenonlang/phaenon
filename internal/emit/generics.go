@@ -1282,26 +1282,16 @@ func (l *lowering) writeTest(node, operand ast.Expr, op, text string, prec progr
 	return nil
 }
 
-// copied is the text of an operand a test writes more than once, without
-// its parentheses and the (bytes) casts the output erases; a (string)
-// cast stays, as PHP's own.
+// copied is the text of an operand a test writes more than once
+// (program.TestOperandOf): without its parentheses and the (bytes) casts
+// the output erases; a (string) cast stays, as PHP's own.
 func (l *lowering) copied(operand ast.Expr) string {
-	for {
-		switch v := operand.(type) {
-		case *ast.Paren:
-			operand = v.Expr
-			continue
-		case *ast.Cast:
-			switch v.Op {
-			case token.T_BYTES_CAST:
-				operand = v.Expr
-				continue
-			case token.T_STRING_CAST:
-				return "(string) " + l.copied(v.Expr)
-			}
-		}
-		return l.text(operand.Span())
+	inner, stringCast := program.TestOperandOf(operand)
+	src := l.text(inner.Span())
+	if stringCast {
+		src = "(string) " + src
 	}
+	return src
 }
 
 // rewrite replaces a span in place, or as a free edit when the text does

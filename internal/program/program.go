@@ -563,22 +563,50 @@ func (t *Test) failure() string {
 	return typeError(t.Expected + " with valid UTF-8")
 }
 
+// TestOperandOf is what a test reads of its operand e: the expression
+// beneath the parentheses, (bytes) casts and (string) casts around it, and
+// whether a (string) is among them. The output erases (bytes) and writes
+// (string) again before each copy of what is beneath; the checker refuses
+// a (string) of what may be an object, whose __toString() would run once
+// per copy. Only the operand's own wrapping counts: a cast inside a chain
+// (`((bytes) $s)[0]`) is part of the expression the output copies.
+func TestOperandOf(e ast.Expr) (inner ast.Expr, stringCast bool) {
+	for {
+		switch v := e.(type) {
+		case *ast.Paren:
+			e = v.Expr
+			continue
+		case *ast.Cast:
+			switch v.Op {
+			case token.T_BYTES_CAST:
+				e = v.Expr
+				continue
+			case token.T_STRING_CAST:
+				e, stringCast = v.Expr, true
+				continue
+			}
+		}
+		return e, stringCast
+	}
+}
+
 // ReadsTwice reports an operand a test may write twice (design/generics.md
-// §11.4, P3012): a variable, a property or static property fetch, a
-// constant-index read of one of these, or a chain of them — never a call, a
-// new, an operator or an assignment, which the second reading would run
-// again. The nullsafe operator is one: after the test, PHPStan knows the
-// chain is not null and reports the second `?->`. A constant reads the same
-// value every time, so it is one too (`Limits::MAX as int`).
+// §11.4, P3012): beneath its own wrapping (TestOperandOf), a variable, a
+// property or static property fetch, a constant-index read of one of
+// these, or a chain of them — never a call, a new, an operator or an
+// assignment, which the second reading would run again. The nullsafe
+// operator is one: after the test, PHPStan knows the chain is not null and
+// reports the second `?->`. A constant reads the same value every time, so
+// it is one too (`Limits::MAX as int`).
 func ReadsTwice(e ast.Expr) bool {
+	inner, _ := TestOperandOf(e)
+	return readsSame(inner)
+}
+
+func readsSame(e ast.Expr) bool {
 	switch e := e.(type) {
 	case *ast.Paren:
-		return ReadsTwice(e.Expr)
-	case *ast.Cast:
-		// (bytes) is erased and (string) of what reads the same twice
-		// converts the same twice: the operand beneath is what is read.
-		// A (string) that calls __toString() is the checker's to refuse.
-		return (e.Op == token.T_BYTES_CAST || e.Op == token.T_STRING_CAST) && ReadsTwice(e.Expr)
+		return readsSame(e.Expr)
 	case *ast.Variable, *ast.ConstFetch, *ast.Name:
 		return true
 	case *ast.ClassConstFetch:
@@ -588,14 +616,14 @@ func ReadsTwice(e ast.Expr) bool {
 		if _, ok := e.Class.(*ast.Name); ok {
 			return true
 		}
-		return ReadsTwice(e.Class)
+		return readsSame(e.Class)
 	case *ast.PropertyFetch:
 		if e.NullSafe {
 			return false
 		}
 		switch e.Name.(type) {
 		case *ast.Ident, *ast.Variable:
-			return ReadsTwice(e.Object)
+			return readsSame(e.Object)
 		}
 	case *ast.StaticPropertyFetch:
 		if _, ok := e.Name.(*ast.Variable); !ok {
@@ -604,9 +632,9 @@ func ReadsTwice(e ast.Expr) bool {
 		if _, ok := e.Class.(*ast.Name); ok {
 			return true
 		}
-		return ReadsTwice(e.Class)
+		return readsSame(e.Class)
 	case *ast.Index:
-		return e.Index != nil && constantIndex(e.Index) && ReadsTwice(e.Array)
+		return e.Index != nil && constantIndex(e.Index) && readsSame(e.Array)
 	}
 	return false
 }

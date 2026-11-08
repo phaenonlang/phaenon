@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -296,5 +298,41 @@ func TestComposer(t *testing.T) {
 		}
 		line, _ := pr.File.Position(pr.Span.Start)
 		t.Logf("  %s:%d: %s", pr.File.Path, line, pr.Msg)
+	}
+}
+
+// TestTestOperandOf: a test reads its operand beneath the parentheses,
+// (bytes) and (string) casts around it, noting a (string) the output
+// writes again; a cast inside a chain is part of what it copies, so such
+// a chain does not read the same twice.
+func TestTestOperandOf(t *testing.T) {
+	v := &ast.Variable{Name: "s"}
+	bytesOf := func(e ast.Expr) ast.Expr { return &ast.Cast{Op: token.T_BYTES_CAST, Expr: e} }
+	stringOf := func(e ast.Expr) ast.Expr { return &ast.Cast{Op: token.T_STRING_CAST, Expr: e} }
+	paren := func(e ast.Expr) ast.Expr { return &ast.Paren{Expr: e} }
+	for _, c := range []struct {
+		name       string
+		e          ast.Expr
+		stringCast bool
+	}{
+		{"variable", v, false},
+		{"((bytes) $s)", paren(bytesOf(v)), false},
+		{"(string) ($s)", stringOf(paren(v)), true},
+		{"(bytes) (string) $s", bytesOf(stringOf(v)), true},
+	} {
+		inner, sc := TestOperandOf(c.e)
+		if inner != v || sc != c.stringCast {
+			t.Errorf("%s: inner %T, stringCast %v", c.name, inner, sc)
+		}
+		if !ReadsTwice(c.e) {
+			t.Errorf("%s does not read the same twice", c.name)
+		}
+	}
+	if inner, _ := TestOperandOf(&ast.Cast{Op: token.T_INT_CAST, Expr: v}); inner == v {
+		t.Errorf("(int) is looked through")
+	}
+	chain := &ast.Index{Array: paren(bytesOf(v)), Index: &ast.IntLit{Raw: "0"}}
+	if ReadsTwice(chain) {
+		t.Errorf("((bytes) $s)[0] reads the same twice: its copy would keep the cast")
 	}
 }
