@@ -154,7 +154,7 @@ func (p *Program) LoadStubs() error {
 }
 
 // LoadSuggested declares the embedded Monolog and Sentry declarations
-// (stdlib.Suggested) that the runtime package's integrations are written
+// (stdlib.Suggested) that the debug package's integrations are written
 // against, after LoadStubs. Only the programs that check or compile the
 // stdlib itself call it: in a project's program they would shadow the real
 // libraries its vendor directory holds.
@@ -211,7 +211,7 @@ func (p *Program) CheckedFiles() []*File {
 func (p *Program) File(path string) *File { return p.files[path] }
 
 // IsStub reports a file of the embedded standard library: the php-src
-// stubs, the overlay, the runtime packages' declarations.
+// stubs, the overlay, the debug package's declarations.
 func (f *File) IsStub() bool { return f != nil && strings.HasPrefix(f.Path, "<stub>/") }
 
 // ClassPolyfilled reports whether a loader (Composer's maps: a polyfill

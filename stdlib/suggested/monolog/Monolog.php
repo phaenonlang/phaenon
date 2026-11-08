@@ -3,7 +3,7 @@
 namespace Monolog;
 
 /**
- * Phaenon's declaration of the Monolog 3 API that phaenon/runtime's Monolog
+ * Phaenon's declaration of the Monolog 3 API that phaenon/debug's Monolog
  * processor (runtime/Debug/Monolog) is written against. Signatures follow
  * monolog/monolog 3.x; the real package is what runs. Only the programs that
  * check and compile the stdlib read this file (stdlib.Suggested).

@@ -22,7 +22,7 @@
 // writer follows the origin of every output byte through both kinds and
 // ends the file with a line map (package linemap) of runs and holds: the
 // lines the compiler wrote are holds, so the tools that translate positions
-// (phn trace, the PhpStorm plugin, phaenon/runtime) never put a breakpoint
+// (phn trace, the PhpStorm plugin, phaenon/debug) never put a breakpoint
 // on them.
 //
 // Phaenon constructs that need rewriting (generics erasure, is/as, …) are

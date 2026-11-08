@@ -10,7 +10,7 @@ import (
 )
 
 // TestStdlibPackagePaths: the compiled stdlib keeps the layout of its
-// sources below stdlib/runtime, which is the runtime package's src/ and its
+// sources below stdlib/runtime, which is the debug package's src/ and its
 // PSR-4 namespace (Phaenon\Debug\Monolog\LineMapProcessor in
 // Debug/Monolog/LineMapProcessor.php).
 func TestStdlibPackagePaths(t *testing.T) {
@@ -37,14 +37,14 @@ func TestStdlibPackagePaths(t *testing.T) {
 	}
 }
 
-// TestRuntimePackageFresh compares the compiled stdlib with what the
-// phaenon/runtime package ships in the sibling checkout (../runtime/src):
-// the .phn sources here are the one source, `phn stdlib --out
-// ../runtime/src` materialises them. Skipped when the checkout is absent.
-func TestRuntimePackageFresh(t *testing.T) {
-	dir := filepath.Join("..", "..", "..", "runtime", "src")
+// TestDebugPackageFresh compares the compiled stdlib with what the
+// phaenon/debug package ships in the sibling checkout (../debug/src): the
+// .phn sources here are the one source, `phn stdlib --out ../debug/src`
+// materialises them. Skipped when the checkout is absent.
+func TestDebugPackageFresh(t *testing.T) {
+	dir := filepath.Join("..", "..", "..", "debug", "src")
 	if _, err := os.Stat(dir); err != nil {
-		t.Skip("no ../runtime checkout")
+		t.Skip("no ../debug checkout")
 	}
 	compiled, err := Stdlib()
 	if err != nil {
@@ -53,7 +53,7 @@ func TestRuntimePackageFresh(t *testing.T) {
 	for name, want := range compiled {
 		got, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil || !bytes.Equal(got, want) {
-			t.Errorf("%s is stale or missing in the runtime package: run `phn stdlib --out ../runtime/src`", name)
+			t.Errorf("%s is stale or missing in the debug package: run `phn stdlib --out ../debug/src`", name)
 		}
 	}
 }

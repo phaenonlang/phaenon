@@ -11,7 +11,7 @@ import (
 
 // TestRuntimeStubs type-checks the stdlib written in Phaenon
 // (stdlib/runtime/**/*.phn): it is read as the compiler's own declaration
-// of the Phaenon\Debug classes, and compiled into the runtime package, so
+// of the Phaenon\Debug classes, and compiled into the debug package, so
 // its bodies must satisfy the checker like any Phaenon source. The Debug
 // integrations are checked against the embedded Monolog and Sentry
 // declarations (stdlib.Suggested).

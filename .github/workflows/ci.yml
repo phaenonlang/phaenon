@@ -14,7 +14,7 @@
 #   - Composer is on PATH and PHAENON_COMPOSER names it, so the plugin's
 #     suite (internal/distribution) runs: the plugin requires no package,
 #     and its projects install it alone, one of them with the phn this
-#     commit builds. TestRuntimePackageFresh and TestVectorCopiesFresh skip
+#     commit builds. TestDebugPackageFresh and TestVectorCopiesFresh skip
 #     for their sibling checkouts, which this workflow does not check out.
 #   - Skipped for want of their variables, which name a php-src corpus, a
 #     PHPStan install, a PHP 8.6 or Phaenon trees to run over: conformance

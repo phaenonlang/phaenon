@@ -6,7 +6,7 @@ use Sentry\Integration\IntegrationInterface;
 use Sentry\State\HubInterface;
 
 /**
- * Phaenon's declaration of the Sentry SDK 4 API that phaenon/runtime's
+ * Phaenon's declaration of the Sentry SDK 4 API that phaenon/debug's
  * Sentry integration (runtime/Debug/Sentry) is written against: the event,
  * its exceptions, stack traces and frames, and the way from the current hub
  * to the client's options. Signatures follow sentry/sentry 4.x; the real
