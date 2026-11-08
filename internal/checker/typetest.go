@@ -797,7 +797,7 @@ type testSeen struct{ t, nt types.Type }
 // t is the operand's type, nt what PHP guarantees of it; typeOK says the
 // type itself drew no finding. The result is the test as emitted, nil
 // when the type has none.
-func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type, typeOK bool) *check {
+func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type, typeOK bool, env *state) *check {
 	if x.c.testSeen == nil {
 		x.c.testSeen = map[ast.Expr]testSeen{}
 	}
@@ -823,8 +823,56 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, 
 	// Reported whether or not the test is settled: `phn build
 	// --emit-on-error` writes the test all the same.
 	twice := strings.Count(rec.Cond, program.TestOperand) > 1 || op != "is"
-	if twice && !program.ReadsTwice(e) {
+	switch {
+	case !twice:
+	case !program.ReadsTwice(e):
 		x.report(e.Span(), P3012, "the operand of `%s` is evaluated twice; assign it to a variable first", op)
+	default:
+		if pr := x.hookedRead(e, env); pr != nil {
+			x.report(e.Span(), P3012, "the operand of `%s` reads the hooked property %s::$%s twice, and its get hook runs each time; assign it to a variable first", op, pr.Class.Name, pr.Name)
+		}
 	}
 	return c
+}
+
+// hookedRead is the first property along an operand's chain of reads
+// whose read runs a get hook (PHP 8.4), as the declarations the checker
+// knows say; nil when there is none. A plain property reads the same
+// twice; a magic __get cannot be known, and is not looked for.
+func (x *fnCtx) hookedRead(e ast.Expr, env *state) *program.Property {
+	for {
+		switch v := e.(type) {
+		case *ast.Paren:
+			e = v.Expr
+		case *ast.Index:
+			e = v.Array
+		case *ast.StaticPropertyFetch:
+			e = v.Class // a static property has no hooks
+		case *ast.PropertyFetch:
+			if name, ok := identName(v.Name); ok {
+				for _, cn := range types.ClassNames(types.StripNull(x.pathType(v.Object, env))) {
+					cl := x.p().Class(cn)
+					if cl == nil {
+						continue
+					}
+					cl.Signature()
+					if pr := cl.FindProperty(name); pr != nil && hasGetHook(pr) {
+						return pr
+					}
+				}
+			}
+			e = v.Object
+		default:
+			return nil
+		}
+	}
+}
+
+func hasGetHook(pr *program.Property) bool {
+	for _, h := range pr.Hooks {
+		if h.Name != nil && strings.EqualFold(h.Name.Name, "get") {
+			return true
+		}
+	}
+	return false
 }

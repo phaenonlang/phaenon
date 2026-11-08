@@ -648,7 +648,7 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	case never:
 		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
 	}
-	c := x.lowerTest(e, e.Expr, e.Type, "is", t, nt, target, typeOK)
+	c := x.lowerTest(e, e.Expr, e.Type, "is", t, nt, target, typeOK, env)
 	var nthen, nels types.Type
 	nold := x.nativeVar(e.Expr, env)
 	if nold != nil {
@@ -689,7 +689,7 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	case never:
 		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
 	}
-	lowered := x.lowerTest(e, e.Expr, e.Type, op, t, nt, target, typeOK) != nil
+	lowered := x.lowerTest(e, e.Expr, e.Type, op, t, nt, target, typeOK, env) != nil
 	result := narrow
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) && !never {
 		result = types.Intersect(t, narrow, x.p())

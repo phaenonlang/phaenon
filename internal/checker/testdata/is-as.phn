@@ -438,3 +438,31 @@ function constants(): int
 
     return $n + ($m ?? 0) + \strlen((string) $k);
 }
+
+// A property with a get hook runs it on each read: a test that writes it
+// twice runs it twice (P3012). A plain property reads the same twice.
+final class Hooked
+{
+    public mixed $data = null;
+
+    public ?Hooked $next = null;
+
+    public mixed $raw {
+        get => $this->data;
+    }
+
+    public ?Hooked $link {
+        get => $this->next;
+    }
+
+    public function read(): int
+    {
+        $b = $this->raw is ?int; // want P3012
+        $c = $this->raw is int; // one function call reads it once
+        $a = $this->raw as int; // want P3012 "reads the hooked property App\IsAs\Hooked::$raw twice"
+        $d = $this->data as int;
+        $e = $this->link->data as? int; // want P2105,P3012 "Hooked::$link"
+
+        return $a + ($b ? 1 : 0) + ($c ? 1 : 0) + $d + ($e ?? 0);
+    }
+}
