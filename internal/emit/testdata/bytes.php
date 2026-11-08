@@ -115,6 +115,12 @@ function decodePresent(?string $payload): string
     return \is_string($payload) && \mb_check_encoding($payload, 'UTF-8') ? $payload : throw ($payload === null ? new \TypeError('expected string, got null') : new \ValueError('not valid UTF-8'));
 }
 
+// The (bytes) cast is erased from each copy of the operand it retypes.
+function decodeRaw(string $raw): string
+{
+    return \mb_check_encoding($raw, 'UTF-8') ? $raw : throw new \ValueError('not valid UTF-8');
+}
+
 // `.` joins binary to binary and erases unchanged (strings.md §2).
 /**
  * @param list<string> $chunks
@@ -173,4 +179,4 @@ final class Archive
         return $from[0] ?? '';
     }
 }
-// phaenon-map v1 bytes.phn 1-6=1 7:1 67-70=61 71:61 119-121=109 122:109 167-170=154 171:155
+// phaenon-map v1 bytes.phn 1-6=1 7:1 67-70=61 71:61 125-127=115 128:115 173-176=160 177:161

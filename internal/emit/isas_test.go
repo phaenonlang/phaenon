@@ -115,6 +115,8 @@ func TestIsAsBehaviour(t *testing.T) {
 		{"int|bytes", "$b as string", "5", "TypeError: expected string with valid UTF-8, got int"},
 		{"int|bytes", "$b as string", `(bytes) "\xFF"`, "TypeError: expected string with valid UTF-8, got string"},
 		{"(bytes, int)", "$b as (string, int)", `[(bytes) "\xFF", 1]`, "TypeError: expected (string, int) with valid UTF-8, got array"},
+		{"string", "((bytes) $b) as string", `"\xFF"`, "ValueError: not valid UTF-8"},
+		{"string", "((bytes) $b) as string", "'ok'", "'ok'"},
 		{"int|bytes", "$b as int|string", `(bytes) "\xFF"`, "ValueError: not valid UTF-8"},
 		{"int|bytes", "$b as int|string", "7", "7"},
 	}

@@ -105,6 +105,12 @@ function decodePresent(?bytes $payload): string
     return $payload as string;
 }
 
+// The (bytes) cast is erased from each copy of the operand it retypes.
+function decodeRaw(string $raw): string
+{
+    return ((bytes) $raw) as string;
+}
+
 // `.` joins binary to binary and erases unchanged (strings.md §2).
 function frame(bytes $header, list<bytes> $chunks): bytes
 {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -958,9 +959,30 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, o opera
 	default:
 		if pr := x.hookedRead(e, env); pr != nil {
 			x.report(e.Span(), P3012, "the operand of `%s` reads the hooked property %s::$%s twice, and its get hook runs each time; assign it to a variable first", op, pr.Class.Name, pr.Name)
+		} else if x.stringifiesObject(e, env) {
+			x.report(e.Span(), P3012, "the operand of `%s` converts a value that may be an object twice, and its __toString() runs each time; assign it to a variable first", op)
 		}
 	}
 	return c, false
+}
+
+// stringifiesObject reports a (string) cast operand of what may be an
+// object: each copy of it calls __toString() again.
+func (x *fnCtx) stringifiesObject(e ast.Expr, env *state) bool {
+	for {
+		switch v := e.(type) {
+		case *ast.Paren:
+			e = v.Expr
+			continue
+		case *ast.Cast:
+			if v.Op == token.T_STRING_CAST {
+				return mayBeObject(x.pathType(v.Expr, env))
+			}
+			e = v.Expr
+			continue
+		}
+		return false
+	}
 }
 
 // utf8Failure says how a UTF-8 test can fail: encodingOnly when every value
@@ -987,6 +1009,8 @@ func (x *fnCtx) hookedRead(e ast.Expr, env *state) *program.Property {
 		switch v := e.(type) {
 		case *ast.Paren:
 			e = v.Expr
+		case *ast.Cast:
+			e = v.Expr // (bytes) and (string), which ReadsTwice reads through
 		case *ast.Index:
 			e = v.Array
 		case *ast.StaticPropertyFetch:

@@ -335,6 +335,31 @@ function converted(bytes $raw): bytes
     return $raw;
 }
 
+// The erased (bytes) cast reads its operand as written, and (string) of a
+// string converts the same each time: the operand of `as` is beneath them.
+// A (string) of an object calls __toString() again for every copy.
+function retyped(string $s): string
+{
+    return ((bytes) $s) as string;
+}
+
+final class Packet
+{
+    public function __construct(private string $raw, private \Stringable $label)
+    {
+    }
+
+    public function text(): string
+    {
+        return (bytes) $this->raw as string;
+    }
+
+    public function label(): int|string
+    {
+        return (string) $this->label as int|string; // want P2306,P3012 "__toString() runs each time"
+    }
+}
+
 type Blob = string|bytes;
 
 // PHP cannot tell bytes from string at runtime: `is bytes`, and `is string`

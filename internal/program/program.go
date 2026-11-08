@@ -17,6 +17,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 	"github.com/phaenonlang/phaenon/stdlib"
 )
@@ -573,6 +574,11 @@ func ReadsTwice(e ast.Expr) bool {
 	switch e := e.(type) {
 	case *ast.Paren:
 		return ReadsTwice(e.Expr)
+	case *ast.Cast:
+		// (bytes) is erased and (string) of what reads the same twice
+		// converts the same twice: the operand beneath is what is read.
+		// A (string) that calls __toString() is the checker's to refuse.
+		return (e.Op == token.T_BYTES_CAST || e.Op == token.T_STRING_CAST) && ReadsTwice(e.Expr)
 	case *ast.Variable, *ast.ConstFetch, *ast.Name:
 		return true
 	case *ast.ClassConstFetch:

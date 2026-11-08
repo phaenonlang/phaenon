@@ -1269,14 +1269,7 @@ func (l *lowering) writeTest(node, operand ast.Expr, op, text string, prec progr
 	if !program.ReadsTwice(operand) {
 		return l.errorf(node, "the operand of `%s` is evaluated twice; assign it to a variable first", op)
 	}
-	for {
-		p, ok := operand.(*ast.Paren)
-		if !ok {
-			break
-		}
-		operand = p.Expr
-	}
-	src := l.text(operand.Span())
+	src := l.copied(operand)
 	text = strings.ReplaceAll(text, program.TestOperand, src)
 	if strings.Contains(src, "\n") {
 		// The copies of an operand written over several lines would sit on
@@ -1287,6 +1280,28 @@ func (l *lowering) writeTest(node, operand ast.Expr, op, text string, prec progr
 	}
 	l.rewrite(node.Span(), text)
 	return nil
+}
+
+// copied is the text of an operand a test writes more than once, without
+// its parentheses and the (bytes) casts the output erases; a (string)
+// cast stays, as PHP's own.
+func (l *lowering) copied(operand ast.Expr) string {
+	for {
+		switch v := operand.(type) {
+		case *ast.Paren:
+			operand = v.Expr
+			continue
+		case *ast.Cast:
+			switch v.Op {
+			case token.T_BYTES_CAST:
+				operand = v.Expr
+				continue
+			case token.T_STRING_CAST:
+				return "(string) " + l.copied(v.Expr)
+			}
+		}
+		return l.text(operand.Span())
+	}
 }
 
 // rewrite replaces a span in place, or as a free edit when the text does
