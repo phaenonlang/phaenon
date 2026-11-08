@@ -38,6 +38,10 @@ type check struct {
 	path          []int
 	noOperand     bool
 	prec          program.Prec
+	// narrowsElse marks a leaf PHPStan narrows on when it is false: an
+	// is_*() type check, instanceof, === of a constant. It does not for
+	// array_is_list(), a count, is_a() or class_exists().
+	narrowsElse bool
 	// accepts is the type of the values a leaf is true for, given the
 	// checks before it. An And or Or with accepts is simplified as a leaf
 	// (`\class_exists($x) || \interface_exists($x)`). narrow, when set,
@@ -79,19 +83,21 @@ type testBuilder struct {
 
 func (b *testBuilder) src(s ast.Span) string { return string(b.x.file.Src[s.Start:s.End]) }
 
-// fn is the leaf `\name(operand)`.
+// fn is the leaf `\name(operand)`; an is_*() type check narrows its
+// operand when false too.
 func fn(name string, path []int, accepts types.Type) *check {
-	return &check{before: "\\" + name + "(", after: ")", path: path, prec: program.PrecAtom, accepts: accepts}
+	return &check{before: "\\" + name + "(", after: ")", path: path, prec: program.PrecAtom, accepts: accepts,
+		narrowsElse: strings.HasPrefix(name, "is_") && name != "is_a"}
 }
 
 // identical is the leaf `operand === value`.
 func identical(value string, path []int, accepts types.Type) *check {
-	return &check{after: " === " + value, path: path, prec: program.PrecEquality, accepts: accepts}
+	return &check{after: " === " + value, path: path, prec: program.PrecEquality, accepts: accepts, narrowsElse: true}
 }
 
 // instanceOf is the leaf `operand instanceof class`.
 func instanceOf(class string, path []int, accepts types.Type) *check {
-	return &check{after: " instanceof " + class, path: path, prec: program.PrecInstanceof, accepts: accepts}
+	return &check{after: " instanceof " + class, path: path, prec: program.PrecInstanceof, accepts: accepts, narrowsElse: true}
 }
 
 var (
@@ -748,6 +754,27 @@ func (x *fnCtx) simplify(c *check, s testState) (out *check, then, els testState
 	return joinChecks(checkOr, kept...), joinStates(branches...), cur, always, never
 }
 
+// elseType is what the operand of type t is where the emitted test c is
+// false, as PHPStan narrows it on the output: a leaf that narrows when
+// false takes its type out, the sides of a || are false one after the
+// other, and a false && narrows nothing — PHPStan keeps only what both of
+// its sides would remove, which for these tests is nothing.
+func (x *fnCtx) elseType(c *check, t types.Type) types.Type {
+	if c.kind == checkLeaf || c.accepts != nil {
+		if c.narrowsElse && len(c.path) == 0 {
+			return x.subtract(t, c.accepts, x.p())
+		}
+		return t
+	}
+	if c.kind == checkAnd {
+		return t
+	}
+	for _, a := range c.args {
+		t = x.elseType(a, t)
+	}
+	return t
+}
+
 // render writes a check as PHP, with program.TestOperand for the operand.
 func render(c *check) (string, program.Prec) {
 	if c.kind == checkLeaf {
@@ -789,9 +816,9 @@ type testSeen struct{ t, nt types.Type }
 
 // lowerTest lowers the test of node (an `is`, `as` or `as?`) of operand
 // e against typ, records it for the emitter and reports P3011 and P3012.
-// t is the operand's type, nt what PHP guarantees of it. ok is false when
-// the type has no test.
-func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type) (ok bool) {
+// t is the operand's type, nt what PHP guarantees of it. The result is the
+// test as emitted, nil when the type has none.
+func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, target types.Type) *check {
 	if x.c.testSeen == nil {
 		x.c.testSeen = map[ast.Expr]testSeen{}
 	}
@@ -807,7 +834,7 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, 
 	b := &testBuilder{x: x, op: op, refined: t}
 	c := b.build(typ, nil)
 	if c == nil || b.failed {
-		return false
+		return nil
 	}
 	c, _, _, _, _ = x.simplify(c, testState{"": {t: nt}})
 	rec.Cond, rec.Prec = render(c)
@@ -817,5 +844,5 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, t, nt, 
 	if twice && !program.ReadsTwice(e) {
 		x.report(e.Span(), P3012, "the operand of `%s` is evaluated twice; assign it to a variable first", op)
 	}
-	return true
+	return c
 }

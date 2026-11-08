@@ -612,13 +612,21 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	case never:
 		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
 	}
-	x.lowerTest(e, e.Expr, e.Type, "is", t, nt, target)
+	c := x.lowerTest(e, e.Expr, e.Type, "is", t, nt, target)
 	var nthen, nels types.Type
-	if nold := x.nativeVar(e.Expr, env); nold != nil {
-		nthen, nels = types.Intersect(nold, narrow, x.p()), x.subtract(nold, target, x.p())
+	nold := x.nativeVar(e.Expr, env)
+	if nold != nil {
+		nthen = types.Intersect(nold, narrow, x.p())
 	}
 	x.narrowPathNative(then, e.Expr, types.Intersect(t, narrow, x.p()), nthen, true)
-	x.narrowPathNative(els, e.Expr, x.subtract(t, target, x.p()), nels, false)
+	// The else branch narrows as PHPStan does on the emitted test, which
+	// is less than the whole type for a test joined with && (elseType).
+	if c != nil {
+		if nold != nil {
+			nels = x.elseType(c, nold)
+		}
+		x.narrowPathNative(els, e.Expr, x.elseType(c, t), nels, false)
+	}
 	return then, els
 }
 
@@ -645,7 +653,7 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	case never:
 		x.report(e.S, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
 	}
-	lowered := x.lowerTest(e, e.Expr, e.Type, op, t, nt, target)
+	lowered := x.lowerTest(e, e.Expr, e.Type, op, t, nt, target) != nil
 	result := narrow
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) && !never {
 		result = types.Intersect(t, narrow, x.p())

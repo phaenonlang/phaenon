@@ -337,3 +337,41 @@ function settled(int $i, string $s, mixed $m): int
 
     return $a + ($b ?? 0) + $c;
 }
+
+// The else branch narrows as PHPStan narrows the emitted test: a false
+// is_*() check, instanceof or === takes its type out, a false && narrows
+// nothing.
+function elseBranch((int, string)|int $t, list<int>|int $l, object|int $o, (int, string)|int|null $p, int|string $v, ?User $u): int
+{
+    $n = 0;
+    if ($t is (int, string)) {
+        $n++;
+    } else {
+        takesInt($t); // want P2103 "int|list{int, string} given"
+    }
+    if ($l is list) {
+        $n++;
+    } else {
+        takesInt($l); // want P2103
+    }
+    if ($o is \Countable&\Traversable) {
+        $n++;
+    } else {
+        takesInt($o); // want P2103
+    }
+    if ($p is ?(int, string)) {
+        $n++;
+    } else {
+        takesInt($p); // want P2103 "int|list{int, string} given"
+    }
+    if ($v is int) {
+        $n++;
+    } else {
+        $n += \strlen(takesString($v)); // a false is_int() leaves the string
+    }
+    if ($u is null) {
+        return $n;
+    }
+
+    return $n + $u->id; // a false === null leaves the User
+}
