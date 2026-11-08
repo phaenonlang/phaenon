@@ -421,7 +421,7 @@ func (b *testBuilder) typed(t types.Type, path []int, span ast.Span, written str
 			return fn("is_string", path, v)
 		}
 	case types.StringLit:
-		return identical(phpQuote(v.V), path, v)
+		return identical(program.PHPString(v.V), path, v)
 	case types.Bytes:
 		return cannot(whyBytes)
 	case types.Object:
@@ -541,10 +541,6 @@ func tuple(s types.Shape) bool {
 }
 
 func quoted(s string) string { return "`" + s + "`" }
-
-func phpQuote(s string) string {
-	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
-}
 
 // refinedAt is the operand's type at an element path, as the checker
 // infers it.

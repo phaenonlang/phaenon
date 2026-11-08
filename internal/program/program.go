@@ -524,6 +524,11 @@ type Test struct {
 // TestOperand stands for the operand in a Test's Cond.
 const TestOperand = "\x00"
 
+// PHPString is s as a single-quoted PHP string literal.
+func PHPString(s string) string {
+	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+}
+
 // Prec orders the PHP operators a lowered test is written with, the
 // loosest first.
 type Prec uint8

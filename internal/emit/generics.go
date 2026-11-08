@@ -1230,7 +1230,7 @@ func (l *lowering) asExpr(n *ast.AsExpr, sc *scope) error {
 	}
 	fail := "null"
 	if !n.Nullable {
-		fail = "throw new \\TypeError(" + phpString("expected "+rec.Expected+", got ") + " . \\get_debug_type(" + program.TestOperand + "))"
+		fail = "throw new \\TypeError(" + program.PHPString("expected "+rec.Expected+", got ") + " . \\get_debug_type(" + program.TestOperand + "))"
 	}
 	return l.writeTest(n, n.Expr, rec.Cond+" ? "+program.TestOperand+" : "+fail, program.PrecTernary, sc)
 }
@@ -1387,8 +1387,4 @@ func (l *lowering) slotsOf(n ast.Node) {
 		set(n.Left, p)
 		set(n.Right, p)
 	}
-}
-
-func phpString(s string) string {
-	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
 }
