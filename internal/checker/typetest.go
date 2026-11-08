@@ -311,7 +311,11 @@ func (b *testBuilder) named(t *ast.NamedType, path []int) *check {
 		}
 		accepts = types.Class{Name: r.Name}
 	case types.Static:
-		if given > 0 && r.Of != nil && !b.fixes(*r.Of, path) {
+		if r.Of == nil {
+			accepts = resolved
+			break
+		}
+		if given > 0 && !b.fixes(*r.Of, path) {
 			return b.cannot(t.S, quoted(b.src(t.S)), b.whyArgs(b.src(t.Name.S), path))
 		}
 		accepts = types.Static{Of: &types.Class{Name: r.Of.Name}}
