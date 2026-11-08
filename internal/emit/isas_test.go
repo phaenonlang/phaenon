@@ -210,7 +210,8 @@ func TestIsAsBehaviour(t *testing.T) {
 // mbstring is the option that loads ext-mbstring into php -n, nothing when
 // it is built in: the UTF-8 test of bytes calls mb_check_encoding()
 // (design/strings.md §6), and a php that shares the extension, as
-// setup-php's does, loads it only from an ini file.
+// setup-php's does, loads it only from an ini file. A php without it
+// skips the test, as one missing from PATH does.
 func mbstring(t *testing.T, php string) []string {
 	t.Helper()
 	probe := func(args ...string) bool {
@@ -223,7 +224,7 @@ func mbstring(t *testing.T, php string) []string {
 	if probe("-d", "extension=mbstring") {
 		return []string{"-d", "extension=mbstring"}
 	}
-	t.Fatalf("%s has no ext-mbstring, which the UTF-8 test of bytes needs", php)
+	t.Skipf("%s has no ext-mbstring, which the UTF-8 test of bytes needs", php)
 	return nil
 }
 
