@@ -5,8 +5,7 @@ use Closure;
 // Lists, maps and strings go through PHP's functions, chained left to
 // right with pipes (roadmap D20): list<T> and map<K, V> erase to array with
 // their types in docblocks, a tuple (A, B) to the shape array{A, B}, and
-// the compiler imports \Phaenon\Type for `is` beside the file's own
-// imports (design/collections.md §2, roadmap D11).
+// `is` to PHP's own test (design/collections.md §2, generics.md §11.4).
 
 final class User
 {
@@ -125,11 +124,11 @@ function firstPair(list<(string, int)> $pairs): ?(string, int)
 }
 
 // json_decode() gives mixed: an offset is read once the value is known to be
-// a map (P2302 before, PHPStan's offsetAccess.nonOffsetAccessible).
+// an array (P2302 before, PHPStan's offsetAccess.nonOffsetAccessible).
 function port(string $json): int
 {
     $config = \json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-    if ($config is map<string, mixed> && \is_int($config['port'] ?? null)) {
+    if ($config is array && \is_int($config['port'] ?? null)) {
         return $config['port'];
     }
 
@@ -138,12 +137,12 @@ function port(string $json): int
 
 // A member of `object` is called once method_exists() proved it (P2006
 // before, PHPStan's method.notFound); its result is mixed until checked.
-function exported(object $value): map<string, mixed>
+function exported(object $value): array<mixed>
 {
     if (\method_exists($value, 'toArray')) {
         $data = $value->toArray();
 
-        return $data is map<string, mixed> ? $data : [];
+        return $data is array ? $data : [];
     }
 
     return [];

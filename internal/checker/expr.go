@@ -176,7 +176,7 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 		return x.asExpr(e, env)
 	case *ast.Name:
 		// The parser leaves constants as bare names. A type parameter's
-		// name denotes its runtime descriptor.
+		// name has no runtime value (P3003).
 		if tp := x.typeParamRef(e); tp != nil {
 			return x.paramAsValue(tp, e.S)
 		}

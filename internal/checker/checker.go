@@ -134,6 +134,9 @@ type Checker struct {
 	// returns, and the classes checked, in order.
 	inits       map[*ast.MethodDecl]map[string]bool
 	initClasses []*program.Class
+	// testSeen holds the operand types of each `is` and `as` over the
+	// passes that reached it (typetest.go).
+	testSeen map[ast.Expr]testSeen
 }
 
 // New creates a checker for the program.
@@ -407,6 +410,7 @@ type fnCtx struct {
 	inConst      bool // checking a constant expression: an attribute argument, a constant, a default
 	constClosure bool // a closure inside a constant expression: static, capturing nothing (P2531)
 	nameOnly     bool // resolving a class name PHP does not load: X::class, instanceof X, catch (X)
+	inTest       bool // checking the type of an `is` or `as`, where a bare `list` is list<mixed>
 	inFinally    int  // depth of finally blocks around the statement being checked
 	// throwFrames collect the throw points of the try blocks and the body
 	// being checked, innermost last (design/tooling.md §9.1, throws.go);

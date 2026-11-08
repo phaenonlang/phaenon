@@ -226,13 +226,14 @@ function uses(Box<int> $ints, Box<User> $users, Source<Admin> $admins, Sink<User
     if ($v is int) {
         takesInt($v);
     }
-    if ($m is list<int>) {
+    if ($m is list<int>) { // want P3011 "test `is list`"
         takesInt($m[0]);
     }
+    $o = mixedValue();
+    $n = $o as? User;
+    takesUser($n); // want P2103
     $s = $m as string;
     takesString($s);
-    $n = $m as? User;
-    takesUser($n); // want P2103
     $i = first<int>([1, 2]);
     takesInt($i ?? 0);
     first<int, string>([1]); // want P3001

@@ -19,7 +19,7 @@ The other repositories are sibling checkouts beside this one, reached as `../<na
 |---|---|---|---|---|
 | **phaenon** | `.` | `phaenonlang/phaenon` | The compiler `phn`: lexer, parser, checker, emitter, migrate; embedded PHP signatures | [Build and test](#build-and-test) |
 | **design** | `../design` | `phaenonlang/design` | The language design and every decision: `language-overview.md` (scope), `generics.md` (decisions §11), `checker.md` (decisions §9, open §10), `roadmap.md` (decisions D1–D8, milestones M0–M7, working method §4) | Markdown only |
-| **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `\Phaenon\Type`, behind structural `is` / `as`; `\Phaenon\Bytes`, the checked conversions between `bytes` and text; `Phaenon\Debug`: the line map reader (`LineMap`), a Monolog processor and a Sentry integration that point production errors at `.phn` positions (`../design/line-map.md` §4.3); `src/` except `Type.php` is compiled from `stdlib/runtime/**/*.phn` | `composer install`, `composer test`, `composer stan` |
+| **runtime** | `../runtime` | `phaenonlang/runtime` | Composer package `phaenon/runtime`: `\Phaenon\Bytes`, the checked conversions between `bytes` and text; `Phaenon\Debug`: the line map reader (`LineMap`), a Monolog processor and a Sentry integration that point production errors at `.phn` positions (`../design/line-map.md` §4.3); `src/` is compiled from `stdlib/runtime/**/*.phn` | `composer install`, `composer test`, `composer stan` |
 | **concurrent** | `../concurrent` | `phaenonlang/concurrent` | Composer package `phaenon/concurrent`: `\Phaenon\Concurrent\Scope` behind `concurrently { }` and `spawn`, on amp v3 / Revolt; `src/Scope.php` is compiled from `stdlib/concurrent/Scope.phn` here | `composer install`, `composer test`, `composer stan` |
 | **jetbrains** | `../jetbrains` | `phaenonlang/jetbrains` | PhpStorm plugin: `.phn` read as PHP code without the open tag (Kotlin, Gradle); `phn lsp`'s diagnostics and build on save; Reformat Code ends with `phn fmt --stdin` | `./gradlew test` (`PHAENON_PHN=bin/phn` of this repo for the layout tests), `./gradlew buildPlugin` |
 | **vscode** | `../vscode` | `phaenonlang/vscode` | VS Code extension (TypeScript): the TextMate grammar, `source.php` plus injections for Phaenon's syntax (the PhpStorm plugin's TextMate bundle copies it); one `phn lsp` per project with §6.1's whole list; build, check and watch as tasks; `phn trace` of the selection or the terminal | `npm install`, `npm test` (`PHAENON_TREES` for whole trees), `PHAENON_PHN=../phaenon/bin/phn npm run test:e2e`, `npm run package` (`.vsix`) |
@@ -57,8 +57,8 @@ internal/printer      AST → canonical PHP, token-faithful round trip
 internal/docblock     PHPDoc tags and the PHPStan/Psalm type grammar
 internal/types        the type lattice (PHPStan semantics): subtyping, narrowing, printing
 internal/program      program model: project files, Composer vendor code (lazy), stubs + overlay
-internal/checker      the type checker behind `phn check`
-internal/emit         patch-based emitter: PER Coding Style 3.0 layout of what it writes (D22), the line map; generics erasure, is/as lowering
+internal/checker      the type checker behind `phn check`; lowers is/as to PHP's own tests (typetest.go)
+internal/emit         patch-based emitter: PER Coding Style 3.0 layout of what it writes (D22), the line map; generics erasure, is/as as the checker lowered them
 internal/linemap      the `// phaenon-map v1 …` comment every compiled file ends with: parse, write, lookups
 internal/format       `phn fmt`'s first layer: Phaenon's layout (spaces for tabs, migrate's braces and docblocks, the spacing of Phaenon's syntax)
 internal/tabs         the tabs Phaenon forbids (D21: outside strings and comments' text), found for P1005 and replaced by migrate and fmt

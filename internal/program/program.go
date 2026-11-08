@@ -503,6 +503,40 @@ type PartialParam struct {
 	Arg *ast.Arg
 }
 
+// Test is the checker's lowering of an `is`, `as` or `as?` to the test PHP
+// makes itself (design/generics.md §11.4): `\is_int($x)`, `$x instanceof
+// Foo`, `\is_array($x) && \array_is_list($x)`, without the checks the
+// operand's PHP type already settles. The emitter writes it as recorded and
+// derives no test of its own, so what runs is what the checker narrowed on.
+type Test struct {
+	// Cond is the condition as PHP code with TestOperand wherever the
+	// operand is written (`\is_int(␀[0])` tests a tuple's first element);
+	// "" when the type has no test, which the checker reported.
+	Cond string
+	// Prec is how tightly Cond binds: written where an operand of a looser
+	// operator is expected, it needs no parentheses.
+	Prec Prec
+	// Expected is the tested type in Phaenon's spelling, for the message
+	// of the TypeError an `as` throws.
+	Expected string
+}
+
+// TestOperand stands for the operand in a Test's Cond.
+const TestOperand = "\x00"
+
+// Prec orders the PHP operators a lowered test is written with, the
+// loosest first.
+type Prec uint8
+
+const (
+	PrecTernary    Prec = iota // cond ? a : b, the form of `as`
+	PrecOr                     // ||
+	PrecAnd                    // &&
+	PrecEquality               // ===
+	PrecInstanceof             // instanceof
+	PrecAtom                   // a call, a constant
+)
+
 // File is one parsed source file and its namespace scopes.
 type File struct {
 	Path    string
@@ -520,6 +554,9 @@ type File struct {
 	// calls (design/php-versions.md §5.3). A pipe the checker did not reach
 	// is absent.
 	Folds map[*ast.Binary]bool
+	// Tests holds the lowering of each checked `is`, `as` and `as?`, by
+	// its node (an *ast.IsExpr or *ast.AsExpr).
+	Tests map[ast.Expr]*Test
 	// Scopes maps statement ranges to the namespace scope in force there.
 	Scopes  []ScopedRange
 	lines   []int

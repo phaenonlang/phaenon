@@ -7,7 +7,6 @@ declare(strict_types=1);
 namespace App;
 
 use Closure;
-use Phaenon\Type;
 
 /**
  * A value in a box.
@@ -210,17 +209,17 @@ function uses(mixed $m, Box $box): void
     if ($m === null || $m instanceof User) {
         echo $user?->id, $fresh->id, $n, $s;
     }
-    if (Type::list(Type::int())->check($m)) {
+    if (\is_array($m) && \array_is_list($m)) {
         echo count($m);
     }
-    if (\is_string($m) && \is_a($m, \App\User::class, true)) {
+    if (\is_string($m) && \is_a($m, User::class, true)) {
         echo $m;
     }
     if (\is_string($m) && (\class_exists($m) || \interface_exists($m))) {
         echo $m;
     }
-    $t = Type::map(Type::string(), Type::int())->assert($m);
-    $u = Type::of(\App\User::class)->orNull($m);
+    $u = $m instanceof User ? $m : null;
+    $t = \is_array($m) ? $m : throw new \TypeError('expected array, got ' . \get_debug_type($m));
     echo count($t), $u?->id, $repo->describe();
 }
 
@@ -280,4 +279,4 @@ final class Keyed
         return $n + \count($rows);
     }
 }
-// phaenon-map v1 generics.phn 1-6=1 7:1 10-10=3 11:4 12:8 14-14=10 15:10 18-20=13 21:13 25-27=17 28:17 36-38=25 39:25 53-55=39 56:39 58-60=41 61:41 77-79=57 80:57 82-84=59 85:60 87-89=62 90:62 94-96=66 97:66 106-108=75 109:75 119-121=85 122:85 134-136=97 137:97 145-148=105 149:105 151-153=107 154:107 165-169=118 170:118 175-179=123 180:123 188-191=131 192:131 197-199=136 200:136 232-235=168 236:168 252-254=184 255:184 266-266=195 267:195
+// phaenon-map v1 generics.phn 1-6=1 7:1 11:8 13-13=10 14:10 17-19=13 20:13 24-26=17 27:17 35-37=25 38:25 52-54=39 55:39 57-59=41 60:41 76-78=57 79:57 81-83=59 84:60 86-88=62 89:62 93-95=66 96:66 105-107=75 108:75 118-120=85 121:85 133-135=97 136:97 144-147=105 148:105 150-152=107 153:107 164-168=118 169:118 174-178=123 179:123 187-190=131 191:131 196-198=136 199:136 231-234=168 235:168 251-253=184 254:184 265-265=195 266:195
