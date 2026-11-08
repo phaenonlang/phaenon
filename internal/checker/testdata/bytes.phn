@@ -162,6 +162,7 @@ function conversions(bytes $raw, bytes $data, ?bytes $maybe, ?bytes $absent, int
         takesBytes($raw . $data);
         takesString($raw . ' and text');
         takesBytes($raw[0]); // a byte of the text is binary data
+        takesBytes((bytes) $raw);
     } else {
         takesBytes($raw);
         takesString($raw); // want P2103 "bytes given"

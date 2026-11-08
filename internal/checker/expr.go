@@ -1378,6 +1378,9 @@ func (x *fnCtx) cast(e *ast.Cast, env *state) types.Type {
 		// how a PHP API's binary-in-a-string enters the typed world and
 		// how the stdlib builds a bytes value (design/strings.md §2).
 		for _, m := range types.Members(t) {
+			if types.IsTextBytes(m) {
+				continue // string&bytes: bytes already
+			}
 			switch m.(type) {
 			case types.String, types.StringLit, types.ClassString, types.Bytes, types.Unknown, types.Mixed:
 			default:
