@@ -1269,8 +1269,8 @@ func (l *lowering) writeTest(node, operand ast.Expr, op, text string, prec progr
 	if !program.ReadsTwice(operand) {
 		return l.errorf(node, "the operand of `%s` is evaluated twice; assign it to a variable first", op)
 	}
-	src := l.copied(operand)
-	text = strings.ReplaceAll(text, program.TestOperand, src)
+	src, cast := l.copied(operand)
+	text = withOperand(text, src, cast)
 	if strings.Contains(src, "\n") {
 		// The copies of an operand written over several lines would sit on
 		// lines that stand for other source lines: the compiler lays the
@@ -1284,14 +1284,40 @@ func (l *lowering) writeTest(node, operand ast.Expr, op, text string, prec progr
 
 // copied is the text of an operand a test writes more than once
 // (program.TestOperandOf): without its parentheses and the (bytes) casts
-// the output erases; a (string) cast stays, as PHP's own.
-func (l *lowering) copied(operand ast.Expr) string {
-	inner, stringCast := program.TestOperandOf(operand)
-	src := l.text(inner.Span())
-	if stringCast {
+// the output erases; a (string) cast stays, as PHP's own, and cast says
+// so.
+func (l *lowering) copied(operand ast.Expr) (src string, cast bool) {
+	inner, cast := program.TestOperandOf(operand)
+	src = l.text(inner.Span())
+	if cast {
 		src = "(string) " + src
 	}
-	return src
+	return src, cast
+}
+
+// withOperand writes src for each program.TestOperand in text. A copy
+// that is a (string) cast gets parentheses before an index, where
+// `(string) $x[0]` would cast the element, and before instanceof, which a
+// cast binds tighter than but a reader need not know it.
+func withOperand(text, src string, cast bool) string {
+	if !cast {
+		return strings.ReplaceAll(text, program.TestOperand, src)
+	}
+	var b strings.Builder
+	for {
+		i := strings.Index(text, program.TestOperand)
+		if i < 0 {
+			b.WriteString(text)
+			return b.String()
+		}
+		b.WriteString(text[:i])
+		text = text[i+len(program.TestOperand):]
+		if strings.HasPrefix(text, "[") || strings.HasPrefix(text, " instanceof ") {
+			b.WriteString("(" + src + ")")
+		} else {
+			b.WriteString(src)
+		}
+	}
 }
 
 // rewrite replaces a span in place, or as a free edit when the text does

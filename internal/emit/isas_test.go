@@ -312,3 +312,39 @@ func TestIsAsMultiLineOperand(t *testing.T) {
 	}
 	t.Errorf("output line %d copies the operand in place:\n%s", copied, out)
 }
+
+// TestIsAsStringCastCopies: a (string) cast operand copied before an
+// index keeps its parentheses, and one written once keeps the source's.
+// No golden holds it: a test on a string against a tuple or a class is
+// settled (P2306), and a golden checks clean; `phn build --emit-on-error`
+// writes it all the same.
+func TestIsAsStringCastCopies(t *testing.T) {
+	src := []byte("fun pair(string $s): bool\n{\n    return ((string) $s) is (int, string);\n}\n\nfun counted(string $s): bool\n{\n    return ((string) $s) is \\Countable&\\Traversable;\n}\n")
+	p := program.New()
+	if err := p.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := p.AddFile("cast.phn", src, lexer.ModePhaenon, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checker.New(p, checker.Options{}).Check()
+	out, err := File(src, Options{SourceName: "cast.phn", StrictTypes: true, Program: p, File: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"\\is_int(((string) $s)[0])", "\\is_string(((string) $s)[1])", "\\is_array((string) $s)", "return ((string) $s) instanceof \\Countable;"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("no %s in:\n%s", want, out)
+		}
+	}
+	if php, err := exec.LookPath("php"); err == nil {
+		path := filepath.Join(t.TempDir(), "cast.php")
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if lint, err := exec.Command(php, "-n", "-l", path).CombinedOutput(); err != nil {
+			t.Errorf("php -l: %s\n%s", lint, out)
+		}
+	}
+}
