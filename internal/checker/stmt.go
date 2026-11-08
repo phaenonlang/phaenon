@@ -234,6 +234,11 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 	}
 	x.assignTo(assign.Target, declared, env, s.S)
 	if isVar {
+		// The variable holds what PHP guarantees of the value, which for a
+		// declaration PHP gives no type is nothing.
+		if g := x.guaranteedOf(assign.Value, env); g != nil {
+			native = g
+		}
 		env.setNative(v.Name, native)
 	}
 }
@@ -680,7 +685,7 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 				head.setPath(key, v)
 			}
 		}
-		if nit := x.nativeOf(s.Expr, head); nit != nil {
+		if nit := x.guaranteedOf(s.Expr, head); nit != nil {
 			// The loop variables hold what PHP's view of the iterable yields.
 			if nk, nv, ok := types.IterableKV(nit, x.p()); ok {
 				if kv, isVar := s.Key.(*ast.Variable); isVar {

@@ -638,7 +638,7 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	target, narrow, typeOK := x.testType(e.Type)
 	x.condValueType = types.TBool
 	then, els = env.clone(), env.clone()
-	nt := x.nativeOr(e.Expr, t, env)
+	nt := x.guaranteedOr(e.Expr, t, env)
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) {
 		switch {
 		case types.IsSubtype(t, target, x.p()):
@@ -683,7 +683,7 @@ func (x *fnCtx) isType(e *ast.IsExpr, env *state) types.Type {
 func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	t := x.expr(e.Expr, env, nil)
 	target, narrow, typeOK := x.testType(e.Type)
-	nt := x.nativeOr(e.Expr, t, env)
+	nt := x.guaranteedOr(e.Expr, t, env)
 	op := "as"
 	if e.Nullable {
 		op = "as?"

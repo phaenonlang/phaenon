@@ -2011,7 +2011,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		}
 		x.assignTo(e.Target, vt, env, e.S)
 		if v, ok := e.Target.(*ast.Variable); ok {
-			env.setNative(v.Name, x.nativeOf(e.Value, env))
+			env.setNative(v.Name, x.guaranteedOf(e.Value, env))
 			x.rememberCondition(v.Name, e.Value, env)
 		}
 		return vt
