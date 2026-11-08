@@ -78,6 +78,14 @@ class Node
     {
         return self::$cache instanceof Node ? self::$cache : null;
     }
+
+    // An operand written twice over more than one line is laid out anew.
+    public function valueUser(): ?User
+    {
+        return $this
+            ->value instanceof User ? $this
+            ->value : null;
+    }
 }
 
 function value(): mixed
@@ -204,4 +212,4 @@ function checked(mixed $m, mixed $l, mixed $p, mixed $u, mixed $o): string
 
     return $s . \count($list) . ($pair === null ? '' : $pair[1]) . ($user === null ? '' : $user->id) . ($owner === null ? '' : $owner->id);
 }
-// phaenon-map v1 is-as.phn 1-6=1 7:1 31-33=25 34:25 36-38=27 39:28 42:33 46-48=37 49:38 160-164=149 165:149
+// phaenon-map v1 is-as.phn 1-6=1 7:1 31-33=25 34:25 36-38=27 39:28 42:33 46-48=37 49:38 86-86=74 87:76 168-172=157 173:157

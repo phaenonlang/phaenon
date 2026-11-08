@@ -1277,12 +1277,21 @@ func (l *lowering) writeTest(node, operand ast.Expr, op, text string, prec progr
 		}
 		operand = p.Expr
 	}
-	l.rewrite(node.Span(), strings.ReplaceAll(text, program.TestOperand, l.text(operand.Span())))
+	src := l.text(operand.Span())
+	text = strings.ReplaceAll(text, program.TestOperand, src)
+	if strings.Contains(src, "\n") {
+		// The copies of an operand written over several lines would sit on
+		// lines that stand for other source lines: the compiler lays the
+		// test out as text of its own.
+		l.e.replaceFree(node.Span(), text)
+		return nil
+	}
+	l.rewrite(node.Span(), text)
 	return nil
 }
 
 // rewrite replaces a span in place, or as a free edit when the text does
-// not keep its line breaks (an operand written over two lines and twice).
+// not keep its line breaks.
 func (l *lowering) rewrite(s ast.Span, text string) {
 	if strings.Count(text, "\n") == bytes.Count(l.e.src[s.Start:s.End], []byte("\n")) {
 		l.e.replace(s, text)

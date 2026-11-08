@@ -10,6 +10,7 @@ import (
 
 	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/linemap"
 	"github.com/phaenonlang/phaenon/internal/program"
 )
 
@@ -189,4 +190,50 @@ func TestIsAsTwiceRefused(t *testing.T) {
 	if out, err := File(src, Options{SourceName: "twice.phn", StrictTypes: true, Program: p, File: f}); err == nil || !strings.Contains(err.Error(), "evaluated twice") {
 		t.Errorf("compiled despite the operand read twice (%v):\n%s", err, out)
 	}
+}
+
+// TestIsAsMultiLineOperand: an operand written over several lines and
+// copied by its test is laid out as text of the compiler's own, a hold in
+// the line map, never an in-place edit whose copies would sit on lines
+// that stand for other source lines.
+func TestIsAsMultiLineOperand(t *testing.T) {
+	src := []byte("final class Holder\n{\n    public mixed $item = null;\n}\n\nfinal class User\n{\n}\n\nfun f(Holder $h): ?User\n{\n    return $h\n        ->item as?\n        User;\n}\n")
+	p := program.New()
+	if err := p.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := p.AddFile("multi.phn", src, lexer.ModePhaenon, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range checker.New(p, checker.Options{}).Check() {
+		if d.Severity == checker.Error {
+			t.Fatalf("checker: %d: %s: %s", d.Line, d.Code, d.Message)
+		}
+	}
+	out, w, err := compile(src, f.AST, Options{SourceName: "multi.phn", StrictTypes: true, Program: p, File: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkLineMap(t, "multi.phn", src, out, w)
+	m, err := linemap.Find(out)
+	if err != nil || m == nil {
+		t.Fatalf("no line map (%v):\n%s", err, out)
+	}
+	copied := 0
+	for i, line := range strings.Split(string(out), "\n") {
+		if !strings.Contains(line, "instanceof User ? $h") {
+			continue
+		}
+		copied = i + 1
+	}
+	if copied == 0 {
+		t.Fatalf("no test written:\n%s", out)
+	}
+	for _, e := range m.Entries {
+		if e.Hold && e.Out <= copied && copied <= e.End {
+			return
+		}
+	}
+	t.Errorf("output line %d copies the operand in place:\n%s", copied, out)
 }

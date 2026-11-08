@@ -67,6 +67,14 @@ class Node
     {
         return self::$cache as? Node;
     }
+
+    // An operand written twice over more than one line is laid out anew.
+    public function valueUser(): ?User
+    {
+        return $this
+            ->value as?
+            User;
+    }
 }
 
 function value(): mixed
