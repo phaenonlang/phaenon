@@ -212,3 +212,46 @@ func TestVerbatimHaltCompiler(t *testing.T) {
 		t.Errorf("last span %q:\n%s", out[last.Out:last.Out+last.Len], out)
 	}
 }
+
+// TestFoldedPipeTarget: the line a folded pipeline lands on is the reverse
+// target of the pipeline's first line, whatever compiler text comes before
+// it there (the `return` of an expression body) and whatever source comes
+// after it (the `;` of a pipeline over several lines), so a breakpoint set
+// on the pipeline stops on the call it compiles to (design/php-versions.md
+// §5.3). TestLineMapProperty cannot see the first: no source byte of the
+// pipeline's line stays in place.
+func TestFoldedPipeTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name, src string
+		line      int // the pipeline's first source line
+		want      string
+	}{
+		{"expression body", "function f(list<int> $xs): list<int> =>\n    $xs |> array_map(fn (int $x) => $x + 1, ?);\n", 2, "return array_map("},
+		{"void expression body", "function g(list<string> $rows): void =>\n    $rows |> implode(', ', ?) |> print_r(...);\n", 2, "print_r(implode("},
+		{"statement", "function h(list<string> $rows): void {\n    $rows\n        |> implode(', ', ?)\n        |> print_r(...);\n}\n", 2, "print_r(implode("},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := program.New()
+			if err := p.LoadStubs(); err != nil {
+				t.Fatal(err)
+			}
+			f, err := p.AddFile("a.phn", []byte(tc.src), lexer.ModePhaenon, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checker.New(p, checker.Options{}).Check()
+			out, _, err := compile([]byte(tc.src), f.AST, Options{SourceName: "a.phn", StrictTypes: true, Program: p, File: f})
+			if err != nil {
+				t.Fatal(err)
+			}
+			m, err := linemap.Find(out)
+			if err != nil || m == nil {
+				t.Fatalf("no line map (%v):\n%s", err, out)
+			}
+			o, ok := m.Reverse(tc.line)
+			if !ok || !strings.Contains(lineText(out, o), tc.want) {
+				t.Errorf("source line %d goes to output line %d (%v), not to the line holding %q:\n%s", tc.line, o, ok, tc.want, out)
+			}
+		})
+	}
+}

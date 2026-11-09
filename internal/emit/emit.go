@@ -322,7 +322,7 @@ func (e *emitter) apply() ([]byte, *lineWriter) {
 			}
 			w.markMap(ed.Start)
 		case ed.Free:
-			w.freeWith(ed.Text, ed.Start, ed.Pieces)
+			w.freeWith(ed.Text, ed.Span, ed.Pieces)
 		default:
 			w.inPlace(ed.Text, ed.Span)
 		}

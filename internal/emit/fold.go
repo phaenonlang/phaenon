@@ -19,19 +19,21 @@ import (
 //	// →
 //	array_values(array_map(fn(User $u) => $u->email, $users))
 //
-// The run's text is a free edit (lines.go): its lines are the compiler's,
-// held at the run's first source line, and the source's runs in it are
-// verbatim spans, so phn fix carries a change of an operand back. It
-// carries the edits made inside
-// the run — erased generics, a lowered partial application, an inner run —
-// rendered where they stand. It goes on one line when that fits in
-// foldWidth columns (an argument that spans lines keeps its lines, moved
-// with it), otherwise one argument per line, PER's multi-line argument
-// list with a trailing comma (§2.6). A run whose text cannot move without
-// changing what it says — a comment between its stages or arguments, an
-// edit between them, a multi-line string that would move sideways, an
-// attribute removed inside it — stays a pipeline, its partial applications
-// arrow functions called at once.
+// The run's text is a free edit (lines.go): its lines are the compiler's
+// and map to the run's first source line, whose reverse target is the line
+// the run lands on unless an earlier one is, so that a breakpoint set on
+// the pipeline stops on its call; the source after a run that joined
+// lines, on its last line, moves with it. The source's runs in the text
+// are verbatim spans, so phn fix carries a change of an operand back. It
+// carries the edits made inside the run — erased generics, a lowered
+// partial application, an inner run — rendered where they stand. It goes
+// on one line when that fits in foldWidth columns (an argument that spans
+// lines keeps its lines, moved with it), otherwise one argument per line,
+// PER's multi-line argument list with a trailing comma (§2.6). A run whose
+// text cannot move without changing what it says — a comment between its
+// stages or arguments, an edit between them, a multi-line string that would
+// move sideways, an attribute removed inside it — stays a pipeline, its
+// partial applications arrow functions called at once.
 
 const foldWidth = 120
 
