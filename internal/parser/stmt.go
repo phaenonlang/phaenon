@@ -1077,6 +1077,11 @@ func (p *Parser) classMember() ast.ClassMember {
 	}
 	// Property.
 	if p.mode == lexer.ModePhaenon {
+		if mods == 0 {
+			// PHP reads a property only after a modifier; Phaenon
+			// implies `public` on a method alone (design/functions.md §1.1).
+			p.errorf("a property is declared with a modifier, as in PHP: `public`, `protected`, `private` or `readonly`")
+		}
 		p.memberModifiers(headIdx, false)
 	}
 	pd := &ast.PropertyDecl{Doc: doc, Attrs: attrs, Modifiers: mods}

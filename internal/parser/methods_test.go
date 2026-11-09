@@ -39,9 +39,9 @@ func TestMemberByPosition(t *testing.T) {
 		{"public static (A&B)|null $x = null;", "property"},
 		{"var (A&B)|null $y = null;", "property"},
 		{"private Closure(int): string $f;", "property"},
-		{"list<int> $xs = [];", "property"},
-		{"map<string, int>|null $m = null;", "property"},
-		{"class<Foo> $c;", "property"},
+		{"public list<int> $xs = [];", "property"},
+		{"private map<string, int>|null $m = null;", "property"},
+		{"protected class<Foo> $c;", "property"},
 		{"private (int, string) $pair;", "property"},
 		{"public string $s { get => 'x'; set(string $v) { } }", "property"},
 		{"const (A&B)|null C = null;", "const"},
@@ -202,6 +202,25 @@ func TestMemberModifiers(t *testing.T) {
 			t.Errorf("%s: %v", member, err)
 		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
 			t.Errorf("%s: %v, want %q", member, err, want)
+		}
+	}
+}
+
+// TestPropertyNeedsModifier: PHP reads a property only after a modifier,
+// and Phaenon implies `public` on a method alone, so a property without
+// one is a syntax error rather than PHP that does not compile.
+func TestPropertyNeedsModifier(t *testing.T) {
+	for member, ok := range map[string]bool{
+		"list<int> $ys = [];": false,
+		"int $n;":             false,
+		"public int $n;":      true,
+		"static int $n = 0;":  true,
+		"readonly int $n;":    true,
+		"var int $n;":         true,
+	} {
+		_, err := Parse([]byte("final class A {\n    "+member+"\n}\n"), lexer.ModePhaenon)
+		if ok != (err == nil) {
+			t.Errorf("%s: %v", member, err)
 		}
 	}
 }
