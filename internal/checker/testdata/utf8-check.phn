@@ -1,0 +1,67 @@
+namespace App\Utf8;
+
+// mb_check_encoding($b, 'UTF-8') is the checked conversion of bytes to
+// text (roadmap D26, design/strings.md §6): bytes that pass are
+// string&bytes, bytes that fail stay bytes. Only a literal naming UTF-8
+// narrows: another encoding, or none, which mb_internal_encoding()
+// decides at run time, narrows nothing.
+
+function takesString(string $s): void
+{
+}
+
+function takesBytes(bytes $b): void
+{
+}
+
+function converted(bytes $b): string => mb_check_encoding($b, 'UTF-8') ? $b : throw new \ValueError('not valid UTF-8');
+
+function orNull(bytes $b): ?string => mb_check_encoding($b, 'UTF-8') ? $b : null;
+
+function branches(bytes $b, bytes $c, bytes $d, bytes $e, string $encoding): void
+{
+    if (mb_check_encoding($b, 'UTF-8')) {
+        takesString($b);
+        takesBytes($b);
+    } else {
+        takesBytes($b);
+        takesString($b); // want P2103 "bytes given"
+    }
+    if (mb_check_encoding($c, 'utf-8') || mb_check_encoding($c, 'Utf8')) {
+        takesString($c);
+    }
+    if (mb_check_encoding($d, 'ISO-8859-1')) {
+        takesString($d); // want P2103 "bytes given"
+    }
+    if (mb_check_encoding($e, $encoding)) {
+        takesString($e); // want P2103 "bytes given"
+    }
+    if (mb_check_encoding($e)) {
+        takesString($e); // want P2103 "bytes given"
+    }
+    if (!mb_check_encoding($e, 'UTF-8')) {
+        throw new \ValueError('not valid UTF-8');
+    }
+    takesString($e);
+}
+
+// On a string|bytes the text passes as it is and the bytes become text:
+// what passes is a string.
+function either(string|bytes $v): string
+{
+    if (mb_check_encoding($v, 'UTF-8')) {
+        return $v;
+    }
+
+    return '';
+}
+
+function kept(bytes $b): bytes
+{
+    $text = mb_check_encoding($b, 'UTF-8');
+    if ($text) {
+        takesString($b);
+    }
+
+    return $b;
+}

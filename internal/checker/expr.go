@@ -2740,8 +2740,12 @@ func (x *fnCtx) rememberCondition(name string, value ast.Expr, env *state) {
 	case *ast.Instanceof, *ast.IsExpr, *ast.Isset, *ast.Empty:
 		condExpr = value
 	case *ast.Call:
-		if n, ok := v.Callee.(*ast.Name); ok && predicateTarget(strings.ToLower(n.Parts[len(n.Parts)-1])) != nil {
-			condExpr = value
+		// The type tests, and the UTF-8 test that tells text from bytes
+		// (design/strings.md §6).
+		if n, ok := v.Callee.(*ast.Name); ok {
+			if name := strings.ToLower(n.Parts[len(n.Parts)-1]); predicateTarget(name) != nil || name == "mb_check_encoding" {
+				condExpr = value
+			}
 		}
 	}
 	if condExpr == nil {
