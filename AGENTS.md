@@ -5,8 +5,9 @@ the `.phn` sources of a Composer project compile into a sibling output directory
 `.src/`, named in `phaenon.json`) holding the PHP you would have written by hand. That output
 depends on nothing but PHP (`../design/roadmap.md` D24): the compiler adds the header,
 `declare(strict_types=1)`, docblocks, and PHP's own functions and classes where the source used
-`is`, `as` or a construct it lowers, and never a call into a package. The type checker is the
-product. This repository is the compiler, `phn`, written in Go. Pre-alpha; MIT-licensed; GitHub
+a construct it lowers, and never a call into a package. Phaenon adds types and the spelling of
+declarations, never an operation PHP lacks (D26): a type test is PHP's own, a method is declared
+without a keyword (D27). The type checker is the product. This repository is the compiler, `phn`, written in Go. Pre-alpha; MIT-licensed; GitHub
 org `phaenonlang`.
 
 **This repository is the entry point for agents.** Start here; the map below says where everything
@@ -38,7 +39,7 @@ output. `../design/roadmap.md` §3 names the milestones and what each one brings
 
 | Question | Look in |
 |---|---|
-| What the language is, and will be | `../design/language-overview.md`, then the feature's doc (`functions.md` for `fun` and closures in constant expressions) |
+| What the language is, and will be | `../design/language-overview.md`, then the feature's doc (`functions.md` for methods without a keyword and closures in constant expressions) |
 | Why something is the way it is | The decision sections: `roadmap.md` §1, `checker.md` §9, `generics.md` §11 — they win over the draft text above them |
 | Milestone status and what is next | `../design/roadmap.md` §3 |
 | Open questions and deferred work | `../design/roadmap.md` §6, `checker.md` §10, `tooling.md` §13; the repository's issues |
@@ -55,20 +56,20 @@ cmd/phn-wasm/         the compiler for WebAssembly (js/wasm only): globalThis.ph
 internal/token        token set: PHP 8.5's plus Phaenon's, named like token_name()
 internal/lexer        hand-written port of zend_language_scanner.l; lossless
 internal/ast          typed node families; Phaenon constructs are additions to the PHP tree
-internal/parser       recursive descent, Pratt expressions (precedence from zend_language_parser.y)
+internal/parser       recursive descent, Pratt expressions (precedence from zend_language_parser.y); methods without a keyword by position, the withdrawn spellings (withdrawn.go)
 internal/printer      AST → canonical PHP, token-faithful round trip
 internal/docblock     PHPDoc tags and the PHPStan/Psalm type grammar
 internal/types        the type lattice (PHPStan semantics): subtyping, narrowing, printing
 internal/program      program model: project files, Composer vendor code (lazy), stubs + overlay
-internal/checker      the type checker behind `phn check`; lowers is/as to PHP's own tests (typetest.go)
-internal/emit         patch-based emitter: PER Coding Style 3.0 layout of what it writes (D22), the line map; generics erasure, is/as as the checker lowered them
+internal/checker      the type checker behind `phn check`; a withdrawn is/as reported as P1001 with the PHP test phn fmt writes for it (typetest.go)
+internal/emit         patch-based emitter: PER Coding Style 3.0 layout of what it writes (D22), the line map; generics erasure, the `public function` of a method head
 internal/linemap      the `// phaenon-map v1 …` comment every compiled file ends with: parse, write, lookups
-internal/format       `phn fmt`'s first layer: Phaenon's layout (spaces for tabs, migrate's braces and docblocks, the spacing of Phaenon's syntax)
+internal/format       `phn fmt`'s first layer: the withdrawn spellings rewritten (respell.go), Phaenon's layout (spaces for tabs, migrate's braces and docblocks, the spacing of Phaenon's syntax)
 internal/tabs         the tabs Phaenon forbids (D21: outside strings and comments' text), found for P1005 and replaced by migrate and fmt
 internal/lsp          `phn lsp`: JSON-RPC on stdio, a program per check (parsed trees shared), hover, definition, completion, build on save
 internal/fix          `phn fix`: a PHP tool's changes of the outputs carried back to the sources through the emitter's verbatim spans
 internal/trace        `phn trace`: positions in compiled files → `.phn` positions, in text, GitHub workflow commands and CI reports (Checkstyle, JUnit, Clover, Cobertura)
-internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` → `fun`
+internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` lifted off methods
 internal/playground   one file checked and compiled in memory, the embedded stdlib alone: what cmd/phn-wasm answers (design/tooling.md §3.6)
 internal/conformance  suites over the php-src corpus with `php` as the oracle
 stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/debug sources (runtime/**/*.phn);
@@ -181,8 +182,9 @@ from the package by hand.
   `internal/emit`); comments explain why, not what.
 - Diagnostic codes are stable once published: `P1xxx` syntax and removed constructs, `P2xxx` types
   and flow, `P3xxx` generics, `P4xxx` interop. One mistake, one diagnostic.
-- The emitter edits spans; plain PHP passes through byte for byte. What it writes or rewrites (the
-  header, imports, docblocks, expression bodies, declaration braces, the closures of lowerings)
+- The emitter edits spans; plain PHP passes through byte for byte, but for the `public` a method
+  without a visibility gets. What it writes or rewrites (the header, imports, docblocks, a
+  method's `public function`, expression bodies, declaration braces, the closures of lowerings)
   is laid out as PER Coding Style 3.0 wants it (php-cs-fixer's `@PER-CS3x0`, design D22; an empty
   body `{}` stays as written), and every compiled file ends with a line map (`../design/line-map.md`): an edit is in place
   (its line breaks stand for the span's) or free (its own lines, holds in the map). The invariant
