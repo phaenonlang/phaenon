@@ -7,12 +7,12 @@ final class Mapped {}
 
 final class User
 {
-    fun __construct(public string $name) {}
+    __construct(public string $name) {}
 }
 
 interface Source
 {
-    fun all(): list<string>;
+    all(): list<string>;
 }
 
 final class Printer
@@ -21,13 +21,13 @@ final class Printer
 
     // A method stored as a callable in a typed property receives what the
     // property's type says.
-    fun __construct(?\Closure $format = null) {
+    __construct(?\Closure $format = null) {
         $this->format = $format ?? $this->spaced(...);
     }
 
-    fun print(): string => ($this->format)(['a', 'b']);
+    print(): string => ($this->format)(['a', 'b']);
 
-    private fun spaced(list<string> $words): string => implode(' ', $words);
+    private spaced(list<string> $words): string => implode(' ', $words);
 }
 
 final class Registry implements Source
@@ -61,7 +61,7 @@ final class Registry implements Source
 
     private array<string> $found = [];
 
-    fun add(User $user): void {
+    add(User $user): void {
         $this->names[] = $user->name;
         $this->byName[$user->name] = $user;
         $this->lengths[$user->name] = strlen($user->name);
@@ -82,29 +82,29 @@ final class Registry implements Source
 
     // A final class: its methods are final. This one returns a property
     // the codemod types first.
-    fun names(): list<string> => $this->names;
+    names(): list<string> => $this->names;
 
     // The interface's @return stands for this one.
-    fun all(): array => $this->names;
+    all(): array => $this->names;
 
-    private static fun keys(): list<string> => array_keys(['a' => 1, 'b' => 2]);
+    private static keys(): list<string> => array_keys(['a' => 1, 'b' => 2]);
 
-    private fun total(list<int> $xs): int => array_sum($xs) + count($this->nothing);
+    private total(list<int> $xs): int => array_sum($xs) + count($this->nothing);
 
-    private fun label(list<string> $parts): string => implode(',', $parts);
+    private label(list<string> $parts): string => implode(',', $parts);
 
-    private fun sumAll(list<int> $xs): int => array_sum($xs);
+    private sumAll(list<int> $xs): int => array_sum($xs);
 
     /** @param $parts - the parts, joined by dashes */
-    private fun dashed(list<string> $parts): string => implode('-', $parts);
+    private dashed(list<string> $parts): string => implode('-', $parts);
 
     // A pair whose positions differ is a tuple.
-    private fun entry(User $user): (string, int) => [$user->name, strlen($user->name)];
+    private entry(User $user): (string, int) => [$user->name, strlen($user->name)];
 
     // A document of more than three types reads as map<string, mixed>.
-    private fun document(): map<string, mixed> => ['id' => 1, 'name' => 'a', 'active' => true, 'score' => 1.5];
+    private document(): map<string, mixed> => ['id' => 1, 'name' => 'a', 'active' => true, 'score' => 1.5];
 
-    fun report(): string {
+    report(): string {
         $sum = $this->total([1, 2, 3]) + $this->total([4]);
         $labels = array_map([$this, 'label'], [['a'], ['b']]);
         $sums = array_map($this->sumAll(...), [[1, 2], [3]]);

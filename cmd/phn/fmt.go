@@ -7,7 +7,11 @@ import (
 	"io"
 	"os"
 
+	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/format"
+	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/parser"
 )
 
 // fmtCmd is `phn fmt [--check] [<file>...]` (design/tooling.md §5). Its
@@ -22,6 +26,13 @@ import (
 // With --stdin the first layer lays out standard input onto standard
 // output: the PhpStorm plugin's Reformat Code runs it after PhpStorm's own
 // formatter (design/tooling.md §5.1).
+//
+// The first layer also rewrites the spellings roadmap D26 and D27 withdrew
+// (§5.6). Most rewrites of a type test depend on the operand's type, so in
+// a project the files that hold one are checked first, as phn check checks
+// them, and the checked program gives each test's PHP; --stdin and files
+// outside a project get the rewrites that need no type. A test left as
+// written is reported, P1001, and the status is 1.
 func fmtCmd(args []string) {
 	fs := flag.NewFlagSet("fmt", flag.ExitOnError)
 	check := fs.Bool("check", false, "report the files that are not formatted; write nothing")
@@ -35,11 +46,15 @@ func fmtCmd(args []string) {
 		if err != nil {
 			fail("phn fmt: %v", err)
 		}
-		out, err := format.Source(src)
+		out, left, err := format.SourceWith(src, format.Options{})
 		if err != nil {
 			fail("phn fmt: %v", err) // nothing on stdout: the caller keeps its text
 		}
 		os.Stdout.Write(out)
+		for _, l := range left {
+			line, col := position(src, l.Span.Start)
+			fmt.Fprintf(os.Stderr, "<stdin>:%d:%d: error P1001: %s\n", line, col, l.Msg)
+		}
 		return
 	}
 	proj := loadProject()
@@ -48,7 +63,8 @@ func fmtCmd(args []string) {
 		proj.requireRoots("fmt")
 		files = collect(proj.roots(), proj.isOutput, ".phn")
 	}
-	changed := len(layoutFiles(files, *check))
+	tests := withdrawnTests(proj, files)
+	changed, withdrawn := layoutWith(files, *check, tests)
 	if *check {
 		fmt.Printf("%d files checked, %d not in Phaenon's layout\n", len(files), changed)
 	} else {
@@ -79,9 +95,105 @@ func fmtCmd(args []string) {
 	switch {
 	case status != 0:
 		os.Exit(status)
-	case left || *check && changed > 0:
+	case left || withdrawn || *check && changed > 0:
 		os.Exit(1)
 	}
+}
+
+// layoutWith is layoutFiles with the rewrites of the withdrawn type tests
+// a checked program gave (withdrawnTests), and the number of files changed
+// and whether a withdrawn test was left as written, which it reports.
+func layoutWith(files []string, check bool, tests map[string]map[ast.Span]string) (changed int, left bool) {
+	for _, path := range files {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			fail("%v", err)
+		}
+		opts := format.Options{Tests: tests[path], Program: tests != nil}
+		out, lefts, err := format.SourceWith(src, opts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)
+			continue
+		}
+		for _, l := range lefts {
+			line, col := position(src, l.Span.Start)
+			fmt.Fprintf(os.Stderr, "%s:%d:%d: error P1001: %s\n", path, line, col, l.Msg)
+			left = true
+		}
+		if bytes.Equal(out, src) {
+			continue
+		}
+		changed++
+		if check {
+			fmt.Fprintf(os.Stderr, "%s: not in Phaenon's layout\n", path)
+			continue
+		}
+		writeFile(path, out)
+	}
+	return changed, left
+}
+
+// withdrawnTests are the rewrites of the withdrawn type tests `is`, `as`
+// and `as?` that the files hold (roadmap D26, design/tooling.md §5.6), by
+// file and span: the files holding one are checked, as phn check checks
+// them, and each test's PHP is the checked program's. nil without a
+// project, when there is no program to read types from, and with nothing
+// to rewrite.
+func withdrawnTests(proj *project, files []string) map[string]map[ast.Span]string {
+	if proj == nil {
+		return nil
+	}
+	var holding []string
+	for _, path := range files {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if f, err := parser.Parse(src, lexer.ModePhaenon); err == nil && holdsTest(f) {
+			holding = append(holding, path)
+		}
+	}
+	if len(holding) == 0 {
+		return nil
+	}
+	tgt := projectTarget(proj, proj.roots())
+	excludes = append(excludes, proj.Exclude...)
+	projectSources = proj.sources()
+	p, _ := loadProgram(holding, tgt.Version, true)
+	checker.New(p, proj.checkerOptions(checker.Options{})).Check()
+	out := map[string]map[ast.Span]string{}
+	for _, path := range holding {
+		f := p.File(path)
+		if f == nil {
+			continue
+		}
+		out[path] = map[ast.Span]string{}
+		for n, rec := range f.Tests {
+			if rec.Rewritten != "" {
+				out[path][n.Span()] = rec.Rewritten
+			}
+		}
+	}
+	return out
+}
+
+// holdsTest reports a withdrawn `is`, `as` or `as?` in f.
+func holdsTest(f *ast.File) bool {
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n.(type) {
+		case *ast.IsExpr, *ast.AsExpr:
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+// position is the 1-based line and column of an offset in src.
+func position(src []byte, off int) (line, col int) {
+	line = 1 + bytes.Count(src[:off], []byte("\n"))
+	return line, off - bytes.LastIndexByte(src[:off], '\n')
 }
 
 // layoutFiles applies the first layer to the files and returns those it

@@ -447,12 +447,12 @@ final class Box implements Item
 
 interface Store<T of Item>
 {
-    fun put(T $item): void;
+    put(T $item): void;
 }
 
 final class BoxStore<T of Box> implements Store<T>
 {
-    fun put(T $item): void
+    put(T $item): void
     {
         if (!$item instanceof Box) {
             throw new \InvalidArgumentException('a box expected');
@@ -462,7 +462,7 @@ final class BoxStore<T of Box> implements Store<T>
 
 final class OnlyBoxes implements Store<Box>
 {
-    fun put(Box $item): void
+    put(Box $item): void
     {
         if (!$item instanceof Box) {
             throw new \InvalidArgumentException('a box expected');

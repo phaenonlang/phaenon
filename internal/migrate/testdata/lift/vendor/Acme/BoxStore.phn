@@ -4,7 +4,7 @@ namespace Acme;
 // from the Box its own T erases to.
 abstract class BoxStore<T of Box> implements Store<T>
 {
-    fun put(T $item): void
+    put(T $item): void
     {
     }
 }

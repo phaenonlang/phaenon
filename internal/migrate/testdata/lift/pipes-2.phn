@@ -1,14 +1,14 @@
 // --pipes=2: two calls are a chain too.
 
-fun countLine(list<int> $xs): string => sprintf('%d items', count($xs));
+function countLine(list<int> $xs): string => sprintf('%d items', count($xs));
 
-fun bounded(int $x): int => max(0, min(10, $x));
+function bounded(int $x): int => max(0, min(10, $x));
 
 // One call is not.
-fun single(string $s): string => trim($s);
+function single(string $s): string => trim($s);
 
 // Three calls, as by default.
-fun three(string $s): string => $s
+function three(string $s): string => $s
     |> str_repeat(?, 2)
     |> trim(...)
     |> strtoupper(...);

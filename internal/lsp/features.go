@@ -399,7 +399,7 @@ func describe(sym *symbol) (code, doc string) {
 		doc = summary(m.Doc)
 	case sym.fn != nil:
 		fn := sym.fn.Signature()
-		code = signature("fun", fn.Name, fn.TypeParams, fn.Params, fn.Return)
+		code = signature("function", fn.Name, fn.TypeParams, fn.Params, fn.Return)
 		doc = summary(fn.Doc)
 	case sym.prop != nil:
 		pr := sym.prop
@@ -446,22 +446,24 @@ func summary(d *docblock.Doc) string {
 	return d.Summary
 }
 
+// methodHead is a method's modifiers as its declaration writes them, with
+// no keyword (roadmap D27): "" for a public instance method.
 func methodHead(m *program.Method) string {
-	var b strings.Builder
+	var words []string
 	switch m.Vis {
 	case program.Protected:
-		b.WriteString("protected ")
+		words = append(words, "protected")
 	case program.Private:
-		b.WriteString("private ")
+		words = append(words, "private")
 	}
 	if m.Static {
-		b.WriteString("static ")
+		words = append(words, "static")
 	}
-	b.WriteString("fun")
-	return b.String()
+	return strings.Join(words, " ")
 }
 
-// signature writes a function's head: `fun name<T>(int $a, ?T $b = …): R`.
+// signature writes a function's head, `function name<T>(int $a, ?T $b =
+// …): R`, or a method's, `static name<T>(…): R`.
 func signature(head, name string, tps []*program.TypeParam, params []*program.Param, ret types.Type) string {
 	label, _ := signatureLabel(head, name, tps, params, ret)
 	return label
@@ -470,7 +472,10 @@ func signature(head, name string, tps []*program.TypeParam, params []*program.Pa
 // signatureLabel is signature with each parameter's byte offsets in it.
 func signatureLabel(head, name string, tps []*program.TypeParam, params []*program.Param, ret types.Type) (string, [][2]int) {
 	var b strings.Builder
-	b.WriteString(head + " " + name)
+	if head != "" {
+		b.WriteString(head + " ")
+	}
+	b.WriteString(name)
 	if len(tps) > 0 {
 		b.WriteString("<")
 		for i, tp := range tps {
@@ -761,6 +766,8 @@ func memberSymbols(t *text, members []ast.ClassMember) []DocumentSymbol {
 
 // formatting is phn fmt's first layer (design/tooling.md §5.3): the
 // project's fixer costs a PHP process, and runs on an explicit command.
+// When the check of the text in the buffer is done, its program gives the
+// rewrites of the withdrawn type tests that depend on types (§5.6).
 func (s *Server) formatting(uri string) (any, error) {
 	path, ok := s.path(uri)
 	if !ok {
@@ -769,14 +776,29 @@ func (s *Server) formatting(uri string) (any, error) {
 	s.mu.Lock()
 	d := s.docs[path]
 	var src []byte
+	var checked *fileCheck
 	if d != nil {
 		src = d.text
+		if d.result != nil && d.result.version == d.version && d.result.file != nil {
+			checked = d.result
+		}
 	}
 	s.mu.Unlock()
 	if d == nil {
 		return nil, nil
 	}
-	out, err := format.Source(src)
+	var opts format.Options
+	if checked != nil {
+		s.query.Lock()
+		opts = format.Options{Tests: map[ast.Span]string{}, Program: true}
+		for n, rec := range checked.file.Tests {
+			if rec.Rewritten != "" {
+				opts.Tests[n.Span()] = rec.Rewritten
+			}
+		}
+		s.query.Unlock()
+	}
+	out, _, err := format.SourceWith(src, opts)
 	if err != nil || bytes.Equal(out, src) {
 		return []TextEdit{}, nil // a text that does not parse is left as it is
 	}

@@ -1,22 +1,22 @@
 // target: 8.6
 // Partial function application (PHP 8.6, design/php-versions.md §5.2).
 
-fun three(int $a, string $b, float $c): string { return "$a$b$c"; }
-fun opt(int $a, string $b = 'x', ?int $c = null): int { return $a; }
-fun vari(int $a, string ...$rest): int { return $a; }
-fun reff(array<mixed> &$xs, int $n): void { $xs[] = $n; }
-fun wantsInt(int $x): void {}
+function three(int $a, string $b, float $c): string { return "$a$b$c"; }
+function opt(int $a, string $b = 'x', ?int $c = null): int { return $a; }
+function vari(int $a, string ...$rest): int { return $a; }
+function reff(array<mixed> &$xs, int $n): void { $xs[] = $n; }
+function wantsInt(int $x): void {}
 
 /**
  * @template T
  * @param list<T> $xs
  * @return T
  */
-fun first(array $xs, int $i): mixed { return $xs[$i]; }
+function first(array $xs, int $i): mixed { return $xs[$i]; }
 
 final class Greeter {
-    fun greet(string $name, string $greeting = 'Hello'): string { return "$greeting, $name"; }
-    static fun shout(string $s, int $times): string { return str_repeat($s, $times); }
+    greet(string $name, string $greeting = 'Hello'): string { return "$greeting, $name"; }
+    static shout(string $s, int $times): string { return str_repeat($s, $times); }
 }
 
 // The closure's parameters: placeholders in PHP's order, with their types.
@@ -81,4 +81,4 @@ $nullsafe = $greeter?->greet(?); // want P1003, P2307
 
 // Constant expressions.
 const UPPER = strtoupper(?);
-fun withDefault(Closure $f = str_repeat('-', ?)): mixed { return $f(3); }
+function withDefault(Closure $f = str_repeat('-', ?)): mixed { return $f(3); }

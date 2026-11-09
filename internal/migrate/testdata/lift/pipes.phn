@@ -2,34 +2,34 @@ namespace App\Pipes;
 
 final class User
 {
-    fun __construct(public readonly ?string $email) {}
+    __construct(public readonly ?string $email) {}
 }
 
 final class Text
 {
-    fun __construct(private string $sep) {}
+    __construct(private string $sep) {}
 
-    fun join(list<string> $parts): string => implode($this->sep, $parts);
+    join(list<string> $parts): string => implode($this->sep, $parts);
 
-    static fun shout(string $s): string => strtoupper($s) . '!';
+    static shout(string $s): string => strtoupper($s) . '!';
 
     // A method stage on $this, a static one, first-class callables, a
     // partial application whose subject is the last argument.
-    fun line(string $s): string => $s
+    line(string $s): string => $s
         |> explode(',', ?)
         |> $this->join(...)
         |> trim(...)
         |> self::shout(...);
 }
 
-fun trace(string $label, string $value): string {
+function trace(string $label, string $value): string {
     echo "eval $label\n";
     return $value;
 }
 
 // design/tooling.md §8.1's example: the head is the subject of the
 // innermost call, the closures stay where they were.
-fun emails(list<User> $users): list<string> {
+function emails(list<User> $users): list<string> {
     $emails = $users
         |> array_map(fn (User $u) => $u->email, ?)
         |> array_filter(?, fn (?string $e) => $e !== null)
@@ -39,29 +39,29 @@ fun emails(list<User> $users): list<string> {
 
 // With only literals, the innermost call is the head; two stages fit on
 // one line.
-fun banner(): string => str_repeat(' ab', 2) |> trim(...) |> strtoupper(...);
+function banner(): string => str_repeat(' ab', 2) |> trim(...) |> strtoupper(...);
 
 // The head runs first, as it did.
-fun traced(): string => trace('head', ' x ') |> trim(...) |> strtoupper(...);
+function traced(): string => trace('head', ' x ') |> trim(...) |> strtoupper(...);
 
 // A named argument keeps its name.
-fun padded(string $s): string => $s
+function padded(string $s): string => $s
     |> strtolower(...)
     |> trim(...)
     |> str_pad(string: ?, length: 8, pad_string: '.');
 
 // Bound arguments that are variables and closures may run after the
 // piped value: nothing the inner calls assign.
-fun listed(string $glue, list<int> $xs): string
+function listed(string $glue, list<int> $xs): string
     => sprintf('[%s]', implode($glue, array_map(fn (int $x): string => (string) ($x * 2), $xs)));
 
 // A method stage on a property its class declares without hooks: the
 // pipeline reads it after the inner calls, which do not assign it.
 final class Banner
 {
-    fun __construct(private Text $text) {}
+    __construct(private Text $text) {}
 
-    fun title(string $csv): string => $csv
+    title(string $csv): string => $csv
         |> trim(...)
         |> strtoupper(...)
         |> explode(',', ?)
@@ -70,7 +70,7 @@ final class Banner
 
 // A method stage on a variable, resolved through the type the checker
 // gives it.
-fun shoutAll(Text $text, string $csv): string => $csv
+function shoutAll(Text $text, string $csv): string => $csv
     |> trim(...)
     |> explode(',', ?)
     |> $text->join(...)
@@ -79,16 +79,16 @@ fun shoutAll(Text $text, string $csv): string => $csv
 // A by-reference parameter splits the chain: the calls above it make a
 // pipeline whose head is the call that takes the reference, and the
 // variable read before it is not one the pipeline would read late.
-fun bumped(int &$n): string {
+function bumped(int &$n): string {
     $n++;
     return " v$n ";
 }
 
-fun split(int $n): string => sprintf('%d %s', $n, bumped($n) |> trim(...) |> strtoupper(...));
+function split(int $n): string => sprintf('%d %s', $n, bumped($n) |> trim(...) |> strtoupper(...));
 
 // A chain inside a closure that is a bound argument: both are rewritten,
 // the closure's lines re-indented with its stage.
-fun nested(list<string> $rows): list<string> => $rows
+function nested(list<string> $rows): list<string> => $rows
     |> array_map(function (string $row): string {
         return $row
             |> str_replace('-', ' ', ?)
@@ -99,19 +99,19 @@ fun nested(list<string> $rows): list<string> => $rows
     |> array_values(...);
 
 // A chain written over several lines, trailing commas and all.
-fun multiline(list<string> $words): string => $words
+function multiline(list<string> $words): string => $words
     |> array_filter(?, fn (string $w): bool => strlen($w) > 2)
     |> array_map(fn (string $w): string => ucfirst($w), ?)
     |> implode(' ', ?);
 
 // Two stages that would pass 120 columns on one line.
-fun long(): string => sprintf('%s and %s', 'a fairly long literal', 'another fairly long one')
+function long(): string => sprintf('%s and %s', 'a fairly long literal', 'another fairly long one')
     |> strtolower(...)
     |> htmlspecialchars(?, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8', false);
 
 // A head that is an operation goes in parentheses: `(string) $n |> …`
 // parses the same, but reads as if the cast took the whole pipeline.
-fun widest(list<int> $numbers): int {
+function widest(list<int> $numbers): int {
     $width = 0;
     foreach ($numbers as $n) {
         $width = max($width, \strlen(trim((string) $n)));
@@ -121,9 +121,9 @@ fun widest(list<int> $numbers): int {
 
 // An anonymous class moves to the line of its stage: its name, which holds
 // its line, is not a type that changed.
-fun tagged(list<int> $xs, object $o): int => count($xs) + count(get_object_vars($o));
+function tagged(list<int> $xs, object $o): int => count($xs) + count(get_object_vars($o));
 
-fun anonymous(list<int> $xs): int => $xs
+function anonymous(list<int> $xs): int => $xs
     |> array_map(fn (int $x): int => $x - 1, ?)
     |> array_filter(...)
     |> array_values(...)
@@ -131,7 +131,7 @@ fun anonymous(list<int> $xs): int => $xs
 
 // For PHP 8.5 the stage's closure captures what the class's constructor
 // arguments read, not its property or its method's variables.
-fun captures(list<int> $xs, int $base): int => $xs
+function captures(list<int> $xs, int $base): int => $xs
     |> array_map(fn (int $x): int => $x - $base, ?)
     |> array_filter(...)
     |> array_values(...)
@@ -147,7 +147,7 @@ fun captures(list<int> $xs, int $base): int => $xs
     });
 
 // A chain that is an argument on a line of its own.
-fun wrapped(string $s): Text => new Text(
+function wrapped(string $s): Text => new Text(
     $s
         |> str_repeat(?, 2)
         |> trim(...)

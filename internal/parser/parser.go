@@ -217,7 +217,7 @@ func isReservedNonModifier(k token.Kind) bool {
 		token.T_CLASS, token.T_CLASS_C, token.T_TRAIT_C, token.T_FUNC_C, token.T_METHOD_C, token.T_LINE,
 		token.T_FILE, token.T_DIR, token.T_NS_C, token.T_FN, token.T_MATCH, token.T_ENUM, token.T_PROPERTY_C,
 		// Phaenon contextual keywords are identifiers everywhere PHP allows a keyword.
-		token.T_IS, token.T_TYPE, token.T_OF, token.T_IN, token.T_OUT, token.T_FUN:
+		token.T_TYPE, token.T_OF, token.T_IN, token.T_OUT:
 		return true
 	}
 	return false

@@ -19,30 +19,30 @@ final class NotFound extends \RuntimeException
 
 interface Handler
 {
-    fun handle(int $id): int throws Refusal|NotFound;
+    handle(int $id): int throws Refusal|NotFound;
 }
 
 final class Store implements Handler
 {
-    fun handle(int $id): int throws NotFound => $id > 0 ? $id : throw new NotFound();
+    handle(int $id): int throws NotFound => $id > 0 ? $id : throw new NotFound();
 
-    fun load(int $id): string throws NotFound {
+    load(int $id): string throws NotFound {
         return $id > 0 ? 'x' : throw new NotFound();
     }
 
-    fun save(string $v): void throws Failure|InvalidArgumentException => print $v; // want P2404, P2404
+    save(string $v): void throws Failure|InvalidArgumentException => print $v; // want P2404, P2404
 
-    fun undeclared(): void => throw new \LogicException('no clause needed');
+    undeclared(): void => throw new \LogicException('no clause needed');
 
-    fun notThrowable(): void throws Store {} // want P2319
+    notThrowable(): void throws Store {} // want P2319
 
-    fun countable(): void throws Countable {} // want P2319
+    countable(): void throws Countable {} // want P2319
 
-    fun missing(): void throws Missing {} // want P2001
+    missing(): void throws Missing {} // want P2001
 
-    fun refuse(): void throws Refusal {} // want P2404
+    refuse(): void throws Refusal {} // want P2404
 }
 
-fun top(): int throws \LogicException|\DomainException => 1; // want P2404, P2404
+function top(): int throws \LogicException|\DomainException => 1; // want P2404, P2404
 
-fun caller(Store $s): int => $s->handle(1) + top() + \strlen($s->load(2));
+function caller(Store $s): int => $s->handle(1) + top() + \strlen($s->load(2));

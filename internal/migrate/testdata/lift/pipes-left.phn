@@ -2,35 +2,35 @@ namespace App\Left;
 
 // Every chain here stays a nest of calls; the .notes file says why.
 
-fun trace(string $label, string $value): string {
+function trace(string $label, string $value): string {
     echo "eval $label\n";
     return $value;
 }
 
-fun pair(string $a, string $b): string => "[$a|$b]";
+function pair(string $a, string $b): string => "[$a|$b]";
 
-fun bump(int &$n): int => ++$n;
+function bump(int &$n): int => ++$n;
 
 final class Store
 {
     public static list<int> $numbers = [3, 1, 2];
 }
 
-fun &numbers(): list<int> => Store::$numbers;
+function &numbers(): list<int> => Store::$numbers;
 
-fun sorted(list<int> &$xs): list<int> {
+function sorted(list<int> &$xs): list<int> {
     sort($xs);
     return $xs;
 }
 
 final class Labeller
 {
-    fun label(string $s): string => "<$s>";
+    label(string $s): string => "<$s>";
 }
 
 final class Shelf
 {
-    fun __construct(private Labeller $labeller) {}
+    __construct(private Labeller $labeller) {}
 
     // A property with hooks is no receiver: a pipeline would run its get
     // hook after the inner calls.
@@ -38,29 +38,29 @@ final class Shelf
         get => $this->labeller;
     }
 
-    fun shelve(string $s): string => $this->hooked->label(strtoupper(trim($s)));
+    shelve(string $s): string => $this->hooked->label(strtoupper(trim($s)));
 
     // Nor is a property the inner calls assign.
-    fun relabel(string $s): string
+    relabel(string $s): string
         => $this->labeller->label(strtoupper(trim(($this->labeller = new Labeller()) ? $s : '')));
 }
 
 // A call before the nested one would run after it.
-fun order(): string => pair(trace('first', 'F'), trim(trace('inner', ' i ')));
+function order(): string => pair(trace('first', 'F'), trim(trace('inner', ' i ')));
 
 // Another call beside the nested one: which of them is the data is not
 // for the codemod to choose.
-fun several(string $a, string $b): string => sprintf('%s %s', strtoupper(trim($a)), trim($b));
+function several(string $a, string $b): string => sprintf('%s %s', strtoupper(trim($a)), trim($b));
 
 // A variable read before the nested call, which the inner calls assign.
-fun assigned(int $n): string => sprintf('%d %d', $n, abs(bump($n)));
+function assigned(int $n): string => sprintf('%d %d', $n, abs(bump($n)));
 
 // The piped parameter is by reference (the checker reports P2112 on the
 // call as written: it needs a variable).
-fun byReference(): string => implode(',', sorted(numbers()));
+function byReference(): string => implode(',', sorted(numbers()));
 
 // The nested call is spread.
-fun spread(): string => implode(',', array_merge(...array_map(fn (int $x): array => [$x, $x], [1, 2])));
+function spread(): string => implode(',', array_merge(...array_map(fn (int $x): array => [$x, $x], [1, 2])));
 
 // A constant expression.
 const SHOUT = static function (string $s): string {
@@ -68,44 +68,44 @@ const SHOUT = static function (string $s): string {
 };
 
 // A call that reads its scope cannot become a callable.
-fun joined(string $a, string $b): string => strtoupper(implode(',', func_get_args()));
+function joined(string $a, string $b): string => strtoupper(implode(',', func_get_args()));
 
 // A dynamic callee resolves to nothing the model knows.
-fun dynamic(string $s): string {
+function dynamic(string $s): string {
     $f = trim(...);
     return strtoupper($f(str_repeat($s, 2)));
 }
 
 // A nullsafe call skips its arguments on null.
-fun nullsafe(?Labeller $l, string $s): ?string => $l?->label(strtoupper(trim($s)));
+function nullsafe(?Labeller $l, string $s): ?string => $l?->label(strtoupper(trim($s)));
 
 // An operand: the outer call cannot be a stage, and two calls are left.
-fun operand(): string => 'x: ' . strtoupper(trim(str_repeat(' a', 2)));
+function operand(): string => 'x: ' . strtoupper(trim(str_repeat(' a', 2)));
 
 // Inside a string.
-fun interpolated(Labeller $l, string $s): string => "label: {$l->label(strtoupper(trim($s)))}";
+function interpolated(Labeller $l, string $s): string => "label: {$l->label(strtoupper(trim($s)))}";
 
 // A comment between the calls.
-fun commented(): string {
+function commented(): string {
     return strtoupper(/* trimmed first */ trim(str_repeat(' a', 2)));
 }
 
 // __LINE__ would move to another line.
-fun line(): string => sprintf('%d: %s', __LINE__, strtoupper(trim(' x ')));
+function line(): string => sprintf('%d: %s', __LINE__, strtoupper(trim(' x ')));
 
-fun frame(string $s, string $frame): string => sprintf($frame, $s);
+function frame(string $s, string $frame): string => sprintf($frame, $s);
 
 // Laid out one stage per line, the pipeline would start inside the
 // constructor's brackets, in the middle of its line.
 final class Note
 {
-    fun __construct(public string $text) {}
+    __construct(public string $text) {}
 }
 
-fun wrapped(string $s): Note => new Note(strtolower(trim(str_repeat($s, 2))));
+function wrapped(string $s): Note => new Note(strtolower(trim(str_repeat($s, 2))));
 
 // A multi-line string would have to move sideways with its stage.
-fun heredoc(string $s): string
+function heredoc(string $s): string
     => frame(strtolower(trim(strtoupper($s))), <<<TXT
         [%s]
         TXT);

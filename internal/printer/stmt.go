@@ -629,7 +629,9 @@ func (p *Printer) member(m ast.ClassMember) {
 		p.doc(m.Doc)
 		p.attrsLines(m.Attrs)
 		p.modifiers(m.Modifiers)
-		p.w(keyword(m.Fun))
+		if !m.Bare() {
+			p.w(keyword(m.Fun))
+		}
 		if m.ByRef {
 			p.w("&")
 		}
@@ -697,7 +699,8 @@ func (p *Printer) member(m ast.ClassMember) {
 	}
 }
 
-// keyword is the spelling of a named declaration: `fun` in Phaenon, else `function`.
+// keyword is a declaration's keyword: PHP's, or the withdrawn `fun`
+// (roadmap D27), printed as written.
 func keyword(fun bool) string {
 	if fun {
 		return "fun "

@@ -8,7 +8,7 @@ namespace Tabs;
 final class Strings
 {
     /** @return array<mixed> */
-    fun values(): array => ["a	b", 'c	d', <<<EOT
+    values(): array => ["a	b", 'c	d', <<<EOT
         heredoc	text
             	deeper
         EOT];
@@ -16,9 +16,9 @@ final class Strings
 
 final class Indented
 {
-	fun one(): int => 1; // want P1005 "(3 lines)"
+	one(): int => 1; // want P1005 "(3 lines)"
 
-	fun two(): int {
+	two(): int {
 		return 2;
     }
 }

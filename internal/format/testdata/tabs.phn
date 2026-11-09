@@ -7,11 +7,11 @@ final class Box<T>
 	/**
 	 * One line.
 	 */
-	fun get(list<T>	$xs): ?T {
+	get(list<T>	$xs): ?T {
 		return $xs[0]	?? null; // the	tail
 	}
 
-	fun text(): string {
+	text(): string {
 		return <<<EOT
 			a	b
 				c

@@ -42,6 +42,28 @@ final class Account
     function split(): void
     {
     }
+
+    public function static(): string
+    {
+        return static::class;
+    }
+
+    function list(): array
+    {
+        function inner(): int
+        {
+            return 1;
+        }
+
+        return [inner()];
+    }
+
+    public function &cached(): array
+    {
+        static $c = [];
+
+        return $c;
+    }
 }
 
 function helper(): void

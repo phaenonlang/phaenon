@@ -7,9 +7,10 @@
  * binary when its input is binary says so with a conditional return. These
  * are the conversions between bytes and text: hex2bin() decodes text into
  * bytes, bin2hex() and base64_encode() spell bytes out as text, mb_scrub()
- * makes text of them by replacing what is not UTF-8, and `$b as string` is
- * the checked conversion. base64_decode() stays text, which (bytes)
- * retypes where it is binary.
+ * makes text of them by replacing what is not UTF-8, and
+ * mb_check_encoding($b, 'UTF-8') is the checked conversion, which the
+ * checker reads as a test (design/roadmap.md D26). base64_decode() stays
+ * text, which (bytes) retypes where it is binary.
  */
 
 /**

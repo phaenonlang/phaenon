@@ -15,14 +15,20 @@
 //   - the spacing of Phaenon's own syntax: type parameters and type
 //     arguments (`class Box<T of Item>`, `map<string, list<int>>`), tuple
 //     and closure types (`(int, string)`, `Closure(int, string...): bool`),
-//     `throws A|B`, `x is T`, `x as? T`, `=>` of an expression body, and
-//     type aliases.
+//     `throws A|B`, `=>` of an expression body, and type aliases.
+//
+// Before all of it, the first layer rewrites the spellings roadmap D26 and
+// D27 withdrew (design/tooling.md §5.6, respell.go): `fun`, `function` on
+// a method whose name needs no keyword, and the type tests `is`, `as` and
+// `as?`, those the checked program gives the PHP of (Options.Tests) and,
+// without one, `$x is Foo` with a class name. These are the layer's only
+// changes of tokens.
 //
 // Everything else is the project's PHP style, which the second layer, the
 // project's fixer run through phn fix, writes. The spacing changes only
 // whitespace within a line: no line is joined or broken, and a construct
 // with a comment inside is left as it is. Source checks that the tokens
-// come out as they went in.
+// come out of the layout as they went in.
 package format
 
 import (
@@ -38,16 +44,29 @@ import (
 	"github.com/phaenonlang/phaenon/internal/token"
 )
 
-// Source lays a .phn out as Phaenon's layout wants it. Formatting the
-// result again changes nothing.
+// Source lays a .phn out as Phaenon's layout wants it, with the rewrites
+// that need no checked program. Formatting the result again changes
+// nothing.
 func Source(src []byte) ([]byte, error) {
-	// The tabs go first: every later step lays out spaces.
-	out := trimLeadingBlankLines(tabs.Expand(src))
-	out, err := migrate.LayoutBlocks(out)
+	out, _, err := SourceWith(src, Options{})
+	return out, err
+}
+
+// SourceWith is Source with what opts know beyond the source. left are the
+// withdrawn type tests it leaves as written, which stay P1001.
+func SourceWith(src []byte, opts Options) (out []byte, left []Left, err error) {
+	// The withdrawn spellings go first, where the checker's offsets hold;
+	// then the tabs: every later step lays out spaces.
+	out, left, err = respell(src, opts)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return space(out)
+	out = trimLeadingBlankLines(tabs.Expand(out))
+	if out, err = migrate.LayoutBlocks(out); err != nil {
+		return nil, nil, err
+	}
+	out, err = space(out)
+	return out, left, err
 }
 
 // trimLeadingBlankLines drops the blank lines a file opens with.
@@ -172,26 +191,6 @@ func (s *spacer) node(n ast.Node) {
 			s.set(kw-1, " ")
 			s.set(kw, " ")
 		}
-	case *ast.IsExpr:
-		kw := s.first(n.Expr.Span().End)
-		if kw >= 0 && s.code[kw].Kind == token.T_IS && s.tight(n.Type.Span()) {
-			s.set(kw-1, " ")
-			s.set(kw, " ")
-			if s.text(kw+1) == "!" {
-				s.set(kw+1, "")
-			}
-		}
-	case *ast.AsExpr:
-		kw := s.first(n.Expr.Span().End)
-		if kw >= 0 && s.code[kw].Kind == token.T_AS && s.tight(n.Type.Span()) {
-			s.set(kw-1, " ")
-			if n.Nullable && s.text(kw+1) == "?" {
-				s.set(kw, "")
-				s.set(kw+1, " ")
-			} else {
-				s.set(kw, " ")
-			}
-		}
 	}
 }
 
@@ -239,7 +238,7 @@ func (s *spacer) typeArgs(args []ast.TypeExpr) {
 	}
 }
 
-// exprBody spaces the arrow of an expression body: `fun name(): T => expr;`.
+// exprBody spaces the arrow of an expression body: `name(): T => expr;`.
 func (s *spacer) exprBody(b *ast.ExprBody) {
 	if b == nil {
 		return

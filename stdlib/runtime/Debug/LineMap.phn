@@ -38,7 +38,7 @@ final class LineMap
      * $outputs holds each entry's first output line, ascending; $holdEnds a
      * hold's last output line, 0 for a run; $sources the source line.
      */
-    private fun __construct(
+    private __construct(
         private readonly string $compiledFile,
         private readonly string $sourcePath,
         private readonly string $sourceFile,
@@ -52,7 +52,7 @@ final class LineMap
      * before its `__halt_compiler()`) on first use and kept for the rest of
      * the process; null when the file has no valid map or cannot be read.
      */
-    static fun forFile(string $compiledFile): ?LineMap {
+    static forFile(string $compiledFile): ?LineMap {
         if (!array_key_exists($compiledFile, self::$read)) {
             self::$read[$compiledFile] = self::read($compiledFile);
         }
@@ -65,7 +65,7 @@ final class LineMap
      * resolved against the compiled file's directory, and the line — or null
      * when the file has no map.
      */
-    static fun locate(string $compiledFile, int $line): ?(string, int) {
+    static locate(string $compiledFile, int $line): ?(string, int) {
         $map = self::forFile($compiledFile);
 
         return $map === null ? null : [$map->sourceFile, $map->sourceLine($line)];
@@ -77,7 +77,7 @@ final class LineMap
      * against. Null for anything else: a malformed map, a version this reader
      * does not know.
      */
-    static fun parse(string $line, string $compiledFile): ?LineMap {
+    static parse(string $line, string $compiledFile): ?LineMap {
         if (str_starts_with($line, '<?php ')) {
             $line = substr($line, 6);
         }
@@ -119,10 +119,10 @@ final class LineMap
     }
 
     /** The compiled file this map belongs to, as it was given. */
-    fun compiledFile(): string => $this->compiledFile;
+    compiledFile(): string => $this->compiledFile;
 
     /** The source path as the map writes it: relative to the compiled file's directory, decoded. */
-    fun sourcePath(): string => $this->sourcePath;
+    sourcePath(): string => $this->sourcePath;
 
     /**
      * The source path resolved against the compiled file's directory,
@@ -130,7 +130,7 @@ final class LineMap
      * container whose root differs from the build machine's, whether the
      * .phn is deployed or not.
      */
-    fun sourceFile(): string => $this->sourceFile;
+    sourceFile(): string => $this->sourceFile;
 
     /**
      * The forward lookup (§3.2): the source line a line of the compiled file
@@ -138,7 +138,7 @@ final class LineMap
      * decides; a run adds the distance, a hold does not. A line below 1 is
      * in no file and comes back as it is.
      */
-    fun sourceLine(int $compiledLine): int {
+    sourceLine(int $compiledLine): int {
         if ($compiledLine < 1) {
             return $compiledLine;
         }
@@ -162,7 +162,7 @@ final class LineMap
      * compiler wrote. A source line no run covers takes the next source line
      * that has a target; null when none has.
      */
-    fun compiledLine(int $sourceLine): ?int {
+    compiledLine(int $sourceLine): ?int {
         $count = count($this->outputs);
         $target = null;
         $covered = PHP_INT_MAX;
@@ -191,7 +191,7 @@ final class LineMap
      * holds it as $compiledShown, replaced by $sourceShown. Other names come
      * back as they are.
      */
-    fun closureName(string $function, string $compiledShown, string $sourceShown): string {
+    closureName(string $function, string $compiledShown, string $sourceShown): string {
         if (!str_contains($function, '{closure:')) {
             return $function;
         }
@@ -202,7 +202,7 @@ final class LineMap
 
     // ---------------------------------------------------------------- reading
 
-    private static fun read(string $file): ?LineMap {
+    private static read(string $file): ?LineMap {
         if (str_contains($file, "\0")) {
             return null; // no file has such a name, and the file functions would throw
         }
@@ -228,7 +228,7 @@ final class LineMap
     }
 
     /** The file's last line without its line break; null when unreadable or too long to be a map. */
-    private static fun lastLine(string $file, int $size): ?string {
+    private static lastLine(string $file, int $size): ?string {
         $length = self::TAIL;
         while (true) {
             $start = max(0, $size - $length);
@@ -257,7 +257,7 @@ final class LineMap
     }
 
     /** The first map line found right before a line holding `__halt_compiler` (any case, as PHP reads it). */
-    private static fun lineBeforeHaltCompiler(string $file): ?string {
+    private static lineBeforeHaltCompiler(string $file): ?string {
         $code = @file_get_contents($file);
         if ($code === false) {
             return null;
@@ -279,12 +279,12 @@ final class LineMap
         return null;
     }
 
-    private static fun isMapLine(string $line): bool {
+    private static isMapLine(string $line): bool {
         return str_starts_with($line, self::PREFIX) || str_starts_with($line, '<?php ' . self::PREFIX);
     }
 
     /** `%20` and `%25` are a space and a percent sign; any other `%` makes the map malformed. */
-    private static fun decodePath(string $encoded): ?string {
+    private static decodePath(string $encoded): ?string {
         if (preg_match('/%(?!20|25)/', $encoded) !== 0) {
             return null;
         }
@@ -298,7 +298,7 @@ final class LineMap
      * drive (`C:/`), a stream wrapper (`phar://`) — stays; a `..` above it
      * stays at it.
      */
-    private static fun resolve(string $compiledFile, string $path): string {
+    private static resolve(string $compiledFile, string $path): string {
         if (preg_match('~^[A-Za-z]:\\\\~', $compiledFile) === 1) {
             $compiledFile = str_replace('\\', '/', $compiledFile); // a Windows path: the map's separator is /
         }

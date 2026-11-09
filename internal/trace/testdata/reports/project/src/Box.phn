@@ -5,17 +5,17 @@ final class Box
     /** @var list<int> */
     private array $log = [];
 
-    fun __construct(private int $n) {}
+    __construct(private int $n) {}
 
-    fun get(): int => $this->n;
+    get(): int => $this->n;
 
-    fun record(int $x): void => $this->log[] = $x;
+    record(int $x): void => $this->log[] = $x;
 
-    fun label(string $paddingCharacters): string => $this->n |> abs(...) |> strval(...) |> str_pad(?, 40, $paddingCharacters, STR_PAD_LEFT) |> strtoupper(...) |> trim(...) |> ucfirst(...) |> htmlspecialchars(...);
+    label(string $paddingCharacters): string => $this->n |> abs(...) |> strval(...) |> str_pad(?, 40, $paddingCharacters, STR_PAD_LEFT) |> strtoupper(...) |> trim(...) |> ucfirst(...) |> htmlspecialchars(...);
 
-    fun refuse(): never => throw new \LogicException('refused');
+    refuse(): never => throw new \LogicException('refused');
 
-    fun unused(): int {
+    unused(): int {
         if ($this->n > 0) {
             return 1;
         }

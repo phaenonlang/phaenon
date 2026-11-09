@@ -180,13 +180,18 @@ func (p *Parser) exprBP(min int) ast.Expr {
 			left = &ast.Instanceof{Expr: left, Class: p.classNameReference()}
 			left.(*ast.Instanceof).S = p.span(start)
 			continue
-		case token.T_IS, token.T_AS:
+		case token.T_STRING, token.T_AS:
+			// The withdrawn `is`, `as` and `as?` (roadmap D26), parsed so
+			// that the checker can name them (withdrawn.go).
+			if k == token.T_STRING && !p.isAhead() {
+				break
+			}
 			if p.mode != lexer.ModePhaenon || bpInstanceof < min || (k == token.T_AS && p.noAs) {
 				return left
 			}
-			if k == token.T_IS {
-				p.next()
-				left = &ast.IsExpr{Expr: left, Type: p.typeExpr()}
+			if k == token.T_STRING {
+				kw := p.next()
+				left = &ast.IsExpr{Kw: ast.Span{Start: kw.Start, End: kw.End}, Expr: left, Type: p.typeExpr()}
 				left.(*ast.IsExpr).S = p.span(start)
 			} else {
 				kw := p.next()

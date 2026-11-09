@@ -9,63 +9,63 @@ use LogicException;
 
 interface Named
 {
-    fun name(): string;
+    name(): string;
 
-    fun shout(): string => \strtoupper($this->name()); // want P2514
+    shout(): string => \strtoupper($this->name()); // want P2514
 }
 
 abstract class Base implements Named
 {
-    abstract fun id(): int => 1; // want P2504
+    abstract id(): int => 1; // want P2504
 }
 
 final class User extends Base
 {
     private int $calls = 0;
 
-    fun __construct(private string $name) {}
+    __construct(private string $name) {}
 
-    fun name(): string => $this->name;
+    name(): string => $this->name;
 
-    fun shout(): string => \strtoupper($this->name);
+    shout(): string => \strtoupper($this->name);
 
-    fun id(): int => \strlen($this->name);
+    id(): int => \strlen($this->name);
 
-    fun wrong(): int => $this->name; // want P2202
+    wrong(): int => $this->name; // want P2202
 
-    fun log(string $message): void => $this->record($message);
+    log(string $message): void => $this->record($message);
 
-    fun record(string $message): void {
+    record(string $message): void {
         $this->calls += \strlen($message);
     }
 
-    fun voidValue(): int => $this->record('x'); // want P2205
+    voidValue(): int => $this->record('x'); // want P2205
 
-    fun fail(string $why): never => throw new LogicException($why);
+    fail(string $why): never => throw new LogicException($why);
 
-    fun leaks(): never => $this->record('x'); // want P2209
+    leaks(): never => $this->record('x'); // want P2209
 
-    fun nullable(): ?string => $this->calls > 0 ? $this->name : null;
+    nullable(): ?string => $this->calls > 0 ? $this->name : null;
 
-    static fun of(string $s): self
+    static of(string $s): self
         => new self(\trim($s));
 
-    fun counter(): \Closure => fn (): int => $this->calls;
+    counter(): \Closure => fn (): int => $this->calls;
 
-    fun generator(): \Generator => yield 1; // want P1004
+    generator(): \Generator => yield 1; // want P1004
 
-    fun __destruct() => $this->record('bye'); // want P1004
+    __destruct() => $this->record('bye'); // want P1004
 }
 
 final class Built
 {
-    fun __construct() => print 'built'; // want P1004
+    __construct() => print 'built'; // want P1004
 }
 
-fun double(int $x): int => $x * 2;
+function double(int $x): int => $x * 2;
 
-fun badDouble(int $x): string => $x * 2; // want P2202
+function badDouble(int $x): string => $x * 2; // want P2202
 
-fun undefined(): int => $missing; // want P2008
+function undefined(): int => $missing; // want P2008
 
-fun main(): void => print double(2) . User::of(' a ')->name();
+function main(): void => print double(2) . User::of(' a ')->name();

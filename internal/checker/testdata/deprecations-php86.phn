@@ -1,8 +1,8 @@
 // deprecations: on
 // What PHP 8.6 deprecates in the language (design/php-versions.md §4):
-// P1101 whatever the target, unless --no-deprecations. `is` cannot be
-// written as a name in Phaenon, where it is the type test; it still
-// reaches PHP through define() and class_alias().
+// P1101 whatever the target, unless --no-deprecations. `is` is a name
+// again since roadmap D26 withdrew the type test, and is reported as
+// `let` is, declared, imported or through define() and class_alias().
 namespace App\Names {
     use ArrayObject as let; // want P1101 "`let` as the name of an imported class"
     use ArrayObject as _; // want P1101 "`_` as the name of an imported class"
@@ -10,6 +10,7 @@ namespace App\Names {
     use function strtoupper as _;
     use const PHP_EOL as _; // want P1101 "imported constant"
     use const PHP_INT_MAX as LET; // want P1101
+    use ArrayObject as is; // want P1101 "`is` as the name of an imported class"
 }
 
 namespace App\Declared {
@@ -23,6 +24,19 @@ namespace App\Declared {
 
     function Let(): void // want P1101 "`let` as a function name"
     {
+    }
+
+    function is(): void // want P1101 "`is` as a function name"
+    {
+    }
+
+    const IS = 3; // want P1101 "`is` as a constant name"
+
+    // A method may be named `is`: PHP 8.6 deprecates the names that
+    // reach the global table, as for `let`.
+    final class Checks
+    {
+        is(): bool => true;
     }
 
     interface let // want P1101 "`let` as an interface name"

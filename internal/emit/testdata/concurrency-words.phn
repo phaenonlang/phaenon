@@ -4,11 +4,11 @@ namespace App\Jobs;
 // left the language (design/concurrency.md §17), and a function or a method
 // of either name, and the calls of them, compile as the PHP they are.
 
-fun spawn(string $job): int {
+function spawn(string $job): int {
     return \strlen($job);
 }
 
-fun concurrently(Pool $pool, string ...$jobs): void {
+function concurrently(Pool $pool, string ...$jobs): void {
     $pool->concurrently(...$jobs);
 }
 
@@ -17,24 +17,24 @@ final class Pool
     /** @var list<int> */
     private array $started = [];
 
-    public static fun spawn(string ...$jobs): self {
+    public static spawn(string ...$jobs): self {
         $pool = new self();
         concurrently($pool, ...$jobs);
         return $pool;
     }
 
-    public fun concurrently(string ...$jobs): void {
+    public concurrently(string ...$jobs): void {
         foreach ($jobs as $job) {
             $this->started[] = spawn ($job);
         }
     }
 
     /** @return list<int> */
-    public fun started(): array {
+    public started(): array {
         return [...$this->started, ...\array_map(spawn(...), ['d', 'ef'])];
     }
 }
 
-fun sizes(): int {
+function sizes(): int {
     return \array_sum(Pool::spawn('a', 'bc')->started());
 }

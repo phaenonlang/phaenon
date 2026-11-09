@@ -12,18 +12,32 @@ final class Account
 
     protected(set) static ?string $owner = null;
 
-    fun __construct(private(set) string $id, protected string $note = '') {}
+    __construct(private(set) string $id, protected string $note = '') {}
 
-    fun id(): string => $this->id;
+    id(): string => $this->id;
 
-    final static fun open(string $id): self => new self($id);
+    final static open(string $id): self => new self($id);
 
-    protected fun touch(): void {}
+    protected touch(): void {}
 
-    private static fun hidden(): void {}
+    private static hidden(): void {}
 
     public
-    fun split(): void {}
+    split(): void {}
+
+    public function static(): string => static::class;
+
+    list(): array<mixed> {
+        function inner(): int => 1;
+
+        return [inner()];
+    }
+
+    &cached(): array<mixed> {
+        static $c = [];
+
+        return $c;
+    }
 }
 
-fun helper(): void {}
+function helper(): void {}

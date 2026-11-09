@@ -270,7 +270,9 @@ func rewriteAndCompile(t *testing.T, name string, src []byte) []byte {
 		t.Fatal(err)
 	}
 	for _, d := range checker.New(q, checker.Options{}).Check() {
-		if d.Severity == checker.Error {
+		// A test the types settle is reported on its PHP as on any PHP
+		// test (P2402): the rewrite keeps what the test did at run time.
+		if d.Severity == checker.Error && d.Code != checker.P2402.ID {
 			t.Errorf("checker after phn fmt: %d: %s: %s\n%s", d.Line, d.Code, d.Message, g.Line(d.Line))
 		}
 	}
@@ -313,7 +315,7 @@ func TestRewriteRefusedTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(left) != 2 || string(out) != string(src) {
+	if len(left) != 2 || !strings.Contains(string(out), "\\strlen('a') as int;") || !strings.Contains(string(out), "\\strlen('a') is int|string;") {
 		t.Errorf("left %v, wrote:\n%s", left, out)
 	}
 }

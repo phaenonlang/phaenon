@@ -146,18 +146,18 @@ function takesBool(bool $b): void
 {
 }
 
-// `as string` is the checked conversion to text: the UTF-8 test, a
-// ValueError when it fails; `as?` gives null and `is string` the test
-// alone. What passes `is string` is string&bytes, bytes that are text:
-// both, until it is assigned. What fails stays bytes.
+// mb_check_encoding($b, 'UTF-8') is the checked conversion to text
+// (roadmap D26), in a ternary that throws a ValueError when it fails or
+// gives null. What passes it is string&bytes, bytes that are text: both,
+// until it is assigned. What fails stays bytes.
 function conversions(bytes $raw, bytes $data, ?bytes $maybe, ?bytes $absent, int|bytes $either, bytes $payload): void
 {
-    takesString($raw as? string ?? '');
-    if ($raw is string) {
+    takesString((mb_check_encoding($raw, 'UTF-8') ? $raw : null) ?? '');
+    if (mb_check_encoding($raw, 'UTF-8')) {
         takesString($raw);
         takesBytes($raw);
         takesInt($raw); // want P2103 "string&bytes given"
-        takesBool($raw is string); // want P2306 "string&bytes is always string"
+        takesBool(is_string($raw));
         takesString("text: $raw");
         takesBytes($raw . $data);
         takesString($raw . ' and text');
@@ -166,31 +166,31 @@ function conversions(bytes $raw, bytes $data, ?bytes $maybe, ?bytes $absent, int
         if ($raw === 'ok') {
             takesBytes($raw . $data); // 'ok'&bytes is bytes too
             takesBytes($raw[0]);
-            takesBool($raw is string); // want P2306 "'ok'&bytes is always string"
+            takesBool(is_string($raw));
         }
     } else {
         takesBytes($raw);
         takesString($raw); // want P2103 "bytes given"
     }
     takesBytes($raw); // string&bytes|bytes is bytes
-    $text = $data as string;
+    $text = mb_check_encoding($data, 'UTF-8') ? $data : throw new \ValueError('not valid UTF-8');
     takesString($text);
-    takesBytes($data); // the conversion types its result: $data is the same bytes
-    takesString($data); // want P2103 "bytes given"
-    if ($maybe is string) {
+    takesBytes($data); // past the conversion, $data is text too
+    takesString($data);
+    if (is_string($maybe) && mb_check_encoding($maybe, 'UTF-8')) {
         takesString($maybe);
     } else {
         takesString($maybe); // want P2103 "null|bytes given"
     }
-    if ($absent is string|null) {
+    if ((is_string($absent) && mb_check_encoding($absent, 'UTF-8')) || $absent === null) {
         takesString($absent ?? '');
     } else {
         takesBytes($absent);
     }
-    if ($either is int|string) {
+    if (is_int($either) || mb_check_encoding($either, 'UTF-8')) {
         takesString((string) $either);
     }
-    takesString($payload as? string); // want P2103 "string|null given"
+    takesString(mb_check_encoding($payload, 'UTF-8') ? $payload : null); // want P2103 "(string&bytes)|null given"
 }
 
 // Nor does a loop that comes round again, or a property: string&bytes
@@ -199,13 +199,13 @@ function rejoined(list<bytes> $chunks, bytes $raw, Frame $frame): int
 {
     $n = 0;
     foreach ($chunks as $chunk) {
-        if ($raw is string) {
+        if (mb_check_encoding($raw, 'UTF-8')) {
             $n += \strlen(takesText($raw));
         }
-        $n += \strlen($chunk) + \strlen(takesText($raw as string));
+        $n += \strlen($chunk) + \strlen(takesText(mb_check_encoding($raw, 'UTF-8') ? $raw : throw new \ValueError('not valid UTF-8')));
     }
     takesBytes($raw);
-    if ($frame->buf is string) {
+    if (mb_check_encoding($frame->buf, 'UTF-8')) {
         $n += \strlen(takesText($frame->buf));
     }
     takesBytes($frame->buf);
@@ -228,7 +228,7 @@ function takesText(string $s): string
 // bytes it is bytes, and text meeting bytes is both.
 function reassigned(bytes $b, bool $flag): string
 {
-    if (!($b is string)) {
+    if (!(mb_check_encoding($b, 'UTF-8'))) {
         throw new \ValueError('not text');
     }
     if ($flag) {
@@ -240,7 +240,7 @@ function reassigned(bytes $b, bool $flag): string
 
 function trimmed(bytes $b, bool $more): string
 {
-    if (!($b is string)) {
+    if (!(mb_check_encoding($b, 'UTF-8'))) {
         throw new \ValueError('not text');
     }
     while ($more) {
@@ -253,7 +253,7 @@ function trimmed(bytes $b, bool $more): string
 
 function refilled(bytes $b, bool $flag): string
 {
-    if (!($b is string)) {
+    if (!(mb_check_encoding($b, 'UTF-8'))) {
         throw new \ValueError('not text');
     }
     if ($flag) {
@@ -265,7 +265,7 @@ function refilled(bytes $b, bool $flag): string
 
 function appended(bytes $b): bytes
 {
-    if ($b is string) {
+    if (mb_check_encoding($b, 'UTF-8')) {
         $b .= '!';
     }
 
@@ -276,12 +276,12 @@ function appended(bytes $b): bytes
 // test does in place.
 function stored(bytes $b, bytes $c): string
 {
-    $text = $b is string;
+    $text = mb_check_encoding($b, 'UTF-8');
     if ($text) {
         return $b;
     }
     takesBytes($b);
-    $valid = $c is string;
+    $valid = mb_check_encoding($c, 'UTF-8');
     if (!$valid) {
         takesString($c); // want P2103 "bytes given"
 
@@ -322,21 +322,21 @@ function mixedSlot(Slot $slot, bool $flag): string
 
 function nullable(?bytes $maybe): string
 {
-    $text = $maybe as string;
-    takesBytes($maybe); // want P2103 "null|bytes given"
+    $text = is_string($maybe) && mb_check_encoding($maybe, 'UTF-8') ? $maybe : throw ($maybe === null ? new \TypeError('expected string, got null') : new \ValueError('not valid UTF-8'));
+    takesBytes($maybe); // past the throw, $maybe is text
 
     return $text;
 }
 
 function either(int|bytes $either): string
 {
-    return $either as string;
+    return is_string($either) && mb_check_encoding($either, 'UTF-8') ? $either : throw new \TypeError('expected string with valid UTF-8, got ' . get_debug_type($either));
 }
 
 function converted(bytes $raw): bytes
 {
-    takesString(random_bytes(4) as string); // want P3012 "the operand of `as` is evaluated twice"
-    takesBool(random_bytes(4) is string); // one call: the UTF-8 test reads it once
+    takesString(random_bytes(4) as string); // want P1001 "the operand would be evaluated twice"
+    takesBool(mb_check_encoding(random_bytes(4), 'UTF-8')); // one call: the UTF-8 test reads it once
 
     return $raw;
 }
@@ -346,7 +346,7 @@ function converted(bytes $raw): bytes
 // A (string) of an object calls __toString() again for every copy.
 function retyped(string $s): string
 {
-    return ((bytes) $s) as string;
+    return mb_check_encoding($s, 'UTF-8') ? $s : throw new \ValueError('not valid UTF-8');
 }
 
 final class Packet
@@ -357,30 +357,31 @@ final class Packet
 
     public function text(): string
     {
-        return (bytes) $this->raw as string;
+        return mb_check_encoding($this->raw, 'UTF-8') ? $this->raw : throw new \ValueError('not valid UTF-8');
     }
 
     public function label(): int|string
     {
-        return (string) $this->label as int|string; // want P2306,P3012 "__toString() runs each time"
+        return (string) $this->label as int|string; // want P1001 "__toString() would run each time"
     }
 }
 
 type Blob = string|bytes;
 
 // PHP cannot tell bytes from string at runtime: `is bytes`, and `is string`
-// on a value that may be either, have no test (P3011, generics.md §11.4).
+// on a value that may be either, had no test (P3011, generics.md §11.4),
+// and have no rewrite now that `is` and `as` left the language (P1001).
 function untestable(mixed $m, string $s, bytes $b, string|bytes $either, (Blob, int) $pair): void
 {
-    takesBool($m is bytes); // want P3011 "`bytes` cannot be tested at runtime: PHP cannot tell bytes from string; (bytes) retypes a string"
-    takesBool($s is bytes); // want P3011
-    takesBool($b is bytes); // want P3011
-    takesBool($m is ?bytes); // want P3011
-    takesBytes($m as bytes); // want P3011
-    takesBool($either is string); // want P3011 "`string` cannot be tested at runtime on string|bytes: PHP cannot tell bytes from string"
-    takesString($either as string); // want P3011
-    takesBool($pair is (string, int)); // want P3011 "on string|bytes"
-    takesBool($either is int); // want P2306 "string|bytes is never int"
+    takesBool($m is bytes); // want P1001 "`bytes` cannot be tested at runtime: PHP cannot tell bytes from string; (bytes) retypes a string"
+    takesBool($s is bytes); // want P1001
+    takesBool($b is bytes); // want P1001
+    takesBool($m is ?bytes); // want P1001
+    takesBytes($m as bytes); // want P1001
+    takesBool($either is string); // want P1001 "`string` cannot be tested at runtime on string|bytes: PHP cannot tell bytes from string"
+    takesString($either as string); // want P1001
+    takesBool($pair is (string, int)); // want P1001 "on string|bytes"
+    takesBool(is_int($either));
 }
 
 function equality(bytes $a, string $b, bytes $c): void

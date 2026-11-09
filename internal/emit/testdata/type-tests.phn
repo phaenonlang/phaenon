@@ -1,9 +1,11 @@
 namespace App\Tests;
 
-// `is` and `as` compile to the tests PHP makes itself, and to nothing else
-// (design/generics.md §11.4, roadmap D23 and D24): a check the operand's PHP
-// type already settles is left out, a compound test gets the parentheses
-// its place needs, `as` is PHP 8's `test ? $x : throw`.
+// A type test is PHP's own (roadmap D26): what the source writes is the
+// output, and PHPStan narrows through it there as the checker does in the
+// source. The tests are those phn fmt wrote for the withdrawn `is` and
+// `as` (design/tooling.md §5.6): a check the operand's type settles left
+// out, a compound test parenthesised where its place needs it, `as` as
+// PHP 8's `test ? $x : throw`.
 
 interface Model
 {
@@ -45,35 +47,35 @@ class Node
 
     public function is(mixed $other): bool
     {
-        return $other is self;
+        return $other instanceof self;
     }
 
     public function like(mixed $other): bool
     {
-        return $other is static;
+        return $other instanceof static;
     }
 
     public function id(): int
     {
-        return $this->row['id'] as int;
+        return is_int($this->row['id']) ? $this->row['id'] : throw new \TypeError('expected int, got ' . get_debug_type($this->row['id']));
     }
 
     public function nextValue(): ?User
     {
-        return $this->next === null ? null : $this->next->value as? User;
+        return $this->next === null ? null : ($this->next->value instanceof User ? $this->next->value : null);
     }
 
     public static function cached(): ?Node
     {
-        return self::$cache as? Node;
+        return self::$cache instanceof Node ? self::$cache : null;
     }
 
     // An operand written twice over more than one line is laid out anew.
     public function valueUser(): ?User
     {
         return $this
-            ->value as?
-            User;
+            ->value instanceof User ? $this
+            ->value : null;
     }
 }
 
@@ -86,26 +88,26 @@ function value(): mixed
 function single(mixed $m): int
 {
     $n = 0;
-    $n += $m is int ? 1 : 0;
-    $n += $m is float ? 1 : 0;
-    $n += $m is string ? 1 : 0;
-    $n += $m is bool ? 1 : 0;
-    $n += $m is array ? 1 : 0;
-    $n += $m is object ? 1 : 0;
-    $n += $m is callable ? 1 : 0;
-    $n += $m is iterable ? 1 : 0;
-    $n += $m is scalar ? 1 : 0;
-    $n += $m is numeric ? 1 : 0;
-    $n += $m is resource ? 1 : 0;
-    $n += $m is map<mixed, mixed> ? 1 : 0;
-    $n += $m is User ? 1 : 0;
-    $n += $m is Model ? 1 : 0;
-    $n += $m is Suit ? 1 : 0;
-    $n += $m is Closure ? 1 : 0;
-    $n += $m is true ? 1 : 0;
-    $n += value() is null ? 1 : 0;
-    $n += value() is int ? 1 : 0;
-    $n += value() is User ? 1 : 0;
+    $n += is_int($m) ? 1 : 0;
+    $n += is_float($m) ? 1 : 0;
+    $n += is_string($m) ? 1 : 0;
+    $n += is_bool($m) ? 1 : 0;
+    $n += is_array($m) ? 1 : 0;
+    $n += is_object($m) ? 1 : 0;
+    $n += is_callable($m) ? 1 : 0;
+    $n += is_iterable($m) ? 1 : 0;
+    $n += is_scalar($m) ? 1 : 0;
+    $n += is_numeric($m) ? 1 : 0;
+    $n += is_resource($m) ? 1 : 0;
+    $n += is_array($m) ? 1 : 0;
+    $n += $m instanceof User ? 1 : 0;
+    $n += $m instanceof Model ? 1 : 0;
+    $n += $m instanceof Suit ? 1 : 0;
+    $n += $m instanceof \Closure ? 1 : 0;
+    $n += $m === true ? 1 : 0;
+    $n += value() === null ? 1 : 0;
+    $n += is_int(value()) ? 1 : 0;
+    $n += value() instanceof User ? 1 : 0;
 
     return $n;
 }
@@ -114,37 +116,37 @@ function single(mixed $m): int
 function compound(mixed $m, object $o, string $s): int
 {
     $n = 0;
-    if ($m is ?User) {
+    if ($m === null || $m instanceof User) {
         $n += $m === null ? 0 : $m->id;
     }
-    if ($m is int|string|Suit) {
+    if (is_int($m) || is_string($m) || $m instanceof Suit) {
         $n++;
     }
-    if ($m is number) {
+    if (is_int($m) || is_float($m)) {
         $n++;
     }
-    if ($o is \Countable&\Traversable) {
+    if ($o instanceof \Countable && $o instanceof \Traversable) {
         $n += \count($o);
     }
-    if ($m is class<User>) {
+    if (is_string($m) && is_a($m, User::class, true)) {
         $n += \strlen($m);
     }
-    if ($m is class) {
+    if (is_string($m) && (class_exists($m) || interface_exists($m))) {
         $n += \strlen($m);
     }
-    if ($s is class<User> || $s is class) {
+    if (is_a($s, User::class, true) || class_exists($s) || interface_exists($s)) {
         $n++;
     }
-    if ($m is list) {
+    if (is_array($m) && array_is_list($m)) {
         $n += \count($m);
     }
-    if ($m is (int, ?string)) {
+    if (is_array($m) && array_is_list($m) && count($m) === 2 && is_int($m[0]) && ($m[1] === null || is_string($m[1]))) {
         $n += $m[0] + \strlen($m[1] ?? '');
     }
-    if ($m is ?(string, (int, bool))) {
+    if ($m === null || (is_array($m) && array_is_list($m) && count($m) === 2 && is_string($m[0]) && is_array($m[1]) && array_is_list($m[1]) && count($m[1]) === 2 && is_int($m[1][0]) && is_bool($m[1][1]))) {
         $n += $m === null ? 0 : \count($m);
     }
-    if ($m is Key) {
+    if (is_int($m) || is_string($m)) {
         $n++;
     }
 
@@ -157,16 +159,16 @@ function compound(mixed $m, object $o, string $s): int
 function settled(map<int|string, int> $ints, array<mixed> $pair, ?Repository<User> $repo, string|int $key): int
 {
     $n = 0;
-    if ($ints is list) {
+    if (array_is_list($ints)) {
         $n += \count($ints);
     }
-    if ($pair is (int, int)) {
+    if (array_is_list($pair) && count($pair) === 2 && is_int($pair[0]) && is_int($pair[1])) {
         $n += $pair[0] + $pair[1];
     }
-    if ($repo is Repository<User>) {
+    if ($repo instanceof Repository) {
         $n += \count($repo->items);
     }
-    if ($key is class<User>) {
+    if (is_string($key) && is_a($key, User::class, true)) {
         $n++;
     }
 
@@ -176,51 +178,51 @@ function settled(map<int|string, int> $ints, array<mixed> $pair, ?Repository<Use
 // Parentheses where the place needs them, none where it does not.
 function places(mixed $a, mixed $b, mixed $c, mixed $d, mixed $e, mixed $f, bool $flag): bool
 {
-    $r = !$a is null;
-    $r = $flag && $b is ?User;
-    $r = $r || $c is list;
-    $r = $flag === $d is null;
-    $r = ($e is ?User) && $r;
+    $r = !($a === null);
+    $r = $flag && ($b === null || $b instanceof User);
+    $r = $r || (is_array($c) && array_is_list($c));
+    $r = $flag === ($d === null);
+    $r = ($e === null || $e instanceof User) && $r;
 
-    return $r || !($f is int|string);
+    return $r || !(is_int($f) || is_string($f));
 }
 
 // A switch's subject and cases and an array's index take any expression:
 // no parentheses there.
 function kinds(mixed $m, mixed $n, mixed $k, map<int, string> $names): string
 {
-    switch ($n is ?int) {
+    switch ($n === null || is_int($n)) {
         case true:
             return 'maybe int';
     }
     switch (true) {
-        case $m is ?User:
+        case $m === null || $m instanceof User:
             return 'maybe user';
-        case $m is list:
+        case is_array($m) && array_is_list($m):
             return 'list';
     }
 
-    return $names[$k as int] ?? '';
+    return $names[is_int($k) ? $k : throw new \TypeError('expected int, got ' . get_debug_type($k))] ?? '';
 }
 
 // `as` throws a TypeError naming the type, `as?` gives null.
 function checked(mixed $m, mixed $l, mixed $p, mixed $u, mixed $o): string
 {
-    $s = $m as string;
-    $list = $l as list;
-    $pair = $p as? (int, string);
-    $user = $u as? User;
-    $owner = $o as User|null;
+    $s = is_string($m) ? $m : throw new \TypeError('expected string, got ' . get_debug_type($m));
+    $list = is_array($l) && array_is_list($l) ? $l : throw new \TypeError('expected list, got ' . get_debug_type($l));
+    $pair = is_array($p) && array_is_list($p) && count($p) === 2 && is_int($p[0]) && is_string($p[1]) ? $p : null;
+    $user = $u instanceof User ? $u : null;
+    $owner = $o instanceof User || $o === null ? $o : throw new \TypeError('expected ?App\\Tests\\User, got ' . get_debug_type($o));
 
-    return $s . \count($list) . ($pair === null ? '' : $pair[1]) . ($user === null ? '' : $user->id) . ($owner === null ? '' : $owner->id);
+    return $s . \count($list) . ($pair === null ? '' : \gettype($pair[1])) . ($user === null ? '' : $user->id) . ($owner === null ? '' : $owner->id);
 }
 
 // `as?` is the operator only when its `?` touches `as`: `as ?int` is `as`
 // with the nullable type ?int, which throws on anything else.
 function spellings(mixed $a, mixed $b): int
 {
-    $maybe = $a as ?int;
-    $orNull = $b as? int;
+    $maybe = $a === null || is_int($a) ? $a : throw new \TypeError('expected ?int, got ' . get_debug_type($a));
+    $orNull = is_int($b) ? $b : null;
 
     return ($maybe ?? 0) + ($orNull ?? 0);
 }

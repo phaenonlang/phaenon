@@ -162,7 +162,7 @@ function firstPair(array $pairs): ?array
 function port(string $json): int
 {
     $config = \json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-    if (\is_array($config) && \is_int($config['port'] ?? null)) {
+    if (is_array($config) && \is_int($config['port'] ?? null)) {
         return $config['port'];
     }
 
@@ -179,7 +179,7 @@ function exported(object $value): array
     if (\method_exists($value, 'toArray')) {
         $data = $value->toArray();
 
-        return \is_array($data) ? $data : [];
+        return is_array($data) ? $data : [];
     }
 
     return [];

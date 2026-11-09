@@ -74,8 +74,8 @@ func TestExprSpacing(t *testing.T) {
 // (design/functions.md §3–4): the declaration keeps its arrow and its
 // clause, and printing the printed text again changes nothing.
 func TestFunctionSyntax(t *testing.T) {
-	src := "final class C\n{\n    fun name(): string\n        => $this->name;\n    abstract protected fun run(): void throws A|\\B\\C;\n    fun log(string $m): void => print $m;\n}\n\nfun f(): int throws X => 1;\n"
-	want := "final class C\n{\n    fun name(): string => $this->name;\n\n    abstract protected fun run(): void throws A|\\B\\C;\n\n    fun log(string $m): void => print $m;\n}\n\nfun f(): int throws X => 1;\n"
+	src := "final class C\n{\n    name(): string\n        => $this->name;\n    abstract protected run(): void throws A|\\B\\C;\n    log(string $m): void => print $m;\n}\n\nfunction f(): int throws X => 1;\n"
+	want := "final class C\n{\n    name(): string => $this->name;\n\n    abstract protected run(): void throws A|\\B\\C;\n\n    log(string $m): void => print $m;\n}\n\nfunction f(): int throws X => 1;\n"
 	f, err := parser.Parse([]byte(src), lexer.ModePhaenon)
 	if err != nil {
 		t.Fatal(err)

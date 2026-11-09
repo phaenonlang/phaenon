@@ -123,7 +123,7 @@ final class Erased<T of User>
 
     public function test(mixed $x): bool
     {
-        return $x is T; // want P3003
+        return $x instanceof T; // want P3003
     }
 
     public static ?T $shared = null; // want P3008
@@ -223,16 +223,16 @@ function uses(Box<int> $ints, Box<User> $users, Source<Admin> $admins, Sink<User
 
     $m = mixedValue();
     $v = $m;
-    if ($v is int) {
+    if (is_int($v)) {
         takesInt($v);
     }
-    if ($m is list<int>) { // want P3011 "test `is list`"
+    if ($m is list<int>) { // want P1001 "`list<int>` cannot be tested at runtime"
         takesInt($m[0]);
     }
     $o = mixedValue();
-    $n = $o as? User;
+    $n = $o instanceof User ? $o : null;
     takesUser($n); // want P2103
-    $s = $m as string;
+    $s = is_string($m) ? $m : throw new \TypeError('expected string, got ' . get_debug_type($m));
     takesString($s);
     $i = first<int>([1, 2]);
     takesInt($i ?? 0);

@@ -25,7 +25,9 @@ type Code struct {
 }
 
 var (
-	// P1 — removed constructs, and constructs the target PHP lacks
+	// P1 — removed constructs, and constructs the target PHP lacks.
+	// P1001 is `var`, a `concurrently` block or `spawn` (D25), and the
+	// spellings D26 and D27 withdrew: `is`, `as`, `as?` and `fun`.
 	P1001 = Code{"P1001", Error, "construct removed from Phaenon"}
 	// P1002: "… needs PHP 8.6 (target 8.5)" for a construct newer than the
 	// target that is not lowered (design/php-versions.md §3).
@@ -171,13 +173,11 @@ var (
 	P3008 = Code{"P3008", Error, "class type parameter in a static property"}
 	P3009 = Code{"P3009", Error, "type arguments on a non-generic callee"}
 	P3010 = Code{"P3010", Warning, "type argument not inferable"}
-	// P3011: `is` or `as` on a type PHP has no O(1) test for — list<int>,
-	// a Closure signature, bytes, string on an operand that may be bytes
-	// or text, Foo<Bar> the operand does not fix — and P3012: a test that
-	// writes its operand twice on an operand that must not be evaluated
-	// twice (design/generics.md §11.4, strings.md §6).
-	P3011 = Code{"P3011", Error, "type cannot be tested at runtime"}
-	P3012 = Code{"P3012", Error, "operand of a test evaluated twice"}
+	// P3011 reported `is` or `as` on a type PHP has no O(1) test for, and
+	// P3012 a test that wrote its operand twice on an operand that must
+	// not be evaluated twice (design/generics.md §11.4); retired with the
+	// operators by roadmap D26 on 2026-11-09, when a leftover test became
+	// P1001. The codes stay reserved.
 
 	// P4 — interop
 	P4001 = Code{"P4001", Warning, "docblock cannot be parsed"}

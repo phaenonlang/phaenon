@@ -1,9 +1,9 @@
 // --keep-calls: no chain becomes a pipeline, and none is reported.
 
-fun listed(list<int> $xs): string
+function listed(list<int> $xs): string
     => sprintf('[%s]', implode(',', array_map(fn (int $x): string => (string) ($x * 2), $xs)));
 
-fun banner(): string => strtoupper(trim(str_repeat(' ab', 2)));
+function banner(): string => strtoupper(trim(str_repeat(' ab', 2)));
 
 echo listed([1, 2]), "\n";
 echo banner(), "\n";

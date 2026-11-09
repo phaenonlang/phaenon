@@ -140,8 +140,8 @@ func TestImportPlacement(t *testing.T) {
 // want is the compiled line of pick()'s signature, found through the line
 // map.
 func TestImportShadowing(t *testing.T) {
-	check := "namespace App\\Engine;\n\nfinal class Check\n{\n    public static fun size(object $o): int\n    {\n        return 1;\n    }\n}\n"
-	checks := "namespace App\\Engines;\n\nfinal class Check\n{\n    public static fun size(object $o): int\n    {\n        return 1;\n    }\n}\n"
+	check := "namespace App\\Engine;\n\nfinal class Check\n{\n    public static size(object $o): int\n    {\n        return 1;\n    }\n}\n"
+	checks := "namespace App\\Engines;\n\nfinal class Check\n{\n    public static size(object $o): int\n    {\n        return 1;\n    }\n}\n"
 	sameName := "namespace App;\n\nfinal class Engine\n{\n}\n"
 	cases := []struct {
 		name   string
@@ -158,7 +158,7 @@ func TestImportShadowing(t *testing.T) {
 		{
 			name:   "a docblock's relative qualified name begins with it: FQCN",
 			others: []string{check},
-			src:    "namespace App;\n\n/** @param Engine\\Check $c */\nfun checked(object $c): object\n{\n    return $c;\n}\n\n" + dice(roll),
+			src:    "namespace App;\n\n/** @param Engine\\Check $c */\nfunction checked(object $c): object\n{\n    return $c;\n}\n\n" + dice(roll),
 			want:   "    public function pick(\\Random\\Engine $engine): int",
 		},
 		{

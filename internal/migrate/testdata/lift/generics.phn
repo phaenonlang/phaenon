@@ -22,13 +22,13 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
      * @param $attributeType - FQN of an attribute class
      * @param $className - FQN of a class we look for attributes in
      */
-    fun allOfType<T of object>(class<T> $attributeType, class $className): array<T> => [];
+    allOfType<T of object>(class<T> $attributeType, class $className): array<T> => [];
 
     /** Finds the first one. */
-    fun first<T of object>(class<T> $attributeType): ?T throws \ReflectionException => null;
+    first<T of object>(class<T> $attributeType): ?T throws \ReflectionException => null;
 
     /** @return T the mapped object */
-    fun map<T of object>(object $source, T|class<T> $target): T => $source;
+    map<T of object>(object $source, T|class<T> $target): T => $source;
 
     /**
      * @param callable(int): string $g
@@ -36,42 +36,42 @@ final class CachedReflector<ClassType of object, out EnumType of \UnitEnum> impl
      * @param array{id: int} $row
      * @param non-empty-string ...$names
      */
-    fun closures(?Closure(object, object): object $mapping, Closure(int): string $f, callable $g, int $n, array $row, string ...$names, ?string $maybe = null): void {}
+    closures(?Closure(object, object): object $mapping, Closure(int): string $f, callable $g, int $n, array $row, string ...$names, ?string $maybe = null): void {}
 
     /** @return list<int> */
-    fun widened(list<int> $xs): iterable => $xs;
+    widened(list<int> $xs): iterable => $xs;
 
-    fun qualified(\App\Model\Row $row, Row $other): void {}
+    qualified(\App\Model\Row $row, Row $other): void {}
 
     /**
      * @param int $n
      * @return iterable<string>
      */
-    fun untypedParts($n) {}
+    untypedParts($n) {}
 
-    fun __construct<ClassType of object>(private ReflectorInterface<ClassType, \UnitEnum> $reflector, string $name = '') {}
+    __construct<ClassType of object>(private ReflectorInterface<ClassType, \UnitEnum> $reflector, string $name = '') {}
 
-    fun fluent(): static => $this;
+    fluent(): static => $this;
 
     /** @phpstan-param positive-int $n */
-    fun prefixed(int $n): void {}
+    prefixed(int $n): void {}
 
-    fun count(): int => 0;
+    count(): int => 0;
 }
 
 abstract class Repo<T> extends Base<T> {}
 
-fun firstOf<T of object>(list<T> $items): ?T => $items[0] ?? null;
+function firstOf<T of object>(list<T> $items): ?T => $items[0] ?? null;
 
 /**
  * @param array{name: string, age: int} $named
  * @param array{string} $single
  */
-fun tuples((string, int) $pair, list<(string, int)> $pairs, array $named, array $single): (int, string)
+function tuples((string, int) $pair, list<(string, int)> $pairs, array $named, array $single): (int, string)
     => [$pair[1], $pair[0]];
 
 /** @param non-empty-array<string, \stdClass> $objects */
-fun keyed(map<int, string> $map, array $objects, Closure(int, int=): int $withOptional): void {}
+function keyed(map<int, string> $map, array $objects, Closure(int, int=): int $withOptional): void {}
 
 /**
  * A cluster reached over kubectl. PHPStan's `T...` and `T=` markers are
@@ -85,7 +85,7 @@ final class KubeAccess
     /** @var \Closure(int &$n): void */
     private \Closure $byRef;
 
-    fun __construct(Closure(string...): (int, string) $kubectl, ?Closure(string, int=): void $log = null) {
+    __construct(Closure(string...): (int, string) $kubectl, ?Closure(string, int=): void $log = null) {
         $this->kubectl = $kubectl;
         $this->kubectlStdin = static fn (string $stdin, string ...$args) => [0, $stdin];
         $this->byRef = static function (int &$n): void {

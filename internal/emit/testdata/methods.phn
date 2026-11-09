@@ -1,0 +1,82 @@
+namespace App\Methods;
+
+// A method declared without a keyword compiles to the PER head with
+// `function` and its visibility written (roadmap D27, design/functions.md
+// §1.2): in place, on the head's line, the modifiers the source writes in
+// PER order kept as its text.
+
+interface Shape
+{
+    area(): float;
+
+    static unit(): string;
+}
+
+abstract class Base implements Shape
+{
+    public static (\Countable&\Stringable)|null $dnf = null;
+
+    /** @var list<int> */
+    protected array $sizes = [];
+
+    __construct(public readonly int $id) {}
+
+    abstract area(): float;
+
+    abstract protected shape(): string;
+
+    static unit(): string => 'cm';
+
+    /** The sizes, a copy. */
+    #[\Deprecated]
+    final public sizes(): list<int> => $this->sizes;
+
+    protected static make(): ?Shape => null;
+
+    static protected made(): ?Shape => null;
+
+    private &first(): list<int>
+    {
+        return $this->sizes;
+    }
+
+    final protected counted(): int => \count($this->first());
+
+    head<T>(list<T> $xs): ?T => $xs[0] ?? null;
+
+    // Named after a modifier, `var`, `const`, `Closure`, `function` or
+    // `fn`, a method keeps `function`, and gets the `public` it implies.
+    function static(): string => static::class;
+
+    final function var(): int => 1;
+
+    public function Closure(): int => 2;
+
+    list(): list<int> => $this->sizes;
+
+    new(): ?Shape => static::make();
+
+    static
+    multiline(): int => 1;
+}
+
+enum Suit: string
+{
+    case Hearts = 'h';
+
+    label(): string => \ucfirst($this->name);
+}
+
+trait Greets
+{
+    greet(): string => 'hi';
+}
+
+final class Greeter
+{
+    use Greets;
+
+    anonymous(): object => new class {
+        inside(): int => 1;
+    };
+}

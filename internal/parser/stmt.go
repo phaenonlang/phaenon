@@ -264,7 +264,7 @@ func (p *Parser) statement() ast.Stmt {
 		p.semi()
 		c.S = p.span(start)
 		return c
-	case token.T_FUNCTION, token.T_FUN:
+	case token.T_FUNCTION:
 		if p.isFunctionDecl() {
 			return p.functionDecl(nil)
 		}
@@ -282,7 +282,7 @@ func (p *Parser) statement() ast.Stmt {
 			p.docComment = doc // a declaration's docblock sits above its attributes
 		}
 		switch {
-		case (p.at(token.T_FUNCTION) || p.at(token.T_FUN)) && p.isFunctionDecl():
+		case p.at(token.T_FUNCTION) && p.isFunctionDecl(), p.funAhead(false):
 			return p.functionDecl(attrs)
 		case p.at(token.T_CONST):
 			p.next()
@@ -312,6 +312,9 @@ func (p *Parser) statement() ast.Stmt {
 			return p.typeAlias(nil)
 		}
 	case token.T_STRING:
+		if p.funAhead(false) {
+			return p.functionDecl(nil)
+		}
 		// A block statement needs no semicolon after its brace, like any
 		// block; a `concurrently(...)` call goes on to the expression
 		// statement below.
@@ -813,10 +816,13 @@ func (p *Parser) functionDecl(attrs []*ast.AttrGroup) ast.Stmt {
 	}
 	doc := p.takeDoc()
 	kw := p.tok()
-	if !p.accept(token.T_FUN) {
+	fun := p.withdrawnWord("fun")
+	if fun {
+		p.next()
+	} else {
 		p.expect(token.T_FUNCTION)
 	}
-	f := &ast.FunctionDecl{Doc: doc, Attrs: attrs, Fun: kw.Kind == token.T_FUN, Head: ast.Span{Start: kw.Start, End: kw.End}}
+	f := &ast.FunctionDecl{Doc: doc, Attrs: attrs, Fun: fun, Kw: ast.Span{Start: kw.Start, End: kw.End}}
 	f.ByRef = p.acceptAmpersand()
 	if p.at(token.T_READONLY) {
 		t := p.next()
@@ -979,7 +985,8 @@ func (p *Parser) classBody() []ast.ClassMember {
 
 func (p *Parser) classMember() ast.ClassMember {
 	start := p.tok().Start
-	if p.at(token.T_USE) {
+	// `use(` and `case(` begin methods named so (roadmap D27).
+	if p.at(token.T_USE) && p.peekKind(1) != token.Kind('(') {
 		return p.traitUse()
 	}
 	doc := p.takeDoc()
@@ -987,7 +994,7 @@ func (p *Parser) classMember() ast.ClassMember {
 	if doc == "" {
 		doc = p.takeDoc()
 	}
-	if p.at(token.T_CASE) {
+	if p.at(token.T_CASE) && p.peekKind(1) != token.Kind('(') {
 		p.next()
 		e := &ast.EnumCase{Doc: doc, Attrs: attrs, Name: p.identifier()}
 		if p.accept(token.Kind('=')) {
@@ -1021,9 +1028,23 @@ func (p *Parser) classMember() ast.ClassMember {
 		p.expect(token.Kind(';'))
 		c.S = p.span(start)
 		return c
-	case p.at(token.T_FUNCTION), p.at(token.T_FUN):
-		kw := p.next()
-		m := &ast.MethodDecl{Doc: doc, Attrs: attrs, Modifiers: mods, Fun: kw.Kind == token.T_FUN, Head: ast.Span{Start: head, End: kw.End}}
+	case p.at(token.T_FUNCTION), p.funAhead(true), p.bareMethodAhead():
+		m := &ast.MethodDecl{Doc: doc, Attrs: attrs, Modifiers: mods}
+		if fun := p.funAhead(true); fun || p.at(token.T_FUNCTION) {
+			// PHP's `function`, or the withdrawn `fun`.
+			kw := p.next()
+			m.Fun = fun
+			m.Kw = ast.Span{Start: kw.Start, End: kw.End}
+			m.Head = ast.Span{Start: head, End: kw.End}
+		} else {
+			// No keyword (roadmap D27): the head is the modifiers.
+			at := p.tok().Start
+			m.Kw = ast.Span{Start: at, End: at}
+			m.Head = ast.Span{Start: at, End: at}
+			if mods != 0 {
+				m.Head = ast.Span{Start: head, End: modsEnd}
+			}
+		}
 		m.ByRef = p.acceptAmpersand()
 		m.Name = p.identifier()
 		m.TypeParams = p.typeParams()

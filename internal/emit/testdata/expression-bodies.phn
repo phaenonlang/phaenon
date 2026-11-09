@@ -10,33 +10,33 @@ use LogicException;
 
 interface Named
 {
-    fun name(): string;
+    name(): string;
 }
 
 final class User implements Named, \Stringable {
     private int $calls = 0;
 
-    fun __construct(private string $name) {}
+    __construct(private string $name) {}
 
-    fun name(): string => $this->name;
+    name(): string => $this->name;
 
-    fun log(string $message): void => $this->record($message);
+    log(string $message): void => $this->record($message);
 
-    private fun record(string $message): void {
+    private record(string $message): void {
         $this->calls += \strlen($message);
     }
 
-    fun fail(string $why): never => throw new LogicException($why);
+    fail(string $why): never => throw new LogicException($why);
 
-    fun calls(): int => $this->calls;
+    calls(): int => $this->calls;
 
-    static fun of(string $name): self
+    static of(string $name): self
         => new self(\trim($name));
 
-    fun greeting(string $salutation, string $punctuation, bool $shout = false): string
+    greeting(string $salutation, string $punctuation, bool $shout = false): string
         => $shout ? \strtoupper($salutation . ', ' . $this->name . $punctuation) : $salutation . ', ' . $this->name . $punctuation;
 
-    fun described(string $prefix, string $suffix): string
+    described(string $prefix, string $suffix): string
         => \sprintf(
             '%s %s %s',
             $prefix,
@@ -44,29 +44,29 @@ final class User implements Named, \Stringable {
             $suffix,
         );
 
-    fun logged(string $message, string $context): void
+    logged(string $message, string $context): void
         => $this->record($message . ' (' . $context . ')');
 
-    fun counter(): \Closure => fn (): int => $this->calls;
+    counter(): \Closure => fn (): int => $this->calls;
 
     #[\Override]
-    fun __toString(): string => $this->name;
+    __toString(): string => $this->name;
 
     /** @return list<string> the parts of the name */
-    fun parts(): array => \explode(' ', $this->name);
+    parts(): array => \explode(' ', $this->name);
 
     /** @return array{name: string, calls: int} */
-    fun tags(): array => [
+    tags(): array => [
         'name' => $this->name,
         'calls' => $this->calls,
     ];
 
-    fun &reference(): int => $this->calls;
+    &reference(): int => $this->calls;
 }
 
-fun double(int $x): int => $x * 2;
+function double(int $x): int => $x * 2;
 
-fun untouched(int $x): int
+function untouched(int $x): int
 {
     return $x;
 }
@@ -74,6 +74,6 @@ fun untouched(int $x): int
 function plain(): string => 'plain';
 
 /** @return list<int> */
-fun ids(int ...$ids): array => \array_values($ids);
+function ids(int ...$ids): array => \array_values($ids);
 
-fun show(): void => print User::of(' Ada ')->greeting('Hello', '!') . double(2) . plain() . untouched(1) . \count(ids(1, 2));
+function show(): void => print User::of(' Ada ')->greeting('Hello', '!') . double(2) . plain() . untouched(1) . \count(ids(1, 2));

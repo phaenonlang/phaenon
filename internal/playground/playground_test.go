@@ -10,10 +10,10 @@ import (
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 )
 
-const clean = "namespace App;\n\nfun greet(string $name): string => \"Hello, {$name}\";\n"
+const clean = "namespace App;\n\nfunction greet(string $name): string => \"Hello, {$name}\";\n"
 
 // broken returns a string where its type promises an int: P2202 on line 3.
-const broken = "namespace App;\n\nfun broken(): int => 'not an int';\n"
+const broken = "namespace App;\n\nfunction broken(): int => 'not an int';\n"
 
 func codes(fs []Finding) []string {
 	var out []string
@@ -75,7 +75,7 @@ func TestParseError(t *testing.T) {
 // A class from outside the file is unknown, as in phn check; a support
 // file, Phaenon or PHP, declares it. Support files are checked too.
 func TestSupportFiles(t *testing.T) {
-	main := "namespace App;\n\nuse Acme\\Clock;\n\nfun run(Clock $c): string => (new Greeter())->hello((string) $c->now());\n"
+	main := "namespace App;\n\nuse Acme\\Clock;\n\nfunction run(Clock $c): string => (new Greeter())->hello((string) $c->now());\n"
 	res := Compile(Request{Files: map[string]string{"main.phn": main}, Main: "main.phn"})
 	unknown := map[string]bool{}
 	for _, f := range res.Findings {
@@ -88,7 +88,7 @@ func TestSupportFiles(t *testing.T) {
 	}
 	files := map[string]string{
 		"main.phn":         main,
-		"lib/Greeter.phn":  "namespace App;\n\nfinal class Greeter\n{\n    fun hello(string $n): string => \"Hello, {$n}\";\n}\n",
+		"lib/Greeter.phn":  "namespace App;\n\nfinal class Greeter\n{\n    hello(string $n): string => \"Hello, {$n}\";\n}\n",
 		"vendor/Clock.php": "<?php\n\nnamespace Acme;\n\nfinal class Clock\n{\n    public function now(): int\n    {\n        return 1;\n    }\n}\n",
 		"notes.txt":        "not a source",
 	}
@@ -100,7 +100,7 @@ func TestSupportFiles(t *testing.T) {
 	if strings.Contains(res.PHP, "class Greeter") {
 		t.Errorf("a support file was compiled into the output:\n%s", res.PHP)
 	}
-	files["lib/Greeter.phn"] = "namespace App;\n\nfinal class Greeter\n{\n    fun hello(string $n): string => \"Hello, {$n}\";\n\n    fun count(): int => 'one';\n}\n"
+	files["lib/Greeter.phn"] = "namespace App;\n\nfinal class Greeter\n{\n    hello(string $n): string => \"Hello, {$n}\";\n\n    count(): int => 'one';\n}\n"
 	res = Compile(Request{Files: files, Main: "main.phn"})
 	if res.OK || len(res.Findings) == 0 || res.Findings[0].File != "lib/Greeter.phn" {
 		t.Errorf("an error in a support file: ok %v, findings %+v", res.OK, res.Findings)
@@ -116,7 +116,7 @@ func TestSupportFiles(t *testing.T) {
 // written as such for 8.6; a target phn does not compile for is P4009 and
 // compiles nothing.
 func TestTargets(t *testing.T) {
-	src := "fun pair(string $a, string $b): string => \"[$a|$b]\";\n\n$f = pair('x', ?);\n"
+	src := "function pair(string $a, string $b): string => \"[$a|$b]\";\n\n$f = pair('x', ?);\n"
 	for _, c := range []struct{ target, want string }{
 		{"", "fn(string $b) => pair('x', $b)"},
 		{"8.5", "fn(string $b) => pair('x', $b)"},
@@ -185,8 +185,8 @@ func TestCompilePage(t *testing.T) {
 	if res.OK || res.PHP != "" || res.Findings[0].File != "src/Broken.phn" {
 		t.Errorf("options: ok %v, findings %v, php %q", res.OK, res.Findings, res.PHP)
 	}
-	res = CompilePage("namespace App;\n\nfun run(): string => (new Greeter())->hello('x');\n",
-		[]byte(`{"files": {"Greeter.phn": "namespace App;\n\nfinal class Greeter\n{\n    fun hello(string $n): string => $n;\n}\n"}}`))
+	res = CompilePage("namespace App;\n\nfunction run(): string => (new Greeter())->hello('x');\n",
+		[]byte(`{"files": {"Greeter.phn": "namespace App;\n\nfinal class Greeter\n{\n    hello(string $n): string => $n;\n}\n"}}`))
 	if !res.OK || res.PHP == "" {
 		t.Errorf("files: ok %v, findings %v", res.OK, res.Findings)
 	}

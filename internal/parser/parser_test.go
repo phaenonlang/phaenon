@@ -154,13 +154,13 @@ func TestPartialApplicationInDeclarations(t *testing.T) {
 	src := `
 const F = str_replace(' ', '-', ?);
 #[Attr(strlen(...), cb: substr(?, 1))]
-fun f(Closure $g = strtoupper(?)): ?int {
+function f(Closure $g = strtoupper(?)): ?int {
     return null;
 }
 class C {
     const G = self::h(?, 2);
     public function __construct(private Closure $k = C::h(...)) {}
-    static fun h(int $a, int $b): int { return $a + $b; }
+    static h(int $a, int $b): int { return $a + $b; }
 }
 `
 	if _, err := Parse([]byte(src), lexer.ModePhaenon); err != nil {

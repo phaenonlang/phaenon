@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -9,17 +10,23 @@ import (
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
-// This file lowers the type of an `is`, `as` or `as?` to the tests PHP makes
-// itself (design/generics.md §11.4, roadmap D23): `\is_int($x)`, `$x
-// instanceof Foo`, `$x === null`, `\is_array($x) && \array_is_list($x)`, a
-// tuple's count and members. A type PHP has no O(1) test for is P3011, and a
-// test that writes its operand twice takes only an operand that reads the
-// same twice (P3012). A check the operand's PHP type already settles is left
-// out, as PHPStan would report it on the output: on an array, `is list` is
-// `\array_is_list($x)` alone. A bytes operand tested as a string is tested
-// for UTF-8 (design/strings.md §6): `\mb_check_encoding($b, 'UTF-8')`. The
-// lowering is recorded on the file (program.Test), and the emitter writes
-// it as recorded.
+// The type tests `is`, `as` and `as?` left the language with roadmap D26
+// (2026-11-09): a test is PHP's own (design/generics.md §11.5). A leftover
+// one is P1001, and phn fmt writes in its place the PHP test it compiled to
+// until then (design/tooling.md §5.6), which this file still derives,
+// because most of it depends on the operand's type: `\is_int($x)`, `$x
+// instanceof Foo`, `$x === null`, `\is_array($x) && \array_is_list($x)`,
+// a tuple's count and members (§11.4's table, roadmap D23). A check the
+// operand's PHP type already settles is left out, as PHPStan would report
+// it: on an array, `is list` is `\array_is_list($x)` alone. A bytes operand
+// tested as a string is tested for UTF-8 (design/strings.md §6):
+// `\mb_check_encoding($b, 'UTF-8')`. A type PHP has no O(1) test for, and
+// an operand a test would write twice that does not read the same twice,
+// have no rewrite: the reason goes into the P1001 message, where P3011 and
+// P3012, retired, once stood. The test is recorded on the file
+// (program.Test) with its rewrite, and the checker narrows through it as
+// through the PHP it stands for, so that a leftover test draws no finding
+// but its own.
 
 // checkKind says what a node of a test is.
 type checkKind uint8
@@ -82,9 +89,10 @@ type testBuilder struct {
 	// generic class (`Repository<User>|null` tested with `is
 	// Repository<User>`).
 	refined types.Type
-	// failed is set when a part of the type has no test; the part is
-	// reported where it was found.
+	// failed is set when a part of the type has no test; why says why,
+	// for the first such part.
 	failed bool
+	why    string
 }
 
 func (b *testBuilder) src(s ast.Span) string { return string(b.x.file.Src[s.Start:s.End]) }
@@ -255,22 +263,24 @@ func classTest(name string, of types.Type, path []int) *check {
 		&check{before: "\\is_a(", after: ", " + name + "::class, true)", path: path, prec: program.PrecAtom, accepts: types.ClassString{Of: of}})
 }
 
-// cannot reports a part of the type that has no test (P3011); written is
-// how the source spells it.
+// cannot records a part of the type that has no test (P3011 until roadmap
+// D26); written is how the source spells it.
 func (b *testBuilder) cannot(span ast.Span, written, why string) *check {
-	b.x.report(span, P3011, "%s cannot be tested at runtime%s", written, why)
+	if !b.failed {
+		b.why = written + " cannot be tested at runtime" + why
+	}
 	b.failed = true
 	return nil
 }
 
 const (
-	whyList     = " in O(1): test `is list` and build the typed value, or check the elements yourself"
-	whyArray    = " in O(1): test `is array` and build the typed value, or check the entries yourself"
-	whyIterable = " in O(1): test `is iterable` and check the values where they are read"
-	whyClosure  = ": test `is Closure`; PHP checks a closure's parameters and result when it is called"
+	whyList     = " in O(1): test is_array() and array_is_list(), and check the elements yourself"
+	whyArray    = " in O(1): test is_array(), and check the entries yourself"
+	whyIterable = " in O(1): test is_iterable(), and check the values where they are read"
+	whyClosure  = ": test instanceof \\Closure; PHP checks a closure's parameters and result when it is called"
 	whyBytes    = ": PHP cannot tell bytes from string; (bytes) retypes a string as binary data, (string) is the unchecked way back"
-	whyEither   = ": PHP cannot tell bytes from string; (bytes) retypes a string as binary data, (string) is the unchecked way back, and `as string` checks the UTF-8 of bytes"
-	whyClass    = " in O(1): test `is class` and check the class with is_a()"
+	whyEither   = ": PHP cannot tell bytes from string; (bytes) retypes a string as binary data, (string) is the unchecked way back, and mb_check_encoding($b, 'UTF-8') checks the UTF-8 of bytes"
+	whyClass    = " in O(1): test is_string() and check the class with is_a()"
 	whyNoValue  = ": no value has this type"
 	whyOther    = " in O(1): test a type PHP checks, and check the rest yourself"
 )
@@ -906,12 +916,12 @@ func render(c *check) (string, program.Prec) {
 // each pass.
 type testSeen struct{ t, nt types.Type }
 
-// lowerTest lowers the test of node (an `is`, `as` or `as?`) of operand
-// e against typ, records it for the emitter and reports P3011 and P3012.
-// o is the operand's type, what PHP guarantees of it and their text view;
-// typeOK says the type itself drew no finding. The result is the test as
-// emitted, nil when the type has none; untestable says the type has no
-// test, which was reported (P3011, P3003).
+// lowerTest lowers the test of node (a withdrawn `is`, `as` or `as?`) of
+// operand e against typ to PHP's own test and records it, with why there
+// is no rewrite where there is none (once P3011 and P3012). o is the
+// operand's type, what PHP guarantees of it and their text view; typeOK
+// says the type itself drew no finding. The result is the test, nil when
+// the type has none; untestable says the type has no test.
 func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, o operand, target types.Type, typeOK bool, env *state) (c *check, untestable bool) {
 	if x.c.testSeen == nil {
 		x.c.testSeen = map[ast.Expr]testSeen{}
@@ -932,6 +942,7 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, o opera
 	b := &testBuilder{x: x, op: op, refined: t}
 	c = b.build(typ, nil)
 	if c == nil || b.failed {
+		rec.Why = b.why
 		return nil, true
 	}
 	c, _, _, _, _ = x.simplify(c, testState{"": {t: nt}})
@@ -942,24 +953,19 @@ func (x *fnCtx) lowerTest(node, e ast.Expr, typ ast.TypeExpr, op string, o opera
 		rec.UTF8 = true
 		rec.EncodingOnly, rec.NullFirst = x.utf8Failure(o, target)
 	}
-	// Reported whether or not the test is settled: `phn build
-	// --emit-on-error` writes the test all the same.
-	// The operand is counted in what the emitter writes: an `as` writes it
-	// again as the value and in the TypeError's message.
+	// The operand is counted in what the rewrite writes: an `as` writes it
+	// again as the value and in the TypeError's message. Program.Test's
+	// Rewrite refuses an operand that does not read the same twice; one
+	// that does may still run code twice.
 	written := rec.Cond
 	if op != "is" {
 		written = rec.As(op == "as?")
 	}
-	twice := strings.Count(written, program.TestOperand) > 1
-	switch {
-	case !twice:
-	case !program.ReadsTwice(e):
-		x.report(e.Span(), P3012, "the operand of `%s` is evaluated twice; assign it to a variable first", op)
-	default:
+	if strings.Count(written, program.TestOperand) > 1 && program.ReadsTwice(e) {
 		if pr := x.hookedRead(e, env); pr != nil {
-			x.report(e.Span(), P3012, "the operand of `%s` reads the hooked property %s::$%s twice, and its get hook runs each time; assign it to a variable first", op, pr.Class.Name, pr.Name)
+			rec.Why = fmt.Sprintf("the operand reads the hooked property %s::$%s twice, and its get hook would run each time; assign it to a variable first", pr.Class.Name, pr.Name)
 		} else if x.stringifiesObject(e, env) {
-			x.report(e.Span(), P3012, "the operand of `%s` converts a value that may be an object twice, and its __toString() runs each time; assign it to a variable first", op)
+			rec.Why = "the operand converts a value that may be an object twice, and its __toString() would run each time; assign it to a variable first"
 		}
 	}
 	return c, false

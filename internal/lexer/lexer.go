@@ -533,29 +533,17 @@ func (l *Lexer) word(i int) token.Token {
 		if k, ok := phaenonKeywords[string(lower)]; ok {
 			return l.emit(k, end)
 		}
-		if string(lower) == "fun" && l.declaresName(end) {
-			return l.emit(token.T_FUN, end)
-		}
 	}
 	return l.emit(token.T_STRING, end)
 }
 
-// declaresName reports whether a name (or `&` and a name) follows offset i
-// after trivia: `fun id(` declares, `fun(` calls a function called fun and
-// `fun = 1` names a constant (design/functions.md §1.1).
-func (l *Lexer) declaresName(i int) bool {
-	j := l.skipWhitespaceAndComments(i)
-	if l.at(j) == '&' {
-		j = l.skipWhitespaceAndComments(j + 1)
-	}
-	return isLabelStart(l.at(j))
-}
-
-// phaenonKeywords are reserved only in Phaenon mode. The contextual ones
-// (type, of, in, out) are lexed as keywords and re-interpreted as
-// identifiers by the parser where the grammar allows a name.
+// phaenonKeywords are Phaenon's contextual keywords, lexed as keywords only
+// in Phaenon mode and re-interpreted as identifiers by the parser where the
+// grammar allows a name. `is` and `fun` are not among them since roadmap
+// D26 and D27 (2026-11-09): both are names, and the parser recognises their
+// withdrawn uses by position (internal/parser/withdrawn.go).
 var phaenonKeywords = map[string]token.Kind{
-	"is": token.T_IS, "type": token.T_TYPE, "of": token.T_OF, "in": token.T_IN, "out": token.T_OUT,
+	"type": token.T_TYPE, "of": token.T_OF, "in": token.T_IN, "out": token.T_OUT,
 }
 
 func (l *Lexer) skipWhitespaceAndComments(i int) int {

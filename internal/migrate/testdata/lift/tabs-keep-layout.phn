@@ -7,7 +7,7 @@ final class Shouter
     /**
      * The text,	shouted.
      */
-    fun shout(string $s): string
+    shout(string $s): string
     {
         return $s
             |> str_repeat(?, 2)
@@ -15,7 +15,7 @@ final class Shouter
             |> strtoupper(...);
     }
 
-    fun table(): string
+    table(): string
     {
         $cell = "a	b";
         return <<<EOT

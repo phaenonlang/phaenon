@@ -489,8 +489,8 @@ func (l *lifter) overrides(m *ast.MethodDecl) *overrideCtx {
 }
 
 func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
-	if !fn.Fun {
-		l.replace(fn.Head, "fun")
+	if e, ok := FunctionHead(fn); ok {
+		l.replace(e.Span, e.Text)
 	}
 	l.params(fn.Params)
 	sc := outer.child()
@@ -512,8 +512,8 @@ func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
 }
 
 func (l *lifter) methodDecl(m *ast.MethodDecl, outer scope) {
-	if !m.Fun {
-		l.replace(m.Head, l.funHead(m.Head))
+	if e, ok := MethodHead(l.src, m, !l.keepPublic); ok {
+		l.replace(e.Span, e.Text)
 	}
 	l.params(m.Params)
 	sc := outer.child()
@@ -1492,25 +1492,6 @@ func (l *lifter) astAtoms(t ast.TypeExpr, sc scope) atoms {
 		out["array"] = true
 	}
 	return normalise(out)
-}
-
-// funHead spells a `[modifiers] function` head as `[modifiers] fun`: the
-// modifiers as written, minus a `public` that `fun` implies (kept with
-// --keep-public). A head broken over lines or holding a comment keeps its
-// modifiers and has only the keyword replaced.
-func (l *lifter) funHead(head ast.Span) string {
-	text := string(l.src[head.Start:head.End])
-	if strings.ContainsAny(text, "\n\r/#") {
-		return text[:len(text)-len("function")] + "fun"
-	}
-	var parts []string
-	for _, w := range strings.Fields(text[:len(text)-len("function")]) {
-		if strings.EqualFold(w, "public") && !l.keepPublic {
-			continue
-		}
-		parts = append(parts, w)
-	}
-	return strings.Join(append(parts, "fun"), " ")
 }
 
 // params drops the `public` of a promoted parameter with an asymmetric

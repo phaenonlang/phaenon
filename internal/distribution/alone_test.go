@@ -45,11 +45,12 @@ func TestInstallsAlone(t *testing.T) {
 	}
 }
 
-// TestCompiledOutputRunsAlone builds a project with the real phn: the output
-// of the lowerings that once called phaenon/runtime (`is` and `as` on a list
-// and a tuple, `as` on bytes, a generic class) names nothing under Phaenon\
-// (emit.PhaenonReferences) and runs through Composer's autoloader with the
-// plugin installed alone, which TestInstallsAlone holds.
+// TestCompiledOutputRunsAlone builds a project with the real phn: the tests
+// that once called phaenon/runtime (of a list and a tuple, the UTF-8 of
+// bytes), written as PHP's own since roadmap D26, and a generic class name
+// nothing under Phaenon\ (emit.PhaenonReferences) and run through
+// Composer's autoloader with the plugin installed alone, which
+// TestInstallsAlone holds.
 func TestCompiledOutputRunsAlone(t *testing.T) {
 	w := newWorld(t, "")
 	php, err := exec.LookPath("php")
@@ -67,25 +68,25 @@ func TestCompiledOutputRunsAlone(t *testing.T) {
 
 final class Greeter
 {
-    fun greet(mixed $names, bytes $greeting): string {
-        $list = $names as list;
+    greet(mixed $names, bytes $greeting): string {
+        $list = is_array($names) && array_is_list($names) ? $names : throw new \TypeError('expected list, got ' . get_debug_type($names));
         $first = $list[0] ?? null;
-        $who = $first as? string;
-        $text = $greeting as string;
+        $who = is_string($first) ? $first : null;
+        $text = mb_check_encoding($greeting, 'UTF-8') ? $greeting : throw new \ValueError('not valid UTF-8');
 
         return $text . ', ' . ($who ?? 'nobody');
     }
 
-    fun pair(mixed $p): string => $p is (int, string) ? $p[1] . ' #' . $p[0] : 'no pair';
+    pair(mixed $p): string => is_array($p) && array_is_list($p) && count($p) === 2 && is_int($p[0]) && is_string($p[1]) ? $p[1] . ' #' . $p[0] : 'no pair';
 }
 `), 0o644)
 	writeFile(t, filepath.Join(p.dir, "src", "Box.phn"), []byte(`namespace App;
 
 final class Box<T>
 {
-    fun __construct(private T $value) {}
+    __construct(private T $value) {}
 
-    fun get(): T => $this->value;
+    get(): T => $this->value;
 }
 `), 0o644)
 

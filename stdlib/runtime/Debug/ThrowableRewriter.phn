@@ -35,10 +35,10 @@ final class ThrowableRewriter
     /** Exception's and Error's file, line and trace properties, by "Class::name". */
     private static map<string, ReflectionProperty> $properties = [];
 
-    private fun __construct() {}
+    private __construct() {}
 
     /** Rewrites $e and its previous chain, the throwables not rewritten before. */
-    static fun rewrite(Throwable $e): void {
+    static rewrite(Throwable $e): void {
         $rewritten = self::$rewritten ??= new WeakMap();
         for ($t = $e; $t !== null && !isset($rewritten[$t]); $t = $t->getPrevious()) {
             $rewritten[$t] = [$t->getFile(), $t->getLine()];
@@ -51,7 +51,7 @@ final class ThrowableRewriter
      * source; null for a throwable not rewritten, or thrown where no map
      * applies.
      */
-    static fun compiledPosition(Throwable $e): ?(string, int) {
+    static compiledPosition(Throwable $e): ?(string, int) {
         if (self::$rewritten === null || !isset(self::$rewritten[$e])) {
             return null;
         }
@@ -60,7 +60,7 @@ final class ThrowableRewriter
         return $position[0] === $e->getFile() && $position[1] === $e->getLine() ? null : $position;
     }
 
-    private static fun rewriteOne(Throwable $t): void {
+    private static rewriteOne(Throwable $t): void {
         $class = $t instanceof Exception ? Exception::class : Error::class;
         $file = $t->getFile();
         $map = LineMap::forFile($file);
@@ -102,7 +102,7 @@ final class ThrowableRewriter
     }
 
     /** @param class-string $class */
-    private static fun property(string $class, string $name): ReflectionProperty {
+    private static property(string $class, string $name): ReflectionProperty {
         return self::$properties[$class . '::' . $name] ??= new ReflectionProperty($class, $name);
     }
 }

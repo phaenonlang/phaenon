@@ -3,7 +3,7 @@
 // Nodes are grouped into typed families — Expr, Stmt, TypeExpr, plus the
 // declaration-level helpers — so the checker and the emitter get static
 // guarantees about what can appear where. Phaenon-only constructs are
-// additions to the PHP tree (TypeArgs on calls, IsExpr, TypeAlias, …), never
+// additions to the PHP tree (TypeArgs on calls, TypeAlias, …), never
 // a separate tree: PHP-mode and Phaenon-mode share every node.
 //
 // Every node records its byte span in the source. Doc comments are attached
@@ -14,6 +14,9 @@ import "github.com/phaenonlang/phaenon/internal/token"
 
 // Span is a half-open byte range [Start, End) in the source file.
 type Span struct{ Start, End int }
+
+// Text is the span's text in src.
+func (s Span) Text(src []byte) string { return string(src[s.Start:s.End]) }
 
 // Node is implemented by every syntax node.
 type Node interface{ Span() Span }
@@ -413,13 +416,18 @@ type (
 		S    Span
 		Expr Expr
 	}
-	// IsExpr is Phaenon's `x is T` / `x is !T`.
+	// IsExpr is `x is T`, the type test withdrawn by roadmap D26
+	// (2026-11-09; a test is PHP's own). It is parsed so that the checker
+	// can name it (P1001) with the PHP test it stood for, which phn fmt
+	// writes in its place; the emitter refuses it.
 	IsExpr struct {
 		S    Span
+		Kw   Span // the word `is`
 		Expr Expr
 		Type TypeExpr
 	}
-	// AsExpr is Phaenon's `x as T` (throws) / `x as? T` (null on failure).
+	// AsExpr is `x as T` (throws) or `x as? T` (null on failure), withdrawn
+	// with IsExpr by roadmap D26 and parsed for the same reasons.
 	AsExpr struct {
 		S    Span
 		Expr Expr
@@ -727,11 +735,14 @@ func (*ClassDecl) stmtNode()    {}
 
 // FunctionDecl is a named function.
 type FunctionDecl struct {
-	S          Span
-	Doc        string
-	Attrs      []*AttrGroup
-	Fun        bool // spelled `fun` (Phaenon); Head is the keyword
-	Head       Span // the keyword
+	S     Span
+	Doc   string
+	Attrs []*AttrGroup
+	// Fun marks the declaration spelled with `fun`, withdrawn by roadmap
+	// D27 (2026-11-09): parsed so that the checker can name it (P1001) and
+	// phn fmt can respell it `function`.
+	Fun        bool
+	Kw         Span // the keyword: `function`, or the withdrawn `fun`
 	ByRef      bool
 	Name       *Ident
 	TypeParams []*TypeParam
@@ -743,7 +754,11 @@ type FunctionDecl struct {
 }
 
 func (n *FunctionDecl) Span() Span { return n.S }
-func (*FunctionDecl) stmtNode()    {}
+
+// Bare reports a method declared without a keyword (roadmap D27):
+// `title(): string`, `protected static create(): static`.
+func (n *MethodDecl) Bare() bool { return n.Kw.Start == n.Kw.End }
+func (*FunctionDecl) stmtNode()  {}
 
 // Throws is the clause `throws A|B` after a signature: the exceptions a
 // named function or method lets escape (design/functions.md §4). It
@@ -774,12 +789,22 @@ func (n *ExprBody) Span() Span { return n.S }
 type (
 	// MethodDecl is a method; Body == nil means abstract / interface method.
 	MethodDecl struct {
-		S          Span
-		Doc        string
-		Attrs      []*AttrGroup
-		Modifiers  Modifier
-		Fun        bool // spelled `fun` (Phaenon): public unless a visibility is written
-		Head       Span // the modifiers and the keyword
+		S         Span
+		Doc       string
+		Attrs     []*AttrGroup
+		Modifiers Modifier
+		// Head is the modifiers and the keyword as written. A method
+		// declared without a keyword (roadmap D27) has only its
+		// modifiers there, and with none an empty span at Kw.
+		Head Span
+		// Kw is the keyword, PHP's `function` or the withdrawn `fun`; for
+		// a method declared without one, the empty span where it would
+		// stand, before the `&` or the name.
+		Kw Span
+		// Fun marks the head spelled with `fun`, withdrawn by roadmap D27
+		// (2026-11-09): parsed so that the checker can name it (P1001)
+		// and phn fmt can respell it.
+		Fun        bool
 		ByRef      bool
 		Name       *Ident
 		TypeParams []*TypeParam

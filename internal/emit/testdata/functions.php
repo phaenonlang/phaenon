@@ -8,7 +8,7 @@ namespace App;
 
 use Closure;
 
-// `fun` declares a function or method, public unless a visibility is written;
+// A method is declared without a keyword, public unless a visibility is written;
 // a property with an asymmetric visibility and no main one is public; a
 // closure in a constant expression compiles to the static function PHP 8.5
 // accepts there (design/functions.md).

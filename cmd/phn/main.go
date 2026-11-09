@@ -76,9 +76,10 @@ usage:
                                                            rebuild, run the tool again and report what it still
                                                            changes, with the rule behind each change for php-cs-fixer
                                                            and Rector; --check reports and writes no source
-  phn fmt [--check] [<file>...] | --stdin                  lay .phn files out: Phaenon's layout (spaces for tabs,
-                                                           braces, {}, one-line docblocks, the spacing of type
-                                                           parameters and arguments, throws, is, as), then the
+  phn fmt [--check] [<file>...] | --stdin                  lay .phn files out: Phaenon's layout (the withdrawn fun,
+                                                           is and as rewritten, function lifted off methods, spaces
+                                                           for tabs, braces, {}, one-line docblocks, the spacing of
+                                                           type parameters and arguments, throws), then the
                                                            project's fixer through phn fix
                                                            (phaenon.json "fmt", or tools/php-cs-fixer or
                                                            vendor/bin/php-cs-fixer); no files:
@@ -92,7 +93,7 @@ usage:
                                                            changes
   phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] <path>...
                                                            rewrite .php files as .phn; lift generic docblocks and bare
-                                                           @throws into syntax, function into fun; write chains of
+                                                           @throws into syntax, function off methods; write chains of
                                                            three nested calls or more as |> pipelines unless
                                                            --keep-calls (--pipes=2: from two), undone in a file whose
                                                            types or findings they change; lay the code out (function
@@ -717,7 +718,7 @@ func printDiag(d checker.Diagnostic) {
 func migrateCmd(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	keepDoc := fs.Bool("keep-docblocks", false, "leave generic docblocks as they are")
-	keepPublic := fs.Bool("keep-public", false, "write `public fun` and keep `public` before private(set) (Phaenon implies it)")
+	keepPublic := fs.Bool("keep-public", false, "keep the `public` of a method lifted out of `function`, and before private(set) (PHP implies it)")
 	keepLayout := fs.Bool("keep-layout", false, "keep braces, docblocks and bodies as they are (no canonical layout)")
 	keepCalls := fs.Bool("keep-calls", false, "keep nested calls as they are (no pipelines)")
 	pipes := fs.Int("pipes", 3, "write chains of this many nested calls or more as pipelines (2 or more)")

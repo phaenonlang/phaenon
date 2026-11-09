@@ -2,18 +2,18 @@ namespace App\ListTypesSelf;
 
 abstract class Command
 {
-    abstract protected fun args(string $name): list<string>;
+    abstract protected args(string $name): list<string>;
 
-    abstract protected fun options(): array<mixed>;
+    abstract protected options(): array<mixed>;
 }
 
 final class Hello extends Command
 {
     // The parent's list<string> is what it returns: it takes that type.
-    protected fun args(string $name): array => ['hello', $name];
+    protected args(string $name): array => ['hello', $name];
 
     // The parent says array<mixed>, this one returns a map of strings.
-    protected fun options(): map<string, string> => ['verbose' => 'yes'];
+    protected options(): map<string, string> => ['verbose' => 'yes'];
 }
 
 final class Tree
@@ -23,21 +23,21 @@ final class Tree
     private list<string> $seen = [];
 
     // A property filtered into itself, and one spread into itself.
-    fun skip(string $id, float $at, float $before): void {
+    skip(string $id, float $at, float $before): void {
         $this->skipped = array_filter($this->skipped, static fn (float $t): bool => $t > $before);
         $this->skipped[$id] = $at;
     }
 
-    fun see(string ...$names): int {
+    see(string ...$names): int {
         $this->seen = [...$this->seen, ...array_values($names)];
 
         return count($this->seen) + count($this->skipped);
     }
 
-    fun strings(array<mixed> $doc): map<string, string> => self::leaves($doc);
+    strings(array<mixed> $doc): map<string, string> => self::leaves($doc);
 
     // A recursion: what it returns holds what it returns.
-    private static fun leaves(array<mixed> $tree, string $prefix = ''): map<string, string> {
+    private static leaves(array<mixed> $tree, string $prefix = ''): map<string, string> {
         $out = [];
         foreach ($tree as $key => $value) {
             $path = '' === $prefix ? (string) $key : $prefix . '.' . $key;
@@ -51,10 +51,10 @@ final class Tree
         return $out;
     }
 
-    static fun size(object $root): int => self::walk($root, []);
+    static size(object $root): int => self::walk($root, []);
 
     // Two methods passing a parameter on to each other.
-    private static fun walk(mixed $value, map<int, true> $visited): int {
+    private static walk(mixed $value, map<int, true> $visited): int {
         if (!\is_object($value) || isset($visited[spl_object_id($value)])) {
             return 0;
         }
@@ -63,7 +63,7 @@ final class Tree
         return 1 + self::walkAll(get_object_vars($value), $visited);
     }
 
-    private static fun walkAll(map<string, mixed> $values, map<int, true> $visited): int {
+    private static walkAll(map<string, mixed> $values, map<int, true> $visited): int {
         $n = 0;
         foreach ($values as $v) {
             $n += self::walk($v, $visited);
@@ -72,10 +72,10 @@ final class Tree
         return $n;
     }
 
-    static fun deepest(array<mixed> $tree): int => self::depth([], $tree);
+    static deepest(array<mixed> $tree): int => self::depth([], $tree);
 
     // A path that grows as the recursion descends.
-    private static fun depth(list<string> $path, array<mixed> $node): int {
+    private static depth(list<string> $path, array<mixed> $node): int {
         $max = \count($path);
         foreach ($node as $key => $child) {
             if (\is_array($child)) {
@@ -89,19 +89,19 @@ final class Tree
 
 final class Printer
 {
-    fun __construct(private Other $other) {}
+    __construct(private Other $other) {}
 
     // Other::format() is not this class's: its argument is not one.
-    fun print(): string => $this->format(['a', 'b']) . $this->other->format(42) . (['x', 'y'] |> $this->joined(...))
+    print(): string => $this->format(['a', 'b']) . $this->other->format(42) . (['x', 'y'] |> $this->joined(...))
         . \count(self::rows());
 
-    private fun format(list<string> $words): string => implode(' ', $words);
+    private format(list<string> $words): string => implode(' ', $words);
 
     // Piped in: the pipe's left side is its argument.
-    private fun joined(list<string> $parts): string => implode('', $parts);
+    private joined(list<string> $parts): string => implode('', $parts);
 
     // An unnamed @var types what it returns.
-    private static fun rows(): list<map<string, mixed>> {
+    private static rows(): list<map<string, mixed>> {
         /** @var list<array<string, mixed>> */
         return json_decode('[]', true);
     }
@@ -109,5 +109,5 @@ final class Printer
 
 final class Other
 {
-    fun format(int $n): string => (string) $n;
+    format(int $n): string => (string) $n;
 }

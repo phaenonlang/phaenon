@@ -10,8 +10,8 @@ import (
 
 func TestExpand(t *testing.T) {
 	cases := []struct{ name, in, want string }{
-		{"indentation", "class A {\n\tfun f() {\n\t\treturn 1;\n\t}\n}\n",
-			"class A {\n    fun f() {\n        return 1;\n    }\n}\n"},
+		{"indentation", "class A {\n\tf() {\n\t\treturn 1;\n\t}\n}\n",
+			"class A {\n    f() {\n        return 1;\n    }\n}\n"},
 		{"tab stops", "$a = 1;\t// x\n  \t$b;\n",
 			"$a = 1; // x\n    $b;\n"},
 		{"string content stays", "$s = \"a\tb\";\t$t = 'c\td';\n",
@@ -45,7 +45,7 @@ func TestExpand(t *testing.T) {
 }
 
 func TestFindLines(t *testing.T) {
-	src := []byte("class A {\n\tfun f() {\t}\n\t$s = \"\t\";\n}\n")
+	src := []byte("class A {\n\tf() {\t}\n\t$s = \"\t\";\n}\n")
 	offs := Find(src)
 	if len(offs) != 3 || offs[0] != 10 {
 		t.Fatalf("Find = %v, want three tabs, the first at 10", offs)

@@ -29,7 +29,7 @@ func TestMapSource(t *testing.T) {
 func TestBuildCheckEmitOnError(t *testing.T) {
 	bin := phnBinary(t)
 	root := formatTree(t)
-	writeTree(t, root, map[string]string{"src/Good.phn": "namespace App;\n\nfun good(): int => 1;\n"})
+	writeTree(t, root, map[string]string{"src/Good.phn": "namespace App;\n\nfunction good(): int => 1;\n"})
 
 	if _, _, err := run(t, root, bin, "build", "--check", "--emit-on-error"); err == nil {
 		t.Error("--check passed before anything was built")
@@ -59,7 +59,7 @@ func TestBuildAbsentRoot(t *testing.T) {
 	root := formatTree(t)
 	writeTree(t, root, map[string]string{
 		"phaenon.json": `{"roots": {"src": ".src", "tests": ".tests"}}`,
-		"src/Good.phn": "namespace App;\n\nfun good(): int => 1;\n",
+		"src/Good.phn": "namespace App;\n\nfunction good(): int => 1;\n",
 	})
 	if err := os.Remove(filepath.Join(root, "src", "Bad.phn")); err != nil {
 		t.Fatal(err)

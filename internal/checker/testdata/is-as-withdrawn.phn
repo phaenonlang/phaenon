@@ -1,9 +1,11 @@
 namespace App\IsAs;
 
-// `is` and `as` test what PHP tests in O(1) (design/generics.md §11.4):
-// P3011 for a type PHP has no such test for, P3012 for an operand a
-// compound test would evaluate twice, the narrowing PHPStan gives the
-// native test on the output.
+// `is`, `as` and `as?` left the language (roadmap D26): each is P1001,
+// with the PHP test it compiled to (design/generics.md §11.4), which phn
+// fmt writes in its place, or with why there is none: a type PHP has no
+// O(1) test for (P3011 until then), an operand the test would evaluate
+// twice (P3012). The checker narrows on a withdrawn test as on its PHP,
+// so that nothing else is reported about it.
 
 interface Model
 {
@@ -94,31 +96,31 @@ function takesKey(Key $k): string
 function checkable(mixed $m, string $s, object $o): int
 {
     $n = 0;
-    if ($m is int || $m is float || $m is string || $m is bool || $m is null) {
+    if ($m is int || $m is float || $m is string || $m is bool || $m is null) { // want P1001 "is_int($m)", P1001 "is_float($m)", P1001 "is_string($m)", P1001 "is_bool($m)", P1001 "$m === null"
         $n++;
     }
-    if ($m is array || $m is object || $m is callable || $m is iterable || $m is true || $m is false) {
+    if ($m is array || $m is object || $m is callable || $m is iterable || $m is true || $m is false) { // want P1001 "is_array($m)", P1001 "is_object($m)", P1001 "is_callable($m)", P1001 "is_iterable($m)", P1001 "$m === true", P1001 "$m === false"
         $n++;
     }
-    if ($m is scalar || $m is numeric || $m is number || $m is resource) {
+    if ($m is scalar || $m is numeric || $m is number || $m is resource) { // want P1001 "is_scalar($m)", P1001 "is_numeric($m)", P1001 "is_int($m) || is_float($m)", P1001 "is_resource($m)"
         $n++;
     }
-    if ($m is User || $m is Model || $m is Suit || $m is \Closure || $m is Closure) {
+    if ($m is User || $m is Model || $m is Suit || $m is \Closure || $m is Closure) { // want P1001 "$m instanceof User", P1001 "$m instanceof Model", P1001 "$m instanceof Suit", P1001 "$m instanceof \Closure", P1001 "$m instanceof \Closure"
         $n++;
     }
-    if ($m is ?User || $m is int|string || $o is \Countable&\Traversable) {
+    if ($m is ?User || $m is int|string || $o is \Countable&\Traversable) { // want P1001 "$m === null || $m instanceof User", P1001 "is_int($m) || is_string($m)", P1001 "($o instanceof \Countable && $o instanceof \Traversable)"
         $n++;
     }
-    if ($m is class<User> || $s is class || $m is class<object>) {
+    if ($m is class<User> || $s is class || $m is class<object>) { // want P1001 "(is_string($m) && is_a($m, User::class, true))", P1001 "class_exists($s) || interface_exists($s)", P1001 "(is_string($m) && (class_exists($m) || interface_exists($m)))"
         $n++;
     }
-    if ($m is list || $m is map<mixed, mixed> || $m is map<int|string, mixed> || $m is array<mixed>) {
+    if ($m is list || $m is map<mixed, mixed> || $m is map<int|string, mixed> || $m is array<mixed>) { // want P1001 "(is_array($m) && array_is_list($m))", P1001 "is_array($m)", P1001 "is_array($m)", P1001 "is_array($m)"
         $n++;
     }
-    if ($m is (int, ?string) || $m is ?(int, (string, bool))) {
+    if ($m is (int, ?string) || $m is ?(int, (string, bool))) { // want P1001 "(is_array($m) && array_is_list($m) && count($m) === 2 && is_int($m[0])", P1001
         $n++;
     }
-    if ($m is Key) {
+    if ($m is Key) { // want P1001 "is_int($m) || is_string($m)"
         $n++;
     }
 
@@ -130,48 +132,48 @@ function checkable(mixed $m, string $s, object $o): int
 function uncheckable(mixed $m, ?Repository<User> $r): int
 {
     $n = 0;
-    if ($m is list<int>) { // want P3011 "`list<int>` cannot be tested at runtime in O(1): test `is list`"
+    if ($m is list<int>) { // want P1001 "`list<int>` cannot be tested at runtime in O(1): test is_array() and a"
         $n++;
     }
-    if ($m is map<string, mixed>) { // want P3011 "test `is array`"
+    if ($m is map<string, mixed>) { // want P1001 "`map<string, mixed>` cannot be tested at runtime in O(1): test is_arra"
         $n++;
     }
-    if ($m is array<int>) { // want P3011 "test `is array`"
+    if ($m is array<int>) { // want P1001 "`array<int>` cannot be tested at runtime in O(1): test is_array(), and"
         $n++;
     }
-    if ($m is iterable<int>) { // want P3011 "test `is iterable`"
+    if ($m is iterable<int>) { // want P1001 "`iterable<int>` cannot be tested at runtime in O(1): test is_iterable("
         $n++;
     }
-    if ($m is Closure(int): string) { // want P3011 "test `is Closure`"
+    if ($m is Closure(int): string) { // want P1001 "`Closure(int): string` cannot be tested at runtime: test instanceof \C"
         $n++;
     }
-    if ($m is bytes) { // want P3011 "PHP cannot tell bytes from string"
+    if ($m is bytes) { // want P1001 "`bytes` cannot be tested at runtime: PHP cannot tell bytes from string"
         $n++;
     }
-    if ($m is (int, list<string>)) { // want P3011 "`list<string>`"
+    if ($m is (int, list<string>)) { // want P1001 "`list<string>` cannot be tested at runtime in O(1): test is_array() an"
         $n++;
     }
-    if ($m is ?list<User>) { // want P3011 "`list<User>`"
+    if ($m is ?list<User>) { // want P1001 "`list<User>` cannot be tested at runtime in O(1): test is_array() and "
         $n++;
     }
-    if ($m is int|map<string, int>) { // want P3011 "`map<string, int>`"
+    if ($m is int|map<string, int>) { // want P1001 "`map<string, int>` cannot be tested at runtime in O(1): test is_array("
         $n++;
     }
-    if ($m is Ids) { // want P3011 "`Ids` (`list<int>`)"
+    if ($m is Ids) { // want P1001 "`Ids` (`list<int>`) cannot be tested at runtime in O(1): test is_array"
         $n++;
     }
-    if ($m is Repository<User>) { // want P3011 "mixed does not fix them; test `is Repository`"
+    if ($m is Repository<User>) { // want P1001 "`Repository<User>` cannot be tested at runtime: instanceof does not se"
         $n++;
     }
-    if ($m is class<Repository<User>>) { // want P3011 "test `is class`"
+    if ($m is class<Repository<User>>) { // want P1001 "`class<Repository<User>>` cannot be tested at runtime in O(1): test is"
         $n++;
     }
-    if ($m is void) { // want P3011 "no value has this type"
+    if ($m is void) { // want P1001 "`void` cannot be tested at runtime: no value has this type"
         $n++;
     }
-    $u = $m as list<User>; // want P3011 "test `is list`"
-    $v = $m as? map<string, int>; // want P3011 "test `is array`"
-    if ($r is Repository<User>) {
+    $u = $m as list<User>; // want P1001 "`list<User>` cannot be tested at runtime in O(1): test is_array() and "
+    $v = $m as? map<string, int>; // want P1001 "`map<string, int>` cannot be tested at runtime in O(1): test is_array("
+    if ($r is Repository<User>) { // want P1001 "$r instanceof Repository"
         $n++; // the operand fixes the arguments: instanceof Repository decides
     }
 
@@ -182,8 +184,8 @@ function uncheckable(mixed $m, ?Repository<User> $r): int
 // settles the test as well.
 function settledUntestable(string $s): bool
 {
-    return $s is list<int> // want P3011
-        || $s is Closure(int): string; // want P3011
+    return $s is list<int> // want P1001 "`list<int>` cannot be tested at runtime in O(1): test is_array() and a"
+        || $s is Closure(int): string; // want P1001 "`Closure(int): string` cannot be tested at runtime: test instanceof \C"
 }
 
 // The arguments a union's member fixes, and ones it does not: a Model may
@@ -191,16 +193,16 @@ function settledUntestable(string $s): bool
 function generic(Repository<User>|int $a, Repository<User>|Repository<Model> $b, Repository<Admin>|User $c, Repository<User>|Model $d): int
 {
     $n = 0;
-    if ($a is Repository<User>) {
+    if ($a is Repository<User>) { // want P1001 "$a instanceof Repository"
         $n += \count($a->items);
     }
-    if ($b is Repository<User>) { // want P3011 "does not fix them"
+    if ($b is Repository<User>) { // want P1001 "`Repository<User>` cannot be tested at runtime: instanceof does not se"
         $n++;
     }
-    if ($c is Repository<Admin>) {
+    if ($c is Repository<Admin>) { // want P1001 "$c instanceof Repository"
         $n += \count($c->items);
     }
-    if ($d is Repository<User>) { // want P3011 "does not fix them"
+    if ($d is Repository<User>) { // want P1001 "`Repository<User>` cannot be tested at runtime: instanceof does not se"
         $n++;
     }
 
@@ -215,27 +217,27 @@ final class Box<T>
 
     public function same(mixed $other): bool
     {
-        return $other is self; // no type parameter is read
+        return $other is self; // no type parameter is read // want P1001 "$other instanceof self"
     }
 
     public function like(mixed $other): bool
     {
-        return $other is static;
+        return $other is static; // want P1001 "$other instanceof static"
     }
 
     public function holds(mixed $m): bool
     {
-        return $m is ?T; // want P3003
+        return $m is ?T; // want P1001, P3003
     }
 
     public function names(mixed $m): bool
     {
-        return $m is class<T>; // want P3003
+        return $m is class<T>; // want P1001, P3003
     }
 
     public function pair(mixed $m): bool
     {
-        return $m is (T, int); // want P3003
+        return $m is (T, int); // want P1001, P3003
     }
 
     public function value(): T
@@ -254,12 +256,12 @@ final class Holder
 
     public function read(): int
     {
-        $id = $this->row['id'] as int;
-        $self = self::$cache as? Holder;
-        $item = $this->next->item as? User; // want P2105
-        $key = $this->row[\PHP_EOL] as? int;
-        $deep = $this->next?->item as? int; // want P3012 "the operand of `as?` is evaluated twice"
-        $first = $this->next?->item is ?User; // want P3012
+        $id = $this->row['id'] as int; // want P1001
+        $self = self::$cache as? Holder; // want P1001 "self::$cache instanceof Holder ? self::$cache : null"
+        $item = $this->next->item as? User; // want P1001 "$this->next->item instanceof User ? $this->next->item : null", P2105
+        $key = $this->row[\PHP_EOL] as? int; // want P1001 "is_int($this->row[\PHP_EOL]) ? $this->row[\PHP_EOL] : null"
+        $deep = $this->next?->item as? int; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
+        $first = $this->next?->item is ?User; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
 
         return $id + ($self === null ? 0 : 1) + ($item?->id ?? 0) + ($key ?? 0) + ($deep ?? 0) + ($first ? 1 : 0);
     }
@@ -271,22 +273,22 @@ final class Holder
 function operands(mixed $m, int $i, map<int, mixed> $a): int
 {
     $n = 0;
-    if (value() is int || value() is User || value() is null) {
+    if (value() is int || value() is User || value() is null) { // want P1001 "is_int(value())", P1001 "value() instanceof User", P1001 "value() === null"
         $n++;
     }
-    if (value() is list) { // want P3012 "the operand of `is` is evaluated twice; assign it to a variable first"
+    if (value() is list) { // want P1001 "the operand would be evaluated twice; assign it to a variable first"
         $n++;
     }
-    if (value() is ?int) { // want P3012
+    if (value() is ?int) { // want P1001 "the operand would be evaluated twice; assign it to a variable first"
         $n++;
     }
-    $x = value() as int; // want P3012 "the operand of `as` is evaluated twice"
-    $y = value() as? int; // want P3012 "`as?`"
-    $z = ($m ?? $i) as int; // want P3012
-    $w = $a[$i] as ?int; // want P3012 "the operand of `as` is"
-    $v = ($m = value()) as int; // want P3012
-    $u = $a[0] as int;
-    if ($a is list) {
+    $x = value() as int; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
+    $y = value() as? int; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
+    $z = ($m ?? $i) as int; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
+    $w = $a[$i] as ?int; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
+    $v = ($m = value()) as int; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
+    $u = $a[0] as int; // want P1001 "is_int($a[0]) ? $a[0] : throw new \TypeError('expected int, got ' . ge"
+    if ($a is list) { // want P1001 "array_is_list($a)"
         $n++; // on an array, `is list` is \array_is_list($a) alone: any operand
     }
 
@@ -297,35 +299,35 @@ function operands(mixed $m, int $i, map<int, mixed> $a): int
 function narrowing(mixed $m, map<int|string, int> $ints, mixed $p, mixed $c): int
 {
     $n = 0;
-    if ($ints is list) {
+    if ($ints is list) { // want P1001 "array_is_list($ints)"
         $n += takesInts($ints); // list<int>
     }
-    if ($m is list) {
+    if ($m is list) { // want P1001 "is_array($m) && array_is_list($m)"
         $n += takesList($m);
         $n += takesInts($m); // want P2103
     }
-    if ($m is array) {
+    if ($m is array) { // want P1001 "is_array($m)"
         $n += takesArray($m);
         $n += takesList($m); // want P2103
     }
-    if ($p is (int, string)) {
+    if ($p is (int, string)) { // want P1001 "is_array($p) && array_is_list($p) && count($p) === 2 && is_int($p[0]) "
         $n += \strlen(takesPair($p));
     }
-    if ($p is ?(int, string)) {
+    if ($p is ?(int, string)) { // want P1001 "$p === null || (is_array($p) && array_is_list($p) && count($p) === 2 &"
         $n += \strlen(takesPair($p ?? [1, ''])); // want P2103 "list{mixed, mixed} given"
     }
-    if ($c is class<User>) {
+    if ($c is class<User>) { // want P1001 "is_string($c) && is_a($c, User::class, true)"
         $n += \strlen(takesUserClass($c));
     }
-    if ($m is Repository) {
+    if ($m is Repository) { // want P1001 "$m instanceof Repository"
         $n += takesModel($m->first()) ? 1 : 0; // the parameter is its bound
     }
-    if ($m is Key) {
+    if ($m is Key) { // want P1001 "is_int($m) || is_string($m)"
         $n += \strlen(takesKey($m));
     }
-    $i = $m as int;
+    $i = $m as int; // want P1001 "is_int($m) ? $m : throw new \TypeError('expected int, got ' . get_debu"
     $n += takesInt($m); // `as` threw unless $m is an int
-    $s = $p as? string;
+    $s = $p as? string; // want P1001 "is_string($p) ? $p : null"
     $n += takesInt($p); // want P2103
 
     return $n + $i + \strlen($s ?? '');
@@ -336,14 +338,14 @@ function narrowing(mixed $m, map<int|string, int> $ints, mixed $p, mixed $c): in
 // writes the test.
 function settled(int $i, string $s, mixed $m): int
 {
-    $a = $i as int; // want P2306 "int is always int"
-    $b = $s as? int; // want P2306 "string is never int"
-    if ($m is mixed) { // want P2306
+    $a = $i as int; // want P1001 "is_int($i) ? $i : throw new \TypeError('expected int, got ' . get_debu"
+    $b = $s as? int; // want P1001 "is_int($s) ? $s : null"
+    if ($m is mixed) { // want P1001 "true"
         return 0;
     }
-    $c = \strlen('a') as int; // want P2306,P3012
-    $d = value() as? mixed; // want P2306
-    $e = value() as mixed; // want P2306,P3012
+    $c = \strlen('a') as int; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
+    $d = value() as? mixed; // want P1001 "true ? value() : null"
+    $e = value() as mixed; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
 
     return $a + ($b ?? 0) + $c + (\is_int($d) ? $d : 0) + (\is_int($e) ? $e : 0);
 }
@@ -354,32 +356,32 @@ function settled(int $i, string $s, mixed $m): int
 function elseBranch((int, string)|int $t, list<int>|int $l, object|int $o, (int, string)|int|null $p, int|string $v, ?User $u): int
 {
     $n = 0;
-    if ($t is (int, string)) {
+    if ($t is (int, string)) { // want P1001 "is_array($t) && array_is_list($t) && count($t) === 2 && is_int($t[0]) "
         $n++;
     } else {
         takesInt($t); // want P2103 "int|list{int, string} given"
     }
-    if ($l is list) {
+    if ($l is list) { // want P1001 "is_array($l) && array_is_list($l)"
         $n++;
     } else {
         takesInt($l); // want P2103
     }
-    if ($o is \Countable&\Traversable) {
+    if ($o is \Countable&\Traversable) { // want P1001 "$o instanceof \Countable && $o instanceof \Traversable"
         $n++;
     } else {
         takesInt($o); // want P2103
     }
-    if ($p is ?(int, string)) {
+    if ($p is ?(int, string)) { // want P1001 "$p === null || (is_array($p) && array_is_list($p) && count($p) === 2 &"
         $n++;
     } else {
         takesInt($p); // want P2103 "int|list{int, string} given"
     }
-    if ($v is int) {
+    if ($v is int) { // want P1001 "is_int($v)"
         $n++;
     } else {
         $n += \strlen(takesString($v)); // a false is_int() leaves the string
     }
-    if ($u is null) {
+    if ($u is null) { // want P1001 "$u === null"
         return $n;
     }
 
@@ -393,7 +395,7 @@ function looped(list<mixed> $xs): int
     $n = 0;
     $last = null;
     foreach ($xs as $x) {
-        if ($x is Box<list>) { // want P3001
+        if ($x is Box<list>) { // want P1001, P3001
             $n++;
         }
         $last = $n;
@@ -407,9 +409,9 @@ function looped(list<mixed> $xs): int
 // tuple too.
 function arity(mixed $m): bool
 {
-    return $m is Box<list> // want P3001
-        || $m is class<list> // want P3001
-        || $m is (list, class, int);
+    return $m is Box<list> // want P1001, P3001
+        || $m is class<list> // want P1001, P3001
+        || $m is (list, class, int); // want P1001
 }
 
 // The inline @var check holds a tag to PHP's type of the value, and to the
@@ -449,8 +451,8 @@ class Limits
 
     public function read(): int
     {
-        $d = static::DEFAULT as? int; // want P2306 "null is never int"
-        $e = self::DEFAULT is ?int; // want P2306
+        $d = static::DEFAULT as? int; // want P1001 "is_int(static::DEFAULT) ? static::DEFAULT : null"
+        $e = self::DEFAULT is ?int; // want P1001 "self::DEFAULT === null || is_int(self::DEFAULT)"
 
         return ($d ?? 0) + ($e ? 1 : 0);
     }
@@ -458,9 +460,9 @@ class Limits
 
 function constants(): int
 {
-    $n = Limits::N as int; // want P2306 "is always int"
-    $m = \PHP_INT_MAX as? int; // want P2306
-    $k = Limits::KEY as int|string; // want P2306
+    $n = Limits::N as int; // want P1001 "is_int(Limits::N) ? Limits::N : throw new \TypeError('expected int, go"
+    $m = \PHP_INT_MAX as? int; // want P1001 "is_int(\PHP_INT_MAX) ? \PHP_INT_MAX : null"
+    $k = Limits::KEY as int|string; // want P1001 "is_string(Limits::KEY) ? Limits::KEY : throw new \TypeError('expected "
 
     return $n + ($m ?? 0) + \strlen((string) $k);
 }
@@ -483,11 +485,11 @@ final class Hooked
 
     public function read(): int
     {
-        $b = $this->raw is ?int; // want P3012
-        $c = $this->raw is int; // one function call reads it once
-        $a = $this->raw as int; // want P3012 "reads the hooked property App\IsAs\Hooked::$raw twice"
-        $d = $this->data as int;
-        $e = $this->link->data as? int; // want P2105,P3012 "Hooked::$link"
+        $b = $this->raw is ?int; // want P1001 "the operand reads the hooked property App\IsAs\Hooked::$raw twice, and"
+        $c = $this->raw is int; // one function call reads it once // want P1001 "is_int($this->raw)"
+        $a = $this->raw as int; // want P1001 "the operand reads the hooked property App\IsAs\Hooked::$raw twice, and"
+        $d = $this->data as int; // want P1001 "is_int($this->data) ? $this->data : throw new \TypeError('expected int"
+        $e = $this->link->data as? int; // want P1001 "the operand reads the hooked property App\IsAs\Hooked::$link twice, an", P2105
 
         return $a + ($b ? 1 : 0) + ($c ? 1 : 0) + $d + ($e ?? 0);
     }
@@ -497,7 +499,7 @@ final class Hooked
 // narrows $k after it, not before it.
 function coalescedKey(mixed $k, map<int, string> $names): string
 {
-    return $names[$k as int] ?? '';
+    return $names[$k as int] ?? ''; // want P1001 "is_int($k) ? $k : throw new \TypeError('expected int, got ' . get_debu"
 }
 
 // `as?` is the operator only when its `?` touches `as`: `$x as ?int` is
@@ -505,12 +507,12 @@ function coalescedKey(mixed $k, map<int, string> $names): string
 // `$x as? int` gives null on anything but an int.
 function spellings(?int $n, null $z): int
 {
-    $a = $n as ?int; // want P2306 "int|null is always int|null"
-    $b = $n as? int;
-    $c = $z as? int; // want P2306 "null is never int"
-    $d = $z as ?int; // want P2306 "null is always int|null"
-    $e = value() as ?int; // want P3012 "the operand of `as` is"
-    $f = value() as? int; // want P3012 "the operand of `as?` is"
+    $a = $n as ?int; // want P1001 "$n === null || is_int($n) ? $n : throw new \TypeError('expected ?int, "
+    $b = $n as? int; // want P1001 "is_int($n) ? $n : null"
+    $c = $z as? int; // want P1001 "is_int($z) ? $z : null"
+    $d = $z as ?int; // want P1001 "$z === null || is_int($z) ? $z : throw new \TypeError('expected ?int, "
+    $e = value() as ?int; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
+    $f = value() as? int; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
 
     return ($a ?? 0) + ($b ?? 0) + ($c ?? 0) + ($d ?? 0) + ($e ?? 0) + ($f ?? 0);
 }
