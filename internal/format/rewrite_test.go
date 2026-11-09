@@ -285,7 +285,8 @@ func rewriteAndCompile(t *testing.T, name string, src []byte) []byte {
 
 // TestRewriteRefusedTwice: an operand a rewrite would write more than once
 // must read the same twice (P3012 until roadmap D26). Such a test has no
-// rewrite: it stays P1001, with the reason, and phn fmt leaves it.
+// rewrite: it stays P1001, with the reason, and phn fmt leaves it and
+// gives the same reason.
 func TestRewriteRefusedTwice(t *testing.T) {
 	src := []byte("function f(): int\n{\n    return \\strlen('a') as int;\n}\n\nfunction g(): bool\n{\n    return \\strlen('a') is int|string;\n}\n")
 	p := program.New()
@@ -305,15 +306,14 @@ func TestRewriteRefusedTwice(t *testing.T) {
 	if !found[3] || !found[8] {
 		t.Errorf("P1001 with the reason on lines %v, want 3 and 8", found)
 	}
-	tests := map[ast.Span]string{}
-	for n, rec := range f.Tests {
-		if rec.Rewritten != "" {
-			tests[n.Span()] = rec.Rewritten
-		}
-	}
-	out, left, err := SourceWith(src, Options{Tests: tests, Program: true})
+	out, left, err := SourceWith(src, TestsOf(f))
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, l := range left {
+		if !strings.Contains(l.Msg, "evaluated twice; assign it to a variable first") {
+			t.Errorf("left without the checker's reason: %s", l.Msg)
+		}
 	}
 	if len(left) != 2 || !strings.Contains(string(out), "\\strlen('a') as int;") || !strings.Contains(string(out), "\\strlen('a') is int|string;") {
 		t.Errorf("left %v, wrote:\n%s", left, out)

@@ -20,8 +20,26 @@ type Options struct {
 	// each compiled to, which the checked program gives
 	// (program.Test.Rewritten). With Program, a test without one has no
 	// rewrite.
-	Tests   map[ast.Span]string
+	Tests map[ast.Span]string
+	// Why says, by span, why a test the checked program reads has no
+	// rewrite: its type has no PHP test, its operand would be evaluated
+	// twice (program.Test.Why).
+	Why     map[ast.Span]string
 	Program bool
+}
+
+// TestsOf is what a checked file's program knows of its withdrawn type
+// tests: the PHP of each and why one has none.
+func TestsOf(f *program.File) Options {
+	opts := Options{Tests: map[ast.Span]string{}, Why: map[ast.Span]string{}, Program: true}
+	for n, rec := range f.Tests {
+		if rec.Rewritten != "" {
+			opts.Tests[n.Span()] = rec.Rewritten
+		} else if rec.Why != "" {
+			opts.Why[n.Span()] = rec.Why
+		}
+	}
+	return opts
 }
 
 // Left is a withdrawn type test the first layer leaves as written: its
@@ -80,7 +98,7 @@ func respell(src []byte, opts Options) ([]byte, []Left, error) {
 					return true
 				}
 			}
-			left = append(left, Left{Span: e.Span(), Msg: leftMessage(n, opts.Program)})
+			left = append(left, Left{Span: e.Span(), Msg: leftMessage(n, opts.Program, opts.Why[e.Span()])})
 		}
 		return true
 	})
@@ -98,13 +116,16 @@ func instanceOf(is *ast.IsExpr, class string, slots *program.Slots) []migrate.He
 	return []migrate.HeadEdit{{Span: ast.Span{Start: is.S.Start, End: is.S.Start}, Text: "("}, rest}
 }
 
-func leftMessage(n ast.Node, checked bool) string {
+func leftMessage(n ast.Node, checked bool, why string) string {
 	op := "is"
 	if as, ok := n.(*ast.AsExpr); ok {
 		op = "as"
 		if as.Nullable {
 			op = "as?"
 		}
+	}
+	if checked && why != "" {
+		return fmt.Sprintf("`%s` left the language (roadmap D26) and this test has no PHP rewrite: write PHP's own test; %s", op, why)
 	}
 	if checked {
 		return fmt.Sprintf("`%s` left the language (roadmap D26) and this test has no PHP rewrite: write PHP's own test", op)

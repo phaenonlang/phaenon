@@ -63,8 +63,7 @@ func fmtCmd(args []string) {
 		proj.requireRoots("fmt")
 		files = collect(proj.roots(), proj.isOutput, ".phn")
 	}
-	tests := withdrawnTests(proj, files)
-	changed, withdrawn := layoutWith(files, *check, tests)
+	changed, withdrawn := layoutWith(files, *check, withdrawnTests(proj, files))
 	if *check {
 		fmt.Printf("%d files checked, %d not in Phaenon's layout\n", len(files), changed)
 	} else {
@@ -100,16 +99,18 @@ func fmtCmd(args []string) {
 	}
 }
 
-// layoutWith is layoutFiles with the rewrites of the withdrawn type tests
-// a checked program gave (withdrawnTests), and the number of files changed
-// and whether a withdrawn test was left as written, which it reports.
-func layoutWith(files []string, check bool, tests map[string]map[ast.Span]string) (changed int, left bool) {
+// layoutWith is layoutFiles with what a checked program knows of each
+// file's withdrawn type tests (withdrawnTests), and the number of files
+// changed and whether a withdrawn test was left as written, which it
+// reports.
+func layoutWith(files []string, check bool, checked map[string]format.Options) (changed int, left bool) {
 	for _, path := range files {
 		src, err := os.ReadFile(path)
 		if err != nil {
 			fail("%v", err)
 		}
-		opts := format.Options{Tests: tests[path], Program: tests != nil}
+		opts := checked[path]
+		opts.Program = checked != nil
 		out, lefts, err := format.SourceWith(src, opts)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)
@@ -133,13 +134,13 @@ func layoutWith(files []string, check bool, tests map[string]map[ast.Span]string
 	return changed, left
 }
 
-// withdrawnTests are the rewrites of the withdrawn type tests `is`, `as`
-// and `as?` that the files hold (roadmap D26, design/tooling.md §5.6), by
-// file and span: the files holding one are checked, as phn check checks
-// them, and each test's PHP is the checked program's. nil without a
+// withdrawnTests is what the checked program knows of the withdrawn type
+// tests `is`, `as` and `as?` that the files hold (roadmap D26, design
+// tooling.md §5.6), by file: each test's PHP, or why it has none. The
+// files holding one are checked, as phn check checks them. nil without a
 // project, when there is no program to read types from, and with nothing
 // to rewrite.
-func withdrawnTests(proj *project, files []string) map[string]map[ast.Span]string {
+func withdrawnTests(proj *project, files []string) map[string]format.Options {
 	if proj == nil {
 		return nil
 	}
@@ -161,17 +162,10 @@ func withdrawnTests(proj *project, files []string) map[string]map[ast.Span]strin
 	projectSources = proj.sources()
 	p, _ := loadProgram(holding, tgt.Version, true)
 	checker.New(p, proj.checkerOptions(checker.Options{})).Check()
-	out := map[string]map[ast.Span]string{}
+	out := map[string]format.Options{}
 	for _, path := range holding {
-		f := p.File(path)
-		if f == nil {
-			continue
-		}
-		out[path] = map[ast.Span]string{}
-		for n, rec := range f.Tests {
-			if rec.Rewritten != "" {
-				out[path][n.Span()] = rec.Rewritten
-			}
+		if f := p.File(path); f != nil {
+			out[path] = format.TestsOf(f)
 		}
 	}
 	return out

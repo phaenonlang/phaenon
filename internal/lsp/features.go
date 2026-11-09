@@ -790,12 +790,7 @@ func (s *Server) formatting(uri string) (any, error) {
 	var opts format.Options
 	if checked != nil {
 		s.query.Lock()
-		opts = format.Options{Tests: map[ast.Span]string{}, Program: true}
-		for n, rec := range checked.file.Tests {
-			if rec.Rewritten != "" {
-				opts.Tests[n.Span()] = rec.Rewritten
-			}
-		}
+		opts = format.TestsOf(checked.file)
 		s.query.Unlock()
 	}
 	out, _, err := format.SourceWith(src, opts)
