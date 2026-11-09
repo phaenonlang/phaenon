@@ -364,20 +364,23 @@ func skipEmit(src []byte) bool {
 
 var reStrict = regexp.MustCompile(`strict_types\s*=\s*1`)
 
-// reservedInPhaenon lists tests that declare something named `is`, which
-// PHP 8.6 deprecates and Phaenon reserves as the type-test operator.
+// reservedInPhaenon lists tests whose file Phaenon refuses where PHP's own
+// expected output is PHP's error for it, so the emitter has nothing to
+// compare.
 var reservedInPhaenon = map[string]bool{
-	"Zend/tests/deprecated_identifiers/is/class_as_name.phpt":        true,
-	"Zend/tests/deprecated_identifiers/is/class_as_name_use.phpt":    true,
-	"Zend/tests/deprecated_identifiers/is/constant_as_name_use.phpt": true,
-	"Zend/tests/deprecated_identifiers/is/function_as_name.phpt":     true,
-	"Zend/tests/deprecated_identifiers/is/function_as_name_use.phpt": true,
-	// The PHP-8.5 branch's versions of these declare a function is(); the
-	// newer branches renamed it once PHP 8.6 deprecated the name.
-	"Zend/tests/asymmetric_visibility/variation.phpt":        true,
-	"Zend/tests/asymmetric_visibility/variation_nested.phpt": true,
-	"Zend/tests/readonly_props/variation.phpt":               true,
-	"Zend/tests/readonly_props/variation_nested.phpt":        true,
+	// The modifiers PHP refuses on a class member, and a property without
+	// one, are a syntax error in Phaenon too; each file is PHP's test of
+	// its own error.
+	"Zend/tests/access_modifiers/access_modifiers_001.phpt": true,
+	"Zend/tests/access_modifiers/access_modifiers_002.phpt": true,
+	"Zend/tests/access_modifiers/access_modifiers_004.phpt": true,
+	"Zend/tests/access_modifiers/access_modifiers_005.phpt": true,
+	"Zend/tests/access_modifiers/access_modifiers_006.phpt": true,
+	"Zend/tests/access_modifiers/access_modifiers_007.phpt": true,
+	"Zend/tests/errmsg/errmsg_009.phpt":                     true,
+	"Zend/tests/errmsg/errmsg_010.phpt":                     true,
+	"Zend/tests/readonly_props/multiple_modifiers.phpt":     true,
+	"Zend/tests/readonly_props/readonly_method.phpt":        true,
 }
 
 // emitDeviations are corpus files whose comparison is void.
