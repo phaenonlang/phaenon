@@ -3,19 +3,19 @@
 // arrow functions for PHP 8.5 (partial.php), written as such for 8.6
 // (partial.8.6.php). Both print the same under PHP 8.6.
 
-fun pair(string $a, string $b): string { return "[$a|$b]"; }
-fun three(int $a, string $b = 'b', float $c = 1.5): string { return "$a-$b-$c"; }
-fun vari(string $sep, string ...$parts): string { return implode($sep, $parts); }
+function pair(string $a, string $b): string { return "[$a|$b]"; }
+function three(int $a, string $b = 'b', float $c = 1.5): string { return "$a-$b-$c"; }
+function vari(string $sep, string ...$parts): string { return implode($sep, $parts); }
 /** @param list<int> $xs */
-fun addTo(array &$xs, int $n): void { $xs[] = $n; }
+function addTo(array &$xs, int $n): void { $xs[] = $n; }
 /** @param list<int> $xs */
-fun total(array $xs, int $n): int { return array_sum($xs) + $n; }
-fun trace(string $label, string $v): string { echo "eval $label\n"; return $v; }
+function total(array $xs, int $n): int { return array_sum($xs) + $n; }
+function trace(string $label, string $v): string { echo "eval $label\n"; return $v; }
 
 final class Greeter {
     public function __construct(private string $greeting) {}
-    fun greet(string $name, string $punct = '!'): string { return "$this->greeting, $name$punct"; }
-    static fun shout(string $s, int $times): string { return str_repeat(strtoupper($s), $times); }
+    greet(string $name, string $punct = '!'): string { return "$this->greeting, $name$punct"; }
+    static shout(string $s, int $times): string { return str_repeat(strtoupper($s), $times); }
 }
 
 final class Paths {
@@ -57,7 +57,7 @@ echo $v('a', 'b', 'c'), "\n";
 $xs = [1];
 $add = addTo(?, 2);
 $add($xs);
-fun totals(): int {
+function totals(): int {
     // A closure over lines: the call moves in with its block.
     $total = total(
         ?,
@@ -85,7 +85,7 @@ echo 'x' |> $greeter->greet(?, '?'), "\n";
 // Constant expressions.
 const UPPER = strtoupper(?);
 echo (UPPER)('const'), "\n";
-fun dashes(Closure $f = str_repeat('-', ?)): string { $r = $f(3); return is_string($r) ? $r : ''; }
+function dashes(Closure $f = str_repeat('-', ?)): string { $r = $f(3); return is_string($r) ? $r : ''; }
 echo dashes(), "\n";
 
 echo Labelled::LABEL, Size::Small->value, "\n";

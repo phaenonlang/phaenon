@@ -153,7 +153,7 @@ func (s *Server) completion(p TextDocumentPositionParams) (any, error) {
 			if !matches(short, prefix) || (ns != "" && ns != scope.Prefix()) || strings.HasPrefix(short, "__phn_") {
 				continue
 			}
-			add(CompletionItem{Label: short, Kind: completionFunction, SortText: "1", Detail: signature("fun", fn.Name, fn.TypeParams, fn.Params, fn.Return),
+			add(CompletionItem{Label: short, Kind: completionFunction, SortText: "1", Detail: signature("function", fn.Name, fn.TypeParams, fn.Params, fn.Return),
 				InsertText: callText(short, len(fn.Params) > 0, snippets), InsertTextFormat: textFormat(snippets)})
 		}
 		for _, it := range s.classItems(r, scope, prefix, inserted) {
@@ -476,7 +476,7 @@ func pipeItems(p *program.Program, left types.Type, prefix string, snippets bool
 			sortKey = "1"
 		}
 		out = append(out, CompletionItem{Label: short, Kind: completionFunction, SortText: sortKey,
-			Detail:     signature("fun", fn.Name, fn.TypeParams, fn.Params, fn.Return),
+			Detail:     signature("function", fn.Name, fn.TypeParams, fn.Params, fn.Return),
 			InsertText: insert, InsertTextFormat: textFormat(snippets)})
 	}
 	return out
@@ -618,7 +618,7 @@ func (s *Server) signatureHelp(p TextDocumentPositionParams) (any, error) {
 			if nm, ok := n.Callee.(*ast.Name); ok {
 				if fn := r.function(nm, off); fn != nil {
 					fn = fn.Signature()
-					head, name, tps, params, ret, doc = "fun", fn.Name, fn.TypeParams, fn.Params, fn.Return, summary(fn.Doc)
+					head, name, tps, params, ret, doc = "function", fn.Name, fn.TypeParams, fn.Params, fn.Return, summary(fn.Doc)
 				}
 			}
 		case *ast.MethodCall:

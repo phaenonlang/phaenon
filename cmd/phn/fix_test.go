@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -112,7 +114,7 @@ func fixTree(t *testing.T) string {
 	return root
 }
 
-const boxSource = "namespace App;\n\nfinal class Box {\n    fun __construct(private int $n) {}\n\n    fun add(int $a,int $b): int => $a+$b;\n}\n"
+const boxSource = "namespace App;\n\nfinal class Box {\n    __construct(private int $n) {}\n\n    add(int $a,int $b): int => $a+$b;\n}\n"
 
 // fakeTool is the test binary under a tool's name, with what it changes.
 func fakeToolCommand(t *testing.T, spec fakeSpec) string {
@@ -219,7 +221,7 @@ func TestFixCarriesAFoldedPipesOperands(t *testing.T) {
 	bin := phnBinary(t)
 	root := fixTree(t)
 	src := "namespace App;\n\nfinal class Names {\n    /** @param list<string> $names */\n" +
-		"    fun shout(array $names): string => $names\n" +
+		"    shout(array $names): string => $names\n" +
 		"        |> array_map(fn (string $n): string => $n.'!', ?)\n" +
 		"        |> implode(',', ?);\n}\n"
 	writeTree(t, root, map[string]string{"src/Names.phn": src})
@@ -252,7 +254,7 @@ func TestFmt(t *testing.T) {
 	tool := fakeToolCommand(t, fakeSpec{Replace: [][2]string{{"int $a,int $b", "int $a, int $b"}}})
 	writeTree(t, root, map[string]string{
 		"phaenon.json": `{"roots": {"src": ".src"}, "fmt": [` + strconvQuote(tool) + `, "fix"]}`,
-		"src/Box.phn":  "\n\nnamespace App;\n\nfinal class Box {\n    fun add(int $a,int $b): list < int > {\n        return [$a];\n    }\n}\n",
+		"src/Box.phn":  "\n\nnamespace App;\n\nfinal class Box {\n    add(int $a,int $b): list < int > {\n        return [$a];\n    }\n}\n",
 	})
 	if _, stderr, err := run(t, root, bin, "fmt", "--check"); err == nil || !strings.Contains(stderr, "src/Box.phn: not in Phaenon's layout") {
 		t.Errorf("--check passed on an unformatted file (%v): %s", err, stderr)
@@ -264,7 +266,7 @@ func TestFmt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("phn fmt: %v\n%s%s", err, stdout, stderr)
 	}
-	want := "namespace App;\n\nfinal class Box\n{\n    fun add(int $a, int $b): list<int> {\n        return [$a];\n    }\n}\n"
+	want := "namespace App;\n\nfinal class Box\n{\n    add(int $a, int $b): list<int> {\n        return [$a];\n    }\n}\n"
 	if box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn")); string(box) != want {
 		t.Errorf("Box.phn:\n%s\nwant\n%s", box, want)
 	}
@@ -274,10 +276,51 @@ func TestFmt(t *testing.T) {
 
 	writeTree(t, root, map[string]string{
 		"phaenon.json": `{"roots": {"src": ".src"}, "fmt": []}`,
-		"src/Box.phn":  "namespace App;\n\nfinal class Box\n{\n    fun add(int $a,int $b): int => $a;\n}\n",
+		"src/Box.phn":  "namespace App;\n\nfinal class Box\n{\n    add(int $a,int $b): int => $a;\n}\n",
 	})
 	if stdout, _, err := run(t, root, bin, "fmt", "--check"); err != nil || strings.Contains(stdout, "php-cs-fixer") {
 		t.Errorf(`"fmt": [] still ran the fixer, or the layout failed (%v):\n%s`, err, stdout)
+	}
+}
+
+// phn fmt rewrites the spellings roadmap D26 and D27 withdrew
+// (design/tooling.md §5.6): in a project the files holding a type test are
+// checked, so that a test whose PHP depends on the operand's type gets it
+// (`is string` on bytes is mb_check_encoding()); --stdin, which has no
+// program, makes the rewrites that need no type and reports the rest.
+func TestFmtRewritesWithdrawnSpellings(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	src := "namespace App;\n\nfinal class Text\n{\n    public static fun of(bytes $b, mixed $m): string\n    {\n" +
+		"        if ($m is Text && $b is string) {\n            return $b;\n        }\n\n        return $b as string;\n    }\n}\n"
+	writeTree(t, root, map[string]string{
+		"phaenon.json": `{"roots": {"src": ".src"}, "fmt": []}`,
+		"src/Text.phn": src,
+	})
+	if _, stderr, err := run(t, root, bin, "fmt", "--check"); err == nil || !strings.Contains(stderr, "src/Text.phn: not in Phaenon's layout") {
+		t.Errorf("--check passed on withdrawn spellings (%v): %s", err, stderr)
+	}
+	if stdout, stderr, err := run(t, root, bin, "fmt"); err != nil {
+		t.Fatalf("phn fmt: %v\n%s%s", err, stdout, stderr)
+	}
+	want := "namespace App;\n\nfinal class Text\n{\n    public static of(bytes $b, mixed $m): string {\n" +
+		"        if ($m instanceof Text && mb_check_encoding($b, 'UTF-8')) {\n            return $b;\n        }\n\n" +
+		"        return mb_check_encoding($b, 'UTF-8') ? $b : throw new \\ValueError('not valid UTF-8');\n    }\n}\n"
+	if got, _ := os.ReadFile(filepath.Join(root, "src/Text.phn")); string(got) != want {
+		t.Errorf("Text.phn:\n%s\nwant\n%s", got, want)
+	}
+	if stdout, stderr, err := run(t, root, bin, "check"); err != nil {
+		t.Errorf("phn check after phn fmt: %v\n%s%s", err, stdout, stderr)
+	}
+
+	cmd := exec.Command(bin, "fmt", "--stdin")
+	cmd.Stdin = strings.NewReader(src)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	cmd.Run()
+	if got := stdout.String(); !strings.Contains(got, "public static of(") || !strings.Contains(got, "$m instanceof Text && $b is string") ||
+		!strings.Contains(got, "return $b as string;") || !strings.Contains(stderr.String(), "<stdin>:7:") {
+		t.Errorf("--stdin:\n%s\n%s", got, stderr.String())
 	}
 }
 
@@ -296,7 +339,7 @@ func TestFmtNamesAFixerThatUndoesTheLayout(t *testing.T) {
 		!strings.Contains(stderr, "src/Box.phn: the fixer's change undoes Phaenon's layout") {
 		t.Errorf("the conflict was not named (%v):\n%s%s", err, stdout, stderr)
 	}
-	if box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn")); !strings.Contains(string(box), "fun __construct(private int $n) {}") {
+	if box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn")); !strings.Contains(string(box), "__construct(private int $n) {}") {
 		t.Errorf("Box.phn lost its {}:\n%s", box)
 	}
 	if _, stderr, err := run(t, root, bin, "build", "--check"); err != nil {

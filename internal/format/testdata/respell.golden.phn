@@ -1,0 +1,85 @@
+namespace App;
+
+// The spellings roadmap D26 and D27 withdrew, rewritten by the first layer
+// without a checked program (design/tooling.md §5.6).
+
+type Id = int;
+
+#[\Attribute]
+final class Marker {}
+
+abstract class Old<T>
+{
+    __construct(private int $n) {}
+
+    public title(): string => 'old';
+
+    protected static create(): static => new static(1);
+
+    final public static &cached(): array {
+        static $c = [];
+
+        return $c;
+    }
+
+    /** A docblock. */
+    #[Marker]
+    abstract protected body(): string;
+
+    first<U>(list<U> $xs): ?U => $xs[0] ?? null;
+
+    // A name that needs the keyword keeps it.
+    function static(): string => static::class;
+
+    public function var(): int => 1;
+
+    function Closure(): int => 2;
+
+    list(): list<int> => [];
+
+    public lifted(): int => 3;
+
+    final public static alsoLifted(): int => 4;
+
+    public function readonly(): bool => true;
+
+    brokenHead(): int => 5;
+
+    public /* kept */ commented(): int => 6;
+
+    nested(): int {
+        function inner(): int {
+            return 1;
+        }
+
+        return inner();
+    }
+
+    tests(mixed $x, mixed $y): bool {
+        // A class name needs no type: `instanceof`.
+        $a = $x instanceof Marker;
+        $b = !$x instanceof \App\Marker;
+        $c = $x instanceof Marker && $y instanceof Old;
+        // The rest depends on the operand's type, or is no class: left.
+        $d = $x is string || $x is number || $x is Closure;
+        $e = $x is Id;
+        $f = $x is T;
+        $g = $x as Marker;
+        $h = $x as? Marker;
+        $i = $x is ?Marker;
+
+        return $a || $b || $c || $d || $e || $f || $g !== $h || $i;
+    }
+}
+
+function helper(): int => 1;
+
+function fun(): int => 1;
+
+function & ref(): array {
+    static $r = [];
+
+    return $r;
+}
+
+fun();

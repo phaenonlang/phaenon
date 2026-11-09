@@ -5,21 +5,21 @@ use Closure;
 /** A greeting. */
 interface Greets
 {
-    fun greet(string $name): string;
+    greet(string $name): string;
 }
 
 trait Counts
 {
     private int $count = 0;
 
-    fun count(): int => $this->count;
+    count(): int => $this->count;
 }
 
 enum Level: int
 {
     case Low = 1;
 
-    fun label(): string => match ($this) {
+    label(): string => match ($this) {
         self::Low => 'low',
     };
 }
@@ -44,82 +44,82 @@ final class Greeter implements
      */
     private string $long = '';
 
-    fun __construct(private readonly string $suffix = '') {}
+    __construct(private readonly string $suffix = '') {}
 
-    fun greet(string $name): string => $this->salutation . ', ' . $name . $this->punctuation . $this->suffix;
+    greet(string $name): string => $this->salutation . ', ' . $name . $this->punctuation . $this->suffix;
 
-    fun log(string $message): void => $this->count += \strlen($message);
+    log(string $message): void => $this->count += \strlen($message);
 
-    fun fail(string $why): never => throw new \LogicException($why);
+    fail(string $why): never => throw new \LogicException($why);
 
-    fun noType() {
+    noType() {
         $this->count++;
     }
 
-    fun twoStatements(): int {
+    twoStatements(): int {
         $this->count++;
         return $this->count;
     }
 
-    fun commented(): int {
+    commented(): int {
         // the count so far
         return $this->count;
     }
 
-    fun documented(): int {
+    documented(): int {
         /** @var int $count */
         $count = $this->count;
         return $count;
     }
 
-    fun inlineVar(): int {
+    inlineVar(): int {
         /** @var int */
         return $this->count;
     }
 
-    fun tags(): array<mixed> => [
+    tags(): array<mixed> => [
         'salutation' => $this->salutation,
         'punctuation' => $this->punctuation,
     ];
 
-    fun chained(string $name): string => \trim(
+    chained(string $name): string => \trim(
         $this->greet($name),
     );
 
-    fun longLine(string $firstName, string $lastName, string $title): string
+    longLine(string $firstName, string $lastName, string $title): string
         => $this->greet($title . ' ' . $firstName . ' ' . $lastName) . $this->salutation . $this->punctuation;
 
-    fun heredoc(string $name): string
+    heredoc(string $name): string
         => <<<TEXT
             Dear {$name},
             TEXT;
 
-    fun generator(): \Generator {
+    generator(): \Generator {
         return yield $this->count;
     }
 
-    fun &reference(): int => $this->count;
+    &reference(): int => $this->count;
 
-    fun oneLine(): int => $this->count;
+    oneLine(): int => $this->count;
 
-    fun factory(): Closure => function (string $name): string {
+    factory(): Closure => function (string $name): string {
         return $this->greet($name);
     };
 
-    fun anonymous(): \Countable => new class () implements \Countable {
-        public function count(): int => 0;
+    anonymous(): \Countable => new class () implements \Countable {
+        count(): int => 0;
     };
 
-    fun braceComment(): int // a comment before the brace
+    braceComment(): int // a comment before the brace
     {
         return $this->count;
     }
 
-    fun __destruct() {
+    __destruct() {
         $this->log('bye');
     }
 }
 
-fun helper(int $x): int => $x * 2;
+function helper(int $x): int => $x * 2;
 
-fun noBody(): void {}
+function noBody(): void {}

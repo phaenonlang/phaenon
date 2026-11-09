@@ -18,18 +18,18 @@ final class OrderId implements AggregateId {}
 
 interface AggregateRepository<Id of AggregateId, T of Aggregate>
 {
-    fun get(Id $id): ?T;
+    get(Id $id): ?T;
 
-    fun save(T $aggregate): void;
+    save(T $aggregate): void;
 }
 
 abstract class AbstractEventSourcedRepository<Id of AggregateId, T of EventSourcedAggregate> implements AggregateRepository<Id, T>
 {
-    abstract protected static fun aggregateClass(): class<T>;
+    abstract protected static aggregateClass(): class<T>;
 
-    fun get(Id $id): ?T => null;
+    get(Id $id): ?T => null;
 
-    fun save(T $aggregate): void {
+    save(T $aggregate): void {
         $aggregateClass = static::aggregateClass();
         if (!$aggregate instanceof $aggregateClass) {
             throw new \InvalidArgumentException('wrong aggregate');
@@ -41,10 +41,10 @@ abstract class AbstractEventSourcedRepository<Id of AggregateId, T of EventSourc
 final class OrderRepository implements AggregateRepository<OrderId, Order>
 {
     /** @return Order|null */
-    fun get(OrderId $id): ?Aggregate => null;
+    get(OrderId $id): ?Aggregate => null;
 
     /** @param $aggregate - the order to store */
-    fun save(Order $aggregate): void {}
+    save(Order $aggregate): void {}
 }
 
 /**
@@ -56,10 +56,10 @@ final class OrderRepository implements AggregateRepository<OrderId, Order>
 final class LenientRepository<T of EventSourcedAggregate> implements AggregateRepository<AggregateId, T>
 {
     /** @return T|null */
-    fun get(AggregateId $id): ?Aggregate => null;
+    get(AggregateId $id): ?Aggregate => null;
 
     /** @param T $aggregate */
-    fun save(object $aggregate): void {}
+    save(object $aggregate): void {}
 }
 
 /**
@@ -68,4 +68,4 @@ final class LenientRepository<T of EventSourcedAggregate> implements AggregateRe
  *
  * @param EventSourcedAggregate $aggregate
  */
-fun store(Aggregate $aggregate): void {}
+function store(Aggregate $aggregate): void {}

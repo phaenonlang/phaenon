@@ -1,0 +1,166 @@
+namespace App\Methods;
+
+// A method is declared without a keyword (roadmap D27, design/functions.md
+// §1.1): after its attributes and modifiers, a name followed by `(`, or by
+// a balanced `<…>` and then `(`, is a method; anything else begins a
+// property. No visibility means public, as in PHP.
+
+#[\Attribute]
+final class Marker
+{
+}
+
+interface Shape
+{
+    area(): float;
+
+    static unit(): string;
+
+    scaled<T of Shape>(T $by): static;
+}
+
+abstract class Base implements Shape
+{
+    public static (\Countable&\Stringable)|null $dnf = null;
+    protected list<int> $sizes = [];
+    public readonly int $id;
+
+    public string $label {
+        get => \strtoupper($this->label);
+        set(string $value) {
+            $this->label = \trim($value);
+        }
+    }
+
+    __construct(int $id)
+    {
+        $this->id = $id;
+    }
+
+    abstract area(): float;
+
+    abstract protected shape(): string;
+
+    static unit(): string => 'cm';
+
+    scaled<T of Shape>(T $by): static => $this;
+
+    /** The sizes, a copy. */
+    #[Marker]
+    final public sizes(): list<int> => $this->sizes;
+
+    protected static make(): ?Shape => null;
+
+    private &first(): list<int>
+    {
+        return $this->sizes;
+    }
+
+    final protected static counted(): int => \count([]);
+
+    // A name that is a modifier, `var`, `const`, `function`, `fn` or the
+    // unqualified `Closure` keeps PHP's `function`; every other name, a
+    // reserved word included, needs no keyword.
+    public function static(): string => static::class;
+
+    public function readonly(): bool => true;
+
+    final function var(): int => 1;
+
+    function Closure(): int => 2;
+
+    list(): list<int> => $this->sizes;
+
+    use(int $n): int => $n;
+
+    case(): string => 'case';
+
+    new(): ?Shape => static::make();
+
+    match(): bool => false;
+
+    closure(): int => 3;
+
+    fun(): int => 4;
+
+    total(): int
+    {
+        // A function declared in a method's body keeps `function`.
+        function inner(): int
+        {
+            return 1;
+        }
+
+        return $this->first()[0] ?? $this->list()[0] ?? inner();
+    }
+
+    sizesAsInts(): int => $this->sizes[0] ?? 'none'; // want P2202
+}
+
+final class Square extends Base
+{
+    area(): float => 4.0;
+
+    protected shape(): string => 'square';
+}
+
+enum Suit: string
+{
+    case Hearts = 'h';
+    case Spades = 's';
+
+    label(): string => \ucfirst($this->name);
+
+    static fromLetter(string $l): self => self::from($l);
+
+    const DEFAULT = self::Hearts;
+}
+
+trait Greets
+{
+    greet(): string => 'hi';
+
+    abstract name(): string;
+}
+
+final class Greeter
+{
+    use Greets;
+
+    name(): string => 'g';
+
+    anonymous(): object => new class {
+        inside(): int => 1;
+    };
+}
+
+function usesThem(Square $s, Greeter $g): float
+{
+    Base::unit();
+    $s->list();
+    $s->new();
+    $s->case();
+    $s->use(1);
+    $g->greet();
+    $s->shape(); // want P2108
+    Suit::fromLetter('h')->label();
+
+    return $s->area() + $s->total();
+}
+
+// `fun` left the language (roadmap D27): a declaration spelled with it is
+// P1001, and phn fmt respells it; `fun` is a name again.
+final class Legacy
+{
+    fun old(): void {} // want P1001 "a method is declared without a keyword, `old(…)`"
+
+    protected static fun create(): static => new static(); // want P1001
+
+    fun static(): void {} // want P1001 "a method named static is declared with `function`"
+}
+
+fun legacy(): void {} // want P1001 "a function is declared with `function`"
+
+function fun(): int => 1;
+
+function callsFun(): int => fun();

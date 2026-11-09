@@ -197,9 +197,9 @@ func (e *emitter) planIndents(f *ast.File) {
 		var fn function
 		switch n := n.(type) {
 		case *ast.FunctionDecl:
-			fn = function{kwAt: n.Head.Start, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, arrow: n.Arrow}
+			fn = function{kwAt: n.Kw.Start, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, arrow: n.Arrow}
 		case *ast.MethodDecl:
-			fn = function{kwAt: n.Head.End - 1, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, arrow: n.Arrow}
+			fn = function{kwAt: n.Kw.Start, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, arrow: n.Arrow}
 		default:
 			return true
 		}

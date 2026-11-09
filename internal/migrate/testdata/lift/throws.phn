@@ -6,20 +6,20 @@ final class NotFound extends \RuntimeException {}
 
 interface Store
 {
-    fun get(int $id): string throws NotFound;
+    get(int $id): string throws NotFound;
 
     /** Removes the entry. */
-    fun remove(int $id): void throws NotFound|\RuntimeException|\LogicException;
+    remove(int $id): void throws NotFound|\RuntimeException|\LogicException;
 }
 
 final class MemoryStore<T of object> implements Store
 {
     private map<int, string> $items = [];
 
-    fun get(int $id): string throws NotFound => $this->items[$id] ?? throw new NotFound((string) $id);
+    get(int $id): string throws NotFound => $this->items[$id] ?? throw new NotFound((string) $id);
 
     /** Removes the entry. */
-    fun remove(int $id): void throws NotFound|\RuntimeException|\LogicException {
+    remove(int $id): void throws NotFound|\RuntimeException|\LogicException {
         unset($this->items[$id]);
     }
 
@@ -28,24 +28,24 @@ final class MemoryStore<T of object> implements Store
      *
      * @throws InvalidArgumentException when the value is empty
      */
-    fun put(int $id, string $value) throws \LengthException {
+    put(int $id, string $value) throws \LengthException {
         $this->items[$id] = $value;
     }
 
     /** @throws void */
-    fun count(): int => \count($this->items);
+    count(): int => \count($this->items);
 
-    fun rethrow(T $item): void throws T {}
+    rethrow(T $item): void throws T {}
 
-    fun raise<E of \Throwable>(E $e): never throws E => throw $e;
+    raise<E of \Throwable>(E $e): never throws E => throw $e;
 
-    fun twice(int $id): string throws NotFound => $this->get($id);
+    twice(int $id): string throws NotFound => $this->get($id);
 
-    fun prefixed(int $id): string throws NotFound => $this->get($id);
+    prefixed(int $id): string throws NotFound => $this->get($id);
 }
 
-fun load(Store $store, int $id): string throws NotFound => $store->get($id);
+function load(Store $store, int $id): string throws NotFound => $store->get($id);
 
-fun untyped($x) throws \LogicException {
+function untyped($x) throws \LogicException {
     throw new \LogicException((string) $x);
 }

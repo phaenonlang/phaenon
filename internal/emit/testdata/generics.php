@@ -203,23 +203,23 @@ function uses(mixed $m, Box $box): void
     $fresh = decode(User::class, 2);
     $n = first([1, 2]);
     $s = $box->map(fn(int $x): string => (string) $x)->get();
-    if (\is_int($m)) {
+    if (is_int($m)) {
         echo $m;
     }
     if ($m === null || $m instanceof User) {
         echo $user?->id, $fresh->id, $n, $s;
     }
-    if (\is_array($m) && \array_is_list($m)) {
+    if (is_array($m) && array_is_list($m)) {
         echo count($m);
     }
-    if (\is_string($m) && \is_a($m, User::class, true)) {
+    if (is_string($m) && is_a($m, User::class, true)) {
         echo $m;
     }
-    if (\is_string($m) && (\class_exists($m) || \interface_exists($m))) {
+    if (is_string($m) && (class_exists($m) || interface_exists($m))) {
         echo $m;
     }
     $u = $m instanceof User ? $m : null;
-    $t = \is_array($m) ? $m : throw new \TypeError('expected array, got ' . \get_debug_type($m));
+    $t = is_array($m) ? $m : throw new \TypeError('expected array, got ' . get_debug_type($m));
     echo count($t), $u?->id, $repo->describe();
 }
 

@@ -1,0 +1,81 @@
+namespace App\Guards;
+
+// A guard of the programmer's own is PHP's settled way to name a test
+// (roadmap D26, design/generics.md §11.5): @phpstan-assert,
+// @phpstan-assert-if-true and @phpstan-assert-if-false on a function, a
+// method or a static method, their @psalm- and bare @assert spellings
+// alike, narrow the argument as PHPStan does.
+
+function takesStrings(list<string> $xs): void
+{
+}
+
+function takesUser(User $u): void
+{
+}
+
+final class User
+{
+}
+
+/** @phpstan-assert-if-true list<string> $xs */
+function isStringList(mixed $xs): bool => is_array($xs) && array_is_list($xs) && array_all($xs, fn (mixed $x): bool => is_string($x));
+
+/** @phpstan-assert-if-false User $u */
+function isNotUser(mixed $u): bool => !$u instanceof User;
+
+/** @phpstan-assert User $u */
+function assertUser(mixed $u): void
+{
+    if (!$u instanceof User) {
+        throw new \InvalidArgumentException('not a user');
+    }
+}
+
+/** @psalm-assert-if-true User $u */
+function psalmUser(mixed $u): bool => $u instanceof User;
+
+final class Check
+{
+    /** @phpstan-assert-if-true list<string> $xs */
+    stringList(mixed $xs): bool => isStringList($xs);
+
+    /** @phpstan-assert User $u */
+    static user(mixed $u): void
+    {
+        assertUser($u);
+    }
+
+    /** @assert-if-true User $u */
+    static isUser(mixed $u): bool => $u instanceof User;
+}
+
+function functions(mixed $a, mixed $b, mixed $c, mixed $d): void
+{
+    if (isStringList($a)) {
+        takesStrings($a);
+    } else {
+        takesStrings($a); // want P2103
+    }
+    if (!isNotUser($b)) {
+        takesUser($b);
+    }
+    assertUser($c);
+    takesUser($c);
+    if (psalmUser($d)) {
+        takesUser($d);
+    }
+}
+
+function methods(Check $check, mixed $a, mixed $b, mixed $c): void
+{
+    if ($check->stringList($a)) {
+        takesStrings($a);
+    }
+    Check::user($b);
+    takesUser($b);
+    if (Check::isUser($c)) {
+        takesUser($c);
+    }
+    takesUser($c); // want P2103
+}

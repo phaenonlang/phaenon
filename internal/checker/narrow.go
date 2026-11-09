@@ -914,6 +914,29 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 				x.narrowPath(els, arg, x.subtract(at, cls, x.p()), false)
 			}
 			return then, els, true
+		case "mb_check_encoding":
+			// Phaenon's one reading of a PHP call (design/strings.md §6,
+			// checker.md §9): with the encoding a literal naming UTF-8,
+			// bytes that pass are text, string&bytes, and bytes that fail
+			// stay bytes. Another encoding, or none, which
+			// mb_internal_encoding() decides at run time, narrows nothing.
+			if len(e.Args.Args) != 2 || e.Args.Args[0].Name != nil || e.Args.Args[1].Name != nil || !utf8Literal(e.Args.Args[1].Value) {
+				return nil, nil, false
+			}
+			x.call(e, env, nil)
+			then, els = env.clone(), env.clone()
+			x.condValueType = types.TBool
+			at := x.pathType(arg, env)
+			text := types.Map(at, func(m types.Type) types.Type {
+				if _, binary := m.(types.Bytes); binary {
+					return types.TTextBytes
+				}
+				return m
+			})
+			if !types.Equal(text, at) {
+				x.narrowPath(then, arg, text, true)
+			}
+			return then, els, true
 		case "array_key_exists", "key_exists":
 			if len(e.Args.Args) < 2 {
 				return nil, nil, false
@@ -1368,4 +1391,17 @@ func nonNullType(t types.Type) bool {
 		return false
 	}
 	return !types.IsNullable(t) && !types.IsMixed(t)
+}
+
+// utf8Literal reports a string literal naming UTF-8, in any case.
+func utf8Literal(e ast.Expr) bool {
+	lit, ok := e.(*ast.StringLit)
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(program.StringValue(lit)) {
+	case "utf-8", "utf8":
+		return true
+	}
+	return false
 }

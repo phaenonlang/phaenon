@@ -1,0 +1,226 @@
+package parser
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/lexer"
+)
+
+// TestMemberByPosition: in a class body, after the attributes and
+// modifiers, a name followed by `(`, or by a balanced `<…>` and then `(`,
+// is a method declared without a keyword (roadmap D27); anything else
+// begins a property, a constant, a case or a trait use
+// (design/functions.md §1.1).
+func TestMemberByPosition(t *testing.T) {
+	cases := []struct {
+		member string
+		want   string // method name, "property", "const", "case", "use"
+	}{
+		{"title(): string => 'x';", "title"},
+		{"protected static create(): static => new static();", "create"},
+		{"final public &cached(): array { return []; }", "cached"},
+		{"abstract render(): string;", "render"},
+		{"first<T>(list<T> $xs): ?T => null;", "first"},
+		{"map<K, V of list<int>>(K $k): V;", "map"},
+		{"#[A] /** d */ list(): array => [];", "list"},
+		{"use(int $x): void {}", "use"},
+		{"case(): void {}", "case"},
+		{"use<T>(T $x): T => $x;", "use"},
+		{"case<T of object>(T $x): T => $x;", "case"},
+		{"new(): static => new static();", "new"},
+		{"closure(): int => 1;", "closure"},
+		{"fun(): int => 1;", "fun"},
+		{"public function static(): void {}", "static"},
+		{"public function function(): void {}", "function"},
+		{"final function var(): void {}", "var"},
+		{"function Closure(): void {}", "Closure"},
+		{"public static (A&B)|null $x = null;", "property"},
+		{"var (A&B)|null $y = null;", "property"},
+		{"private Closure(int): string $f;", "property"},
+		{"public list<int> $xs = [];", "property"},
+		{"private map<string, int>|null $m = null;", "property"},
+		{"protected class<Foo> $c;", "property"},
+		{"private (int, string) $pair;", "property"},
+		{"public string $s { get => 'x'; set(string $v) { } }", "property"},
+		{"const (A&B)|null C = null;", "const"},
+		{"case Hearts;", "case"},
+		{"use Greets;", "use"},
+	}
+	for _, c := range cases {
+		src := "enum E {\n    " + c.member + "\n}\n"
+		f, err := Parse([]byte(src), lexer.ModePhaenon)
+		if err != nil {
+			t.Errorf("%s: %v", c.member, err)
+			continue
+		}
+		var got string
+		switch m := f.Stmts[0].(*ast.ClassDecl).Members[0].(type) {
+		case *ast.MethodDecl:
+			got = m.Name.Name
+		case *ast.PropertyDecl:
+			got = "property"
+		case *ast.ClassConstDecl:
+			got = "const"
+		case *ast.EnumCase:
+			got = "case"
+		case *ast.TraitUse:
+			got = "use"
+		}
+		if got != c.want {
+			t.Errorf("%s: read as %q, want %q", c.member, got, c.want)
+		}
+	}
+}
+
+// TestWithdrawnFun: `fun` is a name (roadmap D27), and a declaration still
+// spelled with it parses as the function or method it declared, marked
+// Fun, for the checker to name (P1001) and phn fmt to respell. At
+// statement level only a declaration's shape is one.
+func TestWithdrawnFun(t *testing.T) {
+	for src, want := range map[string]int{
+		"fun f(): int { return 1; }":                       1,
+		"fun &f(): array { return []; }":                   1,
+		"fun f() throws X {}":                              1,
+		"fun f(): int => 1;":                               1,
+		"class A { fun f() {} static fun g() {} }":         2,
+		"class A { fun static() {} fun list() {} }":        2,
+		"class A { fun() {} }":                             0,
+		"function g() { fun inner() {} }":                  1,
+		"fun();":                                           0,
+		"fun & f();":                                       0,
+		"$x = fun;":                                        0,
+		"function fun(): int { return fun(); }":            0,
+		"$y = $x is Foo; $z = $x as int; $w = $x as? int;": 0,
+	} {
+		f, err := Parse([]byte(src), lexer.ModePhaenon)
+		if err != nil {
+			t.Errorf("%s: %v", src, err)
+			continue
+		}
+		got := 0
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FunctionDecl:
+				if n.Fun {
+					got++
+				}
+			case *ast.MethodDecl:
+				if n.Fun {
+					got++
+				}
+			}
+			return true
+		})
+		if got != want {
+			t.Errorf("%s: %d declarations spelled fun, want %d", src, got, want)
+		}
+	}
+}
+
+// TestWithdrawnTests: after an operand, `is` and a type, `as` and `as?`
+// parse as the withdrawn tests (roadmap D26); `is` is a name everywhere
+// else.
+func TestWithdrawnTests(t *testing.T) {
+	for src, want := range map[string]int{
+		"$y = $x is Foo;":                         1,
+		"$y = $x is ?int || $x is (int, string);": 2,
+		"$y = $x as int; $z = $x as? Foo;":        2,
+		"foreach ($xs as $x) {}":                  0,
+		"is($a); $o->is(); Foo::is();":            0,
+		"function is(): bool { return true; }":    0,
+		"const is = 1;":                           0,
+	} {
+		f, err := Parse([]byte(src), lexer.ModePhaenon)
+		if err != nil {
+			t.Errorf("%s: %v", src, err)
+			continue
+		}
+		got := 0
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch n.(type) {
+			case *ast.IsExpr, *ast.AsExpr:
+				got++
+			}
+			return true
+		})
+		if got != want {
+			t.Errorf("%s: %d withdrawn tests, want %d", src, got, want)
+		}
+	}
+}
+
+// TestKeywordNamedMethod: a method whose name keeps `function`, written
+// without it, is a syntax error that names the rule
+// (design/functions.md §1.1); the properties and constants those words
+// begin parse as before.
+func TestKeywordNamedMethod(t *testing.T) {
+	for member, want := range map[string]string{
+		"static(): int => 1;":                 "a method named static keeps `function`",
+		"public readonly(): int => 1;":        "a method named readonly keeps `function`",
+		"final var(): int { return 1; }":      "a method named var keeps `function`",
+		"const(): int => 1;":                  "a method named const keeps `function`",
+		"fn(int $x): int => $x;":              "a method named fn keeps `function`",
+		"Closure(int $x): int { return 1; }":  "a method named Closure keeps `function`",
+		"abstract public();":                  "a method named public keeps `function`",
+		"public static (A&B)|null $x = null;": "",
+		"private Closure(int): string $f;":    "",
+		"const (A&B)|null C = null;":          "",
+		"var (int, string) $p;":               "",
+	} {
+		_, err := Parse([]byte("abstract class A {\n    "+member+"\n}\n"), lexer.ModePhaenon)
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("%s: %v", member, err)
+		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
+			t.Errorf("%s: %v, want %q", member, err, want)
+		}
+	}
+}
+
+// TestMemberModifiers: the modifiers PHP refuses on a class member when it
+// compiles the class are syntax errors in Phaenon, so that no build writes
+// PHP that does not compile.
+func TestMemberModifiers(t *testing.T) {
+	for member, want := range map[string]string{
+		"readonly foo(): int => 1;":            "Cannot use 'readonly' as method modifier",
+		"public public foo(): int => 1;":       "Multiple access type modifiers are not allowed",
+		"public private foo(): int => 1;":      "Multiple access type modifiers are not allowed",
+		"static static foo(): int => 1;":       "Multiple static modifiers are not allowed",
+		"final abstract foo(): int;":           "Cannot use the final modifier on an abstract method",
+		"private(set) foo(): int => 1;":        "Cannot use an asymmetric visibility on a method",
+		"public public int $x = 0;":            "Multiple access type modifiers are not allowed",
+		"final public static foo(): int => 1;": "",
+		"abstract protected foo(): int;":       "",
+		"public readonly int $y;":              "",
+		"private(set) int $z;":                 "",
+	} {
+		_, err := Parse([]byte("abstract class A {\n    "+member+"\n}\n"), lexer.ModePhaenon)
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("%s: %v", member, err)
+		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
+			t.Errorf("%s: %v, want %q", member, err, want)
+		}
+	}
+}
+
+// TestPropertyNeedsModifier: PHP reads a property only after a modifier,
+// and Phaenon implies `public` on a method alone, so a property without
+// one is a syntax error rather than PHP that does not compile.
+func TestPropertyNeedsModifier(t *testing.T) {
+	for member, ok := range map[string]bool{
+		"list<int> $ys = [];": false,
+		"int $n;":             false,
+		"public int $n;":      true,
+		"static int $n = 0;":  true,
+		"readonly int $n;":    true,
+		"var int $n;":         true,
+	} {
+		_, err := Parse([]byte("final class A {\n    "+member+"\n}\n"), lexer.ModePhaenon)
+		if ok != (err == nil) {
+			t.Errorf("%s: %v", member, err)
+		}
+	}
+}

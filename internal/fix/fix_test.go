@@ -70,8 +70,8 @@ func TestDiff(t *testing.T) {
 	}
 }
 
-const sample = "namespace App;\n\nfun add(int $a,int $b): int => $a+$b;\n\n" +
-	"final class Box {\n    fun __construct(private int $n) {}\n\n    fun get(): int => $this->n;\n}\n"
+const sample = "namespace App;\n\nfunction add(int $a,int $b): int => $a+$b;\n\n" +
+	"final class Box {\n    __construct(private int $n) {}\n\n    get(): int => $this->n;\n}\n"
 
 // A change of what the source wrote is carried back; a change of what the
 // compiler wrote is refused, and the rebuilt output is the tool's but for
@@ -90,7 +90,7 @@ func TestCarry(t *testing.T) {
 	)
 	tool := r.Replace(string(old))
 	got, refused := Carry(src, old, spans, Diff(old, []byte(tool)))
-	want := strings.NewReplacer("int $a,int $b", "int $a, int $b", "$a+$b", "$a + $b", "fun get", "final fun get").Replace(sample)
+	want := strings.NewReplacer("int $a,int $b", "int $a, int $b", "$a+$b", "$a + $b", "    get(", "    final get(").Replace(sample)
 	if string(got) != want {
 		t.Errorf("source\n%s\nwant\n%s", got, want)
 	}
@@ -159,7 +159,7 @@ func TestCarryDeletion(t *testing.T) {
 	}
 	tool := strings.Replace(string(old), method, "", 1)
 	got, refused := Carry(src, old, spans, Diff(old, []byte(tool)))
-	if want := strings.Replace(sample, "\n\n    fun get(): int => $this->n;", "", 1); string(got) != want || refused != nil {
+	if want := strings.Replace(sample, "\n\n    get(): int => $this->n;", "", 1); string(got) != want || refused != nil {
 		t.Errorf("source\n%s\nrefused %v", got, refused)
 	}
 }

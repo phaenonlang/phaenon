@@ -9,10 +9,10 @@
 // hunks. Carry applies to the source every hunk that lies within one
 // verbatim span, at the offset the span maps it to, and every deletion
 // whose ends do, and refuses the others:
-// text the compiler wrote — a docblock, the `function` of a `fun`, an erased
-// type, an import it added — is the compiler's to lay out, and the rebuild
-// writes it anew from the source. Plain PHP copied as written is one span,
-// so every change of it is carried.
+// text the compiler wrote — a docblock, the `function` of a method declared
+// without it, an erased type, an import it added — is the compiler's to
+// lay out, and the rebuild writes it anew from the source. Plain PHP copied
+// as written is one span, so every change of it is carried.
 //
 // A hunk is never split: one change of the tool is carried whole or not at
 // all, so the source never holds half of an edit.

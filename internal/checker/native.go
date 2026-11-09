@@ -32,8 +32,8 @@ func (x *fnCtx) nativeOf(e ast.Expr, env *state) types.Type {
 // guaranteedOf is nativeOf for what PHP guarantees at run time: a call or
 // a static property whose declaration has no PHP type guarantees nothing
 // (mixed), whatever its docblock says, as a PHP caller or a wrong docblock
-// can hand over anything. It decides which checks of an `is` or `as` the
-// operand's type settles, and what a variable assigned the value holds.
+// can hand over anything. It decides which checks of a withdrawn `is` or
+// `as` the operand's type settles in the PHP test phn fmt writes for it, and what a variable assigned the value holds.
 func (x *fnCtx) guaranteedOf(e ast.Expr, env *state) types.Type {
 	return x.phpType(e, env, true)
 }

@@ -24,13 +24,13 @@ func TestMatchesPhn(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", bin, "../../cmd/phn").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
-	greeter := "namespace App;\n\nfinal class Greeter\n{\n    fun hello(string $n): string => \"Hello, {$n}\";\n\n    fun count(): int => 'one';\n}\n"
+	greeter := "namespace App;\n\nfinal class Greeter\n{\n    hello(string $n): string => \"Hello, {$n}\";\n\n    count(): int => 'one';\n}\n"
 	cases := map[string]string{
 		"clean":      clean,
 		"broken":     broken,
-		"support":    "namespace App;\n\nfun run(): string => (new Greeter())->hello('x');\n",
-		"deprecated": "namespace App;\n\nfun latin(string $s): string => utf8_encode($s);\n",
-		"generic":    "namespace App;\n\nfinal class Box<T>\n{\n    fun __construct(private T $value) {}\n\n    fun get(): T => $this->value;\n}\n\nfun unbox(Box<int> $b): string => $b->get();\n",
+		"support":    "namespace App;\n\nfunction run(): string => (new Greeter())->hello('x');\n",
+		"deprecated": "namespace App;\n\nfunction latin(string $s): string => utf8_encode($s);\n",
+		"generic":    "namespace App;\n\nfinal class Box<T>\n{\n    __construct(private T $value) {}\n\n    get(): T => $this->value;\n}\n\nfunction unbox(Box<int> $b): string => $b->get();\n",
 	}
 	for name, main := range cases {
 		for _, emitOnError := range []bool{false, true} {

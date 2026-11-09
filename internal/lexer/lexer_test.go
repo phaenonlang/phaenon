@@ -57,14 +57,14 @@ func TestPhaenonMode(t *testing.T) {
 		{`$a = 1;`, `T_VARIABLE($a) =(=) T_LNUMBER(1) ;(;)`},
 		// Phaenon keywords.
 		{`if ($x is list<int>) {} type Id = string; class R<T of A, in U, out V> {}`,
-			`T_IF(if) ((() T_VARIABLE($x) T_IS(is) T_LIST(list) <(<) T_STRING(int) >(>) )()) {({) }(}) T_TYPE(type) T_STRING(Id) =(=) T_STRING(string) ;(;) T_CLASS(class) T_STRING(R) <(<) T_STRING(T) T_OF(of) T_STRING(A) ,(,) T_IN(in) T_STRING(U) ,(,) T_OUT(out) T_STRING(V) >(>) {({) }(})`},
+			`T_IF(if) ((() T_VARIABLE($x) T_STRING(is) T_LIST(list) <(<) T_STRING(int) >(>) )()) {({) }(}) T_TYPE(type) T_STRING(Id) =(=) T_STRING(string) ;(;) T_CLASS(class) T_STRING(R) <(<) T_STRING(T) T_OF(of) T_STRING(A) ,(,) T_IN(in) T_STRING(U) ,(,) T_OUT(out) T_STRING(V) >(>) {({) }(})`},
 		// No close tags: "?>" is just two operators, and "// ?>" does not end a comment.
 		{"$a ?> 1; // c ?> still comment\n$b", `T_VARIABLE($a) ?(?) >(>) T_LNUMBER(1) ;(;) T_VARIABLE($b)`},
 		// A stray <?php at byte 0 is one token for a friendly diagnostic.
 		{"<?php $a", `T_OPEN_TAG(<?php) T_VARIABLE($a)`},
-		// `fun` is a keyword before a name, an identifier elsewhere.
+		// `fun` and `is` are names (roadmap D26, D27).
 		{`fun f() {} static fun &g() {} fun(); fun = 1; $x->fun;`,
-			`T_FUN(fun) T_STRING(f) ((() )()) {({) }(}) T_STATIC(static) T_FUN(fun) T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG(&) T_STRING(g) ((() )()) {({) }(}) T_STRING(fun) ((() )()) ;(;) T_STRING(fun) =(=) T_LNUMBER(1) ;(;) T_VARIABLE($x) T_OBJECT_OPERATOR(->) T_STRING(fun) ;(;)`},
+			`T_STRING(fun) T_STRING(f) ((() )()) {({) }(}) T_STATIC(static) T_STRING(fun) T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG(&) T_STRING(g) ((() )()) {({) }(}) T_STRING(fun) ((() )()) ;(;) T_STRING(fun) =(=) T_LNUMBER(1) ;(;) T_VARIABLE($x) T_OBJECT_OPERATOR(->) T_STRING(fun) ;(;)`},
 		// Keywords after -> are still names.
 		{`$x->is; $x->type;`, `T_VARIABLE($x) T_OBJECT_OPERATOR(->) T_STRING(is) ;(;) T_VARIABLE($x) T_OBJECT_OPERATOR(->) T_STRING(type) ;(;)`},
 	}

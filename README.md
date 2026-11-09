@@ -2,8 +2,10 @@
 
 A typed dialect of PHP 8.5+ that compiles to idiomatic PHP — "TypeScript for PHP". The compiled
 output depends on nothing but PHP (`design/roadmap.md` D24): the compiler adds the header,
-`declare(strict_types=1)`, docblocks, and PHP's own functions and classes where the source used
-`is`, `as` or a construct it lowers, and never a call into a package.
+`declare(strict_types=1)`, docblocks, and PHP's own functions and classes where the source used a
+construct it lowers, and never a call into a package. Phaenon adds types and the spelling of
+declarations, never an operation PHP lacks (D26): a PHP developer reads a `.phn` and knows what
+every line does.
 
 - `phn` — the compiler (this repository, Go)
 - `phaenon/debug` — opt-in source positions in production: the line map read for Monolog and
@@ -14,7 +16,7 @@ output depends on nothing but PHP (`design/roadmap.md` D24): the compiler adds t
 Status: pre-alpha; the language and the CLI still change between releases. What works today:
 
 - `phn check`, the type checker: PHP plus Phaenon's syntax (generics, `list<T>` and `map<K, V>`,
-  tuples, `bytes`, `fun`, `throws`) and the PHPStan docblock vocabulary;
+  tuples, `bytes`, methods without a keyword, `throws`) and the PHPStan docblock vocabulary;
   it reports what PHPStan reports at level max, and may be stricter, never more lenient.
 - `phn build`, the emitter: the PHP you would have written, with PHPStan docblocks, laid out as PER
   Coding Style 3.0, each file ending with a line map back to its `.phn`.
@@ -86,7 +88,7 @@ output whose source is gone is removed. `exclude` names the paths the checker le
 attributes spare a private property the dead-code warnings (above).
 
 ```sh
-phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function` → `fun`, nested calls as |> pipelines, canonical layout
+phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function title()` → `title()`, nested calls as |> pipelines, canonical layout
 phn build                      # the roots of phaenon.json → their outputs
 phn build --check              # CI: fail when an output is missing, stale or has no source
 phn check                      # type-check the roots, minus "exclude"
@@ -130,10 +132,12 @@ local `php` (`PHN_PHP` names another), which should be as new as the target (`P4
 PHPStan code says in comments into the signature: `@template T of Foo` → `<T of Foo>`, `@extends
 Base<T>` → `extends Base<T>`, `@param list<T> $xs` → `list<T> $xs`, `@return T` → `: T`, a
 property's `@var array<K, V>` → `map<K, V>`, `@param array<array-key, V> $xs` → `array<V> $xs`, and
-a declared `array` that has no element type and inherits none → `array<mixed>`. It also spells every named function and method `fun`,
-dropping the `public` that Phaenon implies (`public function` → `fun`, `final public static
-function` → `final static fun`), drops a constant's `public` (`public const` → `const`) and `public`
-before an asymmetric visibility (`public private(set)` → `private(set)`); `--keep-public` keeps all three. A tag is lifted only when its type has a Phaenon
+a declared `array` that has no element type and inherits none → `array<mixed>`. It also lifts
+`function` off every method, dropping the `public` that PHP implies (`public function title()` →
+`title()`, `final public static function create()` → `final static create()`), while a function
+and a method named after a modifier, `var`, `const`, `Closure`, `function` or `fn` keep
+`function`; it drops a constant's `public` (`public const` → `const`) and `public` before an
+asymmetric visibility (`public private(set)` → `private(set)`); `--keep-public` keeps all three. A tag is lifted only when its type has a Phaenon
 spelling and erases to the type PHP already saw — the generated `.php` keeps the same signatures —
 and every tag left in place is reported with the reason (`--keep-docblocks` skips the lift).
 "Erases" includes the override-erasure rule: a method that implements a generic signature compiles
@@ -238,19 +242,28 @@ phn fix --check -- tools/php-cs-fixer/vendor/bin/php-cs-fixer fix   # each chang
 ```
 
 A change of what the source wrote is applied to the source, and so is a deletion whose ends lie
-in it. A change of text the compiler wrote — the header, a docblock, the `function` of a `fun`,
-an erased type — is not: the rebuild writes that text anew. `phn fix` then rebuilds and runs the
-tool again, carrying what has become the source's, for three rounds at most, and reports what the
-tool still changes; the exit status is 1 then (`design/tooling.md` §4). For php-cs-fixer and
-Rector, each reported change names its rule, `php-cs-fixer (binary_operator_spaces) changes: …`,
-from the tool's own JSON report, which `phn fix` asks for.
+in it. A change of text the compiler wrote — the header, a docblock, the `function` of a method
+declared without it, an erased type — is not: the rebuild writes that text anew. `phn fix` then
+rebuilds and runs the tool again, carrying what has become the source's, for three rounds at
+most, and reports what the tool still changes; the exit status is 1 then (`design/tooling.md`
+§4). For php-cs-fixer and Rector, each reported change names its rule, `php-cs-fixer
+(binary_operator_spaces) changes: …`, from the tool's own JSON report, which `phn fix` asks for.
 
 `phn fmt` formats the `.phn` in two layers. The first is Phaenon's layout, with no options:
 spaces for tabs (a tab outside a string or a comment's text doesn't compile, `P1005`), a
 function's brace on its declaration's line, a class-like's on its own, `{}` for an empty body,
 one-line docblocks, and the spacing of what only Phaenon has (`class Box<T of Item>`,
-`map<string, list<int>>`, `Closure(int): bool`, `throws A|B`, `$x as? User`).
+`map<string, list<int>>`, `Closure(int): bool`, `throws A|B`).
 The second is the project's own PHP style: its php-cs-fixer, run through `phn fix`.
+
+The first layer also rewrites the spellings the language withdrew on 2026-11-09, so that a tree
+crosses the change with one command (`design/tooling.md` §5.6): `fun` goes before a method's name
+and becomes `function` before a function's, `function` is lifted off every method that does not
+need it (the modifiers stay as written), and a leftover `is`, `as` or `as?` becomes the PHP test
+it compiled to — `$x is int` → `is_int($x)`, `$b is string` on `bytes` →
+`mb_check_encoding($b, 'UTF-8')`. Most of those depend on the operand's type, so `phn fmt` in a
+project checks the files that hold one first; `phn fmt --stdin`, with no program, rewrites only
+`fun`, `function` and `$x is Foo` with a class name, and reports the rest (`P1001`).
 
 ```sh
 phn fmt                 # the roots: Phaenon's layout, then the fixer (phaenon.json "fmt", or tools/php-cs-fixer)
@@ -321,22 +334,28 @@ final class Account
 {
     private int $balance = 0;
 
-    fun balance(): int => $this->balance;
+    balance(): int => $this->balance;
 
     /** Takes money out, never below zero. */
-    fun withdraw(int $amount): void throws InsufficientFunds {
+    withdraw(int $amount): void throws InsufficientFunds {
         if ($amount > $this->balance) {
             throw new InsufficientFunds($amount);
         }
         $this->balance -= $amount;
     }
 
-    static fun open(): self => new self();
+    static open(): self => new self();
 }
+
+function opened(): Account => Account::open();
 ```
 
-`fun` declares a named function or method, `public` unless a visibility is written; `function`
-stays valid. A named function may have **one expression** for its body, `=> expr;`: returned, or
+A method is declared without a keyword: after its modifiers, a name and its parameters, `public`
+unless a visibility is written. It compiles to `public function balance(): int`, PER's head. A
+function keeps PHP's `function`, and so does a method named after a modifier, `var`, `const`,
+`Closure`, `function` or `fn` (`public function static()`); `function` stays valid on any method.
+`fun`, the keyword before 2026-11-09, is `P1001`, which `phn fmt` rewrites.
+A named function may have **one expression** for its body, `=> expr;`: returned, or
 only evaluated under `void` and `never`; not on constructors, destructors or generators (`P1004`).
 It compiles to the block it stands for. **`throws A|B`** after the return type names
 the exceptions the function lets escape; each must be a `Throwable` (`P2319`), and callers are not
@@ -351,13 +370,13 @@ Design: `design/functions.md`, `design/tooling.md` §9.1.
 ```php
 final class Repository<T of Model>
 {
-    fun __construct(private readonly class<T> $class, private EventStore $store) {}
-    fun get(Uuid $id): ?T { … if ($root instanceof $this->class) { return $root; } … }
-    fun fresh(Uuid $id): T { return new $this->class($id); }
+    __construct(private readonly class<T> $class, private EventStore $store) {}
+    get(Uuid $id): ?T { … if ($root instanceof $this->class) { return $root; } … }
+    fresh(Uuid $id): T { return new $this->class($id); }
 }
 final class UserRepository extends Repository<User>
 {
-    fun __construct(EventStore $store) { parent::__construct(User::class, $store); }
+    __construct(EventStore $store) { parent::__construct(User::class, $store); }
 }
 
 function first<T>(list<T> $items): ?T { return $items[0] ?? null; }
@@ -370,22 +389,21 @@ at runtime it takes a `class<T>` — the type of `User::class`, a plain string �
 projects already write it, and `UserRepository` is an ordinary autowirable service. The compiler
 never adds parameters or members: the output contains no identifier you did not write.
 
-`is` and `as` test what PHP tests itself, in O(1), and compile to that test: `$x is int` to
-`\is_int($x)`, `$x is ?User` to `$x === null || $x instanceof User`, `$x is list` to
-`\is_array($x) && \array_is_list($x)` (on an `array`, `\array_is_list($x)` alone), a tuple
-`(int, string)` to its count and members. `$x as int` is
-`\is_int($x) ? $x : throw new \TypeError('expected int, got ' . \get_debug_type($x))`, and
-`$x as? User` is `$x instanceof User ? $x : null`. A type PHP cannot test in O(1) is an error
-(`P3011`): `$x is list<int>` would walk the list, so the check of the elements is written out,
-`\array_all($x, fn ($v) => \is_int($v))`, where the cost shows. A test that writes its operand
-twice takes a variable or a property, not a call (`P3012`). Design: `design/generics.md` §11.4.
+A type test is PHP's own — `is_int($x)`, `$x instanceof User`, `is_array($x) &&
+array_is_list($x)`, `$x === null`, `in_array($x, ['a', 'b'], true)` — and the checker narrows
+through it as PHPStan does; a checked value is PHP 8's `is_int($x) ? $x : throw new
+\TypeError(…)`. A guard of your own is a function or method with `@phpstan-assert`,
+`@phpstan-assert-if-true` or `@phpstan-assert-if-false`, which the checker honours. A tuple is a
+type only, with no runtime test. The operators `is`, `as` and `as?` that Phaenon had until
+2026-11-09 are `P1001`, and `phn fmt` writes the PHP test each compiled to. Design:
+`design/generics.md` §11.5.
 
-`bytes` is a PHP string at runtime, so PHP cannot tell it from text: `is bytes` is `P3011`, and
-so is `is string` on a value that may be either. On a `bytes` operand, `as string` is the checked
-conversion to text,
-`\mb_check_encoding($b, 'UTF-8') ? $b : throw new \ValueError('not valid UTF-8')`; `as? string`
-gives `null` and `is string` is the test alone. `(bytes) $s` retypes a string as binary data and
-`(string) $b` is the unchecked way back, both free. `hex2bin()` returns `bytes|false`, and
+`bytes` is a PHP string at runtime, so PHP cannot tell it from text. The checked conversion to
+text is PHP's own test: `mb_check_encoding($b, 'UTF-8')`, with the encoding written as a literal,
+narrows a `bytes` operand to text, `string&bytes`, where it holds —
+`mb_check_encoding($b, 'UTF-8') ? $b : throw new \ValueError('not valid UTF-8')`.
+`(bytes) $s` retypes a string as binary data and `(string) $b` is the unchecked way back, both
+free. `hex2bin()` returns `bytes|false`, and
 `bin2hex()`, `base64_encode()` and `mb_scrub()` take bytes; `base64_decode()` keeps PHP's
 `string`, as base64 carries text as often as binary, and `(bytes) base64_decode($s)` retypes the
 binary case. The check needs `ext-mbstring`, or `symfony/polyfill-mbstring` where it is missing.

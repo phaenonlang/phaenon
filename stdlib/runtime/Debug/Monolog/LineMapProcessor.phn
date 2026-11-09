@@ -22,7 +22,7 @@ use Throwable;
  */
 final class LineMapProcessor implements ProcessorInterface
 {
-    fun __invoke(LogRecord $record): LogRecord {
+    __invoke(LogRecord $record): LogRecord {
         $exception = $record->context['exception'] ?? null;
         if (!$exception instanceof Throwable) {
             return $record;
@@ -48,7 +48,7 @@ final class LineMapProcessor implements ProcessorInterface
      * Symfony quote one — the path or its base name, then `:57`, ` line 57`,
      * ` on line 57` or `(57)` — replaced by the source position.
      */
-    private static fun quoteSource(string $message, string $compiledFile, int $compiledLine, string $sourceFile, int $sourceLine): string {
+    private static quoteSource(string $message, string $compiledFile, int $compiledLine, string $sourceFile, int $sourceLine): string {
         foreach ([[$compiledFile, $sourceFile], [basename($compiledFile), basename($sourceFile)]] as [$from, $to]) {
             $pattern = '~(?<![\w./\\\\-])' . preg_quote($from, '~') . '(:| on line | line |\()' . $compiledLine . '(?![0-9])~';
             $message = preg_replace_callback($pattern, static fn (array $m): string => $to . $m[1] . $sourceLine, $message) ?? $message;

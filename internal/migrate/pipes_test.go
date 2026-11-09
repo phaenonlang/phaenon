@@ -30,8 +30,8 @@ func pipes(t *testing.T, src string, target phpversion.Version, min int) (string
 // PHP 8.5 the stage is lowered as any other: the class's members are no
 // variables of the closure (TestLift's pipes fixture runs one).
 func TestPipesMoveAnAnonymousClass(t *testing.T) {
-	src := "/** @param list<int> $xs */\nfun tagged(array $xs, object $o): int => count($xs);\n\n/** @param list<int> $xs */\nfun f(array $xs): int {\n    return tagged(array_values(array_filter(array_map(fn (int $x): int => $x - 1, $xs))), new class { public int $a = 1; });\n}\n"
-	want := "/** @param list<int> $xs */\nfun tagged(array $xs, object $o): int => count($xs);\n\n/** @param list<int> $xs */\nfun f(array $xs): int {\n    return $xs\n        |> array_map(fn (int $x): int => $x - 1, ?)\n        |> array_filter(...)\n        |> array_values(...)\n        |> tagged(?, new class { public int $a = 1; });\n}\n"
+	src := "/** @param list<int> $xs */\nfunction tagged(array $xs, object $o): int => count($xs);\n\n/** @param list<int> $xs */\nfunction f(array $xs): int {\n    return tagged(array_values(array_filter(array_map(fn (int $x): int => $x - 1, $xs))), new class { public int $a = 1; });\n}\n"
+	want := "/** @param list<int> $xs */\nfunction tagged(array $xs, object $o): int => count($xs);\n\n/** @param list<int> $xs */\nfunction f(array $xs): int {\n    return $xs\n        |> array_map(fn (int $x): int => $x - 1, ?)\n        |> array_filter(...)\n        |> array_values(...)\n        |> tagged(?, new class { public int $a = 1; });\n}\n"
 	for _, target := range []phpversion.Version{phpversion.PHP85, phpversion.PHP86} {
 		got, rep := pipes(t, src, target, 3)
 		if got != want || rep.Pipelines != 1 {
@@ -44,7 +44,7 @@ func TestPipesMoveAnAnonymousClass(t *testing.T) {
 // constructor may: an argument written before the nested call that reads
 // the variable keeps the chain as calls.
 func TestPipesKeepOrderAroundAnAnonymousClass(t *testing.T) {
-	src := "fun f(string $s): string => str_repeat($s, strlen(implode(',', array_keys(get_object_vars(new class ($s) { fun __construct(string &$t) { $t = 'x'; } })))));\n"
+	src := "function f(string $s): string => str_repeat($s, strlen(implode(',', array_keys(get_object_vars(new class ($s) { __construct(string &$t) { $t = 'x'; } })))));\n"
 	got, rep := pipes(t, src, phpversion.PHP86, 3)
 	if got != src || rep.Left[ReasonOrder] != 1 {
 		t.Errorf("left %v; got:\n%s", rep.Left, got)
@@ -53,7 +53,7 @@ func TestPipesKeepOrderAroundAnAnonymousClass(t *testing.T) {
 
 // A call with explicit type arguments is no stage.
 func TestPipesKeepTypeArguments(t *testing.T) {
-	src := "fun first<T>(list<T> $items): T => $items[0];\n\n/** @param list<string> $xs */\nfun f(array $xs): string => first<string>(array_values(array_filter($xs)));\n"
+	src := "function first<T>(list<T> $items): T => $items[0];\n\n/** @param list<string> $xs */\nfunction f(array $xs): string => first<string>(array_values(array_filter($xs)));\n"
 	got, rep := pipes(t, src, phpversion.PHP85, 3)
 	if got != src || rep.Left[ReasonTypeArgs] != 1 {
 		t.Errorf("left %v; got:\n%s", rep.Left, got)
@@ -78,7 +78,7 @@ func TestPipesWithoutChains(t *testing.T) {
 		called = true
 		return nil, nil
 	}
-	src := "fun f(string $s): string => trim(strtoupper($s));\n"
+	src := "function f(string $s): string => trim(strtoupper($s));\n"
 	out, rep, err := Pipes([]PipeFile{{Path: "t.phn", Src: []byte(src)}}, PipeOptions{MinCalls: 3, Load: load})
 	if err != nil || called || string(out[0]) != src || rep.LeftCalls() != 0 {
 		t.Errorf("err %v, called %v, left %d, out %q", err, called, rep.LeftCalls(), out[0])
@@ -90,8 +90,8 @@ func TestPipesWithoutChains(t *testing.T) {
 // check of the calls and the check of the pipelines: the comparison names
 // a class by where it is declared, not by its number.
 func TestCompareChecksRenumberedAnonymousClass(t *testing.T) {
-	main := []byte("fun f(): object {\n    $o = new class {};\n    return $o;\n}\n")
-	srcs := map[string][]byte{"main.phn": main, "other.phn": []byte("fun g(): object => new class {};\n")}
+	main := []byte("function f(): object {\n    $o = new class {};\n    return $o;\n}\n")
+	srcs := map[string][]byte{"main.phn": main, "other.phn": []byte("function g(): object => new class {};\n")}
 	watch := map[string]bool{"main.phn": true}
 	load := func(order ...string) func(map[string][]byte, map[string]bool) (*program.Program, error) {
 		return func(srcs map[string][]byte, watch map[string]bool) (*program.Program, error) {

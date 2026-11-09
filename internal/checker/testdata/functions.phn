@@ -2,14 +2,14 @@ namespace Fun;
 
 use Closure;
 
-// `fun` declares a function or method with public implied; a closure in a
-// constant expression — an attribute argument, a constant, a default — is
+// A method is declared without a keyword, public implied (roadmap D27); a
+// closure in a constant expression — an attribute argument, a constant, a default — is
 // static and captures nothing (design/functions.md §2).
 
 #[\Attribute(\Attribute::TARGET_CLASS)]
 final class Map
 {
-    fun __construct(public readonly Closure $f)
+    __construct(public readonly Closure $f)
     {
     }
 }
@@ -21,16 +21,16 @@ final class Doubled
 
     private(set) int $count = 0;
 
-    fun __construct(private Closure $normalise = fn (string $s): string => \trim($s)) // want P2407 "normalise"
+    __construct(private Closure $normalise = fn (string $s): string => \trim($s)) // want P2407 "normalise"
     {
     }
 
-    protected static fun make(): static
+    protected static make(): static
     {
         return new static();
     }
 
-    fun bad(Closure $f = fn (): mixed => $this): void // want P2531
+    bad(Closure $f = fn (): mixed => $this): void // want P2531
     {
         $this->count = $this->count + 1;
         $f();
@@ -43,12 +43,12 @@ final class Captured
     public int $count = 0;
 }
 
-fun helper(): int
+function helper(): int
 {
     return Doubled::UPPER->__invoke('a') === 'A' ? 1 : 0;
 }
 
-fun caller(): void
+function caller(): void
 {
     $d = new Doubled();
     $d->bad();

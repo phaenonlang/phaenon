@@ -13,21 +13,21 @@ final class NotFound extends \RuntimeException
 
 interface Store
 {
-    fun get(int $id): string throws NotFound;
+    get(int $id): string throws NotFound;
 
     /** Removes the entry. */
-    fun remove(int $id): void throws NotFound|Failure;
+    remove(int $id): void throws NotFound|Failure;
 }
 
 final class MemoryStore implements Store {
     /** @var array<int, string> */
     private array $items = [];
 
-    fun get(int $id): string throws NotFound
+    get(int $id): string throws NotFound
         => $this->items[$id] ?? throw new NotFound((string) $id);
 
     /** Removes the entry. */
-    fun remove(int $id): void throws NotFound|Failure {
+    remove(int $id): void throws NotFound|Failure {
         if (!isset($this->items[$id])) {
             throw new NotFound((string) $id);
         }
@@ -37,7 +37,7 @@ final class MemoryStore implements Store {
     /**
      * Stores a value.
      */
-    fun put(int $id, string $value): void throws \InvalidArgumentException {
+    put(int $id, string $value): void throws \InvalidArgumentException {
         if ($value === '') {
             throw new \InvalidArgumentException('empty');
         }
@@ -47,23 +47,23 @@ final class MemoryStore implements Store {
     /**
      * @param $id - the key
      * @return string the value */
-    fun require(int $id): string
+    require(int $id): string
         throws \LogicException {
         return $this->items[$id] ?? throw new \LogicException('no ' . $id);
     }
 
     #[\Deprecated]
-    fun old(int $id): string throws NotFound => $this->get($id);
+    old(int $id): string throws NotFound => $this->get($id);
 
     #[\Deprecated]
     /** Below its attribute, where PHPStan does not read a docblock. */
-    fun below(int $id): string throws NotFound => $this->get($id);
+    below(int $id): string throws NotFound => $this->get($id);
 
     /** Kept apart from its declaration. */
 
-    fun apart(int $id): string throws NotFound => $this->get($id);
+    apart(int $id): string throws NotFound => $this->get($id);
 
-    /** Beside its declaration. */ fun beside(int $id): string throws NotFound => $this->get($id);
+    /** Beside its declaration. */ beside(int $id): string throws NotFound => $this->get($id);
 
     /**
      * Everything stored, the first entry included.
@@ -71,23 +71,23 @@ final class MemoryStore implements Store {
      * @return array<int, string>
      * @throws \LogicException when the store is empty
      */
-    fun all(): array throws NotFound
+    all(): array throws NotFound
         => $this->items === [] ? throw new \LogicException('empty') : $this->items + [0 => $this->get(0)];
 
     /** @throws NotFound */
-    fun stated(int $id): string throws NotFound => $this->get($id);
+    stated(int $id): string throws NotFound => $this->get($id);
 
     /** @param $items - the candidates, the first one returned */
-    fun first<T of object>(class<T> $class, list<T> $items): T throws NotFound
+    first<T of object>(class<T> $class, list<T> $items): T throws NotFound
         => $items[0] ?? throw new NotFound($class);
 
     /** Rethrows what it is given. */
-    fun rethrow<E of \Throwable>(E $e): never throws E => throw $e;
+    rethrow<E of \Throwable>(E $e): never throws E => throw $e;
 }
 
-fun load(Store $store): string throws NotFound
+function load(Store $store): string throws NotFound
 {
     return $store->get(1);
 }
 
-fun loadAll(MemoryStore $store): int throws NotFound|\LogicException => \count($store->all());
+function loadAll(MemoryStore $store): int throws NotFound|\LogicException => \count($store->all());

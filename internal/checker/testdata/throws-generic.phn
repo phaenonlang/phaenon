@@ -5,17 +5,17 @@ namespace ThrowingGenerics;
 
 final class Rethrower
 {
-    fun rethrow<E of \Throwable>(E $e): never throws E => throw $e;
+    rethrow<E of \Throwable>(E $e): never throws E => throw $e;
 
-    fun loose<T>(T $t): void throws T {} // want P2319
+    loose<T>(T $t): void throws T {} // want P2319
 }
 
 /** A failure carried until someone throws it. */
 final class Pending<E of \RuntimeException>
 {
-    fun __construct(private E $failure) {}
+    __construct(private E $failure) {}
 
-    fun raise(): never throws E => throw $this->failure;
+    raise(): never throws E => throw $this->failure;
 }
 
-fun raised(Pending<\LogicException> $p): never => $p->raise(); // want P3002
+function raised(Pending<\LogicException> $p): never => $p->raise(); // want P3002

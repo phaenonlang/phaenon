@@ -155,6 +155,11 @@ func (p *Parser) errorf(format string, args ...any) {
 	panic(bailout{&Error{Offset: t.Start, Line: t.Line, Msg: fmt.Sprintf(format, args...)}})
 }
 
+// errorAt is errorf at the token t.
+func (p *Parser) errorAt(t token.Token, format string, args ...any) {
+	panic(bailout{&Error{Offset: t.Start, Line: t.Line, Msg: fmt.Sprintf(format, args...)}})
+}
+
 func (p *Parser) describe() string {
 	t := p.tok()
 	if t.Kind == token.EOF {
@@ -217,7 +222,7 @@ func isReservedNonModifier(k token.Kind) bool {
 		token.T_CLASS, token.T_CLASS_C, token.T_TRAIT_C, token.T_FUNC_C, token.T_METHOD_C, token.T_LINE,
 		token.T_FILE, token.T_DIR, token.T_NS_C, token.T_FN, token.T_MATCH, token.T_ENUM, token.T_PROPERTY_C,
 		// Phaenon contextual keywords are identifiers everywhere PHP allows a keyword.
-		token.T_IS, token.T_TYPE, token.T_OF, token.T_IN, token.T_OUT, token.T_FUN:
+		token.T_TYPE, token.T_OF, token.T_IN, token.T_OUT:
 		return true
 	}
 	return false

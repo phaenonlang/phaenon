@@ -4,38 +4,38 @@
 // design/php-versions.md §5.3 says) and for PHP 8.6 (pipes.8.6.php).
 
 final class User {
-    fun __construct(public ?string $email) {}
+    __construct(public ?string $email) {}
 }
 
 final class Log {
     /** @var list<string> */
     public array $lines = [];
 
-    fun line(string $s): void {
+    line(string $s): void {
         $this->lines[] = $s;
     }
 }
 
-fun trace(string $label, string $value): string {
+function trace(string $label, string $value): string {
     echo "eval $label\n";
     return $value;
 }
 
 // Closures bound before and after the piped value.
-fun emails(list<User> $users): list<string> => $users
+function emails(list<User> $users): list<string> => $users
     |> array_map(fn (User $u): ?string => $u->email, ?)
     |> array_filter(?, fn (?string $e): bool => $e !== null)
     |> array_values(...);
 
 // Literal bound arguments and first-class callables.
-fun encode(map<string, int> $parts): string => $parts
+function encode(map<string, int> $parts): string => $parts
     |> json_encode(?, \JSON_THROW_ON_ERROR)
     |> base64_encode(...)
     |> strtr(?, '+/', '-_')
     |> rtrim(?, '=');
 
 // A variable bound after the piped value, a method stage.
-fun report(Log $log, list<string> $rows, string $what): void {
+function report(Log $log, list<string> $rows, string $what): void {
     $rows
         |> count(...)
         |> sprintf('%d %s published.', ?, $what)
@@ -43,24 +43,24 @@ fun report(Log $log, list<string> $rows, string $what): void {
 }
 
 // The head is the innermost call: it runs first, as it did nested.
-fun traced(): string => trace('head', ' x ') |> trim(...) |> strtoupper(...);
+function traced(): string => trace('head', ' x ') |> trim(...) |> strtoupper(...);
 
 // An anonymous class bound in a stage whose closure needs a use clause: its
 // constructor argument is a variable of the function, its property and its
 // method's local, named like the closure's parameter, are not.
 interface Weighted {
-    fun weight(): int;
+    weight(): int;
 }
 
-fun weigh(list<int> $xs, Weighted $w): int => array_sum($xs) * $w->weight();
+function weigh(list<int> $xs, Weighted $w): int => array_sum($xs) * $w->weight();
 
-fun weighted(list<int> $xs, int $factor): int => $xs
+function weighted(list<int> $xs, int $factor): int => $xs
     |> weigh(?, new class ($factor) implements Weighted {
         public int $a = 1;
 
-        fun __construct(private int $factor) {}
+        __construct(private int $factor) {}
 
-        fun weight(): int {
+        weight(): int {
             $xs = [$this->a, $this->factor];
             return array_sum($xs);
         }
@@ -68,35 +68,35 @@ fun weighted(list<int> $xs, int $factor): int => $xs
 
 // A bound argument the left side writes keeps the pipe: PHP 8.6 reads $n
 // after bump() has run, the call would read it before.
-fun bump(int &$n): string {
+function bump(int &$n): string {
     $n++;
     return "b$n";
 }
 
-fun counted(): string {
+function counted(): string {
     $n = 1;
     return bump($n) |> sprintf('%2$s/%1$d', $n, ?);
 }
 
 // A property is read after the left side: the stage stays a pipe's.
 final class Report {
-    fun __construct(private Log $log) {}
+    __construct(private Log $log) {}
 
-    fun add(list<string> $rows): void {
+    add(list<string> $rows): void {
         $rows |> implode(', ', ?) |> $this->log->line(...);
     }
 }
 
 // A comment between the stages stays where it is, and so does the pipe.
-fun shout(string $s): string => $s
+function shout(string $s): string => $s
     |> trim(...) // the blanks around it
     |> strtoupper(...);
 
 // A named placeholder, the head in parentheses.
-fun padded(?string $s): string => ($s ?? 'none') |> trim(...) |> str_pad(length: 8, string: ?);
+function padded(?string $s): string => ($s ?? 'none') |> trim(...) |> str_pad(length: 8, string: ?);
 
 // A closure over lines moves with its stage.
-fun names(list<User> $users): string {
+function names(list<User> $users): string {
     return $users
         |> array_map(function (User $u): string {
             return $u->email ?? '-';

@@ -140,23 +140,23 @@ function uses(mixed $m, Box<int> $box): void
     $fresh = decode(User::class, 2);
     $n = first<int>([1, 2]);
     $s = $box->map(fn(int $x): string => (string) $x)->get();
-    if ($m is int) {
+    if (is_int($m)) {
         echo $m;
     }
-    if ($m is ?User) {
+    if ($m === null || $m instanceof User) {
         echo $user?->id, $fresh->id, $n, $s;
     }
-    if ($m is list) {
+    if (is_array($m) && array_is_list($m)) {
         echo count($m);
     }
-    if ($m is class<User>) {
+    if (is_string($m) && is_a($m, User::class, true)) {
         echo $m;
     }
-    if ($m is class) {
+    if (is_string($m) && (class_exists($m) || interface_exists($m))) {
         echo $m;
     }
-    $u = $m as? User;
-    $t = $m as Table<int|string, mixed>;
+    $u = $m instanceof User ? $m : null;
+    $t = is_array($m) ? $m : throw new \TypeError('expected array, got ' . get_debug_type($m));
     echo count($t), $u?->id, $repo->describe();
 }
 

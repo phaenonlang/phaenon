@@ -103,7 +103,7 @@ func (s *lspSession) next(pred func(map[string]any) bool) map[string]any {
 func TestLSP(t *testing.T) {
 	bin := phnBinary(t)
 	root := fixTree(t)
-	broken := "namespace App;\n\nfun broken(): int => 'x';\n"
+	broken := "namespace App;\n\nfunction broken(): int => 'x';\n"
 	writeTree(t, root, map[string]string{"src/Broken.phn": broken})
 	s := startLSP(t, bin, root, `{"buildOnSave": true}`)
 

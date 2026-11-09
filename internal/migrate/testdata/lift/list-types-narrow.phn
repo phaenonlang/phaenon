@@ -4,19 +4,19 @@ final class Settings
 {
     private map<string, mixed> $values = [];
 
-    fun set(string $name, mixed $value): void => $this->values[$name] = $value;
+    set(string $name, mixed $value): void => $this->values[$name] = $value;
 
     // array_keys() of the property while it is a bare array is a
     // list<int|string>: once the property is typed, a later round narrows
     // it to the list<string> it is.
-    fun names(): list<string> => array_keys($this->values);
+    names(): list<string> => array_keys($this->values);
 }
 
 final class Walk
 {
     // A recursion spread into array_push(): the mixed of its own bare
     // array is not written, the self round finds list<string>.
-    private static fun files(string $dir): list<string> {
+    private static files(string $dir): list<string> {
         $files = [];
         foreach (scandir($dir) ?: [] as $name) {
             if (is_dir($dir . '/' . $name)) {
@@ -29,7 +29,7 @@ final class Walk
         return $files;
     }
 
-    static fun count(string $dir): int => count(self::files($dir));
+    static count(string $dir): int => count(self::files($dir));
 }
 
 final class Trees
@@ -38,7 +38,7 @@ final class Trees
 
     // What the method writes back it read of the property through a
     // local: its own values, which the self round reads.
-    fun put(string $sha, string $base, string $path, \SplFileInfo $file): void {
+    put(string $sha, string $base, string $path, \SplFileInfo $file): void {
         $files = $this->trees[$base] ?? [];
         $files[$path] = $file;
         ksort($files);
@@ -52,14 +52,14 @@ final class Templates
 
     private map<string, list<string>> $words = [];
 
-    fun __construct() {
+    __construct() {
         $this->template = ['a' => [str_repeat('a', 4), "body\n"], 'b' => ['', '']];
         $this->words = ['a' => ['x', 'y']];
     }
 
     // The template's pairs are taken apart: (string, string). The words
     // are iterated: a list.
-    fun body(string $name): string {
+    body(string $name): string {
         [$commit, $body] = $this->template[$name];
         foreach ($this->words[$name] as $word) {
             $body .= $word;
@@ -74,19 +74,19 @@ final class Routes
     // An answer is a map or a list of records, spelled apart; the records
     // in a row are a list, whatever their fields. names() reads the
     // records, which the type spells as deep as they are.
-    private fun routes(): map<string, (int, map<string, string>|list<map<string, string|true>>)> => [
+    private routes(): map<string, (int, map<string, string>|list<map<string, string|true>>)> => [
         'user' => [200, ['login' => 'acme']],
         'repos' => [200, [['name' => 'a'], ['name' => 'b', 'private' => true]]],
         'missing' => [404, []],
     ];
 
-    fun status(string $key): int {
+    status(string $key): int {
         [$status] = $this->routes()[$key];
 
         return $status;
     }
 
-    fun names(string $key): string {
+    names(string $key): string {
         [, $answer] = $this->routes()[$key];
         $names = [];
         if (array_is_list($answer)) {
@@ -102,7 +102,7 @@ final class Routes
 final class Chain
 {
     // $object::class names some class: class.
-    private static fun chainOf(object $client): list<class> => [$client::class];
+    private static chainOf(object $client): list<class> => [$client::class];
 
-    static fun depth(object $client): int => count(self::chainOf($client));
+    static depth(object $client): int => count(self::chainOf($client));
 }

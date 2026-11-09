@@ -119,22 +119,22 @@ func TestBraces(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{
 			"a multi-line parameter list keeps `) {` together",
-			"fun f(\n    int $a,\n) {\n    return;\n}\n",
+			"function f(\n    int $a,\n) {\n    return;\n}\n",
 			"function f(\n    int $a,\n) {\n    return;\n}\n",
 		},
 		{
 			"a brace below a multi-line parameter list moves up",
-			"fun f(\n    int $a,\n): int\n{\n    return $a;\n}\n",
+			"function f(\n    int $a,\n): int\n{\n    return $a;\n}\n",
 			"function f(\n    int $a,\n): int {\n    return $a;\n}\n",
 		},
 		{
 			"a brace on its own line stays",
-			"fun f(): int\n{\n    return 1;\n}\n",
+			"function f(): int\n{\n    return 1;\n}\n",
 			"function f(): int\n{\n    return 1;\n}\n",
 		},
 		{
 			"a comment before the brace keeps the layout",
-			"fun f(): int /* why */ {\n    return 1;\n}\n",
+			"function f(): int /* why */ {\n    return 1;\n}\n",
 			"function f(): int /* why */ {\n    return 1;\n}\n",
 		},
 		{
@@ -144,27 +144,27 @@ func TestBraces(t *testing.T) {
 		},
 		{
 			"an empty body stays on the signature's line",
-			"class A {\n    fun __construct(private int $n) {}\n}\n",
+			"class A {\n    __construct(private int $n) {}\n}\n",
 			"class A\n{\n    public function __construct(private int $n) {}\n}\n",
 		},
 		{
 			"an empty body after a multi-line parameter list",
-			"fun f(\n    int $a,\n): void {}\n",
+			"function f(\n    int $a,\n): void {}\n",
 			"function f(\n    int $a,\n): void {}\n",
 		},
 		{
 			"an empty body loses the throws clause before it",
-			"fun f(): void throws \\LogicException {}\n",
+			"function f(): void throws \\LogicException {}\n",
 			"/**\n * @throws \\LogicException\n */\nfunction f(): void {}\n",
 		},
 		{
 			"an empty body written over lines stays as written",
-			"fun f(): void\n{\n}\nclass B {\n}\n",
+			"function f(): void\n{\n}\nclass B {\n}\n",
 			"function f(): void\n{\n}\nclass B {\n}\n",
 		},
 		{
 			"a body with a comment is not empty",
-			"fun f(): void { /* nothing */ }\n",
+			"function f(): void { /* nothing */ }\n",
 			"function f(): void\n{ /* nothing */ }\n",
 		},
 		{
@@ -179,27 +179,27 @@ func TestBraces(t *testing.T) {
 		},
 		{
 			"a multi-line expression body moves in with its block",
-			"fun f(): array => [\n    1,\n];\n",
+			"function f(): array => [\n    1,\n];\n",
 			"function f(): array\n{\n    return [\n        1,\n    ];\n}\n",
 		},
 		{
 			"a heredoc in an expression body keeps its lines",
-			"fun f(): string => <<<TXT\n  a\n  TXT;\n",
+			"function f(): string => <<<TXT\n  a\n  TXT;\n",
 			"function f(): string\n{\n    return <<<TXT\n  a\n  TXT;\n}\n",
 		},
 		{
 			"an expression body after a multi-line parameter list keeps `): T {` together",
-			"fun f(\n    int $a,\n): int => $a;\n",
+			"function f(\n    int $a,\n): int => $a;\n",
 			"function f(\n    int $a,\n): int {\n    return $a;\n}\n",
 		},
 		{
 			"a method inside a moved-in expression body is laid out where its lines land",
-			"class A {\n    fun f(): object => new class {\n        fun g(): int => 1;\n    };\n}\n",
+			"class A {\n    f(): object => new class {\n        g(): int => 1;\n    };\n}\n",
 			"class A\n{\n    public function f(): object\n    {\n        return new class {\n            public function g(): int\n            {\n                return 1;\n            }\n        };\n    }\n}\n",
 		},
 		{
 			"tabs",
-			"class A {\n\tfun f(): int => 1;\n}\n",
+			"class A {\n\tf(): int => 1;\n}\n",
 			"class A\n{\n\tpublic function f(): int\n\t{\n\t\treturn 1;\n\t}\n}\n",
 		},
 	}
@@ -220,7 +220,8 @@ func TestErrors(t *testing.T) {
 	cases := map[string]string{
 		"<?php\necho 1;":            "A.phn:1: Phaenon files do not start with <?php",
 		"function f<T>(T $x): T {}": "A.phn:1: Phaenon syntax needs type information",
-		"$y = $x is int;":           "A.phn:1: Phaenon syntax needs type information",
+		"$y = $x is int;":           "A.phn:1: `is` left the language (P1001)",
+		"fun f(): void {}":          "A.phn:1: `fun` left the language (P1001)",
 		"echo 1\necho 2;":           "A.phn:2: ",
 	}
 	for in, want := range cases {

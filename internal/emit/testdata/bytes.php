@@ -83,17 +83,17 @@ function fromBase64(string $b64): string
 // (strings.md §6). Where a type may fail too, the error says which.
 function decode(string $payload): string
 {
-    return \mb_check_encoding($payload, 'UTF-8') ? $payload : throw new \ValueError('not valid UTF-8');
+    return mb_check_encoding($payload, 'UTF-8') ? $payload : throw new \ValueError('not valid UTF-8');
 }
 
 function tryDecode(string $payload): ?string
 {
-    return \mb_check_encoding($payload, 'UTF-8') ? $payload : null;
+    return mb_check_encoding($payload, 'UTF-8') ? $payload : null;
 }
 
 function describe(string $payload): string
 {
-    if (\mb_check_encoding($payload, 'UTF-8')) {
+    if (mb_check_encoding($payload, 'UTF-8')) {
         return "text: $payload";
     }
 
@@ -102,23 +102,23 @@ function describe(string $payload): string
 
 function maybeText(?string $payload): bool
 {
-    return $payload === null || \mb_check_encoding($payload, 'UTF-8');
+    return $payload === null || mb_check_encoding($payload, 'UTF-8');
 }
 
 function maybeDecode(?string $payload): ?string
 {
-    return (\is_string($payload) && \mb_check_encoding($payload, 'UTF-8')) || $payload === null ? $payload : throw new \ValueError('not valid UTF-8');
+    return (is_string($payload) && mb_check_encoding($payload, 'UTF-8')) || $payload === null ? $payload : throw new \ValueError('not valid UTF-8');
 }
 
 function decodePresent(?string $payload): string
 {
-    return \is_string($payload) && \mb_check_encoding($payload, 'UTF-8') ? $payload : throw ($payload === null ? new \TypeError('expected string, got null') : new \ValueError('not valid UTF-8'));
+    return is_string($payload) && mb_check_encoding($payload, 'UTF-8') ? $payload : throw ($payload === null ? new \TypeError('expected string, got null') : new \ValueError('not valid UTF-8'));
 }
 
 // The (bytes) cast is erased from each copy of the operand it retypes.
 function decodeRaw(string $raw): string
 {
-    return \mb_check_encoding($raw, 'UTF-8') ? $raw : throw new \ValueError('not valid UTF-8');
+    return mb_check_encoding($raw, 'UTF-8') ? $raw : throw new \ValueError('not valid UTF-8');
 }
 
 // `.` joins binary to binary and erases unchanged (strings.md §2).

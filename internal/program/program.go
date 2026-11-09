@@ -504,12 +504,13 @@ type PartialParam struct {
 	Arg *ast.Arg
 }
 
-// Test is the checker's lowering of an `is`, `as` or `as?` to the test PHP
-// makes itself (design/generics.md §11.4): `\is_int($x)`, `$x instanceof
-// Foo`, `\is_array($x) && \array_is_list($x)`, `\mb_check_encoding($b,
-// 'UTF-8')` for a bytes operand tested as a string, without the checks the
-// operand's PHP type already settles. The emitter writes it as recorded and
-// derives no test of its own, so what runs is what the checker narrowed on.
+// Test is the test PHP makes itself that a withdrawn `is`, `as` or `as?`
+// compiled to until roadmap D26 (design/generics.md §11.4, tooling.md
+// §5.6): `\is_int($x)`, `$x instanceof Foo`, `\is_array($x) &&
+// \array_is_list($x)`, `\mb_check_encoding($b, 'UTF-8')` for a bytes
+// operand tested as a string, without the checks the operand's PHP type
+// already settles. The checker derives it for its P1001 message and for
+// phn fmt, which writes Rewritten in the withdrawn test's place.
 type Test struct {
 	// Cond is the condition as PHP code with TestOperand wherever the
 	// operand is written (`\is_int(␀[0])` tests a tuple's first element);
@@ -528,6 +529,10 @@ type Test struct {
 	// (NullFirst), a TypeError for null and a ValueError otherwise; in any
 	// other shape one TypeError that expects valid UTF-8.
 	UTF8, EncodingOnly, NullFirst bool
+	// Rewritten is the PHP that replaces the whole withdrawn expression
+	// (Rewrite), "" where there is none; Why then says why, if anything
+	// does beyond the type's own finding.
+	Rewritten, Why string
 }
 
 // TestOperand stands for the operand in a Test's Cond.
@@ -591,7 +596,7 @@ func TestOperandOf(e ast.Expr) (inner ast.Expr, stringCast bool) {
 }
 
 // ReadsTwice reports an operand a test may write twice (design/generics.md
-// §11.4, P3012): beneath its own wrapping (TestOperandOf), a variable, a
+// §11.4, once P3012): beneath its own wrapping (TestOperandOf), a variable, a
 // property or static property fetch, a constant-index read of one of
 // these, or a chain of them — never a call, a new, an operator or an
 // assignment, which the second reading would run again. The nullsafe
@@ -691,8 +696,8 @@ type File struct {
 	// calls (design/php-versions.md §5.3). A pipe the checker did not reach
 	// is absent.
 	Folds map[*ast.Binary]bool
-	// Tests holds the lowering of each checked `is`, `as` and `as?`, by
-	// its node (an *ast.IsExpr or *ast.AsExpr).
+	// Tests holds the PHP test of each checked withdrawn `is`, `as` and
+	// `as?`, by its node (an *ast.IsExpr or *ast.AsExpr).
 	Tests map[ast.Expr]*Test
 	// Scopes maps statement ranges to the namespace scope in force there.
 	Scopes  []ScopedRange

@@ -41,7 +41,7 @@ func vendorTree(t *testing.T) string {
 	writeTree(t, root, map[string]string{
 		"composer.json": `{"name": "acme/root", "require": {"php": ">=8.5", "acme/lib": "*"}, "autoload": {"psr-4": {"App\\": ".src/"}}}`,
 		"phaenon.json":  `{"roots": {"src": ".src"}}`,
-		"src/Use.phn":   "namespace App;\n\nuse Acme\\Lib\\Box;\n\nfun unbox(Box<int> $b): int => $b->get();\n",
+		"src/Use.phn":   "namespace App;\n\nuse Acme\\Lib\\Box;\n\nfunction unbox(Box<int> $b): int => $b->get();\n",
 		"vendor/composer/installed.json": `{"packages": [
 			{"name": "acme/lib", "version": "1.2.0", "install-path": "../acme/lib"},
 			{"name": "acme/plain", "version": "2.0.0", "install-path": "../acme/plain"}
@@ -49,8 +49,8 @@ func vendorTree(t *testing.T) string {
 		"vendor/composer/autoload_psr4.php": "<?php\n\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\n\nreturn array(\n    'App\\\\' => array($baseDir . '/.src'),\n    'Acme\\\\Lib\\\\' => array($vendorDir . '/acme/lib/.src'),\n);\n",
 		"vendor/acme/lib/composer.json":     `{"name": "acme/lib", "require": {"php": ">=8.5"}, "autoload": {"psr-4": {"Acme\\Lib\\": ".src/"}}}`,
 		"vendor/acme/lib/phaenon.json":      `{"roots": {"src": ".src", "tests": ".tests"}}`,
-		"vendor/acme/lib/src/Box.phn":       "namespace Acme\\Lib;\n\nfinal class Box<T> {\n    fun __construct(private T $value) {}\n\n    fun get(): T => $this->value;\n}\n",
-		"vendor/acme/lib/src/Bad.phn":       "namespace Acme\\Lib;\n\nfun bad(): int => 'not an int';\n",
+		"vendor/acme/lib/src/Box.phn":       "namespace Acme\\Lib;\n\nfinal class Box<T> {\n    __construct(private T $value) {}\n\n    get(): T => $this->value;\n}\n",
+		"vendor/acme/lib/src/Bad.phn":       "namespace Acme\\Lib;\n\nfunction bad(): int => 'not an int';\n",
 		"vendor/acme/lib/src/data.json":     `{"copied": true}`,
 		"vendor/acme/plain/composer.json":   `{"name": "acme/plain"}`,
 	})

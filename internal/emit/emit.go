@@ -136,26 +136,45 @@ func Tree(src []byte, f *ast.File, opts Options) ([]byte, error) {
 	return out, err
 }
 
-// withdrawn is the first construct of f that left the language
-// (ast.Withdrawn), nil without one: the checker reports it (P1001), and the
-// emitter has nothing to write for it.
-func withdrawn(f *ast.File) *ast.Withdrawn {
-	var found *ast.Withdrawn
+// withdrawn is the first construct of f that left the language, nil
+// without one, and what it is called: a `concurrently` block or `spawn`
+// (ast.Withdrawn), the operators `is`, `as` and `as?` (roadmap D26), a
+// declaration spelled `fun` (D27). The checker reports each (P1001), and
+// the emitter has nothing to write for it.
+func withdrawn(f *ast.File) (ast.Node, string) {
+	var found ast.Node
+	var name string
 	ast.Inspect(f, func(n ast.Node) bool {
-		if w, ok := n.(*ast.Withdrawn); ok {
-			found = w
+		switch n := n.(type) {
+		case *ast.Withdrawn:
+			found, name = n, "`"+n.Name+"`"
+		case *ast.IsExpr:
+			found, name = n, "`is`"
+		case *ast.AsExpr:
+			found, name = n, "`as`"
+			if n.Nullable {
+				name = "`as?`"
+			}
+		case *ast.FunctionDecl:
+			if n.Fun {
+				found, name = n.Name, "`fun`"
+			}
+		case *ast.MethodDecl:
+			if n.Fun {
+				found, name = n.Name, "`fun`"
+			}
 		}
 		return found == nil
 	})
-	return found
+	return found, name
 }
 
 // compile is Tree with the writer, whose copied source segments the tests
 // check the line map against.
 func compile(src []byte, f *ast.File, opts Options) ([]byte, *lineWriter, error) {
 	e := &emitter{src: src, opts: opts, throwsWritten: map[ast.Node]bool{}}
-	if w := withdrawn(f); w != nil {
-		return nil, nil, e.errorf(w, "`%s` left the language (P1001): there is no PHP to write for it", w.Name)
+	if w, name := withdrawn(f); w != nil {
+		return nil, nil, e.errorf(w, "%s left the language (P1001): there is no PHP to write for it; phn fmt rewrites what has a rewrite", name)
 	}
 	e.planIndents(f)
 	if err := e.lowerGenerics(f); err != nil {

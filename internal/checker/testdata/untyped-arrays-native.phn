@@ -13,17 +13,17 @@ final class Native
 
     private ?array $maybe = null; // want P2516 "$maybe"
 
-    fun __construct(private list<array> $rows) {} // want P2516 "$rows"
+    __construct(private list<array> $rows) {} // want P2516 "$rows"
 
-    fun nested(map<string, array> $byName): int => count($byName); // want P2516 "$byName"
+    nested(map<string, array> $byName): int => count($byName); // want P2516 "$byName"
 
-    fun tuple((int, array) $pair): int => $pair[0]; // want P2516 "$pair"
+    tuple((int, array) $pair): int => $pair[0]; // want P2516 "$pair"
 
-    fun closure(Closure(array): int $f): int => $f([]); // want P2516 "$f"
+    closure(Closure(array): int $f): int => $f([]); // want P2516 "$f"
 
-    fun iterTyped(iterable<int> $xs): int => count($this->any) + count($this->names) + count($this->maybe ?? []) + count($this->rows);
+    iterTyped(iterable<int> $xs): int => count($this->any) + count($this->names) + count($this->maybe ?? []) + count($this->rows);
 
-    fun result(): array<int> => [1];
+    result(): array<int> => [1];
 
-    fun bare(): array => []; // want P2516 "bare"
+    bare(): array => []; // want P2516 "bare"
 }

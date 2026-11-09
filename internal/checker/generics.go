@@ -11,7 +11,8 @@ import (
 
 // This file holds the rules that only Phaenon's generic syntax needs:
 // type-argument arity and bounds, variance positions, what an erased type
-// parameter may be used for, `is` / `as`, explicit type arguments on calls.
+// parameter may be used for, the withdrawn `is` and `as` (typetest.go),
+// explicit type arguments on calls.
 
 // typeParamRef reports whether a name in an expression position refers to
 // a type parameter in scope (`new T`, `T::class`, `$x instanceof T`, `T`).
@@ -85,6 +86,14 @@ var keywordArity = map[string][2]int{
 	"int": {0, 0}, "float": {0, 0}, "string": {0, 0}, "bytes": {0, 0}, "bool": {0, 0}, "mixed": {0, 0},
 	"null": {0, 0}, "void": {0, 0}, "never": {0, 0}, "object": {0, 0}, "self": {0, 0},
 	"static": {0, 0}, "parent": {0, 0}, "true": {0, 0}, "false": {0, 0}, "resource": {0, 0},
+}
+
+// TypeKeyword reports a built-in type keyword of Phaenon's syntax, in any
+// case: a name that is no class (phn fmt's rewrite of `$x is Foo` reads
+// it, design/tooling.md §5.6).
+func TypeKeyword(name string) bool {
+	_, ok := keywordArity[strings.ToLower(name)]
+	return ok
 }
 
 func (x *fnCtx) checkNamedType(t *ast.NamedType) {
@@ -646,22 +655,9 @@ func (x *fnCtx) settles(o operand, target types.Type) (always, never bool) {
 	return always, never
 }
 
-// reportSettled reports a test the types settle (P2306), unless the type
-// has no test at all: that is the one finding (P3011).
-func (x *fnCtx) reportSettled(span ast.Span, o operand, target types.Type, untestable bool) (never bool) {
-	t := o.t
-	always, never := x.settles(o, target)
-	switch {
-	case untestable:
-	case always:
-		x.report(span, P2306, "%s is always %s", x.typeName(t), x.typeName(target))
-	case never:
-		x.report(span, P2306, "%s is never %s", x.typeName(t), x.typeName(target))
-	}
-	return never
-}
-
-// isCond narrows on `$x is T`, exactly as instanceof does for classes.
+// isCond narrows on a withdrawn `$x is T` as on the PHP test it stands
+// for (typetest.go), so that the test draws no finding but its own
+// (P1001); one the types settle is left to the rewritten PHP test.
 func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 	t := x.expr(e.Expr, env, nil)
 	target, narrow, typeOK := x.testType(e.Type)
@@ -678,8 +674,7 @@ func (x *fnCtx) isCond(e *ast.IsExpr, env *state) (then, els *state) {
 			x.condValueType = types.TFalse
 		}
 	}
-	c, untestable := x.lowerTest(e, e.Expr, e.Type, "is", o, target, typeOK, env)
-	x.reportSettled(e.S, o, target, untestable)
+	c, _ := x.lowerTest(e, e.Expr, e.Type, "is", o, target, typeOK, env)
 	var nthen, nels types.Type
 	nold := x.nativeVar(e.Expr, env)
 	if nold != nil {
@@ -704,7 +699,8 @@ func (x *fnCtx) isType(e *ast.IsExpr, env *state) types.Type {
 	return types.TBool
 }
 
-// asExpr types `$x as T` (TypeError on failure) and `$x as? T` (null).
+// asExpr types a withdrawn `$x as T` (TypeError on failure) and `$x as?
+// T` (null) as the PHP they stand for.
 func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	t := x.expr(e.Expr, env, nil)
 	target, narrow, typeOK := x.testType(e.Type)
@@ -713,9 +709,9 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	if e.Nullable {
 		op = "as?"
 	}
-	c, untestable := x.lowerTest(e, e.Expr, e.Type, op, o, target, typeOK, env)
+	c, _ := x.lowerTest(e, e.Expr, e.Type, op, o, target, typeOK, env)
 	lowered := c != nil
-	never := x.reportSettled(e.S, o, target, untestable)
+	_, never := x.settles(o, target)
 	result := narrow
 	if !types.IsMixed(t) && !isParamType(t) && !isParamType(target) && !never {
 		// `$b as string` on bytes is the text the UTF-8 check let through,
@@ -739,7 +735,7 @@ func (x *fnCtx) asExpr(e *ast.AsExpr, env *state) types.Type {
 	return result
 }
 
-// asFailure is what an `as` throws, as lowered: a TypeError, a ValueError
+// asFailure is what a withdrawn `as` throws, as its PHP does: a TypeError, a ValueError
 // where only the encoding of bytes can fail, both where null can too
 // (program.Test, design/strings.md §6).
 func (x *fnCtx) asFailure(e *ast.AsExpr) types.Type {

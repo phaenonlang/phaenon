@@ -1,4 +1,4 @@
-package emit
+package format
 
 import (
 	"fmt"
@@ -8,18 +8,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/checker"
+	"github.com/phaenonlang/phaenon/internal/emit"
 	"github.com/phaenonlang/phaenon/internal/lexer"
-	"github.com/phaenonlang/phaenon/internal/linemap"
 	"github.com/phaenonlang/phaenon/internal/program"
 )
 
-// TestIsAsBehaviour runs the tests `is` and `as` compile to under php
-// (design/generics.md §11.4): each type against every value, each `as`
-// against a value that fails it, and the UTF-8 check of bytes tested as a
-// string (design/strings.md §6). want has a digit per value, 1 where the
-// test holds.
-func TestIsAsBehaviour(t *testing.T) {
+// TestRewrittenTestsBehaviour runs under php the PHP tests phn fmt writes
+// for the withdrawn `is` and `as` (design/tooling.md §5.6), each of which
+// must do at run time what its spelling did (design/generics.md §11.4):
+// each type against every value, each `as` against a value that fails it,
+// and the UTF-8 check of bytes tested as a string (design/strings.md §6).
+// want has a digit per value, 1 where the test holds.
+func TestRewrittenTestsBehaviour(t *testing.T) {
 	php, err := exec.LookPath("php")
 	if err != nil {
 		t.Skip("no php on PATH")
@@ -60,23 +62,23 @@ func TestIsAsBehaviour(t *testing.T) {
 	var src strings.Builder
 	src.WriteString("namespace App;\n\ninterface Model\n{\n}\n\nfinal class User implements Model\n{\n}\n\nenum Suit\n{\n    case Hearts;\n}\n\nfinal class Blob\n{\n    public function __construct(public ?bytes $data)\n    {\n    }\n}\n\n")
 	for i, c := range tests {
-		fmt.Fprintf(&src, "fun is%d(mixed $m): bool => $m is %s;\n\n", i, c.typ)
+		fmt.Fprintf(&src, "function is%d(mixed $m): bool => $m is %s;\n\n", i, c.typ)
 	}
 	// On an array, a tuple's test starts at array_is_list(); on a string,
 	// class<User>'s is is_a() alone.
-	src.WriteString("fun pair(array<mixed> $a): bool => $a is (int, string);\n\n")
-	src.WriteString("fun named(string $s): bool => $s is class<User>;\n\n")
+	src.WriteString("function pair(array<mixed> $a): bool => $a is (int, string);\n\n")
+	src.WriteString("function named(string $s): bool => $s is class<User>;\n\n")
 	// What a docblock or the overlay refines is no PHP guarantee: a PHP
 	// caller hands any array through an erased signature, and anything
 	// can land in a static property, so the checks stay.
-	src.WriteString("fun fromValues(map<int|string, int> $ints): bool\n{\n    $list = \\array_values($ints);\n\n    return $list is (int, int);\n}\n\n")
-	src.WriteString("final class Ids\n{\n    /** @var list<int> */\n    public static array $ids = [];\n\n    public static fun pair(): bool => self::$ids is (int, int);\n}\n\n")
+	src.WriteString("function fromValues(map<int|string, int> $ints): bool\n{\n    $list = \\array_values($ints);\n\n    return $list is (int, int);\n}\n\n")
+	src.WriteString("final class Ids\n{\n    /** @var list<int> */\n    public static array $ids = [];\n\n    public static pair(): bool => self::$ids is (int, int);\n}\n\n")
 	// A declaration PHP gives no type guarantees nothing, whatever its
 	// docblock says.
-	src.WriteString("/**\n * @param list<int> $xs\n * @return list<int>\n */\nfunction docList($xs)\n{\n    return $xs;\n}\n\nfun docPair(list<int> $xs): bool\n{\n    $x = docList($xs);\n\n    return $x is (int, int);\n}\n\n")
-	src.WriteString("final class DocIds\n{\n    /** @var list<int> */\n    public static $ids = [];\n\n    public static fun pair(): bool => self::$ids is (int, int);\n}\n\n")
+	src.WriteString("/**\n * @param list<int> $xs\n * @return list<int>\n */\nfunction docList($xs)\n{\n    return $xs;\n}\n\nfunction docPair(list<int> $xs): bool\n{\n    $x = docList($xs);\n\n    return $x is (int, int);\n}\n\n")
+	src.WriteString("final class DocIds\n{\n    /** @var list<int> */\n    public static $ids = [];\n\n    public static pair(): bool => self::$ids is (int, int);\n}\n\n")
 	// A class name among a tuple's members is a test of that member.
-	src.WriteString("fun classPair(mixed $m): bool => $m is (int, class|int);\n\n")
+	src.WriteString("function classPair(mixed $m): bool => $m is (int, class|int);\n\n")
 	// `as` gives the value, or throws the TypeError PHP's own check would.
 	as := []struct{ expr, value, want string }{
 		{"$m as int", "'s'", "expected int, got string"},
@@ -94,7 +96,7 @@ func TestIsAsBehaviour(t *testing.T) {
 		{"$m as ?int", "null", "NULL"},
 	}
 	for i, c := range as {
-		fmt.Fprintf(&src, "fun as%d(mixed $m): string\n{\n    try {\n        $v = %s;\n    } catch (\\TypeError $e) {\n        return $e->getMessage();\n    }\n\n    return show($v);\n}\n\n", i, c.expr)
+		fmt.Fprintf(&src, "function as%d(mixed $m): string\n{\n    try {\n        $v = %s;\n    } catch (\\TypeError $e) {\n        return $e->getMessage();\n    }\n\n    return show($v);\n}\n\n", i, c.expr)
 	}
 	// On bytes, `as string` is the checked conversion to text
 	// (design/strings.md §6): the value when it is UTF-8, a ValueError when
@@ -130,9 +132,9 @@ func TestIsAsBehaviour(t *testing.T) {
 		{"int|bytes", "$b as int|string", "7", "7"},
 	}
 	for i, c := range text {
-		fmt.Fprintf(&src, "fun text%d(%s $b): string\n{\n    try {\n        $v = %s;\n    } catch (\\ValueError|\\TypeError $e) {\n        return $e::class . ': ' . $e->getMessage();\n    }\n\n    return show($v);\n}\n\n", i, c.param, c.expr)
+		fmt.Fprintf(&src, "function text%d(%s $b): string\n{\n    try {\n        $v = %s;\n    } catch (\\ValueError|\\TypeError $e) {\n        return $e::class . ': ' . $e->getMessage();\n    }\n\n    return show($v);\n}\n\n", i, c.param, c.expr)
 	}
-	src.WriteString("fun show(mixed $v): string => $v instanceof Suit ? $v->name : \\var_export($v, true);\n\n")
+	src.WriteString("function show(mixed $v): string => $v instanceof Suit ? $v->name : \\var_export($v, true);\n\n")
 	for i := range tests {
 		fmt.Fprintf(&src, "echo")
 		for j, v := range values {
@@ -160,23 +162,7 @@ func TestIsAsBehaviour(t *testing.T) {
 		fmt.Fprintf(&src, "echo text%d(%s), \"\\n\";\n", i, c.value)
 	}
 
-	p := program.New()
-	if err := p.LoadStubs(); err != nil {
-		t.Fatal(err)
-	}
-	f, err := p.AddFile("isas.phn", []byte(src.String()), lexer.ModePhaenon, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, d := range checker.New(p, checker.Options{}).Check() {
-		if d.Severity == checker.Error {
-			t.Errorf("checker: %d: %s: %s\n%s", d.Line, d.Code, d.Message, f.Line(d.Line))
-		}
-	}
-	out, err := File([]byte(src.String()), Options{SourceName: "isas.phn", StrictTypes: true, Program: p, File: f})
-	if err != nil {
-		t.Fatal(err)
-	}
+	out := rewriteAndCompile(t, "isas.phn", []byte(src.String()))
 	path := filepath.Join(t.TempDir(), "isas.php")
 	if err := os.WriteFile(path, out, 0o644); err != nil {
 		t.Fatal(err)
@@ -243,13 +229,66 @@ func mbstring(t *testing.T, php string) []string {
 	return nil
 }
 
-// TestIsAsTwiceRefused: an operand a test writes more than once must read
-// the same twice (P3012). The checker reports it whether or not the test is
-// settled, and the emitter refuses to write such a test even where the
-// build goes on despite the findings (phn build --emit-on-error), rather
-// than call the function three times.
-func TestIsAsTwiceRefused(t *testing.T) {
-	src := []byte("fun f(): int\n{\n    return \\strlen('a') as int;\n}\n\nfun g(): bool\n{\n    return \\strlen('a') is int|string;\n}\n")
+// rewriteAndCompile checks src, whose withdrawn tests must each be P1001
+// and nothing else an error, formats it with the checked program's
+// rewrites, and compiles what the first layer wrote, which must check
+// clean.
+func rewriteAndCompile(t *testing.T, name string, src []byte) []byte {
+	t.Helper()
+	p := program.New()
+	if err := p.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := p.AddFile(name, src, lexer.ModePhaenon, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range checker.New(p, checker.Options{}).Check() {
+		if d.Severity == checker.Error && d.Code != checker.P1001.ID {
+			t.Errorf("checker: %d: %s: %s\n%s", d.Line, d.Code, d.Message, f.Line(d.Line))
+		}
+	}
+	tests := map[ast.Span]string{}
+	for n, rec := range f.Tests {
+		if rec.Rewritten != "" {
+			tests[n.Span()] = rec.Rewritten
+		}
+	}
+	formatted, left, err := SourceWith(src, Options{Tests: tests, Program: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range left {
+		t.Errorf("left at %d: %s", l.Span.Start, l.Msg)
+	}
+	q := program.New()
+	if err := q.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	g, err := q.AddFile(name, formatted, lexer.ModePhaenon, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range checker.New(q, checker.Options{}).Check() {
+		// A test the types settle is reported on its PHP as on any PHP
+		// test (P2402): the rewrite keeps what the test did at run time.
+		if d.Severity == checker.Error && d.Code != checker.P2402.ID {
+			t.Errorf("checker after phn fmt: %d: %s: %s\n%s", d.Line, d.Code, d.Message, g.Line(d.Line))
+		}
+	}
+	out, err := emit.File(formatted, emit.Options{SourceName: name, StrictTypes: true, Program: q, File: g})
+	if err != nil {
+		t.Fatalf("%v\n%s", err, formatted)
+	}
+	return out
+}
+
+// TestRewriteRefusedTwice: an operand a rewrite would write more than once
+// must read the same twice (P3012 until roadmap D26). Such a test has no
+// rewrite: it stays P1001, with the reason, and phn fmt leaves it and
+// gives the same reason.
+func TestRewriteRefusedTwice(t *testing.T) {
+	src := []byte("function f(): int\n{\n    return \\strlen('a') as int;\n}\n\nfunction g(): bool\n{\n    return \\strlen('a') is int|string;\n}\n")
 	p := program.New()
 	if err := p.LoadStubs(); err != nil {
 		t.Fatal(err)
@@ -260,71 +299,31 @@ func TestIsAsTwiceRefused(t *testing.T) {
 	}
 	found := map[int]bool{}
 	for _, d := range checker.New(p, checker.Options{}).Check() {
-		if d.Code == checker.P3012.ID {
+		if d.Code == checker.P1001.ID && strings.Contains(d.Message, "evaluated twice") {
 			found[d.Line] = true
 		}
 	}
 	if !found[3] || !found[8] {
-		t.Errorf("P3012 on lines %v, want 3 and 8", found)
+		t.Errorf("P1001 with the reason on lines %v, want 3 and 8", found)
 	}
-	if out, err := File(src, Options{SourceName: "twice.phn", StrictTypes: true, Program: p, File: f}); err == nil || !strings.Contains(err.Error(), "evaluated twice") {
-		t.Errorf("compiled despite the operand read twice (%v):\n%s", err, out)
-	}
-}
-
-// TestIsAsMultiLineOperand: an operand written over several lines and
-// copied by its test is laid out as text of the compiler's own, a hold in
-// the line map, never an in-place edit whose copies would sit on lines
-// that stand for other source lines.
-func TestIsAsMultiLineOperand(t *testing.T) {
-	src := []byte("final class Holder\n{\n    public mixed $item = null;\n}\n\nfinal class User\n{\n}\n\nfun f(Holder $h): ?User\n{\n    return $h\n        ->item as?\n        User;\n}\n")
-	p := program.New()
-	if err := p.LoadStubs(); err != nil {
-		t.Fatal(err)
-	}
-	f, err := p.AddFile("multi.phn", src, lexer.ModePhaenon, true)
+	out, left, err := SourceWith(src, TestsOf(f))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range checker.New(p, checker.Options{}).Check() {
-		if d.Severity == checker.Error {
-			t.Fatalf("checker: %d: %s: %s", d.Line, d.Code, d.Message)
+	for _, l := range left {
+		if !strings.Contains(l.Msg, "evaluated twice; assign it to a variable first") {
+			t.Errorf("left without the checker's reason: %s", l.Msg)
 		}
 	}
-	out, w, err := compile(src, f.AST, Options{SourceName: "multi.phn", StrictTypes: true, Program: p, File: f})
-	if err != nil {
-		t.Fatal(err)
+	if len(left) != 2 || !strings.Contains(string(out), "\\strlen('a') as int;") || !strings.Contains(string(out), "\\strlen('a') is int|string;") {
+		t.Errorf("left %v, wrote:\n%s", left, out)
 	}
-	checkLineMap(t, "multi.phn", src, out, w)
-	m, err := linemap.Find(out)
-	if err != nil || m == nil {
-		t.Fatalf("no line map (%v):\n%s", err, out)
-	}
-	copied := 0
-	for i, line := range strings.Split(string(out), "\n") {
-		if !strings.Contains(line, "instanceof User ? $h") {
-			continue
-		}
-		copied = i + 1
-	}
-	if copied == 0 {
-		t.Fatalf("no test written:\n%s", out)
-	}
-	for _, e := range m.Entries {
-		if e.Hold && e.Out <= copied && copied <= e.End {
-			return
-		}
-	}
-	t.Errorf("output line %d copies the operand in place:\n%s", copied, out)
 }
 
-// TestIsAsStringCastCopies: a (string) cast operand copied before an
+// TestRewriteStringCastCopies: a (string) cast operand copied before an
 // index keeps its parentheses, and one written once keeps the source's.
-// No golden holds it: a test on a string against a tuple or a class is
-// settled (P2306), and a golden checks clean; `phn build --emit-on-error`
-// writes it all the same.
-func TestIsAsStringCastCopies(t *testing.T) {
-	src := []byte("fun pair(string $s): bool\n{\n    return ((string) $s) is (int, string);\n}\n\nfun counted(string $s): bool\n{\n    return ((string) $s) is \\Countable&\\Traversable;\n}\n")
+func TestRewriteStringCastCopies(t *testing.T) {
+	src := []byte("function pair(string $s): bool\n{\n    return ((string) $s) is (int, string);\n}\n\nfunction counted(string $s): bool\n{\n    return ((string) $s) is \\Countable&\\Traversable;\n}\n")
 	p := program.New()
 	if err := p.LoadStubs(); err != nil {
 		t.Fatal(err)
@@ -334,22 +333,56 @@ func TestIsAsStringCastCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 	checker.New(p, checker.Options{}).Check()
-	out, err := File(src, Options{SourceName: "cast.phn", StrictTypes: true, Program: p, File: f})
+	tests := map[ast.Span]string{}
+	for n, rec := range f.Tests {
+		tests[n.Span()] = rec.Rewritten
+	}
+	out, _, err := SourceWith(src, Options{Tests: tests, Program: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"\\is_int(((string) $s)[0])", "\\is_string(((string) $s)[1])", "\\is_array((string) $s)", "return ((string) $s) instanceof \\Countable;"} {
+	for _, want := range []string{"is_int(((string) $s)[0])", "is_string(((string) $s)[1])", "is_array((string) $s)", "return ((string) $s) instanceof \\Countable"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("no %s in:\n%s", want, out)
 		}
 	}
-	if php, err := exec.LookPath("php"); err == nil {
-		path := filepath.Join(t.TempDir(), "cast.php")
-		if err := os.WriteFile(path, out, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if lint, err := exec.Command(php, "-n", "-l", path).CombinedOutput(); err != nil {
-			t.Errorf("php -l: %s\n%s", lint, out)
+}
+
+// TestRewriteNested: a test in the operand of another is rewritten in the
+// same run, so that phn fmt formats to itself (design/tooling.md §5.6).
+func TestRewriteNested(t *testing.T) {
+	src := []byte("interface Shape\n{\n}\n\nfinal class Circle implements Shape\n{\n}\n\n" +
+		"function f(mixed $x): bool\n{\n    return ($x as Shape) is Circle;\n}\n\n" +
+		"function g(mixed $x): bool\n{\n    return ($x as? Shape) is Circle;\n}\n")
+	out := rewriteAndCompile(t, "nested.phn", src)
+	formatted, _, _ := SourceWith(src, Options{Program: true, Tests: rewrites(t, src)})
+	for _, want := range []string{
+		"return ($x instanceof Shape ? $x : throw new \\TypeError('expected Shape, got ' . get_debug_type($x))) instanceof Circle;",
+		"return ($x instanceof Shape ? $x : null) instanceof Circle;",
+	} {
+		if !strings.Contains(string(formatted), want) {
+			t.Errorf("no %s in:\n%s\ncompiled:\n%s", want, formatted, out)
 		}
 	}
+}
+
+// rewrites are the checked program's rewrites of src's withdrawn tests.
+func rewrites(t *testing.T, src []byte) map[ast.Span]string {
+	t.Helper()
+	p := program.New()
+	if err := p.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := p.AddFile("rewrites.phn", src, lexer.ModePhaenon, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checker.New(p, checker.Options{}).Check()
+	out := map[ast.Span]string{}
+	for n, rec := range f.Tests {
+		if rec.Rewritten != "" {
+			out[n.Span()] = rec.Rewritten
+		}
+	}
+	return out
 }

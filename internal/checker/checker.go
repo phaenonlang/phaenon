@@ -342,6 +342,7 @@ func (c *Checker) checkFile(f *program.File) {
 		}
 	}
 	visit(f.AST.Stmts)
+	c.withdrawnSpellings(f)
 	c.partialSyntax(f)
 	for _, u := range uses {
 		c.checkUse(f, u)

@@ -1,25 +1,25 @@
 // Partial applications in pipes (design/php-versions.md §5.2, §5.4):
 // `A |> f(B, ?, C)` is checked exactly as f(B, A, C).
 
-fun needsTwo(int $a, int $b): int { return $a + $b; }
-fun up(string $s): string { return strtoupper($s); }
-fun wantsInt(int $x): void {}
-fun addAll(array<mixed> &$xs, int $n): void { $xs[] = $n; }
+function needsTwo(int $a, int $b): int { return $a + $b; }
+function up(string $s): string { return strtoupper($s); }
+function wantsInt(int $x): void {}
+function addAll(array<mixed> &$xs, int $n): void { $xs[] = $n; }
 
 final class User {
     public function __construct(public bool $active, public string $name) {}
 }
 
 final class Style {
-    static fun line(string $s): string { return "| $s"; }
+    static line(string $s): string { return "| $s"; }
 }
 
 final class Out {
-    fun writeln(string $s): void { echo $s, "\n"; }
+    writeln(string $s): void { echo $s, "\n"; }
 }
 
 /** @param list<User> $users */
-fun stages(array $users, Out $out): void {
+function stages(array $users, Out $out): void {
     // A closure in a bound argument takes its types from the call: `$u` is a User.
     $active = $users |> array_filter(?, fn ($u) => $u->active);
     wantsInt($active); // want P2103 "array<int, User>"
@@ -41,7 +41,7 @@ fun stages(array $users, Out $out): void {
     wantsInt($named); // want P2103 "string"
 }
 
-fun mistakes(): void {
+function mistakes(): void {
     $xs = [3, 1, 2];
     $xs |> sort(?); // want P2114
     $xs |> addAll(?, 4); // want P2114

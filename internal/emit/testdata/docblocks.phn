@@ -14,17 +14,17 @@ final class Config
      *     reader: class<\Countable>,
      * } $settings the settings (as parsed, unchecked)
      */
-    fun __construct(private array $settings) {}
+    __construct(private array $settings) {}
 
     /** @return map<string, int> the counts by section */
-    fun counts(): array => $this->settings['by'];
+    counts(): array => $this->settings['by'];
 
     /** @return (string, int) where the settings came from */
-    fun source(): array => $this->settings['source'];
+    source(): array => $this->settings['source'];
 
     /** @param Closure(string): (int, int) $parse how a line is read */
-    fun parseWith(\Closure $parse): int => $parse('a')[0];
+    parseWith(\Closure $parse): int => $parse('a')[0];
 
     /** @return class<\Countable> */
-    fun reader(): string => $this->settings['reader'];
+    reader(): string => $this->settings['reader'];
 }

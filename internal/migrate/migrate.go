@@ -37,9 +37,10 @@ type Options struct {
 	// Generics lifts generic docblocks (@template, @param list<T>, …) into
 	// Phaenon syntax; the tags it cannot lift are reported as notes.
 	Generics bool
-	// KeepPublic writes `public fun` where the PHP said `public function`,
-	// and keeps `public` before an asymmetric visibility; off, a sole
-	// `public` is dropped, since Phaenon implies it (design/functions.md).
+	// KeepPublic keeps the `public` of a method lifted out of `function`
+	// (`public title()` where the PHP said `public function title()`) and
+	// before an asymmetric visibility; off, a sole `public` is dropped,
+	// since PHP implies it (design/functions.md §1.3).
 	KeepPublic bool
 	// Layout applies the canonical layout after the lift (Layout,
 	// design/functions.md §5.3): braces of declarations on their line,

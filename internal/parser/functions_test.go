@@ -14,17 +14,17 @@ import (
 // or never.
 func TestExpressionBodies(t *testing.T) {
 	src := `
-fun id(int $x): int => $x;
+function id(int $x): int => $x;
 function plain(): string => 'a';
-fun log(string $m): void => print $m;
-fun fail(): NEVER => throw new LogicException();
-fun untyped() => 1;
+function log(string $m): void => print $m;
+function fail(): NEVER => throw new LogicException();
+function untyped() => 1;
 class C {
-    fun name(): string => $this->name;
-    static fun of(string $s): self
+    name(): string => $this->name;
+    static of(string $s): self
         => new self($s);
-    private fun go(): Void => $this->run();
-    abstract fun handle(): int;
+    private go(): Void => $this->run();
+    abstract handle(): int;
 }
 `
 	f, err := Parse([]byte(src), lexer.ModePhaenon)
@@ -86,11 +86,11 @@ class C {
 // (design/functions.md §4).
 func TestThrows(t *testing.T) {
 	src := `
-fun load(int $id): T throws NotFound => $this->get($id);
-fun none() throws \RuntimeException|Io\Failure {}
+function load(int $id): T throws NotFound => $this->get($id);
+function none() throws \RuntimeException|Io\Failure {}
 interface I {
-    fun handle(): int throws Refusal;
-    fun more(): void
+    handle(): int throws Refusal;
+    more(): void
         throws A
         | B;
 }
@@ -164,16 +164,16 @@ $f = fn (throws $t): throws => $t;
 		}
 	}
 	refused := map[string]lexer.Mode{
-		"<?php function f() throws X {}":              lexer.ModePHP,
-		"<?php function f(): int => 1;":               lexer.ModePHP,
-		"<?php class C { function f(): int => 1; }":   lexer.ModePHP,
-		"$f = function () throws X {};":               lexer.ModePhaenon,
-		"$f = function (): int => 1;":                 lexer.ModePhaenon,
-		"fun f(): int => 1":                           lexer.ModePhaenon, // the semicolon ends it
-		"fun f(): int throws => 1;":                   lexer.ModePhaenon, // a name is required
-		"fun f(): int throws A| => 1;":                lexer.ModePhaenon,
-		"class C { fun f(): int => { return 1; } }":   lexer.ModePhaenon,
-		"class C { fun f(): int => 1 { return 1; } }": lexer.ModePhaenon,
+		"<?php function f() throws X {}":            lexer.ModePHP,
+		"<?php function f(): int => 1;":             lexer.ModePHP,
+		"<?php class C { function f(): int => 1; }": lexer.ModePHP,
+		"$f = function () throws X {};":             lexer.ModePhaenon,
+		"$f = function (): int => 1;":               lexer.ModePhaenon,
+		"function f(): int => 1":                    lexer.ModePhaenon, // the semicolon ends it
+		"function f(): int throws => 1;":            lexer.ModePhaenon, // a name is required
+		"function f(): int throws A| => 1;":         lexer.ModePhaenon,
+		"class C { f(): int => { return 1; } }":     lexer.ModePhaenon,
+		"class C { f(): int => 1 { return 1; } }":   lexer.ModePhaenon,
 	}
 	for src, mode := range refused {
 		if _, err := Parse([]byte(src), mode); err == nil {

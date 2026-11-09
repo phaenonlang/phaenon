@@ -363,8 +363,8 @@ func TestLiftKeepsAWrittenType(t *testing.T) {
 // on lines of their own (design/line-map.md §7); a function's and an
 // anonymous class's stay up, and a second run changes nothing.
 func TestLayoutMovesClassBracesDown(t *testing.T) {
-	src := "final class A implements \\Countable {\n    fun count(): int {\n        $n = 1;\n        return $n;\n    }\n\n    fun make(): object {\n        $o = new class {\n        };\n        return $o;\n    }\n}\n\ninterface I {\n    fun f(): void;\n}\n\n    enum E: string {\n        case X = 'x';\n    }\n"
-	want := "final class A implements \\Countable\n{\n    fun count(): int {\n        $n = 1;\n        return $n;\n    }\n\n    fun make(): object {\n        $o = new class {\n        };\n        return $o;\n    }\n}\n\ninterface I\n{\n    fun f(): void;\n}\n\n    enum E: string\n    {\n        case X = 'x';\n    }\n"
+	src := "final class A implements \\Countable {\n    count(): int {\n        $n = 1;\n        return $n;\n    }\n\n    make(): object {\n        $o = new class {\n        };\n        return $o;\n    }\n}\n\ninterface I {\n    f(): void;\n}\n\n    enum E: string {\n        case X = 'x';\n    }\n"
+	want := "final class A implements \\Countable\n{\n    count(): int {\n        $n = 1;\n        return $n;\n    }\n\n    make(): object {\n        $o = new class {\n        };\n        return $o;\n    }\n}\n\ninterface I\n{\n    f(): void;\n}\n\n    enum E: string\n    {\n        case X = 'x';\n    }\n"
 	var stats Stats
 	got, err := Layout([]byte(src), &stats)
 	if err != nil {
@@ -409,8 +409,8 @@ func TestLayoutWritesEmptyClassesAsBraces(t *testing.T) {
 // A prose-only @param whose description starts on the next line keeps it:
 // only a tag with no prose at all goes.
 func TestLiftKeepsParamProseOnLaterLines(t *testing.T) {
-	src := "final class Api\n{\n    /**\n     * @param $transport -\n     *                   [status, body] — test seam\n     * @param $other\n     *               the other seam\n     * @param $none\n     */\n    fun __construct(?Closure $transport = null, ?Closure $other = null, int $none = 0)\n    {\n    }\n}\n"
-	want := "final class Api\n{\n    /**\n     * @param $transport -\n     *                   [status, body] — test seam\n     * @param $other -\n     *               the other seam\n     */\n    fun __construct(?Closure $transport = null, ?Closure $other = null, int $none = 0)\n    {\n    }\n}\n"
+	src := "final class Api\n{\n    /**\n     * @param $transport -\n     *                   [status, body] — test seam\n     * @param $other\n     *               the other seam\n     * @param $none\n     */\n    __construct(?Closure $transport = null, ?Closure $other = null, int $none = 0)\n    {\n    }\n}\n"
+	want := "final class Api\n{\n    /**\n     * @param $transport -\n     *                   [status, body] — test seam\n     * @param $other -\n     *               the other seam\n     */\n    __construct(?Closure $transport = null, ?Closure $other = null, int $none = 0)\n    {\n    }\n}\n"
 	got, notes, err := Lift([]byte(src), Options{Generics: true})
 	if err != nil {
 		t.Fatal(err)

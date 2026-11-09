@@ -1542,7 +1542,7 @@ func (a *arrayTyper) spelledType(spelled string) types.Type {
 	if a.pcl == nil {
 		return nil
 	}
-	tree, err := parser.Parse([]byte("fun f(): "+spelled+" {}"), lexer.ModePhaenon)
+	tree, err := parser.Parse([]byte("function f(): "+spelled+" {}"), lexer.ModePhaenon)
 	if err != nil {
 		return nil
 	}

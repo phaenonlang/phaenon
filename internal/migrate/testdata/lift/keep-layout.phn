@@ -14,12 +14,12 @@ final class Account
     /**
      * Withdraws money.
      */
-    fun withdraw(int $amount): void throws \DomainException
+    withdraw(int $amount): void throws \DomainException
     {
         $this->balance -= $amount;
     }
 
-    fun balance(): int
+    balance(): int
     {
         return $this->balance;
     }

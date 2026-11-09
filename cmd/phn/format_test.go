@@ -24,7 +24,7 @@ func writeFormatTree(t *testing.T, root string) {
 		"phaenon.json":                      `{"roots": {"src": ".src"}}`,
 		"vendor/composer/installed.json":    `{"packages": []}`,
 		"vendor/composer/autoload_psr4.php": "<?php\n\nreturn array();\n",
-		"src/Bad.phn":                       "namespace App;\n\nfun bad(): int => \"50%, a: <b> & 'c'\";\n\nfun alsoBad(): string => 5 + 1;\n",
+		"src/Bad.phn":                       "namespace App;\n\nfunction bad(): int => \"50%, a: <b> & 'c'\";\n\nfunction alsoBad(): string => 5 + 1;\n",
 	})
 }
 
@@ -63,7 +63,7 @@ func TestCheckFormats(t *testing.T) {
 	if !ok || c.Name != "error" || c.Message != message {
 		t.Errorf("not the first finding: %q (%+v)", out[0], c)
 	}
-	want := map[string]string{"file": "src/Bad.phn", "line": "3", "endLine": "3", "col": "19", "title": "P2202"}
+	want := map[string]string{"file": "src/Bad.phn", "line": "3", "endLine": "3", "col": "24", "title": "P2202"}
 	for k, v := range want {
 		if got, _ := c.Get(k); got != v {
 			t.Errorf("%s=%q, want %q in %q", k, got, v, out[0])
@@ -71,7 +71,7 @@ func TestCheckFormats(t *testing.T) {
 	}
 	// The end column is inclusive, and only the message's % is escaped: , and
 	// : are escaped in properties alone.
-	if want := `::error file=src/Bad.phn,line=3,endLine=3,col=19,endColumn=37,title=P2202::function App\bad() should return int but returns '50%25, a: <b> & \'c\''`; out[0] != want {
+	if want := `::error file=src/Bad.phn,line=3,endLine=3,col=24,endColumn=42,title=P2202::function App\bad() should return int but returns '50%25, a: <b> & \'c\''`; out[0] != want {
 		t.Errorf("got  %s\nwant %s", out[0], want)
 	}
 
@@ -96,7 +96,7 @@ func TestCheckFormats(t *testing.T) {
 		t.Fatalf("--format=checkstyle:\n%s", stdout)
 	}
 	e := report.Files[0].Errors[0]
-	if e.Line != 3 || e.Column != 19 || e.Severity != "error" || e.Message != message || e.Source != "P2202" {
+	if e.Line != 3 || e.Column != 24 || e.Severity != "error" || e.Message != message || e.Source != "P2202" {
 		t.Errorf("first error %+v", e)
 	}
 

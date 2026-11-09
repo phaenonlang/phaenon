@@ -4,11 +4,11 @@ namespace Blocks;
 // puts its brace on the declaration's line, a single `return` included.
 final class Box
 {
-    fun one(): int {
+    one(): int {
         return 1;
     }
 
-    fun two(): list<int> {
+    two(): list<int> {
         $x = 2;
         return [$x];
     }

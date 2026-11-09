@@ -1,0 +1,16 @@
+namespace App\Vars;
+
+// `var` is removed from Phaenon (P1001): on a property, where `public`
+// says the same, and on a method, which PHP refuses and which D27 reads
+// by position.
+
+final class Holder
+{
+    var int $count = 0; // want P1001 "`var` is not available in Phaenon; use public"
+
+    var (int, string) $pair = [0, '']; // want P1001
+
+    var size(): int => $this->count; // want P1001 "PHP refuses it on a method"
+
+    public int $kept = 0;
+}

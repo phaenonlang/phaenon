@@ -278,12 +278,12 @@ const userSrc = `namespace App;
 /** A user of the shop. */
 final class User
 {
-    fun __construct(private string $name, public int $age) {}
+    __construct(private string $name, public int $age) {}
 
     /** The user's name. */
-    fun name(): string => $this->name;
+    name(): string => $this->name;
 
-    fun rename(string $to, bool $loud = false): User => new User($to, $this->age);
+    rename(string $to, bool $loud = false): User => new User($to, $this->age);
 }
 `
 
@@ -291,7 +291,7 @@ const shopSrc = `namespace App;
 
 final class Shop
 {
-    fun greet(User $u): string {
+    greet(User $u): string {
         $n = $u->name();
         return $n;
     }
@@ -315,7 +315,7 @@ func TestDiagnosticsOnOpenAndChange(t *testing.T) {
 		t.Errorf("range: %s", jsonOf(d[0]))
 	}
 	// The edit of another open buffer counts before it is saved.
-	c.open("src/User.phn", strings.Replace(userSrc, "fun name(): string", "fun name(): int", 1))
+	c.open("src/User.phn", strings.Replace(userSrc, "name(): string", "name(): int", 1))
 	c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": c.uri("src/Shop.phn"), "version": 3},
 		"contentChanges": []any{map[string]any{"text": shopSrc}}})
 	if got := codes(c.diagnostics("src/Shop.phn", 3)); len(got) != 1 || got[0] != "P2202" {
@@ -402,7 +402,7 @@ func TestRelatedDeclaration(t *testing.T) {
 }
 
 func TestBuildOnSaveOff(t *testing.T) {
-	broken := strings.Replace(userSrc, "fun name(): string", "fun name(): int", 1)
+	broken := strings.Replace(userSrc, "name(): string", "name(): int", 1)
 	c := start(t, map[string]string{"src/User.phn": broken}, map[string]any{"buildOnSave": false})
 	c.diagnostics("src/User.phn", 0) // the check at initialized
 	c.notify("textDocument/didSave", map[string]any{"textDocument": map[string]any{"uri": c.uri("src/User.phn")}})
@@ -436,11 +436,11 @@ func TestHoverAndDefinition(t *testing.T) {
 		line, char int
 		want       string
 	}{
-		{5, 18, "fun App\\User::name(): string"}, // name()
+		{5, 18, "App\\User::name(): string"}, // name()
 		{5, 18, "The user's name."},
 		{5, 9, "$n: string"},
-		{4, 15, "final class App\\User"}, // the parameter's type
-		{4, 15, "A user of the shop."},
+		{4, 11, "final class App\\User"}, // the parameter's type
+		{4, 11, "A user of the shop."},
 		{5, 14, "$u: App\\User"},
 	}
 	for _, cs := range cases {
@@ -450,7 +450,7 @@ func TestHoverAndDefinition(t *testing.T) {
 		}
 	}
 	def := c.at("textDocument/definition", "src/Shop.phn", 5, 18).(map[string]any)
-	if def["uri"] != c.uri("src/User.phn") || jsonOf(def["range"]) != `{"end":{"character":12,"line":8},"start":{"character":8,"line":8}}` {
+	if def["uri"] != c.uri("src/User.phn") || jsonOf(def["range"]) != `{"end":{"character":8,"line":8},"start":{"character":4,"line":8}}` {
 		t.Errorf("definition of name(): %s", jsonOf(def))
 	}
 	def = c.at("textDocument/definition", "src/Shop.phn", 6, 16).(map[string]any) // return $n
@@ -458,10 +458,10 @@ func TestHoverAndDefinition(t *testing.T) {
 		t.Errorf("definition of $n: %s", jsonOf(def))
 	}
 	// A function of the stubs opens their file, written to the cache.
-	src := "namespace App;\n\nfun f(string $s): int => strlen($s);\n"
+	src := "namespace App;\n\nfunction f(string $s): int => strlen($s);\n"
 	c.open("src/F.phn", src)
 	c.diagnostics("src/F.phn", 1)
-	def = c.at("textDocument/definition", "src/F.phn", 2, 27).(map[string]any)
+	def = c.at("textDocument/definition", "src/F.phn", 2, 32).(map[string]any)
 	if u, _ := def["uri"].(string); !strings.Contains(u, "phaenon/lsp/stub/") {
 		t.Errorf("definition of strlen: %s", jsonOf(def))
 	}
@@ -531,7 +531,7 @@ func TestCompletion(t *testing.T) {
 }
 
 func TestPipeCompletion(t *testing.T) {
-	src := "namespace App;\n\nfun f(list<int> $xs): int {\n    return $xs |> array_su\n}\n"
+	src := "namespace App;\n\nfunction f(list<int> $xs): int {\n    return $xs |> array_su\n}\n"
 	c := start(t, map[string]string{"src/F.phn": src}, nil)
 	c.open("src/F.phn", src)
 	res := c.at("textDocument/completion", "src/F.phn", 3, 26).(map[string]any)
@@ -551,7 +551,7 @@ func TestSignatureHelp(t *testing.T) {
 	c.open("src/Shop.phn", src)
 	res := c.at("textDocument/signatureHelp", "src/Shop.phn", 5, 29).(map[string]any)
 	sig := res["signatures"].([]any)[0].(map[string]any)
-	if sig["label"] != "fun App\\User::rename(string $to, bool $loud = …): App\\User" && sig["label"] != "fun rename(string $to, bool $loud = …): App\\User" {
+	if sig["label"] != "App\\User::rename(string $to, bool $loud = …): App\\User" && sig["label"] != "rename(string $to, bool $loud = …): App\\User" {
 		t.Errorf("label: %v", sig["label"])
 	}
 	if res["activeParameter"] != float64(1) {
@@ -560,7 +560,7 @@ func TestSignatureHelp(t *testing.T) {
 }
 
 func TestFormattingAndTabFix(t *testing.T) {
-	src := "namespace App;\n\nfinal class Box\n{\n\tfun get(): list < int >\n\t{\n\t\treturn [];\n\t}\n}\n"
+	src := "namespace App;\n\nfinal class Box\n{\n\tget(): list < int >\n\t{\n\t\treturn [];\n\t}\n}\n"
 	c := start(t, map[string]string{"src/Box.phn": src}, nil)
 	c.open("src/Box.phn", src)
 	d := c.diagnostics("src/Box.phn", 1)
@@ -578,7 +578,7 @@ func TestFormattingAndTabFix(t *testing.T) {
 		t.Errorf("the tab fix: %s", jsonOf(actions))
 	}
 	edits := c.call("textDocument/formatting", map[string]any{"textDocument": map[string]any{"uri": c.uri("src/Box.phn")}}).([]any)
-	want := "namespace App;\n\nfinal class Box\n{\n    fun get(): list<int> {\n        return [];\n    }\n}\n"
+	want := "namespace App;\n\nfinal class Box\n{\n    get(): list<int> {\n        return [];\n    }\n}\n"
 	if len(edits) != 1 || edits[0].(map[string]any)["newText"] != want {
 		t.Errorf("formatting: %s", jsonOf(edits))
 	}

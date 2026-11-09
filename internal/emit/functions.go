@@ -8,8 +8,8 @@ import (
 )
 
 // lowerFunctions compiles the syntax of design/functions.md, none of which
-// needs type information: a `fun` head becomes the PER `function` head
-// with `public` written out, a class constant or a property or promoted
+// needs type information: a method declared without a keyword gets the
+// PER `function` head with `public` written out, a class constant or a property or promoted
 // parameter with an asymmetric visibility and no main one gets its implied
 // `public`, a closure in a constant expression becomes the `static
 // function` PHP 8.5 accepts there, an expression body becomes a PER
@@ -23,18 +23,20 @@ func (e *emitter) lowerFunctions(f *ast.File) {
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.FunctionDecl:
-			if n.Fun {
-				e.replace(n.Head, "function")
-			}
 			e.throwsDoc(n, n.S.Start, n.Name.S.Start, n.Doc, n.Throws)
-			e.layoutFunction(function{kwAt: n.Head.Start, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, throws: n.Throws,
+			e.layoutFunction(function{kwAt: n.Kw.Start, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, throws: n.Throws,
 				arrow: n.Arrow, body: n.Body, hasBody: true, end: n.S.End})
 		case *ast.MethodDecl:
-			if n.Fun {
-				e.methodHead(n)
-			}
+			// The @throws docblock goes first: a method without modifiers
+			// gets its head where the docblock is inserted.
 			e.throwsDoc(n, n.S.Start, n.Name.S.Start, n.Doc, n.Throws)
-			e.layoutFunction(function{kwAt: n.Head.End - 1, name: n.Name, tps: n.TypeParams,
+			switch {
+			case n.Bare():
+				e.methodHead(n)
+			case n.Modifiers&(ast.ModPublic|ast.ModProtected|ast.ModPrivate) == 0:
+				e.impliedVisibility(n)
+			}
+			e.layoutFunction(function{kwAt: n.Kw.Start, name: n.Name, tps: n.TypeParams,
 				ret: n.ReturnType, throws: n.Throws, arrow: n.Arrow, body: n.Body, hasBody: n.HasBody, end: n.S.End})
 		case *ast.ClassDecl:
 			if n.Name != nil {
@@ -243,30 +245,78 @@ func (e *emitter) mergeThrows(declStart, nameStart int, doc, tag string) {
 	e.replaceFree(ast.Span{Start: from, End: end}, text)
 }
 
-// methodHead rewrites `[modifiers] fun` as `[modifiers] function` in PER
-// order with `public` written out. A head broken over lines or holding a
-// comment keeps its modifiers as written and has only the keyword replaced,
-// so nothing the programmer wrote is lost. Modifiers already written so
-// stay the source's text and only the keyword is the compiler's, so that a
-// tool's change of a modifier is carried back (phn fix).
+// methodHead writes the `function` a method declared without a keyword
+// leaves out (roadmap D27, design/functions.md §1.2), in the PER head
+// `[abstract|final] visibility [static] function` with `public` written
+// out, since PER Coding Style 3.0 wants a declared visibility on every
+// method. Modifiers already written so stay the source's text and only the
+// keyword is the compiler's, so that a tool's change of a modifier is
+// carried back (phn fix); a head broken over lines, holding a comment, or
+// with modifiers PHP refuses on a method keeps them as written, so nothing
+// the programmer wrote is lost and PHP says what is wrong with them. Every
+// edit is on the head's line, in place.
 func (e *emitter) methodHead(n *ast.MethodDecl) {
-	head := e.src[n.Head.Start:n.Head.End]
-	kw := ast.Span{Start: n.Head.End - len("fun"), End: n.Head.End}
-	if bytes.ContainsAny(head, "\n\r/#") {
-		if n.Modifiers&(ast.ModPublic|ast.ModProtected|ast.ModPrivate) == 0 {
-			e.replace(kw, "public function")
-		} else {
-			e.replace(kw, "function")
-		}
-		return
-	}
-	mods := string(head[:len(head)-len("fun")])
+	e.writeHead(n, "function ")
+}
+
+// impliedVisibility writes the `public` a method spelled with `function`
+// leaves implied, as PER Coding Style 3.0 wants every method's visibility
+// declared (D22): `function static()` → `public function static()`,
+// `final function var()` → `final public function var()`, under
+// methodHead's rules.
+func (e *emitter) impliedVisibility(n *ast.MethodDecl) {
+	e.writeHead(n, "")
+}
+
+// writeHead writes a method's modifiers in PER order, with `public` where
+// none is written, and kw before the keyword's place.
+func (e *emitter) writeHead(n *ast.MethodDecl, kw string) {
+	visible := n.Modifiers&(ast.ModPublic|ast.ModProtected|ast.ModPrivate) != 0
+	mods := ast.Span{Start: n.Head.Start, End: n.Kw.Start}
+	text := string(e.src[mods.Start:mods.End])
 	canonical := methodModifiers(n.Modifiers)
-	if mods == canonical {
-		e.replace(kw, "function")
-		return
+	switch {
+	case mods.Start == mods.End:
+		e.insert(n.Kw.Start, "public "+kw)
+	case strings.TrimSpace(text)+" " == canonical:
+		if kw != "" {
+			e.insert(n.Kw.Start, kw)
+		}
+	case !plainModifiers(text):
+		if !visible {
+			kw = "public " + kw
+		}
+		if kw != "" {
+			e.insert(n.Kw.Start, kw)
+		}
+	default:
+		e.replace(mods, canonical+kw)
 	}
-	e.replace(n.Head, canonical+"function")
+}
+
+// plainModifiers reports a run of method modifiers PHP accepts, each once,
+// on one line and without a comment: what may be written again in PER
+// order.
+func plainModifiers(text string) bool {
+	if strings.ContainsAny(text, "\n\r/#") {
+		return false
+	}
+	seen := map[string]bool{}
+	visibility := 0
+	for _, w := range strings.Fields(strings.ToLower(text)) {
+		switch w {
+		case "public", "protected", "private":
+			visibility++
+		case "abstract", "final", "static":
+		default:
+			return false
+		}
+		if seen[w] {
+			return false
+		}
+		seen[w] = true
+	}
+	return visibility <= 1 && !(seen["abstract"] && seen["final"])
 }
 
 // methodModifiers renders a method's modifiers in PER order (§4.6), `public`

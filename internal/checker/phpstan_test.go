@@ -109,8 +109,8 @@ func TestPHPStanParity(t *testing.T) {
 			php := append([]byte("<?php "), src...)
 			sourceLine := func(n int) int { return n }
 			if usesFunctionSyntax(src) {
-				// `fun`, expression bodies and `throws` need no type
-				// information (design/functions.md): PHPStan judges the
+				// Methods without a keyword, expression bodies and `throws`
+				// need no type information (design/functions.md): PHPStan judges the
 				// compiled file, its lines read through the line map.
 				php = compileForParity(t, path, src)
 				m, err := linemap.Find(php)
@@ -220,8 +220,9 @@ var skipParity = map[string]string{
 }
 
 // usesFunctionSyntax reports whether a corpus file declares with the
-// syntax of design/functions.md — `fun`, an expression body, `throws` —
-// which the emitter lowers without type information.
+// syntax of design/functions.md — a method without a keyword, an
+// expression body, `throws` — which the emitter lowers without type
+// information.
 func usesFunctionSyntax(src []byte) bool {
 	f, err := parser.Parse(src, lexer.ModePhaenon)
 	if err != nil {
@@ -233,7 +234,7 @@ func usesFunctionSyntax(src []byte) bool {
 		case *ast.FunctionDecl:
 			found = found || n.Fun || n.Arrow != nil || n.Throws != nil
 		case *ast.MethodDecl:
-			found = found || n.Fun || n.Arrow != nil || n.Throws != nil
+			found = found || n.Bare() || n.Fun || n.Arrow != nil || n.Throws != nil
 		}
 		return !found
 	})
@@ -262,7 +263,7 @@ func compileForParity(t *testing.T, path string, src []byte) []byte {
 
 // usesPhaenonSyntax reports whether a corpus file has constructs PHPStan
 // cannot parse and the parity run does not compile (the emit goldens do): type
-// parameters and arguments, is / as, type aliases, Closure signatures,
+// parameters and arguments, the withdrawn is / as, type aliases, Closure signatures,
 // hyphenated type names, PHP 8.6 placeholders.
 func usesPhaenonSyntax(src []byte) bool {
 	f, err := parser.Parse(src, lexer.ModePhaenon)

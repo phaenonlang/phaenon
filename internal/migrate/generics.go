@@ -48,6 +48,16 @@ func Lift(src []byte, opts Options) ([]byte, []Note, error) {
 		l.prog, l.pfile = nil, nil
 	}
 	l.stmts(f.Stmts, nil)
+	// The methods the walk of declarations does not reach, an anonymous
+	// class's, lose `function` as the others do (roadmap D27).
+	ast.Inspect(f, func(n ast.Node) bool {
+		if m, ok := n.(*ast.MethodDecl); ok && !l.headed[m] {
+			if e, ok := MethodHead(src, m, !l.keepPublic); ok {
+				l.replace(e.Span, e.Text)
+			}
+		}
+		return true
+	})
 	sort.SliceStable(l.notes, func(i, j int) bool { return l.notes[i].Line < l.notes[j].Line })
 	return l.apply(), l.notes, nil
 }
@@ -76,6 +86,8 @@ type lifter struct {
 	// tree does not keep (tokens); stats counts the lifted @throws tags.
 	toks  tokenIndex
 	stats *Stats
+	// headed holds the methods whose head methodDecl respelled.
+	headed map[*ast.MethodDecl]bool
 }
 
 // overrideCtx is what the override-erasure rule needs to know about a
@@ -489,8 +501,8 @@ func (l *lifter) overrides(m *ast.MethodDecl) *overrideCtx {
 }
 
 func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
-	if !fn.Fun {
-		l.replace(fn.Head, "fun")
+	if e, ok := FunctionHead(fn); ok {
+		l.replace(e.Span, e.Text)
 	}
 	l.params(fn.Params)
 	sc := outer.child()
@@ -512,9 +524,13 @@ func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
 }
 
 func (l *lifter) methodDecl(m *ast.MethodDecl, outer scope) {
-	if !m.Fun {
-		l.replace(m.Head, l.funHead(m.Head))
+	if e, ok := MethodHead(l.src, m, !l.keepPublic); ok {
+		l.replace(e.Span, e.Text)
 	}
+	if l.headed == nil {
+		l.headed = map[*ast.MethodDecl]bool{}
+	}
+	l.headed[m] = true
 	l.params(m.Params)
 	sc := outer.child()
 	d := l.findDoc(m.Doc, m.S.Start)
@@ -1492,25 +1508,6 @@ func (l *lifter) astAtoms(t ast.TypeExpr, sc scope) atoms {
 		out["array"] = true
 	}
 	return normalise(out)
-}
-
-// funHead spells a `[modifiers] function` head as `[modifiers] fun`: the
-// modifiers as written, minus a `public` that `fun` implies (kept with
-// --keep-public). A head broken over lines or holding a comment keeps its
-// modifiers and has only the keyword replaced.
-func (l *lifter) funHead(head ast.Span) string {
-	text := string(l.src[head.Start:head.End])
-	if strings.ContainsAny(text, "\n\r/#") {
-		return text[:len(text)-len("function")] + "fun"
-	}
-	var parts []string
-	for _, w := range strings.Fields(text[:len(text)-len("function")]) {
-		if strings.EqualFold(w, "public") && !l.keepPublic {
-			continue
-		}
-		parts = append(parts, w)
-	}
-	return strings.Join(append(parts, "fun"), " ")
 }
 
 // params drops the `public` of a promoted parameter with an asymmetric
