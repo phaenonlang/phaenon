@@ -985,8 +985,9 @@ func (p *Parser) classBody() []ast.ClassMember {
 
 func (p *Parser) classMember() ast.ClassMember {
 	start := p.tok().Start
-	// `use(` and `case(` begin methods named so (roadmap D27).
-	if p.at(token.T_USE) && p.peekKind(1) != token.Kind('(') {
+	// `use(`, `case(` and their generic forms begin methods named so
+	// (roadmap D27).
+	if p.at(token.T_USE) && !p.bareMethodAhead() {
 		return p.traitUse()
 	}
 	doc := p.takeDoc()
@@ -994,7 +995,7 @@ func (p *Parser) classMember() ast.ClassMember {
 	if doc == "" {
 		doc = p.takeDoc()
 	}
-	if p.at(token.T_CASE) && p.peekKind(1) != token.Kind('(') {
+	if p.at(token.T_CASE) && !p.bareMethodAhead() {
 		p.next()
 		e := &ast.EnumCase{Doc: doc, Attrs: attrs, Name: p.identifier()}
 		if p.accept(token.Kind('=')) {

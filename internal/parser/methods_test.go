@@ -26,6 +26,8 @@ func TestMemberByPosition(t *testing.T) {
 		{"#[A] /** d */ list(): array => [];", "list"},
 		{"use(int $x): void {}", "use"},
 		{"case(): void {}", "case"},
+		{"use<T>(T $x): T => $x;", "use"},
+		{"case<T of object>(T $x): T => $x;", "case"},
 		{"new(): static => new static();", "new"},
 		{"closure(): int => 1;", "closure"},
 		{"fun(): int => 1;", "fun"},
