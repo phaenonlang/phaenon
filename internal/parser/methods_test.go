@@ -178,3 +178,30 @@ func TestKeywordNamedMethod(t *testing.T) {
 		}
 	}
 }
+
+// TestMemberModifiers: the modifiers PHP refuses on a class member when it
+// compiles the class are syntax errors in Phaenon, so that no build writes
+// PHP that does not compile.
+func TestMemberModifiers(t *testing.T) {
+	for member, want := range map[string]string{
+		"readonly foo(): int => 1;":            "Cannot use 'readonly' as method modifier",
+		"public public foo(): int => 1;":       "Multiple access type modifiers are not allowed",
+		"public private foo(): int => 1;":      "Multiple access type modifiers are not allowed",
+		"static static foo(): int => 1;":       "Multiple static modifiers are not allowed",
+		"final abstract foo(): int;":           "Cannot use the final modifier on an abstract method",
+		"private(set) foo(): int => 1;":        "Cannot use an asymmetric visibility on a method",
+		"public public int $x = 0;":            "Multiple access type modifiers are not allowed",
+		"final public static foo(): int => 1;": "",
+		"abstract protected foo(): int;":       "",
+		"public readonly int $y;":              "",
+		"private(set) int $z;":                 "",
+	} {
+		_, err := Parse([]byte("abstract class A {\n    "+member+"\n}\n"), lexer.ModePhaenon)
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("%s: %v", member, err)
+		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
+			t.Errorf("%s: %v, want %q", member, err, want)
+		}
+	}
+}

@@ -318,3 +318,46 @@ func isCastKind(k token.Kind) bool {
 	}
 	return false
 }
+
+// memberModifiers refuses, in Phaenon mode, the runs of modifiers PHP
+// refuses on a class member when it compiles the class, so that no build
+// writes PHP that does not compile: a modifier written twice, two
+// visibilities, and on a method `readonly` or `final` with `abstract`. The
+// run starts at token index from and ends at the current token.
+func (p *Parser) memberModifiers(from int, method bool) {
+	seen := map[token.Kind]bool{}
+	visibility := false
+	for j := from; j < p.i; j++ {
+		t := p.toks[j]
+		if t.Kind.IsTrivia() {
+			continue
+		}
+		word := strings.ToLower(t.Text(p.src))
+		switch t.Kind {
+		case token.T_PUBLIC, token.T_PROTECTED, token.T_PRIVATE:
+			if visibility {
+				p.errorAt(t, "Multiple access type modifiers are not allowed")
+			}
+			visibility = true
+		case token.T_STATIC, token.T_ABSTRACT, token.T_FINAL, token.T_READONLY, token.T_VAR,
+			token.T_PUBLIC_SET, token.T_PROTECTED_SET, token.T_PRIVATE_SET:
+			if seen[t.Kind] {
+				p.errorAt(t, "Multiple %s modifiers are not allowed", word)
+			}
+		default:
+			continue
+		}
+		seen[t.Kind] = true
+	}
+	if !method {
+		return
+	}
+	switch {
+	case seen[token.T_READONLY]:
+		p.errorf("Cannot use 'readonly' as method modifier")
+	case seen[token.T_ABSTRACT] && seen[token.T_FINAL]:
+		p.errorf("Cannot use the final modifier on an abstract method")
+	case seen[token.T_PUBLIC_SET] || seen[token.T_PROTECTED_SET] || seen[token.T_PRIVATE_SET]:
+		p.errorf("Cannot use an asymmetric visibility on a method")
+	}
+}

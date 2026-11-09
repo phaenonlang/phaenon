@@ -155,6 +155,11 @@ func (p *Parser) errorf(format string, args ...any) {
 	panic(bailout{&Error{Offset: t.Start, Line: t.Line, Msg: fmt.Sprintf(format, args...)}})
 }
 
+// errorAt is errorf at the token t.
+func (p *Parser) errorAt(t token.Token, format string, args ...any) {
+	panic(bailout{&Error{Offset: t.Start, Line: t.Line, Msg: fmt.Sprintf(format, args...)}})
+}
+
 func (p *Parser) describe() string {
 	t := p.tok()
 	if t.Kind == token.EOF {

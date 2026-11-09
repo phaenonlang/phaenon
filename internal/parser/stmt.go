@@ -1006,6 +1006,7 @@ func (p *Parser) classMember() ast.ClassMember {
 		return e
 	}
 	head := p.tok().Start
+	headIdx := p.i
 	mods := p.modifiers()
 	modsEnd := p.end()
 	if p.mode == lexer.ModePhaenon {
@@ -1033,6 +1034,9 @@ func (p *Parser) classMember() ast.ClassMember {
 		c.S = p.span(start)
 		return c
 	case p.at(token.T_FUNCTION), p.funAhead(true), p.bareMethodAhead():
+		if p.mode == lexer.ModePhaenon {
+			p.memberModifiers(headIdx, true)
+		}
 		m := &ast.MethodDecl{Doc: doc, Attrs: attrs, Modifiers: mods}
 		if fun := p.funAhead(true); fun || p.at(token.T_FUNCTION) {
 			// PHP's `function`, or the withdrawn `fun`.
@@ -1072,6 +1076,9 @@ func (p *Parser) classMember() ast.ClassMember {
 		return m
 	}
 	// Property.
+	if p.mode == lexer.ModePhaenon {
+		p.memberModifiers(headIdx, false)
+	}
 	pd := &ast.PropertyDecl{Doc: doc, Attrs: attrs, Modifiers: mods}
 	if mods != 0 {
 		pd.Mods = ast.Span{Start: head, End: modsEnd}
