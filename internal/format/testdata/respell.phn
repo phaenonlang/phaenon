@@ -68,7 +68,7 @@ abstract class Old<T>
         $b = !$x is \App\Marker;
         $c = $x is Marker && $y is Old;
         // The rest depends on the operand's type, or is no class: left.
-        $d = $x is string;
+        $d = $x is string || $x is number || $x is Closure;
         $e = $x is Id;
         $f = $x is T;
         $g = $x as Marker;

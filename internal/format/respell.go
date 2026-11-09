@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/migrate"
 	"github.com/phaenonlang/phaenon/internal/parser"
@@ -111,14 +112,6 @@ func leftMessage(n ast.Node, checked bool) string {
 	return fmt.Sprintf("`%s` left the language (roadmap D26): its rewrite depends on the operand's type, which phn fmt reads from the checked program of a project", op)
 }
 
-// typeKeywords are the type names that are no class.
-var typeKeywords = map[string]bool{
-	"int": true, "float": true, "string": true, "bool": true, "false": true, "true": true, "null": true,
-	"void": true, "never": true, "mixed": true, "array": true, "object": true, "callable": true,
-	"iterable": true, "list": true, "map": true, "bytes": true, "class": true, "self": true,
-	"static": true, "parent": true, "resource": true, "scalar": true, "numeric": true, "closure": true,
-}
-
 // className is the type as written when it is a class name: no type
 // keyword, no type arguments, no alias or type parameter of the file's.
 func className(src []byte, t ast.TypeExpr, local map[string]bool) string {
@@ -127,7 +120,7 @@ func className(src []byte, t ast.TypeExpr, local map[string]bool) string {
 		return ""
 	}
 	if len(nt.Name.Parts) == 1 && nt.Name.Kind == ast.NameUnqualified {
-		if w := strings.ToLower(nt.Name.Parts[0]); typeKeywords[w] || local[w] {
+		if w := nt.Name.Parts[0]; checker.TypeKeyword(w) || local[strings.ToLower(w)] {
 			return ""
 		}
 	}

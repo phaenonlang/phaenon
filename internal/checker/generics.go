@@ -88,6 +88,14 @@ var keywordArity = map[string][2]int{
 	"static": {0, 0}, "parent": {0, 0}, "true": {0, 0}, "false": {0, 0}, "resource": {0, 0},
 }
 
+// TypeKeyword reports a built-in type keyword of Phaenon's syntax, in any
+// case: a name that is no class (phn fmt's rewrite of `$x is Foo` reads
+// it, design/tooling.md §5.6).
+func TypeKeyword(name string) bool {
+	_, ok := keywordArity[strings.ToLower(name)]
+	return ok
+}
+
 func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 	given := len(t.TypeArgs)
 	if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
