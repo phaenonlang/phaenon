@@ -247,3 +247,74 @@ func (p *Parser) isAhead() bool {
 		return isPhaenonContextual(k)
 	}
 }
+
+// keywordNamedMethod refuses, with the rule in the message, a method
+// declared without a keyword whose name keeps `function`
+// (design/functions.md §1.1): after the modifiers, the last of them, or
+// `const`, `fn` or `Closure`, followed by what can only be a parameter list
+// and a body. The parse itself stays a lookahead of one token after the
+// name; this only says why it fails.
+func (p *Parser) keywordNamedMethod(modified bool) {
+	name := ""
+	at := 0
+	switch {
+	case p.at(token.Kind('(')) && modified:
+		name = p.toks[p.prevIndex()].Text(p.src)
+	case p.at(token.T_CONST), p.at(token.T_FN):
+		name, at = p.text(), 1
+	case p.at(token.T_STRING) && p.text() == "Closure":
+		name, at = p.text(), 1
+	default:
+		return
+	}
+	if !p.methodShapeAt(at) {
+		return
+	}
+	p.errorf("a method named %s keeps `function`: `public function %s()` (design/functions.md §1.1)", name, name)
+}
+
+// prevIndex is the index of the non-trivia token before the current one.
+func (p *Parser) prevIndex() int {
+	j := p.i - 1
+	for j > 0 && p.toks[j].Kind.IsTrivia() {
+		j--
+	}
+	return j
+}
+
+// methodShapeAt reports a parameter list at position i, `(…)` or a cast
+// token, followed by what only a method has before a body: `{`, `=>` or
+// `;`, where a property's or a constant's type goes on to its variable or
+// its name and `=`.
+func (p *Parser) methodShapeAt(i int) bool {
+	if k := p.tokenAhead(i).Kind; k != token.Kind('(') && !isCastKind(k) {
+		return false
+	}
+	depth := 0
+	for ; ; i++ {
+		switch p.tokenAhead(i).Kind {
+		case token.Kind('('):
+			depth++
+		case token.Kind(')'):
+			depth--
+		case token.Kind('{'), token.T_DOUBLE_ARROW, token.Kind(';'):
+			if depth == 0 {
+				return true
+			}
+		case token.T_VARIABLE:
+			if depth == 0 {
+				return false
+			}
+		case token.Kind('='), token.Kind('}'), token.EOF:
+			return false
+		}
+	}
+}
+
+func isCastKind(k token.Kind) bool {
+	switch k {
+	case token.T_INT_CAST, token.T_DOUBLE_CAST, token.T_STRING_CAST, token.T_ARRAY_CAST, token.T_OBJECT_CAST, token.T_BOOL_CAST, token.T_BYTES_CAST:
+		return true
+	}
+	return false
+}

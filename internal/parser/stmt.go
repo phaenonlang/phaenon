@@ -1008,6 +1008,9 @@ func (p *Parser) classMember() ast.ClassMember {
 	head := p.tok().Start
 	mods := p.modifiers()
 	modsEnd := p.end()
+	if p.mode == lexer.ModePhaenon {
+		p.keywordNamedMethod(mods != 0)
+	}
 	switch {
 	case p.at(token.T_CONST):
 		kw := p.next()

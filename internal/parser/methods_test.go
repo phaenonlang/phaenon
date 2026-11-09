@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -146,6 +147,34 @@ func TestWithdrawnTests(t *testing.T) {
 		})
 		if got != want {
 			t.Errorf("%s: %d withdrawn tests, want %d", src, got, want)
+		}
+	}
+}
+
+// TestKeywordNamedMethod: a method whose name keeps `function`, written
+// without it, is a syntax error that names the rule
+// (design/functions.md §1.1); the properties and constants those words
+// begin parse as before.
+func TestKeywordNamedMethod(t *testing.T) {
+	for member, want := range map[string]string{
+		"static(): int => 1;":                 "a method named static keeps `function`",
+		"public readonly(): int => 1;":        "a method named readonly keeps `function`",
+		"final var(): int { return 1; }":      "a method named var keeps `function`",
+		"const(): int => 1;":                  "a method named const keeps `function`",
+		"fn(int $x): int => $x;":              "a method named fn keeps `function`",
+		"Closure(int $x): int { return 1; }":  "a method named Closure keeps `function`",
+		"abstract public();":                  "a method named public keeps `function`",
+		"public static (A&B)|null $x = null;": "",
+		"private Closure(int): string $f;":    "",
+		"const (A&B)|null C = null;":          "",
+		"var (int, string) $p;":               "",
+	} {
+		_, err := Parse([]byte("abstract class A {\n    "+member+"\n}\n"), lexer.ModePhaenon)
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("%s: %v", member, err)
+		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
+			t.Errorf("%s: %v, want %q", member, err, want)
 		}
 	}
 }
