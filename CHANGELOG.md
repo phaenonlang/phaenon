@@ -3,6 +3,23 @@
 From 0.3.0 on, release-please writes each entry from the Conventional Commits merged since the
 previous release (`release-please-config.json`). The two releases before were cut by hand.
 
+## [0.4.0](https://github.com/phaenonlang/phaenon/compare/v0.3.0...v0.4.0) (2026-11-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* `fun`, `is`, `as` and `as?` are no longer Phaenon syntax; phn fmt rewrites a tree that holds them.
+* `phaenon/phn` no longer requires `phaenon/runtime` and conflicts with it below 0.4; a project that used the Debug integrations requires `phaenon/debug`.
+* `concurrently` and `spawn` are no longer syntax; a program that wants amp writes amp.
+* **emit:** `\Phaenon\Bytes` is removed; `$b as string` is the checked conversion, `is bytes` and `as bytes` are errors.
+
+### Features
+
+* concurrently and spawn leave the language ([cf521e8](https://github.com/phaenonlang/phaenon/commit/cf521e80a9df444352b9d7ba467f45f588e83efe))
+* **emit:** bytes as string is the checked conversion to text ([26427df](https://github.com/phaenonlang/phaenon/commit/26427df578a4b123dc65d3d262443627020fe453))
+* methods without a keyword; is, as and fun leave the language ([b9e86d8](https://github.com/phaenonlang/phaenon/commit/b9e86d8e3bf6074cdf71abb7ddcf5ba2a533e1e8))
+* phaenon/phn requires no package ([e3c9d6d](https://github.com/phaenonlang/phaenon/commit/e3c9d6d47b9e9de83075b3f2941cf64d86f2f7b5))
+
 ## [0.3.0](https://github.com/phaenonlang/phaenon/compare/v0.2.1...v0.3.0) (2026-11-07)
 
 
