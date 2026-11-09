@@ -142,16 +142,23 @@ func (s *Slots) of(n ast.Node) {
 var testFunctions = regexp.MustCompile(`\\(is_[a-z]+|array_is_list|count|class_exists|interface_exists|mb_check_encoding|get_debug_type)\(`)
 
 // Rewrite is the PHP that replaces the withdrawn test node, whose operand
-// is operand, in src: the condition of an `is`, or the whole checked value
-// of an `as` (nullable for `as?`). The functions are written unqualified
-// unless qualified says that the file's namespace declares one of the same
-// name. It fails, with the reason, where the operand would be written
-// twice and does not read the same twice (the rule P3012 enforced).
-func (t *Test) Rewrite(src []byte, node, operand ast.Expr, as, nullable bool, slots *Slots, qualified func(function string) bool) (string, string) {
-	text, prec := t.Cond, t.Prec
+// is operand: the condition of an `is`, or the whole checked value of an
+// `as` (nullable for `as?`). text is the source of a span as the rewrite
+// writes it, with the tests nested in it already rewritten, so that one
+// run of phn fmt rewrites a test in another's operand. The functions are
+// written unqualified unless qualified says that the file's namespace
+// declares one of the same name. It fails, with the reason, where the
+// operand would be written twice and does not read the same twice (the
+// rule P3012 enforced).
+func (t *Test) Rewrite(text func(ast.Span) string, node, operand ast.Expr, as, nullable bool, slots *Slots, qualified func(function string) bool) (string, string) {
+	cond, prec := t.Cond, t.Prec
 	if as {
-		text, prec = t.As(nullable), PrecTernary
+		cond, prec = t.As(nullable), PrecTernary
 	}
+	return t.rewrite(text, cond, prec, node, operand, slots, qualified)
+}
+
+func (t *Test) rewrite(src func(ast.Span) string, text string, prec Prec, node, operand ast.Expr, slots *Slots, qualified func(function string) bool) (string, string) {
 	text = testFunctions.ReplaceAllStringFunc(text, func(m string) string {
 		if qualified != nil && qualified(m[1:len(m)-1]) {
 			return m
@@ -161,16 +168,14 @@ func (t *Test) Rewrite(src []byte, node, operand ast.Expr, as, nullable bool, sl
 	if slots != nil && slots.Parenthesise(node, prec) {
 		text = "(" + text + ")"
 	}
-	os := operand.Span()
 	if strings.Count(text, TestOperand) == 1 {
-		return strings.Replace(text, TestOperand, string(src[os.Start:os.End]), 1), ""
+		return strings.Replace(text, TestOperand, src(operand.Span()), 1), ""
 	}
 	if !ReadsTwice(operand) {
 		return "", "the operand would be evaluated twice; assign it to a variable first"
 	}
 	inner, cast := TestOperandOf(operand)
-	is := inner.Span()
-	return withOperand(text, string(src[is.Start:is.End]), cast), ""
+	return withOperand(text, src(inner.Span()), cast), ""
 }
 
 // withOperand writes src for each TestOperand in text. A copy that is a

@@ -347,3 +347,42 @@ func TestRewriteStringCastCopies(t *testing.T) {
 		}
 	}
 }
+
+// TestRewriteNested: a test in the operand of another is rewritten in the
+// same run, so that phn fmt formats to itself (design/tooling.md §5.6).
+func TestRewriteNested(t *testing.T) {
+	src := []byte("interface Shape\n{\n}\n\nfinal class Circle implements Shape\n{\n}\n\n" +
+		"function f(mixed $x): bool\n{\n    return ($x as Shape) is Circle;\n}\n\n" +
+		"function g(mixed $x): bool\n{\n    return ($x as? Shape) is Circle;\n}\n")
+	out := rewriteAndCompile(t, "nested.phn", src)
+	formatted, _, _ := SourceWith(src, Options{Program: true, Tests: rewrites(t, src)})
+	for _, want := range []string{
+		"return ($x instanceof Shape ? $x : throw new \\TypeError('expected Shape, got ' . get_debug_type($x))) instanceof Circle;",
+		"return ($x instanceof Shape ? $x : null) instanceof Circle;",
+	} {
+		if !strings.Contains(string(formatted), want) {
+			t.Errorf("no %s in:\n%s\ncompiled:\n%s", want, formatted, out)
+		}
+	}
+}
+
+// rewrites are the checked program's rewrites of src's withdrawn tests.
+func rewrites(t *testing.T, src []byte) map[ast.Span]string {
+	t.Helper()
+	p := program.New()
+	if err := p.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := p.AddFile("rewrites.phn", src, lexer.ModePhaenon, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checker.New(p, checker.Options{}).Check()
+	out := map[ast.Span]string{}
+	for n, rec := range f.Tests {
+		if rec.Rewritten != "" {
+			out[n.Span()] = rec.Rewritten
+		}
+	}
+	return out
+}

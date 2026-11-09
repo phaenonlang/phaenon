@@ -150,8 +150,10 @@ func localTypeNames(f *ast.File) map[string]bool {
 	return out
 }
 
-// apply makes the edits, in source order; an edit inside one made before
-// it (a test in the operand of another) waits for the next run.
+// apply makes the edits, in source order. An edit inside one made before
+// it is a test in the operand of another, whose rewrite already holds its
+// PHP (the checker writes the innermost first); the instanceof rewrites
+// made without a program leave the operand alone, so theirs never nest.
 func apply(src []byte, edits []migrate.HeadEdit) []byte {
 	if len(edits) == 0 {
 		return src
