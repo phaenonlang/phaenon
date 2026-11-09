@@ -48,6 +48,16 @@ func Lift(src []byte, opts Options) ([]byte, []Note, error) {
 		l.prog, l.pfile = nil, nil
 	}
 	l.stmts(f.Stmts, nil)
+	// The methods the walk of declarations does not reach, an anonymous
+	// class's, lose `function` as the others do (roadmap D27).
+	ast.Inspect(f, func(n ast.Node) bool {
+		if m, ok := n.(*ast.MethodDecl); ok && !l.headed[m] {
+			if e, ok := MethodHead(src, m, !l.keepPublic); ok {
+				l.replace(e.Span, e.Text)
+			}
+		}
+		return true
+	})
 	sort.SliceStable(l.notes, func(i, j int) bool { return l.notes[i].Line < l.notes[j].Line })
 	return l.apply(), l.notes, nil
 }
@@ -76,6 +86,8 @@ type lifter struct {
 	// tree does not keep (tokens); stats counts the lifted @throws tags.
 	toks  tokenIndex
 	stats *Stats
+	// headed holds the methods whose head methodDecl respelled.
+	headed map[*ast.MethodDecl]bool
 }
 
 // overrideCtx is what the override-erasure rule needs to know about a
@@ -515,6 +527,10 @@ func (l *lifter) methodDecl(m *ast.MethodDecl, outer scope) {
 	if e, ok := MethodHead(l.src, m, !l.keepPublic); ok {
 		l.replace(e.Span, e.Text)
 	}
+	if l.headed == nil {
+		l.headed = map[*ast.MethodDecl]bool{}
+	}
+	l.headed[m] = true
 	l.params(m.Params)
 	sc := outer.child()
 	d := l.findDoc(m.Doc, m.S.Start)

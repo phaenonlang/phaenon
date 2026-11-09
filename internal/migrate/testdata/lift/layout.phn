@@ -107,7 +107,7 @@ final class Greeter implements
     };
 
     anonymous(): \Countable => new class () implements \Countable {
-        public function count(): int => 0;
+        count(): int => 0;
     };
 
     braceComment(): int // a comment before the brace

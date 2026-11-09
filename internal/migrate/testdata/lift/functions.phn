@@ -38,6 +38,10 @@ final class Account
 
         return $c;
     }
+
+    counter(): object => new class {
+        next(): int => 1;
+    };
 }
 
 function helper(): void {}

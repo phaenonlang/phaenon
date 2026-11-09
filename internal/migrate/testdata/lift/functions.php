@@ -64,6 +64,16 @@ final class Account
 
         return $c;
     }
+
+    public function counter(): object
+    {
+        return new class {
+            public function next(): int
+            {
+                return 1;
+            }
+        };
+    }
 }
 
 function helper(): void

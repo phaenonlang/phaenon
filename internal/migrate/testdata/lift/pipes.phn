@@ -138,9 +138,9 @@ function captures(list<int> $xs, int $base): int => $xs
     |> tagged(?, new class ($base) {
         public int $a = 1;
 
-        public function __construct(public int $base) {}
+        __construct(public int $base) {}
 
-        public function sum(): int {
+        sum(): int {
             $xs = [$this->a, $this->base];
             return array_sum($xs);
         }
