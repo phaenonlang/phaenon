@@ -32,7 +32,8 @@ import (
 // a project the files that hold one are checked first, as phn check checks
 // them, and the checked program gives each test's PHP; --stdin and files
 // outside a project get the rewrites that need no type. A test left as
-// written is reported, P1001, and the status is 1.
+// written is reported, P1001, and the status is 1; with --stdin it is 0, so
+// that an editor that runs the first layer keeps the rest of the layout.
 func fmtCmd(args []string) {
 	fs := flag.NewFlagSet("fmt", flag.ExitOnError)
 	check := fs.Bool("check", false, "report the files that are not formatted; write nothing")

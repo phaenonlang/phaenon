@@ -754,11 +754,7 @@ type FunctionDecl struct {
 }
 
 func (n *FunctionDecl) Span() Span { return n.S }
-
-// Bare reports a method declared without a keyword (roadmap D27):
-// `title(): string`, `protected static create(): static`.
-func (n *MethodDecl) Bare() bool { return n.Kw.Start == n.Kw.End }
-func (*FunctionDecl) stmtNode()  {}
+func (*FunctionDecl) stmtNode()    {}
 
 // Throws is the clause `throws A|B` after a signature: the exceptions a
 // named function or method lets escape (design/functions.md §4). It
@@ -889,6 +885,10 @@ func (n *ConstItem) Span() Span       { return n.S }
 func (n *EnumCase) Span() Span        { return n.S }
 func (n *TraitUse) Span() Span        { return n.S }
 func (n *TraitAdaptation) Span() Span { return n.S }
+
+// Bare reports a method declared without a keyword (roadmap D27):
+// `title(): string`, `protected static create(): static`.
+func (n *MethodDecl) Bare() bool { return n.Kw.Start == n.Kw.End }
 
 // ------------------------------------------------------------------ statements
 

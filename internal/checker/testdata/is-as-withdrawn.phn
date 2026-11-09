@@ -127,8 +127,8 @@ function checkable(mixed $m, string $s, object $o): int
     return $n;
 }
 
-// What PHP has no O(1) test for: P3011, the message naming the test that
-// exists.
+// What PHP has no O(1) test for has no rewrite (P3011 until roadmap D26):
+// the message names the test that exists.
 function uncheckable(mixed $m, ?Repository<User> $r): int
 {
     $n = 0;
@@ -268,8 +268,8 @@ final class Holder
 }
 
 // A compound test, an `as` and an `as?` write their operand more than once:
-// P3012 for an operand a second reading would run again. A single-function
-// test takes any expression.
+// no rewrite for an operand a second reading would run again (P3012 until
+// roadmap D26). A single-function test takes any expression.
 function operands(mixed $m, int $i, map<int, mixed> $a): int
 {
     $n = 0;
@@ -333,9 +333,9 @@ function narrowing(mixed $m, map<int|string, int> $ints, mixed $p, mixed $c): in
     return $n + $i + \strlen($s ?? '');
 }
 
-// A test the types settle is P2306, for `as` and `as?` as for `is`. An
-// operand read twice is P3012 all the same: `phn build --emit-on-error`
-// writes the test.
+// A test the types settle is rewritten all the same, the operand read
+// twice refused as anywhere, and one the rewrite would drop refused where
+// it is a call.
 function settled(int $i, string $s, mixed $m): int
 {
     $a = $i as int; // want P1001 "is_int($i) ? $i : throw new \TypeError('expected int, got ' . get_debu"
@@ -444,8 +444,7 @@ function varTags(): string
     return $s . $t;
 }
 
-// A constant reads the same value twice: no P3012, only the P2306 its
-// value's type settles.
+// A constant reads the same value twice, so its tests are rewritten.
 class Limits
 {
     public const N = 3;
@@ -471,7 +470,8 @@ function constants(): int
 }
 
 // A property with a get hook runs it on each read: a test that writes it
-// twice runs it twice (P3012). A plain property reads the same twice.
+// twice has no rewrite (P3012 until roadmap D26). A plain property reads
+// the same twice.
 final class Hooked
 {
     public mixed $data = null;

@@ -243,11 +243,11 @@ phn fix --check -- tools/php-cs-fixer/vendor/bin/php-cs-fixer fix   # each chang
 
 A change of what the source wrote is applied to the source, and so is a deletion whose ends lie
 in it. A change of text the compiler wrote — the header, a docblock, the `function` of a method
-declared without it, an erased type — is not: the rebuild writes that text anew. `phn fix` then rebuilds and runs the
-tool again, carrying what has become the source's, for three rounds at most, and reports what the
-tool still changes; the exit status is 1 then (`design/tooling.md` §4). For php-cs-fixer and
-Rector, each reported change names its rule, `php-cs-fixer (binary_operator_spaces) changes: …`,
-from the tool's own JSON report, which `phn fix` asks for.
+declared without it, an erased type — is not: the rebuild writes that text anew. `phn fix` then
+rebuilds and runs the tool again, carrying what has become the source's, for three rounds at
+most, and reports what the tool still changes; the exit status is 1 then (`design/tooling.md`
+§4). For php-cs-fixer and Rector, each reported change names its rule, `php-cs-fixer
+(binary_operator_spaces) changes: …`, from the tool's own JSON report, which `phn fix` asks for.
 
 `phn fmt` formats the `.phn` in two layers. The first is Phaenon's layout, with no options:
 spaces for tabs (a tab outside a string or a comment's text doesn't compile, `P1005`), a
