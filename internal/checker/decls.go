@@ -334,8 +334,21 @@ func (c *Checker) checkClass(cl *program.Class) {
 		}
 	}
 	phaenon := cl.File.Mode == lexer.ModePhaenon
-	if d.Modifiers&ast.ModVar != 0 && phaenon {
-		c.report(d.S, P1001, "`var` is not available in Phaenon; use public")
+	if phaenon {
+		// `var` is the member's modifier: a property's, or, read by
+		// position since roadmap D27, a method's, which PHP refuses.
+		for _, m := range d.Members {
+			switch m := m.(type) {
+			case *ast.PropertyDecl:
+				if m.Modifiers&ast.ModVar != 0 {
+					c.report(m.Mods, P1001, "`var` is not available in Phaenon; use public")
+				}
+			case *ast.MethodDecl:
+				if m.Modifiers&ast.ModVar != 0 {
+					c.report(m.Head, P1001, "`var` is not available in Phaenon, and PHP refuses it on a method; leave it out")
+				}
+			}
+		}
 	}
 
 	// Members.
