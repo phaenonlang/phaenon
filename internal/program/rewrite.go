@@ -149,7 +149,8 @@ var testFunctions = regexp.MustCompile(`\\(is_[a-z]+|array_is_list|count|class_e
 // written unqualified unless qualified says that the file's namespace
 // declares one of the same name. It fails, with the reason, where the
 // operand would be written twice and does not read the same twice (the
-// rule P3012 enforced).
+// rule P3012 enforced), and where a test the types settle would drop an
+// operand that does more than read.
 func (t *Test) Rewrite(text func(ast.Span) string, node, operand ast.Expr, as, nullable bool, slots *Slots, qualified func(function string) bool) (string, string) {
 	cond, prec := t.Cond, t.Prec
 	if as {
@@ -168,8 +169,16 @@ func (t *Test) rewrite(src func(ast.Span) string, text string, prec Prec, node, 
 	if slots != nil && slots.Parenthesise(node, prec) {
 		text = "(" + text + ")"
 	}
-	if strings.Count(text, TestOperand) == 1 {
+	switch strings.Count(text, TestOperand) {
+	case 1:
 		return strings.Replace(text, TestOperand, src(operand.Span()), 1), ""
+	case 0:
+		// A test the types settle (`is mixed` is `true`) drops its
+		// operand, which only a read may lose.
+		if !ReadsTwice(operand) {
+			return "", "the types settle this test, and its PHP would not evaluate the operand; test what PHP needs, or nothing"
+		}
+		return text, ""
 	}
 	if !ReadsTwice(operand) {
 		return "", "the operand would be evaluated twice; assign it to a variable first"

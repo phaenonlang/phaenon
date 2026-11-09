@@ -343,6 +343,9 @@ function settled(int $i, string $s, mixed $m): int
     if ($m is mixed) { // want P1001 "true"
         return 0;
     }
+    if (value() is mixed) { // want P1001 "the types settle this test, and its PHP would not evaluate the operand"
+        return 1;
+    }
     $c = \strlen('a') as int; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
     $d = value() as? mixed; // want P1001 "true ? value() : null"
     $e = value() as mixed; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
