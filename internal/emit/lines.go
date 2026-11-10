@@ -28,6 +28,15 @@ import (
 // next line and the lines of an expanded expression body are holds, and a
 // breakpoint set on their source line goes to the line that starts with
 // its code.
+//
+// A folded pipeline (fold.go) is a free edit whose source runs, the
+// operands it moves, are source code of the pipeline's first line, the
+// line its lines map to (design/php-versions.md §5.3): the line it lands
+// on is that line's reverse target even when only compiler text, the
+// `return` of an expanded expression body, comes before it there. When
+// the pipeline joined source lines, the source after it on its last output
+// line, from the pipeline's last source line (the statement's `;`), is
+// moved with it: verbatim, but held by the line the pipeline maps to.
 
 // outLine is what the writer knows about one output line.
 type outLine struct {
@@ -36,6 +45,9 @@ type outLine struct {
 	opened int  // source line a source or in-place line break opened, 0: a free one
 	anchor int  // anchor line of the free line break that opened the line
 	isMap  bool // the line the map itself takes (before __halt_compiler)
+	// joined: a folded pipeline that joined source lines ended on the line,
+	// so the source after it here moves with it and does not map the line.
+	joined bool
 }
 
 // segment is a run of source bytes copied to the output unchanged: source
@@ -91,8 +103,17 @@ func (w *lineWriter) cur() *outLine { return &w.lines[len(w.lines)-1] }
 func isBlank(c byte) bool { return c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\v' }
 
 // source copies src[a:b), adding the indentation an indent request asks
-// for after each line break it covers.
+// for after each line break it covers. What lands on a joined line, up to
+// the next line break, is moved.
 func (w *lineWriter) source(a, b int) {
+	if w.cur().joined {
+		end := b
+		if i := bytes.IndexByte(w.src[a:b], '\n'); i >= 0 {
+			end = a + i
+		}
+		w.move(a, end)
+		a = end
+	}
 	line := w.lineOf(a)
 	from := a
 	for i := a; i < b; i++ {
@@ -120,6 +141,15 @@ func (w *lineWriter) copySource(a, b int) {
 		return
 	}
 	w.segments = append(w.segments, segment{Span: ast.Span{Start: a, End: b}, Out: w.out.Len()})
+	w.out.Write(w.src[a:b])
+}
+
+// move copies src[a:b), a run without line breaks, as a moved one.
+func (w *lineWriter) move(a, b int) {
+	if a >= b {
+		return
+	}
+	w.moved = append(w.moved, segment{Span: ast.Span{Start: a, End: b}, Out: w.out.Len()})
 	w.out.Write(w.src[a:b])
 }
 
@@ -164,7 +194,7 @@ func (w *lineWriter) inPlace(text string, s ast.Span) {
 				}
 			}
 		case !isBlank(c):
-			if l := w.cur(); l.code == 0 {
+			if l := w.cur(); l.code == 0 && !l.joined {
 				l.code = line
 			}
 		}
@@ -174,26 +204,40 @@ func (w *lineWriter) inPlace(text string, s ast.Span) {
 
 // free writes compiler-laid-out text anchored at source offset at.
 func (w *lineWriter) free(text string, at int) {
-	w.freeWith(text, at, nil)
+	w.freeWith(text, ast.Span{Start: at, End: at}, nil)
 }
 
-// freeWith is free for text holding source runs at pieces.
-func (w *lineWriter) freeWith(text string, at int, pieces []piece) {
+// freeWith is free for text replacing span s that holds source runs at
+// pieces, the operands a folded pipeline moves: code of its anchor line,
+// the pipeline's first. Its last line is joined when s spans line breaks.
+func (w *lineWriter) freeWith(text string, s ast.Span, pieces []piece) {
 	for _, p := range pieces {
 		w.moved = append(w.moved, segment{Span: p.Span, Out: w.out.Len() + p.Off})
 	}
 	w.out.WriteString(text)
-	anchor := w.lineOf(at)
+	anchor := w.lineOf(s.Start)
+	next := 0 // the first piece that does not end before i
 	for i := 0; i < len(text); i++ {
+		for next < len(pieces) && i >= pieces[next].Off+pieces[next].End-pieces[next].Start {
+			next++
+		}
+		moved := next < len(pieces) && i >= pieces[next].Off
 		c := text[i]
 		switch {
 		case c == '\n':
 			w.lines = append(w.lines, outLine{anchor: anchor})
 		case !isBlank(c):
-			if l := w.cur(); l.free == 0 {
+			l := w.cur()
+			if moved && l.code == 0 && !l.joined {
+				l.code = anchor
+			}
+			if l.free == 0 {
 				l.free = anchor
 			}
 		}
+	}
+	if len(pieces) > 0 && bytes.IndexByte(w.src[s.Start:s.End], '\n') >= 0 {
+		w.cur().joined = true
 	}
 }
 

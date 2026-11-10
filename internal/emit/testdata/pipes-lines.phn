@@ -1,0 +1,48 @@
+namespace App;
+
+// A folded pipeline's lines map to the pipeline's first line, and the line
+// it lands on is that line's reverse target, so a breakpoint set on it
+// stops there (design/php-versions.md §5.3, line-map.md §3.2): in an
+// expression body whose expression has a line of its own, after the
+// `return` the block gains, or none under void; in a block body, the `;`
+// after a pipeline over several lines moving with it.
+
+final class Ledger {
+    /** @var list<string> */
+    private array $lines = [];
+
+    ids(list<int> $roots): list<int> =>
+        $roots |> array_map(fn (int $root) => $root * 2, ?);
+
+    total(list<int> $amounts): int =>
+        $amounts
+            |> array_filter(?, fn (int $a) => $a > 0)
+            |> array_sum(...);
+
+    record(list<string> $rows): void =>
+        $rows |> implode(', ', ?) |> $this->write(...);
+
+    summary(list<int> $amounts): string {
+        $parts = $amounts
+            |> array_map(fn (int $a) => "#$a", ?)
+            |> implode(', ', ?);
+
+        return $parts;
+    }
+
+    flush(list<string> $rows): void {
+        $rows
+            |> array_unique(...)
+            |> array_values(...)
+            |> $this->append(...);
+    }
+
+    private write(string $line): void {
+        $this->lines[] = $line;
+    }
+
+    /** @param list<string> $rows */
+    private append(array $rows): void {
+        array_push($this->lines, ...$rows);
+    }
+}
