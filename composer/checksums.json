@@ -3,23 +3,23 @@
     "assets": {
         "darwin-amd64": {
             "file": "phn-darwin-amd64",
-            "sha256": "be93d545496d836e3eee92beb35f540ffbe613d898b46252b11d620ee065ec7b"
+            "sha256": "3d72d770e672f05e8b64b47a77d12a62c8b85c50a0cbf3c4970b06f3ba801bb6"
         },
         "darwin-arm64": {
             "file": "phn-darwin-arm64",
-            "sha256": "d53b59c53bd7dc254d17868ca1fa4b1bd4880c18b009630f03f14fb75dbc3a17"
+            "sha256": "e11abda915d7403af955bf7efa1e0f43417d9c934cca40ecadef334882225c61"
         },
         "linux-amd64": {
             "file": "phn-linux-amd64",
-            "sha256": "53fe54385e9e102bc8150e6809be8519b17b1abb1958f21531bc6f5b8e8cceb2"
+            "sha256": "73ea8646a311e69f364dcd27e12f25512d47034ca35762858a546c6b3f8fdce5"
         },
         "linux-arm64": {
             "file": "phn-linux-arm64",
-            "sha256": "f9b5b654239adcb0e157e648014e9d626271ebd544d8f74904cc0a37cd7a2f1a"
+            "sha256": "ff6a7c1206daf9d53ed96864b0ae0f7dd5cf5021ebefb845f23ac5e339fc1f97"
         },
         "wasm": {
             "file": "phn.wasm.gz",
-            "sha256": "0435e641b3f4771d16baffa9ee10e605b40a9073e127297154e4805034251fda"
+            "sha256": "2cccd90fd28e4c8e3341ed55bff29345ca3cdbb3409c07aaa406f5d10cded3e6"
         },
         "wasm-exec": {
             "file": "wasm_exec.js",
@@ -27,7 +27,7 @@
         },
         "windows-amd64": {
             "file": "phn-windows-amd64.exe",
-            "sha256": "7d85704cf1ab3a2341a11a3ea7025f62e6ae9275c5bc4baae4ae0c8243b0a093"
+            "sha256": "28eff0327c5e12c51b6ba682fabde25ad3823ae9647e5dab7044101605f3467c"
         }
     }
 }
