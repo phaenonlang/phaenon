@@ -3,6 +3,13 @@
 From 0.3.0 on, release-please writes each entry from the Conventional Commits merged since the
 previous release (`release-please-config.json`). The two releases before were cut by hand.
 
+## [0.4.1](https://github.com/phaenonlang/phaenon/compare/v0.4.0...v0.4.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **emit:** a pipe in an expression body maps to the pipeline's line ([9eea388](https://github.com/phaenonlang/phaenon/commit/9eea3880446f9448d0954d7b22ca2a87d55500d6))
+
 ## [0.4.0](https://github.com/phaenonlang/phaenon/compare/v0.3.0...v0.4.0) (2026-11-09)
 
 
