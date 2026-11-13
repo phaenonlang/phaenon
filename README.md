@@ -117,6 +117,48 @@ phn check                      # type-check the roots, minus "exclude"
 Without a project file, `phn build src tests` writes `Foo.php` next to `Foo.phn` — the adoption
 case, a `.phn` at a time in a PHP tree — or under `--out DIR`.
 
+### The compilers a library keeps out
+
+A library that commits its outputs requires `phaenon/phn` under `require-dev` alone, which binds
+none of the projects that install it, while a project written in Phaenon reads the library's
+`phaenon.json` with its own `phn`. A release from before a key the file uses cannot read it as
+written: it refuses the file, or reads it without the key. So the library's `composer.json` keeps
+those releases out with a `conflict`, which Composer applies wherever `phaenon/phn` is installed
+beside the library:
+
+```json
+{"require-dev": {"phaenon/phn": "0.5.0"}, "conflict": {"phaenon/phn": "<0.5.0"}}
+```
+
+Nothing makes an author write that line, and one that is missing or too low shows only in
+somebody else's project. So `phn build` of a project that commits a root checks it, and
+`phn build --check` does. The floor is the newest first release among the keys the project file
+uses: 0.5.0 for `committed`. The build fails, with one line on stderr and status 1, while a release
+from before the floor can be installed beside the package:
+
+```text
+composer.json: "conflict": {"phaenon/phn": "<0.4"} does not keep this package from being installed beside phaenon/phn 0.4.1 or 0.4.0, which cannot read its phaenon.json: the key "committed" is known from 0.5.0 on; write "phaenon/phn": "<0.5.0" under "conflict"
+```
+
+- **The outputs are written all the same**, or compared under `--check`: the line and the status
+  are all the check adds. The plugin builds the project when Composer writes the autoloader, so a
+  `composer install` in the library's own checkout fails on it too, after building.
+- **It asks about the releases that exist**, each tried against the constraint as Composer tries
+  it. `<0.5`, `<0.5.0`, `<=0.4.99` and `<0.5 || >=9` keep out the same releases and pass alike;
+  `<0.4`, `0.3.*` and no `conflict` on `phaenon/phn` at all do not. The package's name is read in
+  any letter case, as Composer reads it.
+- **A constraint `phn` cannot read fails the build as well**, as one that "cannot be judged", with
+  the reason: it is not known to keep anything out. `phn` reads the comparisons, `~`, `^`,
+  wildcards, hyphen ranges, alternatives, stability suffixes and flags, and branches as Composer
+  does; it does not read an inline alias (`as`), a numeric branch (`0.5.x-dev`), a version made of
+  a date, or what Composer itself refuses (`~>0.4`). A `composer.json` that cannot be read fails
+  the same way.
+- **It is asked of the project's whole build only**: not by `phn check`, `phn watch`, the editor's
+  build on save or a build of some paths; not of a project that commits no root or has no
+  `composer.json`; and never of an installed package, whose release is its maintainers' to repair.
+
+Design: `design/tooling.md` §3.7.
+
 ### The PHP target
 
 A project compiles for a **target**, the oldest PHP the output must run on: PHP 8.5 or 8.6. Phaenon

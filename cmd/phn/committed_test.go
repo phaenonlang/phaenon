@@ -448,12 +448,15 @@ func TestBuildVendorWithoutTheKey(t *testing.T) {
 
 // ownTrees are two copies of one project, a library's own checkout: the
 // second names its root under "committed". An output with no source and a
-// stale copy wait in both for a build to remove and refresh.
+// stale copy wait in both for a build to remove and refresh. Their
+// composer.json keeps out the compilers from before the key, which the
+// build of the second asks for (conflict.go).
 func ownTrees(t *testing.T) (plain, committed string) {
 	t.Helper()
 	plain, committed = fixTree(t), fixTree(t)
 	for _, root := range []string{plain, committed} {
 		writeTree(t, root, map[string]string{
+			"composer.json":   kitManifest,
 			".src/Orphan.php": "<?php\n",
 			".src/data.php":   "<?php\nreturn array();\n",
 		})

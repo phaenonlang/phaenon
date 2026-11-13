@@ -45,6 +45,7 @@ output. `../design/roadmap.md` §3 names the milestones and what each one brings
 | Open questions and deferred work | `../design/roadmap.md` §6, `checker.md` §10, `tooling.md` §13; the repository's issues |
 | Every `PHAENON_*` test variable | [Test variables](#test-variables) |
 | A diagnostic code | `internal/checker/codes.go` |
+| The release a `phaenon.json` key came in | `keyReleases` in `cmd/phn/conflict.go`: a new key is added there too, and `earlierReleases` extended to the last release without it (`TestKeyReleases`) |
 | What PHP does | `php` itself (the oracle), then `../php-src` |
 | A PHP function's signature | `stdlib/php-src/**/*.stub.php`, refined by `stdlib/overlay/` |
 

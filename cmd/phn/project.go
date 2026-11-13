@@ -33,6 +33,9 @@ const ProjectFile = "phaenon.json"
 // same place from the output, and the emitted PHP needs no rewriting. Files
 // under a root that are not Phaenon sources (fixtures, YAML, data) are copied
 // into the output for the same reason: __DIR__.'/Fixture' must exist there.
+//
+// A key added here is given, in keyReleases (conflict.go), the first
+// release of phn that reads it.
 type project struct {
 	Roots map[string]string `json:"roots"`
 	// Committed names the source roots whose outputs the project's
