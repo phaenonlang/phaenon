@@ -45,6 +45,103 @@ func knownKeys(t reflect.Type, prefix string) []string {
 	return keys
 }
 
+// repairs is where a message sends for what to edit when a release got
+// another number than the table of keys assumed.
+const repairs = `AGENTS.md, "Git and commits"`
+
+// tableProblems holds a table of the keys' releases and a list of the
+// releases from before the newest of them to the releases a changelog
+// lists, and says what is wrong, each with its repair.
+//
+// What it cannot see is when a key was merged: nothing in the tree says it.
+// So a key given a release that was already made when the key was merged
+// passes, although that release does not read the key and a library's
+// `conflict` would then let it in. Whoever reviews a change that adds a key
+// checks that the release it is given is not in CHANGELOG.md yet, and
+// again when the change is merged, should a release have come in between.
+func tableProblems(table map[string]string, earlier []string, changelog string) []string {
+	var problems []string
+	parse := func(s string) (semver.Version, bool) {
+		v, err := semver.ParseVersion(s)
+		if err != nil || !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(s) {
+			problems = append(problems, fmt.Sprintf("%q is not a release of %s: X.Y.Z", s, compilerPackage))
+			return v, false
+		}
+		return v, true
+	}
+	var released []semver.Version
+	for _, m := range regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+)\]`).FindAllStringSubmatch(changelog, -1) {
+		if v, ok := parse(m[1]); ok {
+			released = append(released, v)
+		}
+	}
+	slices.SortFunc(released, semver.Version.Compare)
+	if len(released) == 0 {
+		return append(problems, "CHANGELOG.md lists no release")
+	}
+	made := func(v semver.Version) bool {
+		return slices.ContainsFunc(released, func(r semver.Version) bool { return r.Compare(v) == 0 })
+	}
+	var newest semver.Version
+	var newestKeys []string
+	for _, key := range slices.Sorted(maps.Keys(table)) {
+		since, ok := parse(table[key])
+		if !ok {
+			continue
+		}
+		switch order := newest.Compare(since); {
+		case newestKeys == nil || order < 0:
+			newest, newestKeys = since, []string{key}
+		case order == 0:
+			newestKeys = append(newestKeys, key)
+		}
+		// A release that was never made, with one made after it: the
+		// number the next release got is not the one the table assumed.
+		if after := slices.IndexFunc(released, func(r semver.Version) bool { return r.Compare(since) > 0 }); after >= 0 && !made(since) {
+			problems = append(problems, fmt.Sprintf("%q is given %s, and no %s was made: CHANGELOG.md lists %s after it. The first release made after a key is merged is the one that reads it. Give %q %s in keyReleases, and change what names %s with it (%s)",
+				key, table[key], table[key], released[after], key, released[after], table[key], repairs))
+		}
+		if parent, _, nested := strings.Cut(key, "."); nested {
+			if of, ok := parse(table[parent]); ok && of.Compare(since) > 0 {
+				problems = append(problems, fmt.Sprintf("%q is given %s, a release from before its object %q came", key, table[key], parent))
+			}
+		}
+	}
+	if newestKeys == nil {
+		return problems
+	}
+	var before, missing []string
+	for _, r := range released {
+		if r.Compare(newest) < 0 {
+			before = append(before, r.String())
+			if !slices.Contains(earlier, r.String()) {
+				missing = append(missing, r.String())
+			}
+		}
+	}
+	for _, r := range earlier {
+		switch v, ok := parse(r); {
+		case !ok:
+		case v.Compare(newest) >= 0:
+			problems = append(problems, fmt.Sprintf("earlierReleases names %s, which is not before %s, the newest release keyReleases names: take it out", r, newest))
+		case !made(v):
+			problems = append(problems, fmt.Sprintf("earlierReleases names %s, which CHANGELOG.md does not list: take it out", r))
+		}
+	}
+	// A release the list lacks is one of two things, and the tree does not
+	// say which: the two repairs go opposite ways.
+	if len(missing) > 0 {
+		keys := strings.Join(newestKeys, ", ")
+		problems = append(problems, fmt.Sprintf("CHANGELOG.md lists %s before %s, the release keyReleases gives %s, and earlierReleases lacks it. The repair depends on when it was cut, which `git tag --contains` of the commit that added the key says. "+
+			"Cut before the key was merged, it does not read the key: add it to earlierReleases. "+
+			"Cut after, under another number than the table assumed, it reads the key, and %s is what is wrong: give %s the first such release in keyReleases, and change what names %s with it (%s)",
+			strings.Join(missing, ", "), newest, keys, newest, keys, newest, repairs))
+	} else if len(problems) == 0 && !slices.Equal(earlier, before) {
+		problems = append(problems, fmt.Sprintf("earlierReleases is %v; oldest first, the releases before %s are %v", earlier, newest, before))
+	}
+	return problems
+}
+
 // Every key the project file's reader knows has the release it came in, a
 // release that was made or the next one; and the releases from before the
 // newest of them are the ones CHANGELOG.md lists.
@@ -52,7 +149,7 @@ func TestKeyReleases(t *testing.T) {
 	known := knownKeys(reflect.TypeFor[project](), "")
 	for _, key := range known {
 		if _, ok := keyReleases[key]; !ok {
-			t.Errorf("the key %q of %s has no first release in keyReleases", key, ProjectFile)
+			t.Errorf("the key %q of %s has no first release in keyReleases: give it the next release, extend earlierReleases to the last release without it and move composer.json's alias of dev-main (%s)", key, ProjectFile, repairs)
 		}
 	}
 	for key := range keyReleases {
@@ -60,49 +157,111 @@ func TestKeyReleases(t *testing.T) {
 			t.Errorf("keyReleases names %q, which is no key of %s", key, ProjectFile)
 		}
 	}
-	parse := func(s string) semver.Version {
-		t.Helper()
-		v, err := semver.ParseVersion(s)
-		if err != nil || !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(s) {
-			t.Fatalf("%q is not a release of %s (%v)", s, compilerPackage, err)
-		}
-		return v
-	}
 	changelog, err := os.ReadFile(filepath.Join("..", "..", "CHANGELOG.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var released []semver.Version
-	for _, m := range regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+)\]`).FindAllStringSubmatch(string(changelog), -1) {
-		released = append(released, parse(m[1]))
+	for _, problem := range tableProblems(keyReleases, earlierReleases, string(changelog)) {
+		t.Error(problem)
 	}
-	slices.SortFunc(released, semver.Version.Compare)
-	if len(released) == 0 {
-		t.Fatal("CHANGELOG.md lists no release")
-	}
-	newest := parse("0.0.0")
-	for key, release := range keyReleases {
-		since := parse(release)
-		if newest.Compare(since) < 0 {
-			newest = since
+}
+
+// Each way the table can disagree with the releases made gets the repair
+// that is right for it: a release under another number than the table
+// assumed is repaired in the table, not in the list of earlier releases.
+func TestKeyReleasesSayTheRepair(t *testing.T) {
+	log := func(releases ...string) string {
+		var b strings.Builder
+		for _, r := range slices.Backward(releases) {
+			b.WriteString("## [" + r + "](https://example.test/" + r + ") (2026-11-13)\n\n* an entry\n\n")
 		}
-		made := slices.ContainsFunc(released, func(r semver.Version) bool { return r.Compare(since) == 0 })
-		if !made && released[len(released)-1].Compare(since) > 0 {
-			t.Errorf("%q is given %s, which CHANGELOG.md does not list among the releases made", key, release)
-		}
-		if parent, _, nested := strings.Cut(key, "."); nested && parse(keyReleases[parent]).Compare(since) > 0 {
-			t.Errorf("%q is given %s, a release from before its object %q came", key, release, parent)
+		return b.String()
+	}
+	table := map[string]string{"roots": "0.1.0", "fmt": "0.2.0", "committed": "0.5.0"}
+	earlier := []string{"0.1.0", "0.2.0", "0.2.1", "0.3.0", "0.4.0", "0.4.1"}
+	and := func(more ...string) []string { return append(slices.Clone(earlier), more...) }
+	given := func(key, release string) map[string]string {
+		changed := maps.Clone(table)
+		changed[key] = release
+		return changed
+	}
+	cases := []struct {
+		name      string
+		table     map[string]string
+		earlier   []string
+		changelog string
+		want      []string // what the one message holds; none for no message
+	}{
+		{"the key not released yet", table, earlier, log(earlier...), nil},
+		{"the release the table assumed", table, earlier, log(and("0.5.0")...), nil},
+		{"releases after it", table, earlier, log(and("0.5.0", "0.5.1", "0.6.0", "1.0.0")...), nil},
+		{"the next release in a lower line than assumed", table, earlier, log(and("0.4.2")...),
+			[]string{"CHANGELOG.md lists 0.4.2 before 0.5.0", "Cut before the key was merged", "add it to earlierReleases", "Cut after", "0.5.0 is what is wrong", "give committed the first such release in keyReleases", repairs}},
+		{"that repaired in the table", given("committed", "0.4.2"), earlier, log(and("0.4.2")...), nil},
+		{"the next release a minor further than assumed", table, earlier, log(and("0.6.0")...),
+			[]string{`"committed" is given 0.5.0, and no 0.5.0 was made`, "CHANGELOG.md lists 0.6.0 after it", `Give "committed" 0.6.0 in keyReleases`, repairs}},
+		{"that repaired in the table", given("committed", "0.6.0"), earlier, log(and("0.6.0")...), nil},
+		{"the next release a major", table, earlier, log(and("1.0.0")...),
+			[]string{`no 0.5.0 was made`, `Give "committed" 1.0.0 in keyReleases`}},
+		{"a key added without the list extended", given("later", "0.7.0"), earlier, log(and("0.5.0", "0.6.0")...),
+			[]string{"CHANGELOG.md lists 0.5.0, 0.6.0 before 0.7.0", "the release keyReleases gives later", "add it to earlierReleases"}},
+		{"that repaired in the list", given("later", "0.7.0"), and("0.5.0", "0.6.0"), log(and("0.5.0", "0.6.0")...), nil},
+		{"a release in the list that was never made", table, and("0.4.5"), log(earlier...),
+			[]string{"earlierReleases names 0.4.5, which CHANGELOG.md does not list: take it out"}},
+		{"a release in the list that is not earlier", table, and("0.5.0"), log(and("0.5.0")...),
+			[]string{"earlierReleases names 0.5.0, which is not before 0.5.0"}},
+		{"the list out of order", table, []string{"0.2.0", "0.1.0", "0.2.1", "0.3.0", "0.4.0", "0.4.1"}, log(earlier...),
+			[]string{"oldest first"}},
+		{"a key of an object from before the object", given("fmt.later", "0.1.0"), earlier, log(earlier...),
+			[]string{`"fmt.later" is given 0.1.0, a release from before its object "fmt" came`}},
+		// What the check cannot see (tableProblems): 0.4.1 was made before
+		// this key was merged and does not read it. The case stands here so
+		// that a guard, once there is a sound one, has its place.
+		{"a key given a release already made", given("later", "0.4.1"), earlier, log(earlier...), nil},
+	}
+	for _, c := range cases {
+		problems := tableProblems(c.table, c.earlier, c.changelog)
+		switch {
+		case c.want == nil && len(problems) > 0:
+			t.Errorf("%s: %v", c.name, problems)
+		case c.want != nil && len(problems) != 1:
+			t.Errorf("%s: %d messages, want one: %v", c.name, len(problems), problems)
+		case c.want != nil:
+			for _, part := range c.want {
+				if !strings.Contains(problems[0], part) {
+					t.Errorf("%s: the message does not say %q:\n%s", c.name, part, problems[0])
+				}
+			}
 		}
 	}
-	var earlier []string
-	for _, r := range released {
-		if r.Compare(newest) < 0 {
-			earlier = append(earlier, r.String())
+}
+
+// aliasProblem says what is wrong with the alias composer.json gives
+// dev-main, for a table of the keys' releases; "" for nothing.
+func aliasProblem(alias string, table map[string]string) string {
+	line := regexp.MustCompile(`^(\d+\.\d+)\.x-dev$`).FindStringSubmatch(alias)
+	if line == nil {
+		return fmt.Sprintf(`composer.json's extra.branch-alias names dev-main %q, want "X.Y.x-dev"`, alias)
+	}
+	// Release lines are compared: X.Y of the alias with X.Y of the release.
+	aliased, err := semver.ParseVersion(line[1])
+	if err != nil {
+		return err.Error()
+	}
+	for _, key := range slices.Sorted(maps.Keys(table)) {
+		minor := regexp.MustCompile(`^\d+\.\d+`).FindString(table[key])
+		since, err := semver.ParseVersion(minor)
+		if err != nil {
+			return err.Error()
+		}
+		if aliased.Compare(since) < 0 {
+			return fmt.Sprintf("composer.json aliases dev-main to %s, a line below %s, the release keyReleases gives %q. "+
+				"On the main branch the alias is what is wrong: the branch reads the key, and a library's conflict below %s would keep a project on it out; move the alias to %s.x-dev in the commit that adds the key. "+
+				"On a release PR, whose workflow wrote the alias, the release is of a lower line than the table assumed and reads the key, and the table is what is wrong: give %q that release in keyReleases (%s)",
+				alias, table[key], key, table[key], minor, key, repairs)
 		}
 	}
-	if !slices.Equal(earlierReleases, earlier) {
-		t.Errorf("earlierReleases is %v; the releases before %s in CHANGELOG.md are %v", earlierReleases, newest, earlier)
-	}
+	return ""
 }
 
 // The main branch reads every key of keyReleases, so the version Composer
@@ -125,25 +284,19 @@ func TestBranchAliasCoversTheKeys(t *testing.T) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	alias := manifest.Extra.BranchAlias["dev-main"]
-	line := regexp.MustCompile(`^(\d+\.\d+)\.x-dev$`).FindStringSubmatch(alias)
-	if line == nil {
-		t.Fatalf(`composer.json's extra.branch-alias names dev-main %q, want "X.Y.x-dev"`, alias)
+	if problem := aliasProblem(manifest.Extra.BranchAlias["dev-main"], keyReleases); problem != "" {
+		t.Error(problem)
 	}
-	// Release lines are compared: X.Y of the alias with X.Y of the release.
-	aliased, err := semver.ParseVersion(line[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range slices.Sorted(maps.Keys(keyReleases)) {
-		minor := regexp.MustCompile(`^\d+\.\d+`).FindString(keyReleases[key])
-		since, err := semver.ParseVersion(minor)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if aliased.Compare(since) < 0 {
-			t.Errorf("composer.json aliases dev-main to %s, a line below %s, the release keyReleases gives %q: the main branch reads the key, and a library's conflict below %s would keep a project on it out. Move the alias to %s.x-dev in the commit that adds the key",
-				alias, keyReleases[key], key, keyReleases[key], minor)
+	table := map[string]string{"roots": "0.1.0", "committed": "0.5.0"}
+	for alias, want := range map[string]string{
+		"0.5.x-dev": "",
+		"0.6.x-dev": "",
+		"1.0.x-dev": "",
+		"0.4.x-dev": `a line below 0.5.0, the release keyReleases gives "committed"`,
+		"dev-main":  `want "X.Y.x-dev"`,
+	} {
+		if got := aliasProblem(alias, table); (want == "") != (got == "") || !strings.Contains(got, want) {
+			t.Errorf("the alias %s: %q, want it to say %q", alias, got, want)
 		}
 	}
 }

@@ -257,6 +257,26 @@ from the package by hand.
   key's entry in `keyReleases`. A library's `conflict` below that release would otherwise keep
   out a project on the main branch, whose compiler reads the key; `TestBranchAliasCoversTheKeys`
   fails for a key whose release is above the alias.
+- **A key of `phaenon.json` is added with its release** (`cmd/phn/conflict.go`): the next release
+  in `keyReleases`, `earlierReleases` extended to the last release made, the alias moved as above.
+  `TestKeyReleases` holds the three to the reader's keys and to `CHANGELOG.md`.
+  - **What the tests cannot see is when a key was merged.** A key given a release that was
+    already made passes them, although that release does not read the key and a library's
+    `conflict` then lets it in. Whoever reviews a change that adds a key checks that the release
+    it is given is not in `CHANGELOG.md`, and again at the merge when a release came in between.
+  - **When a release gets another number than the table assumed** (a `Release-As`, a key merged
+    as something else than a `feat`), CI is red on the release PR, and the message says which
+    case it is. The first release made after a key was merged is the one that reads it: give the
+    key that release in `keyReleases`. `earlierReleases` stays the releases from before it, and
+    the alias on `main` stands at that release's line or above. Then change what names the old
+    number: the tests of the check (`cmd/phn/conflict_test.go`,
+    `internal/distribution/alias_test.go`), the usage text in `cmd/phn/main.go`, the README's
+    section on the compilers a library keeps out, and `../design/tooling.md` §3.7 and T20. The
+    edit is made on `main`, which release-please rebuilds its branch from.
+  - A release the changelog lists and `earlierReleases` lacks is one of two things, which the
+    tree does not tell apart: cut before the key was merged, it goes into the list; cut after,
+    the key's release in the table is what is wrong. `git tag --contains` of the commit that
+    added the key says which, and the two repairs go opposite ways.
 - `go.mod`'s module line is `github.com/phaenonlang/phaenon`. GoLand has rewritten it to `module
   phaenon` before, which breaks every import of the repository's own packages: put the line back by
   hand and never commit the rewritten one (`go mod init` or `go mod tidy` repairs it the wrong way).
