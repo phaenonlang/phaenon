@@ -8,6 +8,7 @@ package distribution
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -432,33 +433,35 @@ final class Keys
 
 // TestCommittedLibraryWithoutItsOutputs: a release that names a root under
 // "committed" and ships no output for it fails the dump as a failed build
-// does, with an error naming the package and the root, before a binary is
-// fetched or run: PHN_BINARY names one, and it stays unused. The plugin
-// does not build the root instead. The real phn, run by hand on the same
-// install, fails with the same error.
+// does, with an error naming the package, its version and the root and a
+// line saying what the project can do, before a binary is fetched or run:
+// PHN_BINARY names one, and it stays unused. The plugin does not build the
+// root instead. Under --quiet the error is all Composer prints. The real
+// phn, run by hand on the same install, fails with the same lines, whole.
 func TestCommittedLibraryWithoutItsOutputs(t *testing.T) {
-	const summary = "1 installed packages lack outputs they commit, and nothing was built"
+	const gap = "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: "
 	for name, c := range map[string]struct {
 		release func(dir string) error
 		want    string
 	}{
 		"no output directory": {
 			release: func(dir string) error { return os.RemoveAll(filepath.Join(dir, ".src")) },
-			want:    "acme/kit: its phaenon.json commits the outputs of the root src, but the package is installed without them: .src is missing",
+			want:    gap + ".src is missing",
 		},
 		"one output": {
 			release: func(dir string) error { return os.Remove(filepath.Join(dir, ".src", "Greeter.php")) },
-			want:    "acme/kit: its phaenon.json commits the outputs of the root src, but the package is installed without them: .src/Greeter.php is missing",
+			want:    gap + ".src/Greeter.php is missing",
 		},
 		"every compiled output": {
 			release: func(dir string) error {
 				return errors.Join(os.Remove(filepath.Join(dir, ".src", "Greeter.php")), os.Remove(filepath.Join(dir, ".src", "Box.php")))
 			},
-			want: "acme/kit: its phaenon.json commits the outputs of the root src, but the package is installed without them: .src/Box.php is missing, and 1 more",
+			want: gap + ".src/Box.php is missing, and 1 more",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t, "")
+			summary := committedSummary(t)
 			release, shipped := w.newKit("kit", func(dir string) {
 				if err := c.release(dir); err != nil {
 					t.Fatal(err)
@@ -472,21 +475,46 @@ func TestCommittedLibraryWithoutItsOutputs(t *testing.T) {
 			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
 				t.Fatalf("composer install: %v, want exit status 1\n%s", err, out)
 			}
-			if !strings.Contains(out, "phaenon/phn: "+c.want+"\n") || !strings.Contains(out, "phaenon/phn: "+summary) {
-				t.Errorf("composer's output lacks the plugin's error:\n%s\nwant\n%s", out, c.want)
+			plugins := "phaenon/phn: " + c.want + "\nphaenon/phn: " + summary + "\n"
+			if !strings.HasSuffix(out, plugins) {
+				t.Errorf("composer's output does not end with the plugin's error:\n%s\nwant\n%s", out, plugins)
 			}
 			w.expectRuns()
 			p.expectShipped(shipped)
+
+			out, err = p.composer("install", "--quiet")
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 || out != plugins {
+				t.Errorf("composer install --quiet: %v, want exit status 1 and the plugin's error alone:\n%s", err, out)
+			}
+			w.expectRuns()
 
 			stdout, stderr, err := p.phn("build", "--vendor")
 			if !errors.As(err, &exit) || exit.ExitCode() != 1 || stdout != "" {
 				t.Fatalf("phn build --vendor: %v, want exit status 1\n%s%s", err, stdout, stderr)
 			}
-			if !strings.HasPrefix(stderr, c.want+"\n"+summary) {
-				t.Errorf("phn's error is not the plugin's:\n%s\nwant\n%s", stderr, c.want)
+			if want := c.want + "\n" + summary + "\n"; stderr != want {
+				t.Errorf("phn's error is not the plugin's:\n%s\nwant\n%s", stderr, want)
 			}
 			p.expectShipped(shipped)
 			expectAbsent(t, filepath.Join(p.dir, "vendor", "acme", "lib", ".src"))
 		})
 	}
+}
+
+// committedSummary is the line that ends the errors of one package without
+// its committed outputs, from the reference the compiler and the plugin are
+// both held to (cmd/phn/testdata/committed-outputs.json).
+func committedSummary(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repositoryRoot(t), "cmd", "phn", "testdata", "committed-outputs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reference struct {
+		Summary map[string]string `json:"summary"`
+	}
+	if err := json.Unmarshal(data, &reference); err != nil || reference.Summary["1"] == "" {
+		t.Fatalf("no summary for one package in the reference (%v)", err)
+	}
+	return reference.Summary["1"]
 }

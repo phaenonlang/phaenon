@@ -131,16 +131,27 @@ final readonly class ProjectFile
     }
 
     /**
-     * The committed roots that $package, installed in $packageDir, came without the outputs of:
-     * no output directory, or a .phn with no .php there. The check is of presence only; whether an
-     * output is current is for the package's own gate to say.
+     * The errors of a package that came without outputs it commits: for each committed root the
+     * install has, in the order of their names, no output directory, or a .phn with no .php there.
+     * The check is of presence only; whether an output is current is for the package's own gate to
+     * say.
      *
-     * @return list<string> an error for each such root, naming the package and the root
+     * The error's text and summary()'s are phn's (committedGap and committedGapsSummary in
+     * cmd/phn/vendor.go): cmd/phn/testdata/committed-outputs.json holds both to them, in full.
+     *
+     * @param string $package    its name
+     * @param string $version    its version as Composer shows it, which names the broken release
+     * @param string $packageDir where it is installed
+     *
+     * @return ?list<string> an error for each such root; null when a directory of a committed
+     *                       root cannot be read, which is phn's to report
      */
-    public function missingOutputs(string $package, string $packageDir): array
+    public function missingOutputs(string $package, string $version, string $packageDir): ?array
     {
+        $committed = $this->committed;
+        sort($committed, \SORT_STRING);
         $errors = [];
-        foreach ($this->committed as $source) {
+        foreach ($committed as $source) {
             if (!is_dir($packageDir . '/' . $source)) {
                 continue; // the install does not have the root
             }
@@ -149,7 +160,12 @@ final readonly class ProjectFile
             if (!is_dir($packageDir . '/' . $output)) {
                 $missing[] = $output;
             } else {
-                foreach ($this->sources($packageDir, $source) as $file) {
+                // phn does not walk into a root that is a symbolic link, and compiles nothing there.
+                $sources = is_link($packageDir . '/' . $source) ? [] : self::sources($packageDir, $source);
+                if ($sources === null) {
+                    return null;
+                }
+                foreach ($sources as $file) {
                     $compiled = $output . substr($file, \strlen($source), -\strlen('.phn')) . '.php';
                     if (!is_file($packageDir . '/' . $compiled)) {
                         $missing[] = $compiled;
@@ -159,8 +175,8 @@ final readonly class ProjectFile
             }
             if ($missing !== []) {
                 $errors[] = sprintf(
-                    '%s: its phaenon.json commits the outputs of the root %s, but the package is installed without them: %s is missing%s',
-                    $package,
+                    '%s: its phaenon.json commits the outputs of the root %s, but this release is installed without them: %s is missing%s',
+                    trim($package . ' ' . $version),
                     $source,
                     $missing[0],
                     \count($missing) > 1 ? sprintf(', and %d more', \count($missing) - 1) : '',
@@ -172,28 +188,45 @@ final readonly class ProjectFile
     }
 
     /**
-     * The .phn files phn compiles under a directory of a root, as paths relative to the package:
-     * not those of a nested vendor directory or of an output directory, and a symbolic link is
-     * not followed.
-     *
-     * @return list<string>
+     * The line that ends the errors of $packages packages: what the failure means for the project
+     * that installed them, which cannot repair another package's release, and what it can do.
      */
-    private function sources(string $packageDir, string $dir): array
+    public static function summary(int $packages): string
     {
+        return sprintf(
+            '%d installed packages lack outputs they commit, and nothing was built: '
+            . 'a build here would hide a release that is broken for every project without phn. '
+            . 'This project cannot repair another package\'s release: report it to that package\'s maintainers, '
+            . 'or require a version of the package that has its outputs',
+            $packages,
+        );
+    }
+
+    /**
+     * The .phn files phn compiles under a directory of a root, as paths relative to the package:
+     * not those of a nested vendor directory, and a symbolic link is not followed.
+     *
+     * @return ?list<string> null when a directory cannot be read
+     */
+    private static function sources(string $packageDir, string $dir): ?array
+    {
+        $names = @scandir($packageDir . '/' . $dir);
+        if ($names === false) {
+            return null;
+        }
         $files = [];
-        foreach (@scandir($packageDir . '/' . $dir) ?: [] as $name) {
+        foreach ($names as $name) {
             if ($name === '.' || $name === '..') {
                 continue;
             }
             $path = $dir . '/' . $name;
-            if (\in_array($path, $this->roots, true)) {
-                continue;
-            }
             $full = $packageDir . '/' . $path;
             if (!is_link($full) && is_dir($full)) {
-                if ($name !== 'vendor') {
-                    $files = [...$files, ...$this->sources($packageDir, $path)];
+                $nested = $name === 'vendor' ? [] : self::sources($packageDir, $path);
+                if ($nested === null) {
+                    return null;
                 }
+                $files = [...$files, ...$nested];
             } elseif (str_ends_with($name, '.phn')) {
                 $files[] = $path;
             }

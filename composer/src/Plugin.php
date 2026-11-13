@@ -68,26 +68,27 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         $projectDir = ComposerPlatform::getCwd();
         $packages = [];
         $incomplete = 0;
-        foreach (self::phaenonPackages($composer) as $name => $dir) {
-            // A file this reader refuses is phn's to report: its package is built as before.
+        foreach (self::phaenonPackages($composer) as $name => [$version, $dir]) {
+            // A file this reader refuses, or a root it cannot read, is phn's to report: the
+            // package is built as before.
             $file = ProjectFile::read($dir . '/phaenon.json');
-            $errors = $file?->missingOutputs($name, $dir) ?? [];
+            $errors = $file?->missingOutputs($name, $version, $dir);
+            if ($file === null || $errors === null) {
+                $packages[] = $name;
+
+                continue;
+            }
             foreach ($errors as $error) {
                 self::error($io, $error);
             }
             if ($errors !== []) {
                 ++$incomplete;
-            } elseif ($file === null || !$file->leavesNothingToBuild($dir)) {
+            } elseif (!$file->leavesNothingToBuild($dir)) {
                 $packages[] = $name;
             }
         }
         if ($incomplete > 0) {
-            // phn build --vendor fails the same way, in the same words (cmd/phn/vendor.go).
-            throw self::failure($io, sprintf(
-                '%d installed packages lack outputs they commit, and nothing was built: '
-                . 'a build here would hide a release that is broken for every project without phn',
-                $incomplete,
-            ), 1);
+            throw self::failure($io, ProjectFile::summary($incomplete), 1);
         }
         $buildsProject = $settings->buildRoot && is_file($projectDir . '/phaenon.json');
         if ($packages === [] && !$buildsProject) {
@@ -135,9 +136,11 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
     }
 
     /**
-     * The installed packages that have a phaenon.json, the ones `phn build --vendor` reads.
+     * The installed packages that have a phaenon.json, the ones `phn build --vendor` reads, in
+     * the order it reads them: by name.
      *
-     * @return array<string, string> where each is installed, by its name
+     * @return array<string, array{string, string}> the version of each as Composer shows it and
+     *                                              where it is installed, by its name
      */
     private static function phaenonPackages(Composer $composer): array
     {
@@ -146,9 +149,10 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         foreach ($composer->getRepositoryManager()->getLocalRepository()->getCanonicalPackages() as $package) {
             $path = $installationManager->getInstallPath($package);
             if ($path !== null && is_file($path . '/phaenon.json')) {
-                $packages[$package->getPrettyName()] = $path;
+                $packages[$package->getPrettyName()] = [$package->getPrettyVersion(), $path];
             }
         }
+        ksort($packages, \SORT_STRING);
 
         return $packages;
     }
@@ -181,8 +185,12 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         return new ScriptExecutionException($message, $status, $previous);
     }
 
+    /**
+     * An error is printed under --quiet too, where Composer prints its own: the status alone would
+     * leave a failed install with an empty log.
+     */
     private static function error(IOInterface $io, string $message): void
     {
-        $io->writeError('<error>phaenon/phn: ' . str_replace('<', '\\<', $message) . '</error>');
+        $io->writeError('<error>phaenon/phn: ' . str_replace('<', '\\<', $message) . '</error>', true, IOInterface::QUIET);
     }
 }

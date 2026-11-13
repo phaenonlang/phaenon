@@ -213,7 +213,10 @@ from the package by hand.
 - **Project file vectors** `cmd/phn/testdata/project-files.json` are the reference of how
   `phaenon.json`'s `roots` and `committed` are read, by the compiler (`TestProjectFileVectors`) and
   by the plugin's PHP (`TestProjectFileReadersAgree` in `internal/distribution`, which needs `php`
-  and no Composer): a change of either reader starts as a vector.
+  and no Composer): a change of either reader starts as a vector. `committed-outputs.json` beside
+  it is the same for the check of an installed package's committed roots, trees with the errors
+  they give, whole (`TestCommittedOutputVectors`, `TestCommittedOutputChecksAgree`): the error's
+  text is changed there, and then in `cmd/phn/vendor.go` and `composer/src/ProjectFile.php`.
 - **Migrate goldens** `internal/migrate/testdata/lift/X.php` → `X.phn` + `X.notes` (the tags left
   in place and why): same `PHAENON_UPDATE=1` rule; the `.phn` must parse and lift to itself.
 - **Format goldens** `internal/format/testdata/X.phn` → `X.golden.phn`: the same `PHAENON_UPDATE=1`
