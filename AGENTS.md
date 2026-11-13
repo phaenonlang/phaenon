@@ -221,7 +221,11 @@ from the package by hand.
   stamp of an earlier build, trees with the lines printed and every path left
   (`TestEarlierBuildVectors`, `TestEarlierBuildsAgree`): `cmd/phn/earlier.go` and
   `composer/src/EarlierBuild.php` delete files in an installed package, so a change of either
-  starts as a vector, and a new way to be unsure removes nothing.
+  starts as a vector, and a new way to be unsure removes nothing. The plugin may refuse where
+  `phn` removes (a vector then says `"plugin": "unsure"`), and never removes where `phn` refuses:
+  that includes the plugin's walk of the sources (`ProjectFile::sources`), which decides whether
+  a package is whole, and its answer to whether `phn` would read the project file at all
+  (`ProjectFile::$strict`, held to `project-files.json`).
 - **Migrate goldens** `internal/migrate/testdata/lift/X.php` → `X.phn` + `X.notes` (the tags left
   in place and why): same `PHAENON_UPDATE=1` rule; the `.phn` must parse and lift to itself.
 - **Format goldens** `internal/format/testdata/X.phn` → `X.golden.phn`: the same `PHAENON_UPDATE=1`

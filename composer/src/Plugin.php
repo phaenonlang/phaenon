@@ -70,7 +70,7 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         $packages = [];
         $committing = [];
         $incomplete = 0;
-        foreach (self::phaenonPackages($composer) as $name => [$version, $dir]) {
+        foreach (self::phaenonPackages($composer) as $name => [$version, $dir, $installationSource]) {
             // A file this reader refuses, or a root it cannot read, is phn's to report: the
             // package is built as before.
             $file = ProjectFile::read($dir . '/phaenon.json');
@@ -89,7 +89,7 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
                 continue;
             }
             if ($file->committed !== []) {
-                $committing[trim($name . ' ' . $version)] = [$file, $dir];
+                $committing[trim($name . ' ' . $version)] = [$file, $dir, $installationSource];
             }
             if (!$file->leavesNothingToBuild($dir)) {
                 $packages[] = $name;
@@ -99,10 +99,15 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
             throw self::failure($io, ProjectFile::summary($incomplete), 1);
         }
         // Then, and only when every package came whole, what an earlier build left in a root its
-        // package now commits is removed. It takes no compiler.
-        foreach ($committing as $package => [$file, $dir]) {
-            foreach (EarlierBuild::clear($file, $dir) as $build) {
-                self::reportAnEarlierBuild($io, $build, (string) $package);
+        // package now commits is removed, in the packages an earlier build can have survived in
+        // (EarlierBuild). It takes no compiler: where none is about to run, it is done here.
+        // Where installed packages are built, `phn build --vendor` does the same before it
+        // builds, and says it; done here as well, a warning would come twice.
+        if ($packages === []) {
+            foreach ($committing as $package => [$file, $dir, $installationSource]) {
+                foreach (EarlierBuild::clear($file, $dir, $installationSource) as $build) {
+                    self::reportAnEarlierBuild($io, $build, (string) $package, self::shown($dir, $projectDir));
+                }
             }
         }
         $buildsProject = $settings->buildRoot && is_file($projectDir . '/phaenon.json');
@@ -154,8 +159,10 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
      * The installed packages that have a phaenon.json, the ones `phn build --vendor` reads, in
      * the order it reads them: by name.
      *
-     * @return array<string, array{string, string}> the version of each as Composer shows it and
-     *                                              where it is installed, by its name
+     * @return array<string, array{string, string, ?string}> by its name, the version of each as
+     *                                                       Composer shows it, where it is
+     *                                                       installed, and what it was
+     *                                                       installed from (`source`, `dist`)
      */
     private static function phaenonPackages(Composer $composer): array
     {
@@ -164,7 +171,7 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         foreach ($composer->getRepositoryManager()->getLocalRepository()->getCanonicalPackages() as $package) {
             $path = $installationManager->getInstallPath($package);
             if ($path !== null && is_file($path . '/phaenon.json')) {
-                $packages[$package->getPrettyName()] = [$package->getPrettyVersion(), $path];
+                $packages[$package->getPrettyName()] = [$package->getPrettyVersion(), $path, $package->getInstallationSource()];
             }
         }
         ksort($packages, \SORT_STRING);
@@ -173,20 +180,30 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
     }
 
     /**
-     * A committed root that holds the stamp of a build was built here by an earlier release of
-     * the package, one that shipped its sources alone, and an upgrade that kept the directory (a
-     * source install, which is a git checkout) left that build's outputs in it: a class the new
-     * release dropped still loads. EarlierBuild has removed them and the stamp, and one line
-     * says so; the next dump finds no stamp and says nothing. Where it could not, the line is a
-     * warning, and comes again until the directory is put right.
+     * A committed root that holds the stamp of a build, in a package an earlier build can have
+     * survived in, was built here by a release that shipped its sources alone, and an upgrade
+     * that kept the directory left that build's outputs in it: a class the new release dropped
+     * still loads. EarlierBuild has removed them and the stamp. What it did is said once, every
+     * file named, since nothing can tell afterwards which files went; the next dump finds no
+     * stamp and says nothing. Where it could not, the lines are a warning that says what to do,
+     * and come again until the directory is put right. Under --quiet nothing of this is printed.
      */
-    private static function reportAnEarlierBuild(IOInterface $io, EarlierBuild $build, string $package): void
+    private static function reportAnEarlierBuild(IOInterface $io, EarlierBuild $build, string $package, string $shown): void
     {
-        $message = 'phaenon/phn: ' . str_replace('<', '\\<', $build->report($package));
-        $io->writeError($build->isWarning() ? '<warning>' . $message . '</warning>' : $message);
-        foreach ($build->removed as $file) {
-            $io->writeError('  - removed ' . str_replace('<', '\\<', $file), true, IOInterface::VERBOSE);
+        $lines = $build->report($package, $shown);
+        $lines[0] = 'phaenon/phn: ' . $lines[0];
+        foreach ($lines as $line) {
+            $line = str_replace('<', '\\<', $line);
+            $io->writeError($build->isWarning() ? '<warning>' . $line . '</warning>' : $line);
         }
+    }
+
+    /**
+     * A directory as a message shows it: relative to the project when it lies inside it.
+     */
+    private static function shown(string $dir, string $projectDir): string
+    {
+        return str_starts_with($dir, $projectDir . '/') ? substr($dir, \strlen($projectDir) + 1) : $dir;
     }
 
     private static function resolver(Composer $composer, IOInterface $io, Settings $settings): BinaryResolver

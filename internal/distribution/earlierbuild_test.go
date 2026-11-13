@@ -20,17 +20,32 @@ type earlierBuildVector struct {
 	Files       map[string]string `json:"files"`
 	Dirs        []string          `json:"dirs"`
 	Links       map[string]string `json:"links"`
+	Source      *string           `json:"installation-source"`
+	Linked      bool              `json:"linked"`
 	Unreadable  []string          `json:"unreadable"`
 	Unlisted    []string          `json:"unlisted"`
 	Unsearch    []string          `json:"unsearchable"`
 	Readonly    []string          `json:"readonly"`
 	Permissions bool              `json:"permissions"`
+	Folds       bool              `json:"folds"`
+	Normalises  bool              `json:"normalises"`
 	Said        []string          `json:"said"`
 	Warned      []string          `json:"warned"`
 	Again       []string          `json:"again"`
 	Left        []string          `json:"left"`
 	Errors      []string          `json:"errors"`
 	Undecided   bool              `json:"undecided"`
+	Compiler    string            `json:"compiler"`
+	Plugin      string            `json:"plugin"`
+}
+
+// takesOneNameForAnother reports whether the file system of dir finds a
+// file created as made under the name asked.
+func takesOneNameForAnother(t *testing.T, dir, made, asked string) bool {
+	t.Helper()
+	writeFile(t, filepath.Join(dir, made), nil, 0o644)
+	_, err := os.Lstat(filepath.Join(dir, asked))
+	return err == nil
 }
 
 // modes are the permissions the vector asks for, by directory.
@@ -83,13 +98,15 @@ func holds(t *testing.T, dir string) []string {
 
 // earlierBuildScript is the plugin's part of a dump for one installed
 // package, without Composer: the check of presence, and after it, when the
-// package came whole, the clean-up of what earlier builds left. Its
-// arguments are ProjectFile.php, EarlierBuild.php and the packages.
+// package came whole, the clean-up of what earlier builds left, as
+// Plugin::build calls the two. Its arguments are ProjectFile.php,
+// EarlierBuild.php and then, for each package, where it is installed and
+// what installed.json records it was installed from ("" for nothing).
 const earlierBuildScript = `<?php
 require $argv[1];
 require $argv[2];
 $answers = [];
-foreach (array_slice($argv, 3) as $dir) {
+foreach (array_chunk(array_slice($argv, 3), 2) as [$dir, $source]) {
     $file = Phaenon\Composer\ProjectFile::read($dir . '/phaenon.json');
     $errors = $file?->missingOutputs('acme/kit', '1.0.0', $dir);
     if ($file === null || $errors === null) {
@@ -98,13 +115,14 @@ foreach (array_slice($argv, 3) as $dir) {
     }
     $answer = ['errors' => $errors, 'said' => [], 'warned' => []];
     if ($errors === []) {
-        foreach (Phaenon\Composer\EarlierBuild::clear($file, $dir) as $build) {
-            $answer[$build->isWarning() ? 'warned' : 'said'][] = $build->report('acme/kit 1.0.0');
+        foreach (Phaenon\Composer\EarlierBuild::clear($file, $dir, $source === '' ? null : $source) as $build) {
+            $kind = $build->isWarning() ? 'warned' : 'said';
+            $answer[$kind] = [...$answer[$kind], ...$build->report('acme/kit 1.0.0', 'vendor/acme/kit')];
         }
     }
     $answers[] = $answer;
 }
-echo json_encode($answers);
+echo json_encode($answers, JSON_UNESCAPED_UNICODE);
 `
 
 // TestEarlierBuildsAgree holds the plugin's clean-up of what an earlier
@@ -113,9 +131,11 @@ echo json_encode($answers);
 // TestEarlierBuildVectors runs `phn build --vendor` over: the same lines,
 // whole and in order, as information or as a warning, exactly the same
 // paths left, and nothing removed where the check of presence fails or is
-// left to phn. A second run says nothing where the first cleared the root,
-// and repeats the warning where it could not. It needs php, and no
-// Composer.
+// left to phn, where no earlier build can have survived, or where phn
+// refuses the project file. Where a vector says the plugin is unsure of a
+// tree phn clears, it removes nothing and says nothing. A second run says
+// nothing where the first cleared the root, and repeats the warning where
+// it could not. It needs php, and no Composer.
 func TestEarlierBuildsAgree(t *testing.T) {
 	php, err := exec.LookPath("php")
 	if err != nil {
@@ -132,20 +152,42 @@ func TestEarlierBuildsAgree(t *testing.T) {
 	if err := json.Unmarshal(data, &reference); err != nil {
 		t.Fatal(err)
 	}
+	base := t.TempDir()
+	folds := takesOneNameForAnother(t, base, "name", "NAME")
+	normalises := takesOneNameForAnother(t, base, "Caf\u00e9", "Cafe\u0301")
 	var vectors []earlierBuildVector
 	for _, v := range reference.Vectors {
-		if !v.Permissions || os.Getuid() != 0 { // root reads and writes every directory
+		switch {
+		case v.Permissions && os.Getuid() == 0: // root reads and writes every directory
+		case v.Folds && !folds, v.Normalises && !normalises:
+		default:
 			vectors = append(vectors, v)
 		}
 	}
 	if len(vectors) == 0 {
 		t.Fatal("no vectors")
 	}
-	// Each vector is the package as installed, in a directory of its own.
-	base := t.TempDir()
-	var dirs []string
+	t.Logf("%d vectors run (letter case folded: %v, normalisations folded: %v)", len(vectors), folds, normalises)
+	// Each vector is the package as installed, in a directory of its own;
+	// for a linked one that is a link to its directory.
+	var dirs, installs []string
+	var before [][]string
 	for i, v := range vectors {
 		dir := filepath.Join(base, strconv.Itoa(i), "acme", "kit")
+		source := ""
+		if v.Source != nil {
+			source = *v.Source
+		}
+		installs = append(installs, dir, source)
+		if v.Linked {
+			dir = filepath.Join(base, strconv.Itoa(i), "checkout")
+			if err := os.MkdirAll(filepath.Join(base, strconv.Itoa(i), "acme"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("../checkout", filepath.Join(base, strconv.Itoa(i), "acme", "kit")); err != nil {
+				t.Fatal(err)
+			}
+		}
 		dirs = append(dirs, dir)
 		writeFile(t, filepath.Join(dir, "phaenon.json"), []byte(v.Project), 0o644)
 		for path, text := range v.Files {
@@ -161,6 +203,7 @@ func TestEarlierBuildsAgree(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		before = append(before, holds(t, dir))
 	}
 	chmod := func(restrict bool) {
 		for i, v := range vectors {
@@ -177,11 +220,11 @@ func TestEarlierBuildsAgree(t *testing.T) {
 	t.Cleanup(func() { chmod(false) })
 	script := filepath.Join(t.TempDir(), "clear.php")
 	writeFile(t, script, []byte(earlierBuildScript), 0o644)
-	args := append([]string{script, filepath.Join(root, "composer", "src", "ProjectFile.php"), filepath.Join(root, "composer", "src", "EarlierBuild.php")}, dirs...)
+	args := append([]string{script, filepath.Join(root, "composer", "src", "ProjectFile.php"), filepath.Join(root, "composer", "src", "EarlierBuild.php")}, installs...)
 
 	for run, name := range []string{"the first run", "a second run"} {
 		chmod(true)
-		out, err := exec.Command(php, args...).CombinedOutput()
+		out, err := exec.Command(php, args...).Output()
 		chmod(false)
 		if err != nil {
 			t.Fatalf("php: %v\n%s", err, out)
@@ -200,12 +243,15 @@ func TestEarlierBuildsAgree(t *testing.T) {
 		}
 		for i, v := range vectors {
 			got := answers[i]
-			said, warned := v.Said, v.Warned
+			said, warned, left := v.Said, v.Warned, v.Left
 			if run > 0 {
 				said = nil
 				if v.Again != nil {
 					warned = v.Again
 				}
+			}
+			if v.Plugin == "unsure" {
+				said, warned, left = nil, nil, before[i]
 			}
 			switch {
 			case got.Undecided != v.Undecided:
@@ -216,8 +262,8 @@ func TestEarlierBuildsAgree(t *testing.T) {
 				t.Errorf("%s, %s: said\n\t%s\nwarned\n\t%s\nwant said\n\t%s\nwarned\n\t%s", v.Name, name,
 					strings.Join(got.Said, "\n\t"), strings.Join(got.Warned, "\n\t"), strings.Join(said, "\n\t"), strings.Join(warned, "\n\t"))
 			}
-			if left := holds(t, dirs[i]); !slices.Equal(left, v.Left) {
-				t.Errorf("%s, %s leaves\n\t%s\nwant\n\t%s", v.Name, name, strings.Join(left, "\n\t"), strings.Join(v.Left, "\n\t"))
+			if got := holds(t, dirs[i]); !slices.Equal(got, left) {
+				t.Errorf("%s, %s leaves\n\t%s\nwant\n\t%s", v.Name, name, strings.Join(got, "\n\t"), strings.Join(left, "\n\t"))
 			}
 		}
 	}
@@ -226,7 +272,9 @@ func TestEarlierBuildsAgree(t *testing.T) {
 // TestEarlierBuildUnderOpenBasedir: where PHP runs with open_basedir, a
 // source it is not allowed to look at reads as one that does not exist, so
 // the plugin removes nothing and says why. Here the source of an output is
-// a link that leads out of the allowed directory.
+// a link that leads out of the allowed directory, under a nested vendor
+// directory, which the check of presence does not walk: a link it does
+// meet and may not look at makes it leave the whole package to phn.
 func TestEarlierBuildUnderOpenBasedir(t *testing.T) {
 	php, err := exec.LookPath("php")
 	if err != nil {
@@ -241,15 +289,15 @@ func TestEarlierBuildUnderOpenBasedir(t *testing.T) {
 	for path, text := range map[string]string{
 		"phaenon.json":             `{"roots": {"src": ".src"}, "committed": ["src"]}`,
 		".src/.phn-build":          "phn 0.4.1\n",
-		".src/data.json":           "{}\n",
+		".src/vendor/data.json":    "{}\n",
 		"../../../outside/data.js": "{}\n",
 	} {
 		writeFile(t, filepath.Join(dir, path), []byte(text), 0o644)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "src", "vendor"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(base, "outside", "data.js"), filepath.Join(dir, "src", "data.json")); err != nil {
+	if err := os.Symlink(filepath.Join(base, "outside", "data.js"), filepath.Join(dir, "src", "vendor", "data.json")); err != nil {
 		t.Fatal(err)
 	}
 	before := holds(t, dir)
@@ -258,12 +306,13 @@ func TestEarlierBuildUnderOpenBasedir(t *testing.T) {
 	sources := filepath.Join(root, "composer", "src")
 	// PHP warns of each path it refuses; the answer is what it prints.
 	out, err := exec.Command(php, "-d", "display_errors=stderr", "-d", "open_basedir="+filepath.Join(base, "allowed")+string(os.PathListSeparator)+sources,
-		script, filepath.Join(sources, "ProjectFile.php"), filepath.Join(sources, "EarlierBuild.php"), dir).Output()
+		script, filepath.Join(sources, "ProjectFile.php"), filepath.Join(sources, "EarlierBuild.php"), dir, "source").Output()
 	if err != nil {
 		t.Fatalf("php: %v\n%s", err, out)
 	}
-	want := "acme/kit 1.0.0: .src/.phn-build is the stamp of an earlier build of this package, in a root it now commits, and nothing was removed: " +
-		"PHP runs with open_basedir, under which a source it may not read looks like one that is gone. What that build left there may still load"
+	want := "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: " +
+		"PHP runs with open_basedir, under which a source it may not read looks like one that is gone. What a build left there may still load. " +
+		"To clear the directory, remove vendor/acme/kit and install the package again"
 	var answers []struct {
 		Warned []string `json:"warned"`
 	}

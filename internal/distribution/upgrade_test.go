@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,14 @@ import (
 // and old.txt. The library has one root, so that an install of 2.0.0 has
 // nothing to build.
 func (w *world) newReleases(name string, ignored bool) *kit {
+	w.t.Helper()
+	return w.newReleasesWith(name, ignored, nil, nil)
+}
+
+// newReleasesWith is newReleases with 2.0.0 shaped by the test: prepare
+// changes the tree before the real phn builds it, finish after, and both
+// before the commit.
+func (w *world) newReleasesWith(name string, ignored bool, prepare, finish func(dir string)) *kit {
 	w.t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		w.t.Skip("no git on PATH")
@@ -63,18 +72,65 @@ func (w *world) newReleases(name string, ignored bool) *kit {
 	} {
 		writeFile(w.t, filepath.Join(k.dir, path), []byte(text), 0o644)
 	}
-	build := exec.Command(w.buildPhn(), "build")
-	build.Dir = k.dir
-	if out, err := build.CombinedOutput(); err != nil {
-		w.t.Fatalf("phn build in the library: %v\n%s", err, out)
+	if prepare != nil {
+		prepare(k.dir)
+	}
+	k.build()
+	if finish != nil {
+		finish(k.dir)
 	}
 	k.git("add", "--all")
 	k.git("commit", "--quiet", "--message", "acme/kit 2.0.0")
 	k.git("tag", "2.0.0")
-	if tracked := k.git("ls-files", ".src"); tracked != ".src/Greeter.php\n" {
+	if tracked := k.git("ls-files", ".src"); prepare == nil && finish == nil && tracked != ".src/Greeter.php\n" {
 		w.t.Fatalf("2.0.0 tracks under .src/:\n%s", tracked)
 	}
 	return k
+}
+
+// build builds the library as its own project is built, with the real phn,
+// and returns what phn printed.
+func (k *kit) build(args ...string) string {
+	k.w.t.Helper()
+	build := exec.Command(k.w.buildPhn(), append([]string{"build"}, args...)...)
+	build.Dir = k.dir
+	out, err := build.CombinedOutput()
+	if err != nil {
+		k.w.t.Fatalf("phn build %s in the library: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+// path is the library's directory as a path repository of 2.0.0, linked
+// into the project's vendor directory or copied there.
+func (k *kit) path(link bool) dependency {
+	return dependency{name: "acme/kit", constraint: "*", repository: pathRepository(k.dir, "acme/kit", "2.0.0", link)}
+}
+
+// internals gives the library a directory of sources that its archive
+// leaves out, while it ships their outputs: the one inconsistency a
+// release can have that the check of presence does not object to.
+func internals(dir string) {
+	for path, text := range map[string]string{
+		"src/Internal/Debug.phn": "namespace Acme\\Kit\\Internal;\n\nfinal class Debug\n{\n}\n",
+		".gitattributes":         "/.src/** linguist-generated\n/src/Internal export-ignore\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, path)), 0o755); err != nil {
+			panic(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(text), 0o644); err != nil {
+			panic(err)
+		}
+	}
+}
+
+// stamped leaves in the library's committed root the stamp of a build of
+// its checkout as an installed package, made before the root was
+// committed.
+func stamped(dir string) {
+	if err := os.WriteFile(filepath.Join(dir, ".src", ".phn-build"), []byte("phn 0.4.1\n"), 0o644); err != nil {
+		panic(err)
+	}
 }
 
 // repository is the library's git repository as Composer reads it: every
@@ -173,9 +229,9 @@ func (p *project) installBuilt() {
 // rest of that build beside them, untracked: the output of the class the
 // release dropped, the copy of a file it dropped, and the stamp. The
 // plugin removes them at the dump of the same `composer update`, with no
-// compiler, and the checkout is then exactly the release: the dropped
-// class does not load, git finds nothing to report, ignored files
-// included, and the next dump says nothing.
+// compiler, naming each file, and the checkout is then exactly the
+// release: the dropped class does not load, git finds nothing to report,
+// ignored files included, and the next dump says nothing.
 func TestSourceInstallUpgradedToCommittedOutputs(t *testing.T) {
 	w := newWorld(t, "")
 	k := w.newReleases("kit", true)
@@ -188,9 +244,9 @@ func TestSourceInstallUpgradedToCommittedOutputs(t *testing.T) {
 	p.require("^2.0")
 	out := p.mustComposer("update")
 
-	want := earlierBuildLine("2.0.0") + "removed 2 files with no source behind them (.src/Legacy.php, and 1 more) and the stamp\n"
-	if !strings.Contains(out, want) || strings.Contains(out, "- removed") {
-		t.Errorf("composer's output:\n%s\nwant the line, and no file named without -v:\n%s", out, want)
+	want := earlierBuildLine("2.0.0") + "removed it and 2 files with no source behind them\n  - removed .src/Legacy.php\n  - removed .src/old.txt\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("composer's output:\n%s\nwant the line, and each file named:\n%s", out, want)
 	}
 	if tag := p.vendored("describe", "--tags", "--exact-match"); tag != "2.0.0\n" {
 		t.Errorf("the checkout is at %s", tag)
@@ -229,7 +285,7 @@ func TestSourceUpgradeClearedByHand(t *testing.T) {
 	p.expectKit("2.0.0", true)
 
 	stdout, stderr, err := p.phn("build", "--vendor")
-	want := strings.TrimPrefix(earlierBuildLine("2.0.0"), "phaenon/phn: ") + "removed 2 files with no source behind them (.src/Legacy.php, and 1 more) and the stamp\n" +
+	want := strings.TrimPrefix(earlierBuildLine("2.0.0"), "phaenon/phn: ") + "removed it and 2 files with no source behind them\n  - removed .src/Legacy.php\n  - removed .src/old.txt\n" +
 		"0 installed packages built, 0 up to date, 1 left as installed with their committed outputs\n"
 	if err != nil || stdout != want || stderr != "" {
 		t.Errorf("phn build --vendor: %v\n%s%s\nwant\n%s", err, stdout, stderr, want)
@@ -316,4 +372,276 @@ func TestDistUpgradeToCommittedOutputs(t *testing.T) {
 	p.expectKit("2.0.0", false)
 	w.expectRuns()
 	expectAbsent(t, p.installed())
+}
+
+// TestArchiveThatShipsAStamp: a stamp is an earlier build's only where
+// such a build can have survived. This release tracks a stamp and leaves
+// the sources of one directory out of its archive while it ships their
+// outputs. Installed from the archive, into a directory Composer emptied,
+// nothing was ever built there: the plugin removes nothing and says
+// nothing, the package is byte for byte its archive, as it is for a
+// project without the plugin, and phn run by hand does the same.
+func TestArchiveThatShipsAStamp(t *testing.T) {
+	w := newWorld(t, "")
+	k := w.newReleasesWith("kit", true, func(dir string) {
+		internals(dir)
+		writeFile(t, filepath.Join(dir, ".gitignore"), []byte("/vendor/\n"), 0o644) // the entry for the stamp forgotten
+	}, stamped)
+	if tracked := k.git("ls-files", ".src"); tracked != ".src/.phn-build\n.src/Greeter.php\n.src/Internal/Debug.php\n" {
+		t.Fatalf("2.0.0 tracks under .src/:\n%s", tracked)
+	}
+	p := w.newProject("app", project{dependencies: []dependency{k.archives("2.0.0")}})
+
+	out := p.mustComposer("install")
+
+	if strings.Contains(out, "phaenon/phn:") {
+		t.Errorf("the plugin spoke of an archive's stamp:\n%s", out)
+	}
+	want := []string{".gitattributes", ".gitignore", ".src/", ".src/.phn-build", ".src/Greeter.php", ".src/Internal/", ".src/Internal/Debug.php", "composer.json", "phaenon.json", "src/", "src/Greeter.phn"}
+	installed := filepath.Join(p.dir, "vendor", "acme", "kit")
+	if got := holds(t, installed); !slices.Equal(got, want) {
+		t.Errorf("vendor/acme/kit holds\n\t%s\nwant the archive of 2.0.0\n\t%s", strings.Join(got, "\n\t"), strings.Join(want, "\n\t"))
+	}
+	w.expectRuns()
+	expectAbsent(t, p.installed())
+
+	stdout, stderr, err := p.phn("build", "--vendor")
+	if err != nil || stdout != "0 installed packages built, 0 up to date, 1 left as installed with their committed outputs\n" || stderr != "" {
+		t.Errorf("phn build --vendor: %v\n%s%s", err, stdout, stderr)
+	}
+	if got := holds(t, installed); !slices.Equal(got, want) {
+		t.Errorf("after phn build --vendor vendor/acme/kit holds\n\t%s\nwant\n\t%s", strings.Join(got, "\n\t"), strings.Join(want, "\n\t"))
+	}
+}
+
+// TestCopiedCheckoutThatHoldsAStamp: the library is as the design has it,
+// its .gitignore lists the stamp, and its checkout holds one, ignored: it
+// was once built as a linked package. Composer's copy of a path repository
+// leaves out what the archive leaves out and takes what git ignores, so
+// the copy has the stamp and the outputs of sources it lacks. No build was
+// made in the copy: nothing is removed and nothing said, by the plugin or
+// by phn.
+func TestCopiedCheckoutThatHoldsAStamp(t *testing.T) {
+	w := newWorld(t, "")
+	k := w.newReleasesWith("kit", true, internals, nil)
+	stamped(k.dir)
+	if status := k.git("status", "--porcelain", "--ignored"); status != "!! .src/.phn-build\n" {
+		t.Fatalf("the library's checkout:\n%s", status)
+	}
+	p := w.newProject("app", project{dependencies: []dependency{k.path(false)}})
+
+	out := p.mustComposer("install")
+
+	if strings.Contains(out, "phaenon/phn:") {
+		t.Errorf("the plugin spoke of a stamp Composer copied:\n%s", out)
+	}
+	installed := filepath.Join(p.dir, "vendor", "acme", "kit")
+	for _, f := range []string{".src/.phn-build", ".src/Internal/Debug.php", ".src/Greeter.php"} {
+		if _, err := os.Stat(filepath.Join(installed, f)); err != nil {
+			t.Errorf("the copy: %v", err)
+		}
+	}
+	expectAbsent(t, filepath.Join(installed, "src", "Internal"))
+	w.expectRuns()
+	expectAbsent(t, p.installed())
+
+	if stdout, stderr, err := p.phn("build", "--vendor"); err != nil || strings.Contains(stdout+stderr, "acme/kit") {
+		t.Errorf("phn build --vendor (%v) spoke of acme/kit:\n%s%s", err, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(installed, ".src", "Internal", "Debug.php")); err != nil {
+		t.Errorf("after phn build --vendor: %v", err)
+	}
+}
+
+// TestLinkedCheckoutIsCleared: a path repository linked to a checkout is
+// the other place an earlier build survives, since Composer never empties
+// it. The plugin clears it without a compiler, and the files removed are
+// the ones the library's own build removes: `phn build --check` there
+// reports the same file before, and nothing after. Under --quiet the
+// removal is made and nothing is printed. `dump-autoload --dry-run` does
+// what a dump does: Composer sends the event without saying that it is a
+// dry run, so the project is built and the package cleared.
+func TestLinkedCheckoutIsCleared(t *testing.T) {
+	w := newWorld(t, "")
+	k := w.newReleases("kit", true)
+	leave := func() {
+		t.Helper()
+		stamped(k.dir)
+		writeFile(t, filepath.Join(k.dir, ".src", "Legacy.php"), []byte("<?php\n"), 0o644)
+	}
+	leave()
+	// With the stamp in a root it commits, the library's own build would
+	// remove both: the file that has no source and the stamp.
+	check := exec.Command(w.buildPhn(), "build", "--check")
+	check.Dir = k.dir
+	if found, err := check.CombinedOutput(); err == nil || !strings.Contains(string(found), ".src/Legacy.php: no source behind it\n") ||
+		!strings.Contains(string(found), ".src/.phn-build: no source behind it\n") || strings.Count(string(found), "no source behind it") != 2 {
+		t.Fatalf("phn build --check in the library (%v):\n%s", err, found)
+	}
+	p := w.newProject("app", project{phaenonJSON: true, dependencies: []dependency{k.path(true)}, override: true})
+
+	out := p.mustComposer("install")
+
+	want := earlierBuildLine("2.0.0") + "removed it and 1 file with no source behind it\n  - removed .src/Legacy.php\n"
+	if !strings.Contains(out, want) || strings.Count(out, "is the stamp of a build") != 1 {
+		t.Errorf("composer's output:\n%s\nwant, once,\n%s", out, want)
+	}
+	if status := k.git("status", "--porcelain", "--ignored", "--", ".src"); status != "" {
+		t.Errorf("the library's .src/ is not as committed:\n%s", status)
+	}
+	k.build("--check")
+	w.expectRuns(run{p.dir, []string{"build"}})
+
+	leave()
+	if out := p.mustComposer("dump-autoload", "--quiet"); out != "" {
+		t.Errorf("composer dump-autoload --quiet printed:\n%s", out)
+	}
+	if status := k.git("status", "--porcelain", "--ignored", "--", ".src"); status != "" {
+		t.Errorf("under --quiet the library's .src/ was not cleared:\n%s", status)
+	}
+
+	leave()
+	out = p.mustComposer("dump-autoload", "--dry-run")
+	if !strings.Contains(out, want) {
+		t.Errorf("composer dump-autoload --dry-run:\n%s\nwant what a dump prints:\n%s", out, want)
+	}
+	if status := k.git("status", "--porcelain", "--ignored", "--", ".src"); status != "" {
+		t.Errorf("in a dry run the library's .src/ was not cleared, though the project was built:\n%s", status)
+	}
+	w.expectRuns(run{p.dir, []string{"build"}}, run{p.dir, []string{"build"}}, run{p.dir, []string{"build"}})
+}
+
+// TestOneDumpSaysItOnce: a package whose stamp cannot be acted on, here
+// for a committed root the checkout lacks, is warned of once in a dump,
+// with what to do. Where nothing is built the plugin says it. Where an
+// installed package is built, `phn build --vendor` says it and the plugin
+// leaves it to phn: said by both, the same warning came twice in every
+// dump.
+func TestOneDumpSaysItOnce(t *testing.T) {
+	w := newWorld(t, "")
+	k := w.newReleasesWith("kit", true, func(dir string) {
+		writeFile(t, filepath.Join(dir, "phaenon.json"), []byte(`{"roots": {"src": ".src", "gen": ".gen"}, "committed": ["src", "gen"]}`+"\n"), 0o644)
+	}, nil)
+	writeFile(t, filepath.Join(k.dir, ".gen", ".phn-build"), []byte("phn 0.4.1\n"), 0o644)
+	writeFile(t, filepath.Join(k.dir, ".gen", "Old.php"), []byte("<?php\n"), 0o644)
+	const warning = "acme/kit 2.0.0: .gen/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: " +
+		"the package is installed without gen. What a build left there may still load. " +
+		"The package is a link to a checkout: `phn build` there removes what a build left, the stamp with it\n"
+
+	alone := w.newProject("alone", project{dependencies: []dependency{k.path(true)}})
+	out := alone.mustComposer("install")
+	if !strings.Contains(out, "phaenon/phn: "+warning) || strings.Count(out, "is the stamp of a build") != 1 {
+		t.Errorf("with nothing to build, composer's output:\n%s\nwant the plugin's warning, once:\n%s", out, warning)
+	}
+	w.expectRuns()
+	expectAbsent(t, alone.installed())
+
+	beside := w.newProject("beside", project{dependencies: []dependency{k.path(true)}, libraries: []string{"acme/lib"}, binary: w.buildPhn()})
+	for _, command := range []string{"install", "dump-autoload"} {
+		out = beside.mustComposer(command)
+		if !strings.Contains(out, "warning: "+warning) || strings.Count(out, "is the stamp of a build") != 1 {
+			t.Errorf("with a package to build, composer %s:\n%s\nwant phn's warning, once:\n%s", command, out, warning)
+		}
+	}
+	for _, f := range []string{".phn-build", "Old.php"} {
+		if _, err := os.Stat(filepath.Join(k.dir, ".gen", f)); err != nil {
+			t.Errorf("nothing was to be removed: %v", err)
+		}
+	}
+}
+
+// TestReleaseThatTracksAStamp: the limit that is left, as it behaves. A
+// release tracks a stamp because its gate was skipped: `phn build` in the
+// library removes a stamp from a root the project commits, so the tree
+// differs from the commit and the gate fails. Installed as a checkout all
+// the same, by a project that never built it, the stamp is taken for an
+// earlier build's and removed: the checkout is modified, and the next
+// `composer update` of the package, made without a person to answer,
+// fails on "has uncommitted changes".
+func TestReleaseThatTracksAStamp(t *testing.T) {
+	w := newWorld(t, "")
+	k := w.newReleasesWith("kit", true, func(dir string) {
+		writeFile(t, filepath.Join(dir, ".gitignore"), []byte("/vendor/\n"), 0o644) // the entry for the stamp forgotten
+	}, stamped)
+	if tracked := k.git("ls-files", ".src"); tracked != ".src/.phn-build\n.src/Greeter.php\n" {
+		t.Fatalf("2.0.0 tracks under .src/:\n%s", tracked)
+	}
+	// The gate would have caught it: a build, then the state of the tree.
+	k.build()
+	if status := k.git("status", "--porcelain", "--", ".src"); status != " D .src/.phn-build\n" {
+		t.Errorf("after phn build in the library, git status -- .src:\n%s\nwant the stamp removed", status)
+	}
+	k.git("checkout", "--", ".src")
+	writeFile(t, filepath.Join(k.dir, "composer.json"), []byte(strings.Replace(mustRead(t, filepath.Join(k.dir, "composer.json")), "2.0.0", "2.0.1", 1)), 0o644)
+	k.git("commit", "--quiet", "--all", "--message", "acme/kit 2.0.1")
+	k.git("tag", "2.0.1")
+
+	p := w.newProject("app", project{dependencies: []dependency{k.repository("2.0.0")}, config: map[string]any{"preferred-install": "source"}})
+	out := p.mustComposer("install")
+	if want := earlierBuildLine("2.0.0") + "removed it, and no file, since every file there has a source\n"; !strings.Contains(out, want) {
+		t.Errorf("composer's output:\n%s\nwant\n%s", out, want)
+	}
+	if status := p.vendored("status", "--porcelain", "--ignored"); status != " D .src/.phn-build\n" {
+		t.Errorf("the checkout of 2.0.0:\n%s", status)
+	}
+
+	p.require("2.0.1")
+	out, err := p.composer("update")
+	var exit *exec.ExitError
+	// Composer boxes the message, and breaks its lines inside words.
+	if !errors.As(err, &exit) || !strings.Contains(strings.Join(strings.Fields(out), ""), "hasuncommittedchanges") {
+		t.Errorf("composer update: %v, want it to fail on the modified checkout\n%s", err, out)
+	}
+}
+
+func mustRead(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// TestWarningSaysWhatToDo: where the leftovers of an earlier build cannot
+// be removed, here because a link among the sources leads nowhere and so
+// proves nothing of the file behind an output, the warning names the
+// package's directory and the way to clear it, and following it works:
+// with the directory removed, the install that follows is the release, and
+// nothing is said.
+func TestWarningSaysWhatToDo(t *testing.T) {
+	w := newWorld(t, "")
+	k := w.newReleases("kit", true)
+	p := w.newProject("app", project{dependencies: []dependency{k.repository("^1.0")}, config: map[string]any{"preferred-install": "source"}})
+	p.installBuilt()
+	installed := filepath.Join(p.dir, "vendor", "acme", "kit")
+	if err := os.Symlink("../nowhere", filepath.Join(installed, "src", "old.txt")); err == nil {
+		t.Fatal("1.0.0 has src/old.txt: the link should not fit")
+	}
+
+	p.require("^2.0")
+	p.mustComposer("update", "--no-plugins")
+	if err := os.Symlink("../nowhere", filepath.Join(installed, "src", "old.txt")); err != nil {
+		t.Fatal(err)
+	}
+	out := p.mustComposer("dump-autoload")
+
+	want := "phaenon/phn: acme/kit 2.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: " +
+		"whether src/old.txt exists cannot be told. What a build left there may still load. " +
+		"To clear the directory, remove vendor/acme/kit and install the package again\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("composer's output:\n%s\nwant the warning\n%s", out, want)
+	}
+	p.expectKit("2.0.0", true)
+
+	if err := os.RemoveAll(installed); err != nil {
+		t.Fatal(err)
+	}
+	if out := p.mustComposer("install"); strings.Contains(out, "phaenon/phn:") {
+		t.Errorf("the install that follows the advice should leave the plugin nothing to say:\n%s", out)
+	}
+	if status := p.vendored("status", "--porcelain", "--ignored"); status != "" {
+		t.Errorf("the checkout after the advice was followed:\n%s", status)
+	}
+	p.expectKit("2.0.0", false)
 }

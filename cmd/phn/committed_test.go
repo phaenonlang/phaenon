@@ -5,7 +5,7 @@ package main
 // library is installed, `phn build --vendor` leaves them as installed and
 // fails when they came without their outputs; in the library's own project
 // every command treats them as any root, but that a build keeps no stamp
-// there (earlier_test.go).
+// there.
 
 import (
 	"bufio"

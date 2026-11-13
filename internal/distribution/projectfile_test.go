@@ -17,7 +17,11 @@ import (
 // cmd/phn's TestProjectFileVectors holds the compiler to: the same roots
 // and committed roots for a file both read, a refusal where the compiler
 // refuses either key, and an answer where the compiler refuses the file for
-// a key the plugin does not read. It needs php, and no Composer.
+// a key the plugin does not read. Of that last kind the plugin must also
+// say that the compiler does not read the file, which is what it asks
+// before it removes anything from a package: it may say so of a file the
+// compiler reads, where the vector marks it, and of no other. It needs
+// php, and no Composer.
 func TestProjectFileReadersAgree(t *testing.T) {
 	php, err := exec.LookPath("php")
 	if err != nil {
@@ -35,6 +39,8 @@ func TestProjectFileReadersAgree(t *testing.T) {
 			Refused   bool              `json:"refused"`
 			Roots     map[string]string `json:"roots"`
 			Committed []string          `json:"committed"`
+			Compiler  string            `json:"compiler"`
+			Strict    *bool             `json:"strict"`
 		} `json:"vectors"`
 	}
 	if err := json.Unmarshal(data, &vectors); err != nil {
@@ -46,7 +52,7 @@ require $argv[1];
 $answers = [];
 foreach (json_decode((string) file_get_contents($argv[2]), true)['vectors'] as $vector) {
     $file = Phaenon\Composer\ProjectFile::parse($vector['file']);
-    $answers[] = $file === null ? null : ['roots' => (object) $file->roots, 'committed' => $file->committed];
+    $answers[] = $file === null ? null : ['roots' => (object) $file->roots, 'committed' => $file->committed, 'strict' => $file->strict];
 }
 echo json_encode($answers);
 `), 0o644)
@@ -57,6 +63,7 @@ echo json_encode($answers);
 	var answers []*struct {
 		Roots     map[string]string `json:"roots"`
 		Committed []string          `json:"committed"`
+		Strict    bool              `json:"strict"`
 	}
 	if err := json.Unmarshal(out, &answers); err != nil {
 		t.Fatalf("the reader's answers: %v\n%s", err, out)
@@ -73,6 +80,8 @@ echo json_encode($answers);
 			t.Errorf("%s: refused; want roots %v, committed %v", v.Name, v.Roots, v.Committed)
 		case !maps.Equal(got.Roots, v.Roots) || !slices.Equal(got.Committed, v.Committed):
 			t.Errorf("%s: roots %v, committed %v; want %v, %v", v.Name, got.Roots, got.Committed, v.Roots, v.Committed)
+		case got.Strict != (v.Compiler == "" && (v.Strict == nil || *v.Strict)):
+			t.Errorf("%s: the plugin says the compiler reads the file: %v, and it does not; or that it does not, and nothing marks the file", v.Name, got.Strict)
 		}
 	}
 }

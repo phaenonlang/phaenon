@@ -19,7 +19,9 @@
 // archive git makes of it and as a path repository, by projects with the
 // plugin and without it (committed_test.go). A library that goes from
 // shipping its sources to committing its outputs is another: a repository
-// with a tag for each, upgraded as a git checkout and as an archive
+// with a tag for each, upgraded as a git checkout and as an archive, and
+// installed in the ways a stamp can reach a project that never built it:
+// an archive that tracks one, a copy of a checkout that holds one
 // (upgrade_test.go). TestProjectFileReadersAgree holds the plugin's reader
 // of phaenon.json to the compiler's reference, and needs php alone, as do
 // TestCommittedOutputChecksAgree and TestEarlierBuildsAgree for its check

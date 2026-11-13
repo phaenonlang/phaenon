@@ -31,10 +31,18 @@ final readonly class ProjectFile
      *                                         cleaned paths relative to the package
      * @param list<string>          $committed the roots whose outputs the package commits, each a
      *                                         key of $roots
+     * @param bool                  $strict    whether phn would read the file as well: it has no key
+     *                                         phn does not know, each key has the type phn wants,
+     *                                         and none is written twice. The check of presence
+     *                                         does not ask, and reads `roots` and `committed`
+     *                                         whatever stands beside them; a removal does
+     *                                         (EarlierBuild), since phn refuses a file with a key
+     *                                         it does not know and removes nothing for it
      */
     private function __construct(
         public array $roots,
         public array $committed,
+        public bool $strict,
     ) {
     }
 
@@ -113,7 +121,100 @@ final readonly class ProjectFile
             }
         }
 
-        return new self($roots, $committed);
+        return new self($roots, $committed, self::phnReads($data) && !self::repeatsAKey($json));
+    }
+
+    /**
+     * Whether phn reads the keys beside `roots` and `committed` too (readProject in
+     * cmd/phn/project.go): `exclude` and `fmt` lists of strings, `php` a string, `unused` an
+     * object whose one key, `reflectedAttributes`, lists class names, each of them or null, and
+     * no other key. It may refuse a file phn reads; it accepts none phn refuses.
+     */
+    private static function phnReads(\stdClass $data): bool
+    {
+        $strings = static function (mixed $list): bool {
+            return $list === null || (\is_array($list) && array_is_list($list) && array_filter($list, is_string(...)) === $list);
+        };
+        foreach (get_object_vars($data) as $key => $value) {
+            $read = match ((string) $key) {
+                'roots', 'committed' => true, // parse() has read them
+                'exclude', 'fmt' => $strings($value),
+                'php' => $value === null || \is_string($value),
+                'unused' => $value === null || ($value instanceof \stdClass && self::phnReadsUnused($value)),
+                default => false,
+            };
+            if (!$read) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static function phnReadsUnused(\stdClass $unused): bool
+    {
+        foreach (get_object_vars($unused) as $key => $value) {
+            if ((string) $key !== 'reflectedAttributes') {
+                return false;
+            }
+            if ($value === null) {
+                continue;
+            }
+            if (!\is_array($value) || !array_is_list($value)) {
+                return false;
+            }
+            foreach ($value as $name) {
+                // A full class name, with or without the backslash before it.
+                $identifier = '[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*';
+                if (!\is_string($name) || preg_match('/^\\\\?' . $identifier . '(\\\\' . $identifier . ')*$/D', $name) !== 1) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Whether an object of the JSON text, which json_decode has accepted, has a key twice.
+     * json_decode keeps the last of them and phn merges or replaces by rules of its own, so the
+     * two may not read such a file alike.
+     */
+    private static function repeatsAKey(string $json): bool
+    {
+        /** @var list<?array<string, true>> $open the keys of each open object; null for an array */
+        $open = [];
+        $length = \strlen($json);
+        for ($i = 0; $i < $length; ++$i) {
+            $char = $json[$i];
+            if ($char === '{') {
+                $open[] = [];
+            } elseif ($char === '[') {
+                $open[] = null;
+            } elseif ($char === '}' || $char === ']') {
+                array_pop($open);
+            } elseif ($char === '"') {
+                $start = $i;
+                for (++$i; $i < $length && $json[$i] !== '"'; ++$i) {
+                    if ($json[$i] === '\\') {
+                        ++$i;
+                    }
+                }
+                // A string is a key when a colon follows it.
+                $after = $i + 1 + strspn($json, " \t\r\n", $i + 1);
+                $top = array_key_last($open);
+                if ($top === null || $open[$top] === null || ($json[$after] ?? '') !== ':') {
+                    continue;
+                }
+                $key = 'k' . var_export(json_decode(substr($json, $start, $i - $start + 1)), true);
+                if (isset($open[$top][$key])) {
+                    return true;
+                }
+                $open[$top][$key] = true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -213,7 +314,7 @@ final readonly class ProjectFile
      * The .phn files phn compiles under a directory of a root, as paths relative to the package:
      * not those of a nested vendor directory, and a symbolic link is not followed.
      *
-     * @return ?list<string> null when a directory cannot be read
+     * @return ?list<string> null when a directory cannot be read, or cannot be searched
      */
     private static function sources(string $packageDir, string $dir): ?array
     {
@@ -228,6 +329,12 @@ final readonly class ProjectFile
             }
             $path = $dir . '/' . $name;
             $full = $packageDir . '/' . $path;
+            if (!is_link($full) && !file_exists($full)) {
+                // A name the directory lists and nothing answers to: the directory can be read
+                // and not searched, and what it holds, a directory of sources perhaps, is not
+                // known.
+                return null;
+            }
             if (!is_link($full) && is_dir($full)) {
                 $nested = $name === 'vendor' ? [] : self::sources($packageDir, $path);
                 if ($nested === null) {

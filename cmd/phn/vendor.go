@@ -43,7 +43,28 @@ type installedPackage struct {
 	Name        string `json:"name"`
 	Version     string `json:"version"`
 	InstallPath string `json:"install-path"`
-	dir         string // where it is installed, relative to the working directory when under it
+	// InstallationSource is "source" for a checkout of the package's
+	// repository and "dist" for an archive or a path repository.
+	InstallationSource string `json:"installation-source"`
+	dir                string // where it is installed, relative to the working directory when under it
+}
+
+// isLink reports whether the package's directory is a symbolic link: a
+// path repository linked to a checkout.
+func (p installedPackage) isLink() bool {
+	st, err := os.Lstat(p.dir)
+	return err == nil && st.Mode()&fs.ModeSymlink != 0
+}
+
+// keepsItsDirectory reports whether a build made in the package's directory
+// can have outlived an upgrade of the package. Composer updates an archive
+// and a copied path repository by removing the directory and installing
+// anew, so nothing of an earlier build is ever there. A checkout of the
+// package's repository is updated in place, and a linked path repository
+// is a checkout Composer never empties. A package installed.json says
+// nothing of is not known to be either.
+func (p installedPackage) keepsItsDirectory() bool {
+	return p.InstallationSource == "source" || p.isLink()
 }
 
 // vendorComposerDir is the vendor/composer directory of the project in the
@@ -219,13 +240,18 @@ func buildVendor() {
 		fail("%s", committedGapsSummary(broken))
 	}
 	// Then, and only when every package came whole, what an earlier build
-	// left in a root its package now commits is removed (earlier.go).
+	// left in a root its package now commits is removed (earlier.go), in
+	// the packages an earlier build can have survived in.
 	for _, p := range pkgs {
+		if !p.keepsItsDirectory() {
+			continue
+		}
 		for _, e := range p.earlierBuilds() {
-			if line, warning := e.report(strings.TrimSpace(p.Name + " " + p.Version)); warning {
-				fmt.Fprintf(os.Stderr, "warning: %s\n", line)
+			lines, warning := e.report(strings.TrimSpace(p.Name+" "+p.Version), filepath.ToSlash(p.dir), p.isLink())
+			if warning {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", strings.Join(lines, "\n"))
 			} else {
-				fmt.Println(line)
+				fmt.Println(strings.Join(lines, "\n"))
 			}
 		}
 	}

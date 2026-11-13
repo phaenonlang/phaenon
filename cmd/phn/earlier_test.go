@@ -25,17 +25,33 @@ type earlierBuildVector struct {
 	Files       map[string]string `json:"files"`
 	Dirs        []string          `json:"dirs"`
 	Links       map[string]string `json:"links"`
+	Source      *string           `json:"installation-source"`
+	Linked      bool              `json:"linked"`
 	Unreadable  []string          `json:"unreadable"`
 	Unlisted    []string          `json:"unlisted"`
 	Unsearch    []string          `json:"unsearchable"`
 	Readonly    []string          `json:"readonly"`
 	Permissions bool              `json:"permissions"`
+	Folds       bool              `json:"folds"`
+	Normalises  bool              `json:"normalises"`
 	Said        []string          `json:"said"`
 	Warned      []string          `json:"warned"`
 	Again       []string          `json:"again"`
 	Left        []string          `json:"left"`
 	Errors      []string          `json:"errors"`
 	Undecided   bool              `json:"undecided"`
+	Compiler    string            `json:"compiler"`
+}
+
+// takesOneNameForAnother reports whether the file system of dir finds a
+// file created as made under the name asked.
+func takesOneNameForAnother(t *testing.T, dir, made, asked string) bool {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, made), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := os.Lstat(filepath.Join(dir, asked))
+	return err == nil
 }
 
 // write makes the vector's package in dir, but for the permissions.
@@ -138,18 +154,46 @@ func earlierBuildVectors(t *testing.T) []earlierBuildVector {
 func TestEarlierBuildVectors(t *testing.T) {
 	bin := phnBinary(t)
 	summary := committedGapsSummary(1)
+	probe := t.TempDir()
+	folds := takesOneNameForAnother(t, probe, "name", "NAME")
+	normalises := takesOneNameForAnother(t, probe, "Caf\u00e9", "Cafe\u0301")
+	ran := 0
 	for _, v := range earlierBuildVectors(t) {
 		t.Run(v.Name, func(t *testing.T) {
-			if v.Permissions && os.Getuid() == 0 {
+			switch {
+			case v.Permissions && os.Getuid() == 0:
 				t.Skip("root reads and writes every directory")
+			case v.Folds && !folds:
+				t.Skip("the file system tells one letter case from another")
+			case v.Normalises && !normalises:
+				t.Skip("the file system tells one normalisation from another")
 			}
+			ran++
 			root := t.TempDir()
-			kit := filepath.Join(root, "vendor/acme/kit")
+			installed := map[string]any{"name": "acme/kit", "version": "1.0.0", "install-path": "../acme/kit"}
+			if v.Source != nil {
+				installed["installation-source"] = *v.Source
+			}
+			record, err := json.Marshal(map[string]any{"packages": []any{installed}, "dev": true, "dev-package-names": []string{}})
+			if err != nil {
+				t.Fatal(err)
+			}
 			writeTree(t, root, map[string]string{
 				"composer.json":                     `{"name": "acme/root", "require": {"php": ">=8.5", "acme/kit": "*"}}`,
-				"vendor/composer/installed.json":    `{"packages": [{"name": "acme/kit", "version": "1.0.0", "install-path": "../acme/kit"}], "dev": true, "dev-package-names": []}`,
+				"vendor/composer/installed.json":    string(record),
 				"vendor/composer/autoload_psr4.php": "<?php\n\nreturn array();\n",
 			})
+			// The package's directory, and for a linked one the link to it.
+			kit := filepath.Join(root, "vendor/acme/kit")
+			if v.Linked {
+				kit = filepath.Join(root, "checkout")
+				if err := os.MkdirAll(filepath.Join(root, "vendor/acme"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("../../checkout", filepath.Join(root, "vendor/acme/kit")); err != nil {
+					t.Fatal(err)
+				}
+			}
 			v.write(t, kit)
 			warned := v.Warned
 			for i, name := range []string{"the first run", "a second run"} {
@@ -171,10 +215,18 @@ func TestEarlierBuildVectors(t *testing.T) {
 					if !asExit(err, &exit) || exit.ExitCode() != 1 || stderr != want || stdout != "" {
 						t.Errorf("%s: %v\nstdout:\n%s\nstderr:\n%s\nwant exit status 1 and on stderr\n%s", name, err, stdout, stderr, want)
 					}
+				case v.Compiler != "":
+					if err != nil || !strings.Contains(stderr, v.Compiler) || len(said) != 0 {
+						t.Errorf("%s: %v\nstdout:\n%s\nstderr:\n%s\nwant a warning saying %q, and nothing done", name, err, stdout, stderr, v.Compiler)
+					}
 				default:
+					// A warning's first line is marked, the lines of its files follow.
 					want := ""
 					for _, line := range warned {
-						want += "warning: " + line + "\n"
+						if !strings.HasPrefix(line, "  ") {
+							line = "warning: " + line
+						}
+						want += line + "\n"
 					}
 					wantSaid := v.Said
 					if i > 0 {
@@ -193,6 +245,7 @@ func TestEarlierBuildVectors(t *testing.T) {
 			}
 		})
 	}
+	t.Logf("%d vectors run (letter case folded: %v, normalisations folded: %v)", ran, folds, normalises)
 }
 
 // A package whose stamp is cleared beside a package that is built: the
@@ -201,6 +254,7 @@ func TestEarlierBuildVectors(t *testing.T) {
 func TestBuildVendorClearsAnEarlierBuild(t *testing.T) {
 	bin := phnBinary(t)
 	root := committedTree(t)
+	checkedOut(t, root)
 	kit := filepath.Join(root, "vendor/acme/kit")
 	writeTree(t, kit, map[string]string{
 		".src/" + stampFile: "phn 0.4.1\n",
@@ -220,7 +274,8 @@ func TestBuildVendorClearsAnEarlierBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("phn build --vendor: %v\n%s%s", err, stdout, stderr)
 	}
-	want := "acme/kit 1.0.0: .src/.phn-build is the stamp of an earlier build of this package, in a root it now commits: removed 2 files with no source behind them (.src/Legacy.php, and 1 more) and the stamp\n"
+	want := "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 2 files with no source behind them\n" +
+		"  - removed .src/Legacy.php\n  - removed .src/Orphan.php\n"
 	if !strings.HasPrefix(stdout, want) || !strings.HasSuffix(stdout, "2 installed packages built, 0 up to date\n") {
 		t.Errorf("stdout:\n%s\nwant first\n%s", stdout, want)
 	}
@@ -234,4 +289,41 @@ func TestBuildVendorClearsAnEarlierBuild(t *testing.T) {
 		t.Errorf("a second build should say nothing of an earlier one (%v):\n%s", err, stdout)
 	}
 	expectSnapshot(t, "acme/kit's committed root", filepath.Join(kit, ".src"), shipped)
+}
+
+// checkedOut makes the packages of committedTree checkouts of their
+// repositories, as installed.json records a source install: the kind of
+// install an earlier build survives in.
+func checkedOut(t *testing.T, root string) {
+	t.Helper()
+	writeTree(t, root, map[string]string{"vendor/composer/installed.json": `{"packages": [
+		{"name": "acme/kit", "version": "1.0.0", "install-path": "../acme/kit", "installation-source": "source"},
+		{"name": "acme/lib", "version": "1.2.0", "install-path": "../acme/lib", "installation-source": "source"}
+	], "dev": true, "dev-package-names": []}`})
+}
+
+// Where an earlier build cannot have survived, a stamp in a committed root
+// came with the files: an archive or a copy (installed.json says "dist",
+// and the directory is no link), or a package it says nothing of. The
+// stamp, the file beside it and the release's own file without a source
+// stay, and nothing is said. The same tree as a checkout is cleared.
+func TestBuildVendorLeavesAStampThatCameWithTheFiles(t *testing.T) {
+	bin := phnBinary(t)
+	for _, source := range []string{`, "installation-source": "dist"`, ``} {
+		root := committedTree(t)
+		kit := filepath.Join(root, "vendor/acme/kit")
+		writeTree(t, root, map[string]string{"vendor/composer/installed.json": `{"packages": [
+			{"name": "acme/kit", "version": "1.0.0", "install-path": "../acme/kit"` + source + `},
+			{"name": "acme/lib", "version": "1.2.0", "install-path": "../acme/lib"}
+		], "dev": true, "dev-package-names": []}`})
+		writeTree(t, kit, map[string]string{".src/" + stampFile: "phn 0.4.1\n", ".src/Legacy.php": "<?php\n"})
+		shipped := snapshot(t, kit)
+
+		stdout, stderr, err := run(t, root, bin, "build", "--vendor")
+
+		if err != nil || strings.Contains(stdout, "acme/kit") || strings.Contains(stderr, "acme/kit") {
+			t.Errorf("installed.json%s: phn build --vendor (%v) spoke of acme/kit:\n%s%s", source, err, stdout, stderr)
+		}
+		expectSnapshot(t, "acme/kit", kit, shipped)
+	}
 }

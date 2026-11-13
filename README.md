@@ -112,14 +112,28 @@ One thing is removed from a committed root: what a build of an earlier release l
 library that shipped its sources alone was built where it is installed, and an upgrade that keeps
 the directory (a source install, which is a git checkout) leaves that build's stamp, `.phn-build`,
 and the outputs of the sources the new release dropped beside the committed files, where they
-still load. Where a committed root's output directory holds the stamp, `phn build --vendor`
-removes the files no source stands behind, by the rule of `phn build` itself, then the stamp, and
-says so in one line; the next run finds no stamp and says nothing. It removes nothing it is not
-sure of. With a root or an output directory that is a symbolic link or lies behind one, a source
-directory it cannot read, or a link among the sources that leads nowhere, it leaves the whole root
-as it is and warns; a symbolic link in the output directory is neither followed nor removed; a
-file that cannot be removed is a warning, and the stamp then stays for the next run. A package
-that came without its outputs is not touched at all.
+still load. Where a committed root's output directory holds a stamp, `phn build --vendor`
+removes the files no source stands behind, by the rule of `phn build` itself, then the stamp. It
+prints a line that names the package and the stamp and a line for each file removed; the next run
+finds no stamp and says nothing.
+
+- It does so only where an earlier build can have survived: in a checkout of the package's
+  repository (`"installation-source": "source"` in `vendor/composer/installed.json`) and in a path
+  repository linked to a checkout. Composer installs an archive, and a path repository it copies,
+  into an emptied directory, so a stamp there came with the files: it is left alone with
+  everything beside it, and nothing is said.
+- It removes nothing it is not sure of. With a root or an output directory that is a symbolic
+  link or lies behind one, a root the install lacks, a directory of the outputs it cannot read,
+  or a source whose absence it cannot prove (a link among the sources that leads nowhere, a
+  directory behind a link that it cannot read or search), it leaves the whole root as it is and
+  warns, saying what can be done: reinstall the package, or, in a linked checkout, run `phn
+  build` there. A directory of the root itself that cannot be read fails the command, as before.
+- A symbolic link in the output directory is neither followed nor removed, and only the
+  directories a removal empties go with the files.
+- A file that cannot be removed is a warning, and the stamp then stays for the next run.
+- A package that came without its outputs is not touched, nor is any package beside it.
+- A project file `phn` refuses, for a key it does not know among other things, leaves its package
+  out as it always did.
 
 In the library's own project, `phn build` removes a `.phn-build` from the output directory of a
 root the project commits, as it removes a file with no source, and `phn build --check` reports
@@ -352,11 +366,17 @@ A root an installed package lists under `committed` (above) is left as installed
 whose installed roots are all committed is nothing to build: alone, it makes the plugin neither
 fetch the binary nor run it. A package that came without the outputs it commits fails the command
 before any binary is fetched, with the error `phn build --vendor` gives, under `--quiet` too. A
-committed root that holds the stamp of a build (`.phn-build`) was built there by an earlier
-release, before its outputs were committed: the plugin removes what that build left, the files no
-source stands behind and the stamp, as `phn build --vendor` does (above) and without a compiler,
-and says so in one line (`-v` names each file). Where it is not sure, it removes nothing and
-warns at each dump.
+committed root that holds the stamp of a build (`.phn-build`), in a checkout of the package's
+repository or a linked path repository, was built there by an earlier release, before its outputs
+were committed: what that build left is removed, the files no source stands behind and the stamp,
+as `phn build --vendor` does (above), each file named. In a dump that builds no installed package
+the plugin does it itself, in PHP and without a compiler; in a dump that does, `phn build
+--vendor` does it before it builds, so that one dump says it once. Where it is not sure, it
+removes nothing and warns at each dump, saying what to do; the plugin is no less careful than
+`phn`, and removes nothing either for a project file `phn` would refuse, or when PHP runs under
+`open_basedir`. Under `--quiet` the removal is made and nothing is printed. `composer
+dump-autoload --dry-run` builds and clears as a dump does: Composer sends the plugin the same
+event and does not say that the run is a dry one.
 It requires no other package, since the compiled output needs none, and suggests
 `phaenon/debug`, which points production errors at `.phn` positions (`design/line-map.md` §4.3).
 It conflicts with `phaenon/runtime` below 0.4, that package's name until then, which declares the

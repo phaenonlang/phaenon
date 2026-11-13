@@ -9,11 +9,24 @@ package main
 // install does, what that build wrote stays beside the committed files:
 // its stamp, and the outputs of the sources the release dropped, which
 // still load. `phn build --vendor` leaves a committed root as installed,
-// with this one exception: where the root's output directory holds the
-// stamp, it removes the files no source stands behind, then the stamp. The
-// stamp is the proof that the root was built here: only this command
-// writes one, a library's repository ignores the file, and no build writes
-// one into a committed root.
+// with this one exception: where the root's output directory holds a
+// stamp, in a package whose directory an earlier build can have survived
+// in, it removes the files no source stands behind, then the stamp.
+//
+// A stamp alone proves little: a file of that name can come with a release
+// that tracks one, or with the copy Composer makes of a checkout that
+// holds one. It is taken for an earlier build's only where such a build
+// can have been made and kept: in a checkout of the package's repository
+// ("installation-source": "source" in installed.json), which Composer
+// updates in place, and in a linked path repository, which it never
+// empties. An archive and a copied path repository are installed into an
+// emptied directory, so a stamp there came with the files: it is left
+// alone, with everything beside it, and nothing is said. What remains is a
+// release that tracks a stamp, installed as a checkout: there the stamp
+// goes, and the checkout is modified. The build closes that at its source:
+// in a project's own committed root it removes a stamp (mirror,
+// project.go), so that no commit that passed the library's gate tracks
+// one.
 //
 // It removes what the build's own rule names (sourcesBehind, project.go)
 // and nothing else, and only when it is sure:
@@ -39,14 +52,20 @@ package main
 //     goes last, so that a removal that fails leaves the stamp for the
 //     next run.
 //
+// Every file removed is named: the line is printed once in a package's
+// life, and the files were untracked, so nothing else can say afterwards
+// what went. A warning ends with what can be done about it.
+//
 // The Composer plugin does the same without a compiler
-// (composer/src/EarlierBuild.php), before it fetches one:
-// testdata/earlier-builds.json holds the two to each other, the lines they
-// print included.
+// (composer/src/EarlierBuild.php) in a dump that runs none; in a dump that
+// builds installed packages this command does it, so that one dump says it
+// once. testdata/earlier-builds.json holds the two to each other, the
+// lines they print included.
 
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -90,7 +109,7 @@ func (p phaenonPackage) earlierBuilds() []*earlierBuild {
 // nothing then.
 func clearEarlierBuild(dir, src, out string) *earlierBuild {
 	stamp := filepath.Join(out, stampFile)
-	if st, err := os.Lstat(filepath.Join(dir, stamp)); err != nil || !st.Mode().IsRegular() {
+	if !isStamp(filepath.Join(dir, stamp)) {
 		return nil
 	}
 	e := &earlierBuild{out: filepath.ToSlash(out)}
@@ -154,40 +173,73 @@ func clearEarlierBuild(dir, src, out string) *earlierBuild {
 			}
 		}
 	}
-	if len(e.failed) == 0 && !removeRegular(filepath.Join(dir, stamp)) {
+	// On a file system that takes one spelling of a name for another, the
+	// stamp may have gone with the files above, under the name the
+	// directory lists it by.
+	if _, err := os.Lstat(filepath.Join(dir, stamp)); len(e.failed) == 0 && !errors.Is(err, fs.ErrNotExist) && !removeRegular(filepath.Join(dir, stamp)) {
 		e.failed = append(e.failed, filepath.ToSlash(stamp))
 	}
 	return e
 }
 
-// report is the line that says what was done, and whether it is a warning:
-// something is left that the next run will find again.
-func (e *earlierBuild) report(pkg string) (line string, warning bool) {
-	head := fmt.Sprintf("%s: %s/%s is the stamp of an earlier build of this package, in a root it now commits", pkg, e.out, stampFile)
-	list := func(paths []string) string {
-		if n := len(paths) - 1; n > 0 {
-			return fmt.Sprintf("%s, and %d more", paths[0], n)
+// isStamp reports whether path is a stamp as buildVendor writes one: a
+// regular file, not a link to one, whose text begins with the compiler's
+// name.
+func isStamp(path string) bool {
+	st, err := os.Lstat(path)
+	if err != nil || !st.Mode().IsRegular() {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	begins := make([]byte, len(stampBegins))
+	_, err = io.ReadFull(f, begins)
+	return err == nil && string(begins) == stampBegins
+}
+
+// stampBegins is how every stamp begins (buildVendor: "phn <version> …").
+const stampBegins = "phn "
+
+// report is what is printed of it: a line that says what was done, then a
+// line for each file, and whether the whole is a warning, which it is when
+// something is left that the next run will find again. pkg is the
+// package's name and version, dir where it is installed, as shown to the
+// reader, and linked whether that directory is a link to a checkout, which
+// decides what a warning advises.
+func (e *earlierBuild) report(pkg, dir string, linked bool) (lines []string, warning bool) {
+	head := fmt.Sprintf("%s: %s/%s is the stamp of a build, in a root the package commits", pkg, e.out, stampFile)
+	count := func(n int, one, many string) string {
+		if n == 1 {
+			return "1 " + one
 		}
-		return paths[0]
+		return fmt.Sprintf("%d %s", n, many)
 	}
-	removed := ""
-	switch n := len(e.removed); {
-	case n == 1:
-		removed = fmt.Sprintf("removed 1 file with no source behind it (%s)", e.removed[0])
-	case n > 1:
-		removed = fmt.Sprintf("removed %d files with no source behind them (%s)", n, list(e.removed))
+	remedy := fmt.Sprintf("To clear the directory, remove %s and install the package again", dir)
+	if linked {
+		remedy = "The package is a link to a checkout: `phn build` there removes what a build left, the stamp with it"
 	}
-	switch {
+	switch removed := count(len(e.removed), "file with no source behind it", "files with no source behind them"); {
 	case e.obstacle != "":
-		return head + ", and nothing was removed: " + e.obstacle + ". What that build left there may still load", true
-	case len(e.failed) > 0 && removed != "":
-		return head + ": " + removed + ", but " + list(e.failed) + " could not be removed, so the stamp stays and the next build tries again", true
+		return []string{head + ", and nothing was removed: " + e.obstacle + ". What a build left there may still load. " + remedy}, true
+	case len(e.failed) > 0 && len(e.removed) > 0:
+		lines = []string{head + ": removed " + removed + ", but " + count(len(e.failed), "file", "files") + " could not be removed, so the stamp stays and the removal is tried again next time. " + remedy}
 	case len(e.failed) > 0:
-		return head + ": " + list(e.failed) + " could not be removed, so the stamp stays and the next build tries again", true
-	case removed != "":
-		return head + ": " + removed + " and the stamp", false
+		lines = []string{head + ": " + count(len(e.failed), "file", "files") + " could not be removed, so the stamp stays and the removal is tried again next time. " + remedy}
+	case len(e.removed) > 0:
+		lines = []string{head + ": removed it and " + removed}
+	default:
+		return []string{head + ": removed it, and no file, since every file there has a source"}, false
 	}
-	return head + ": removed the stamp alone, since every file there has a source", false
+	for _, file := range e.removed {
+		lines = append(lines, "  - removed "+file)
+	}
+	for _, file := range e.failed {
+		lines = append(lines, "  - could not remove "+file)
+	}
+	return lines, len(e.failed) > 0
 }
 
 // linkOnPath returns the first directory on the path rel under dir that is

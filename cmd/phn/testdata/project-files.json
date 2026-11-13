@@ -1,5 +1,5 @@
 {
-  "format": "phaenon.json's \"roots\" and \"committed\" as its two readers answer them, the compiler (cmd/phn/project.go) and the Composer plugin (composer/src/ProjectFile.php; ../design/tooling.md §3.7): \"file\" is the project file's text. \"refused\" marks a file that is in error. Otherwise \"roots\" maps each source root to its output directory and \"committed\" lists the roots whose outputs the project commits, in the file's order, all as cleaned paths with forward slashes. \"compiler\" is part of the error of a file the compiler refuses for something other than the two keys, which the plugin, reading the two keys alone, answers as given.",
+  "format": "phaenon.json's \"roots\" and \"committed\" as its two readers answer them, the compiler (cmd/phn/project.go) and the Composer plugin (composer/src/ProjectFile.php; ../design/tooling.md §3.7): \"file\" is the project file's text. \"refused\" marks a file that is in error. Otherwise \"roots\" maps each source root to its output directory and \"committed\" lists the roots whose outputs the project commits, in the file's order, all as cleaned paths with forward slashes. \"compiler\" is part of the error of a file the compiler refuses for something other than the two keys, which the plugin, reading the two keys alone, answers as given. The plugin also says whether the compiler would read the file, which it asks before it removes anything from the package (EarlierBuild.php): it must say no for every file marked \"compiler\", may say no for a file the compiler reads, which \"strict\": false marks, and says yes for the rest.",
   "vectors": [
     {
       "name": "no key: the project commits no outputs (D13)",
@@ -310,6 +310,167 @@
         "src"
       ],
       "compiler": "the key \"ReflectedAttributes\" is written \"reflectedAttributes\""
+    },
+    {
+      "name": "every other key, as the compiler reads it: the plugin's strict reading takes the file too",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"src/Fixture\"], \"php\": \"8.5\", \"fmt\": [\"vendor/bin/php-cs-fixer\", \"fix\"], \"unused\": {\"reflectedAttributes\": [\"\\\\App\\\\Mapped\", \"Doctrine\\\\ORM\\\\Mapping\\\\MappingAttribute\"]}}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "the other keys as null",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": null, \"php\": null, \"fmt\": null, \"unused\": null}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "unused without its key, and with it as null",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": null}}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "php that is not a string",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"php\": 8.5}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "compiler": "cannot unmarshal"
+    },
+    {
+      "name": "exclude that is not a list",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": \"src/Fixture\"}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "compiler": "cannot unmarshal"
+    },
+    {
+      "name": "exclude that lists something other than strings",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"src/Fixture\", 1]}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "compiler": "cannot unmarshal"
+    },
+    {
+      "name": "fmt that is not a list",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"fmt\": {\"0\": \"fix\"}}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "compiler": "cannot unmarshal"
+    },
+    {
+      "name": "unused that is not an object",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": []}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "compiler": "cannot unmarshal"
+    },
+    {
+      "name": "a key of unused the compiler does not know",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"attributes\": []}}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "compiler": "unknown field"
+    },
+    {
+      "name": "a class name of unused that starts with a digit",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [\"1App\\\\Mapped\"]}}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "compiler": "is not one"
+    },
+    {
+      "name": "a key written twice: the compiler takes the later, and a strict reading takes neither",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"php\": \"8.5\", \"php\": \"8.6\"}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "strict": false
+    },
+    {
+      "name": "committed written twice",
+      "file": "{\"roots\": {\"src\": \".src\", \"lib\": \".lib\"}, \"committed\": [\"src\"], \"committed\": [\"lib\"]}",
+      "roots": {
+        "src": ".src",
+        "lib": ".lib"
+      },
+      "committed": [
+        "lib"
+      ],
+      "strict": false
+    },
+    {
+      "name": "a key of unused written twice",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [], \"reflectedAttributes\": []}}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "strict": false
+    },
+    {
+      "name": "a colon and a quote inside a string are no key",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"a\\\": \\\"b\", \"src: \\\\\"]}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "a value that reads as its key is not a key written twice",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"php\": \"php\"}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
     }
   ]
 }
