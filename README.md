@@ -298,7 +298,10 @@ are, and the whole project on each save, building the outputs after it as `phn b
 answers hover, go to definition, document symbols, completion (after `|>`, the functions that
 take the left side), signature help and formatting (the first layer). The PhpStorm plugin
 (`../jetbrains`) starts it for diagnostics and build on save only, since PhpStorm's own PHP
-support answers the rest. `phn watch` checks and builds after each change, for a terminal.
+support answers the rest. `phn watch` checks and builds after each change, for a terminal. Both
+read `phaenon.json` and `composer.json` again when either changes; a project file that has become
+invalid is reported, and until it is fixed the project is checked as last read and nothing is
+built.
 
 ```sh
 phn lsp                 # the project around the working directory, on stdin and stdout

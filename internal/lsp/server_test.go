@@ -30,6 +30,9 @@ type fakeHost struct {
 	// vendor, when set, is a loader every program shares, as phn's programs
 	// share a project's Composer maps.
 	vendor program.Loader
+	// reloads counts the calls of Reload, which returns reloadErr.
+	reloads   int
+	reloadErr error
 }
 
 var stubCache = program.NewParseCache() // the stubs parse once for every test
@@ -116,6 +119,13 @@ func (h *fakeHost) Build(p *program.Program, diags []checker.Diagnostic) (BuildP
 }
 
 func (h *fakeHost) ClassNames() []string { return []string{"Vendor\\Lib\\Widget"} }
+
+func (h *fakeHost) Reload() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.reloads++
+	return h.reloadErr
+}
 
 // client drives a server over pipes.
 type client struct {
@@ -415,6 +425,47 @@ func TestRelatedDeclaration(t *testing.T) {
 	if loc["uri"] != c.uri("src/User.phn") || loc["range"].(map[string]any)["start"].(map[string]any)["line"] != float64(10) ||
 		!strings.Contains(r["message"].(string), "parameter $to of App\\User::rename() declared here") {
 		t.Errorf("related: %s", jsonOf(r))
+	}
+}
+
+// A change of the project file or of composer.json has the host read the
+// project again before the next project check; a change of a source does
+// not. A project file that does not read is shown to the user.
+func TestProjectFileChangeReloads(t *testing.T) {
+	broken := strings.Replace(userSrc, "name(): string", "name(): int", 1)
+	c := start(t, map[string]string{"src/User.phn": broken}, nil)
+	c.diagnostics("src/User.phn", 0) // the check at initialized
+	changed := func(path string) {
+		c.notify("workspace/didChangeWatchedFiles", map[string]any{"changes": []any{map[string]any{"uri": c.uri(path), "type": 2}}})
+	}
+	reloads := func() int {
+		c.host.mu.Lock()
+		defer c.host.mu.Unlock()
+		return c.host.reloads
+	}
+	changed("src/User.phn")
+	c.diagnostics("src/User.phn", 0)
+	if n := reloads(); n != 0 {
+		t.Errorf("a source's change read the project %d times", n)
+	}
+	changed("composer.json")
+	c.diagnostics("src/User.phn", 0)
+	if n := reloads(); n != 1 {
+		t.Errorf("composer.json's change read the project %d times", n)
+	}
+	c.host.mu.Lock()
+	c.host.reloadErr = fmt.Errorf(`phaenon.json: the output of "src" must be another directory`)
+	c.host.mu.Unlock()
+	changed("phaenon.json")
+	m := c.wait(func(m map[string]any) bool { return m["method"] == "window/showMessage" })
+	if m == nil {
+		t.Fatal("the project file's error was not shown")
+	}
+	if p := m["params"].(map[string]any); p["type"] != float64(1) || !strings.Contains(p["message"].(string), `the output of "src"`) {
+		t.Errorf("message: %s", jsonOf(p))
+	}
+	if got := codes(c.diagnostics("src/User.phn", 0)); len(got) != 1 {
+		t.Errorf("the project check after the error: %v", got)
 	}
 }
 

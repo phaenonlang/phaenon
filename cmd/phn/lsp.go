@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/phaenonlang/phaenon/internal/checker"
@@ -84,33 +85,64 @@ func longRunning() {
 }
 
 // projectHost is the project in the working directory, as phn check and
-// phn build read it, for phn lsp and phn watch.
+// phn build read it, for phn lsp and phn watch. Reload reads it again when
+// phaenon.json or composer.json changes.
 type projectHost struct {
-	root  string
+	root string
+	// mu guards what the project file and composer.json say, and the
+	// package's excludes and projectSources set from them: phn lsp asks
+	// from several goroutines while Reload replaces them.
+	mu    sync.RWMutex
 	proj  *project // nil without a phaenon.json
 	roots []string // nil without a phaenon.json: no files but the open ones
 	tgt   target
+	// err is the project file's error at the last read, which kept the
+	// project read before it: checked as it was, built not at all.
+	err error
 }
 
 func newProjectHost() *projectHost {
 	root, _ := os.Getwd()
 	h := &projectHost{root: root}
-	proj, err := readProject(ProjectFile)
-	if err != nil {
+	if err := h.Reload(); err != nil {
 		fmt.Fprintf(os.Stderr, "phn: %v\n", err)
 	}
-	h.proj = proj
+	return h
+}
+
+// Reload reads phaenon.json and the target again: the roots, "exclude",
+// the checker's settings, "php" and composer.json's require.php. A project
+// file that does not read keeps the project as it was last read, without a
+// project file at the start, and its error is returned until a read
+// succeeds; meanwhile Build builds nothing.
+func (h *projectHost) Reload() error {
+	proj, err := readProject(ProjectFile)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err != nil {
+		h.err = fmt.Errorf("%v; until it is fixed, the project is checked as last read and nothing is built", err)
+		if h.tgt.Version.IsZero() {
+			h.tgt = projectTarget(nil, []string{"."})
+		}
+		return h.err
+	}
+	h.proj, h.roots, h.err = proj, nil, nil
+	// The exclusions and the sources are the project file's alone: a
+	// reread replaces them.
+	excludes = nil
+	sources := map[string]string{}
 	if proj != nil && len(proj.Roots) > 0 {
 		h.roots = proj.roots()
 		excludes = append(excludes, proj.Exclude...)
-		projectSources = proj.sources()
+		sources = proj.sources()
 	}
+	share.setProjectSources(sources)
 	anchor := h.roots
 	if anchor == nil {
 		anchor = []string{"."}
 	}
 	h.tgt = projectTarget(proj, anchor)
-	return h
+	return nil
 }
 
 func (h *projectHost) Root() string { return h.root }
@@ -118,6 +150,8 @@ func (h *projectHost) Root() string { return h.root }
 // Files lists what phn check checks: the roots' .phn, and their plain .php
 // that no .phn compiles to.
 func (h *projectHost) Files() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	if h.roots == nil {
 		return nil
 	}
@@ -149,6 +183,8 @@ func collectQuiet(roots []string, skip func(string) bool) (files []string) {
 }
 
 func (h *projectHost) Program(files []string, read func(string) ([]byte, error), check func(string) bool) (p *program.Program, diags []checker.Diagnostic, err error) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	defer recoverFailure(&err)
 	anchor := ""
 	if len(files) > 0 {
@@ -177,19 +213,29 @@ func (h *projectHost) Program(files []string, read func(string) ([]byte, error),
 	return p, diags, nil
 }
 
-// Options adds the checker's settings from phaenon.json, as read when the
-// host was made.
+// Options adds the checker's settings from phaenon.json, as last read.
 func (h *projectHost) Options(opts checker.Options) checker.Options {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	return h.proj.checkerOptions(opts)
 }
 
 func (h *projectHost) ProjectDiagnostics(p *program.Program, files []string) []checker.Diagnostic {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	return append([]checker.Diagnostic(nil), h.tgt.Diags...)
 }
 
 func (h *projectHost) Build(p *program.Program, diags []checker.Diagnostic) (res lsp.BuildParams, err error) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	defer recoverFailure(&err)
-	if h.roots == nil {
+	switch {
+	case h.err != nil:
+		return res, h.err
+	case h.proj != nil && h.roots == nil:
+		return res, errors.New(ProjectFile + " names no root that is here: nothing to build")
+	case h.roots == nil:
 		return res, errors.New("no " + ProjectFile + ": nothing to build")
 	}
 	if h.tgt.Unsupported {
@@ -233,21 +279,44 @@ func watchCmd(args []string) {
 	for {
 		watchRun(host, !*noBuild)
 		fmt.Println("phn watch: waiting for changes (Ctrl-C to stop)")
-		for {
+		for cur := last; sameStamps(cur, last); {
 			time.Sleep(*every)
-			cur := watchStamps(host)
-			if !sameStamps(cur, last) {
-				// Let an editor's or a tool's burst of writes settle.
-				time.Sleep(*every / 3)
-				last = watchStamps(host)
-				break
-			}
+			cur = watchStamps(host)
 		}
+		// Let an editor's or a tool's burst of writes settle.
+		time.Sleep(*every / 3)
+		if projectChanged(watchStamps(host), last) {
+			// The roots, their exclusions and the target may be others
+			// now; an error of the project file is the run's to report.
+			host.Reload()
+		}
+		last = watchStamps(host)
 	}
 }
 
+// projectChanged reports whether phaenon.json or composer.json differs
+// between two records of watchStamps: it is there, or gone, or rewritten.
+func projectChanged(a, b map[string]stamp) bool {
+	for _, f := range []string{ProjectFile, "composer.json"} {
+		x, inA := a[f]
+		y, inB := b[f]
+		if inA != inB || inA && (!x.mod.Equal(y.mod) || x.size != y.size) {
+			return true
+		}
+	}
+	return false
+}
+
+// projectErr is the project file's error at the last read, nil when it read.
+func (h *projectHost) projectErr() error {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.err
+}
+
 // watchRun checks the project, prints the findings as phn check does, and
-// builds.
+// builds. While the project file does not read, the project is checked as
+// last read, the error printed, and nothing built.
 func watchRun(host *projectHost, build bool) {
 	started := time.Now()
 	err := func() (err error) {
@@ -273,6 +342,9 @@ func watchRun(host *projectHost, build bool) {
 			}
 		}
 		fmt.Printf("%d files checked: %d errors, %d warnings\n", len(files), errs, warnings)
+		if err := host.projectErr(); err != nil {
+			return err
+		}
 		if !build {
 			return nil
 		}
@@ -297,6 +369,8 @@ type stamp struct {
 // check or build reads: the roots' sources, the project files, Composer's
 // install state.
 func watchStamps(h *projectHost) map[string]stamp {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	out := map[string]stamp{}
 	add := func(path string, info fs.FileInfo) {
 		out[path] = stamp{info.ModTime(), info.Size()}

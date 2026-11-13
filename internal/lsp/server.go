@@ -64,6 +64,10 @@ type Host interface {
 	// ClassNames lists the classes Composer's maps can load, which no
 	// program declares until code names them: class completion offers them.
 	ClassNames() []string
+	// Reload reads the project's settings again, after its project file or
+	// composer.json changed. An error is the project file's, which the
+	// server shows: the host goes on with the project as it read it last.
+	Reload() error
 }
 
 // Server is one session with an editor.
@@ -88,6 +92,7 @@ type Server struct {
 	projectGen  int                  // the newest project check; an older one stops
 	projectT    *time.Timer
 	wantBuild   bool // a save asked for a build no check has done yet
+	reload      bool // the project file or composer.json changed since the host read them
 	// clientRoot is the project's root as the client spells it (rootUri),
 	// which may differ from the Host's through a symbolic link: URIs sent
 	// to the client use it. A rootUri naming another directory, such as
@@ -239,6 +244,16 @@ func (s *Server) dispatch(m *message) {
 			s.didClose(p)
 		}
 	case "workspace/didChangeWatchedFiles":
+		var p DidChangeWatchedFilesParams
+		if json.Unmarshal(m.Params, &p) == nil {
+			for _, c := range p.Changes {
+				if path, ok := s.path(c.URI); ok && (path == "phaenon.json" || path == "composer.json") {
+					s.mu.Lock()
+					s.reload = true
+					s.mu.Unlock()
+				}
+			}
+		}
 		s.scheduleProject(s.Debounce*2, false)
 	case "workspace/didChangeConfiguration":
 		var p DidChangeConfigurationParams
@@ -721,10 +736,37 @@ func (s *Server) scheduleProject(after time.Duration, build bool) {
 		if s.stale(gen) {
 			return
 		}
+		s.reloadHost()
 		if _, err := s.safely(func() (any, error) { return nil, s.checkProject(gen) }); err != nil {
 			s.logf("project: %v", err)
 		}
 	})
+}
+
+// reloadHost has the host read the project again when its project file or
+// composer.json changed, and shows the user a project file that does not
+// read. It runs on a project check's turn, so no build of the project as it
+// was is running then.
+func (s *Server) reloadHost() {
+	s.mu.Lock()
+	reload := s.reload
+	s.reload = false
+	s.mu.Unlock()
+	if !reload {
+		return
+	}
+	if _, err := s.safely(func() (any, error) { return nil, s.host.Reload() }); err != nil {
+		s.logf("%v", err)
+		s.conn.notify("window/showMessage", ShowMessageParams{Type: 1, Message: "phn: " + err.Error()})
+		return
+	}
+	// The open documents' checks are of the project as it was: a request
+	// checks again.
+	s.mu.Lock()
+	for _, d := range s.docs {
+		d.result = nil
+	}
+	s.mu.Unlock()
 }
 
 func (s *Server) stale(gen int) bool {

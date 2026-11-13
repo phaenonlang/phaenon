@@ -17,11 +17,11 @@ import (
 
 // lspSession runs `phn lsp` in a project and speaks to it.
 type lspSession struct {
-	t   *testing.T
-	in  io.WriteCloser
-	out *bufio.Reader
-	cmd *exec.Cmd
-	id  int
+	t    *testing.T
+	in   io.WriteCloser
+	msgs chan map[string]any // what the server writes, read as it comes
+	cmd  *exec.Cmd
+	id   int
 }
 
 func startLSP(t *testing.T, bin, dir string, opts string) *lspSession {
@@ -34,7 +34,8 @@ func startLSP(t *testing.T, bin, dir string, opts string) *lspSession {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	s := &lspSession{t: t, in: in, out: bufio.NewReader(out), cmd: cmd}
+	s := &lspSession{t: t, in: in, msgs: make(chan map[string]any, 100), cmd: cmd}
+	go s.read(bufio.NewReader(out))
 	t.Cleanup(func() {
 		s.send(`{"jsonrpc":"2.0","id":999,"method":"shutdown"}`)
 		s.send(`{"jsonrpc":"2.0","method":"exit"}`)
@@ -62,16 +63,16 @@ func (s *lspSession) send(body string) {
 	fmt.Fprintf(s.in, "Content-Length: %d\r\n\r\n%s", len(body), body)
 }
 
-// next reads messages until one satisfies pred.
-func (s *lspSession) next(pred func(map[string]any) bool) map[string]any {
-	s.t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
+// read passes the server's messages to msgs until its standard output ends;
+// what is not a message ends it too, and next reports it.
+func (s *lspSession) read(out *bufio.Reader) {
+	defer close(s.msgs)
+	for {
 		n := 0
 		for {
-			line, err := s.out.ReadString('\n')
+			line, err := out.ReadString('\n')
 			if err != nil {
-				s.t.Fatalf("phn lsp: %v", err)
+				return
 			}
 			line = strings.TrimSpace(line)
 			if line == "" {
@@ -82,19 +83,36 @@ func (s *lspSession) next(pred func(map[string]any) bool) map[string]any {
 			}
 		}
 		body := make([]byte, n)
-		if _, err := io.ReadFull(s.out, body); err != nil {
-			s.t.Fatal(err)
+		if _, err := io.ReadFull(out, body); err != nil {
+			return
 		}
 		var m map[string]any
 		if err := json.Unmarshal(body, &m); err != nil {
-			s.t.Fatalf("not JSON on stdout: %q", body)
+			m = map[string]any{"notJSON": string(body)}
 		}
-		if pred(m) {
-			return m
+		s.msgs <- m
+	}
+}
+
+// next waits for a message that satisfies pred, passing over the others.
+func (s *lspSession) next(pred func(map[string]any) bool) map[string]any {
+	s.t.Helper()
+	timeout := time.After(30 * time.Second)
+	for {
+		select {
+		case m, ok := <-s.msgs:
+			switch {
+			case !ok:
+				s.t.Fatal("phn lsp ended its output")
+			case m["notJSON"] != nil:
+				s.t.Fatalf("not JSON on stdout: %q", m["notJSON"])
+			case pred(m):
+				return m
+			}
+		case <-timeout:
+			s.t.Fatal("timed out")
 		}
 	}
-	s.t.Fatal("timed out")
-	return nil
 }
 
 // phn lsp over stdio in a real project: the opened file's diagnostics, and
@@ -138,6 +156,47 @@ func TestLSP(t *testing.T) {
 	}
 	if _, stderr, err := run(t, root, bin, "build", "--check", "--exclude", "src/Broken.phn"); err != nil && !strings.Contains(stderr, "Broken") {
 		t.Errorf("the outputs are not phn build's: %s", stderr)
+	}
+}
+
+// phn lsp reads the project again when the client reports a change of
+// phaenon.json or composer.json: the next check leaves out what "exclude"
+// names now. A project file that has become invalid is shown to the user,
+// and the server goes on, and reads it again once it is valid.
+func TestLSPRereadsTheProject(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	writeTree(t, root, map[string]string{"src/Broken.phn": brokenSource})
+	s := startLSP(t, bin, root, `{}`)
+	uri := fileURI(filepath.Join(root, "src/Broken.phn"))
+	diagnostics := func() []any {
+		t.Helper()
+		m := s.next(func(m map[string]any) bool {
+			p, _ := m["params"].(map[string]any)
+			return m["method"] == "textDocument/publishDiagnostics" && p["uri"] == uri
+		})
+		return m["params"].(map[string]any)["diagnostics"].([]any)
+	}
+	changed := func(project string) {
+		writeTree(t, root, map[string]string{"phaenon.json": project})
+		s.send(`{"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{"changes":[{"uri":"` +
+			fileURI(filepath.Join(root, "phaenon.json")) + `","type":2}]}}`)
+	}
+	if d := diagnostics(); len(d) != 1 {
+		t.Fatalf("the check at start: %v", d)
+	}
+	changed(`{"roots": {"src": ".src"}, "exclude": ["src/Broken.phn"]}`)
+	if d := diagnostics(); len(d) != 0 {
+		t.Errorf("an excluded file is still reported: %v", d)
+	}
+	changed(`{"roots": {"src": "src"}}`)
+	m := s.next(func(m map[string]any) bool { return m["method"] == "window/showMessage" })
+	if p := m["params"].(map[string]any); p["type"] != float64(1) || !strings.Contains(p["message"].(string), `the output of "src" must be another directory`) {
+		t.Errorf("the invalid project file: %v", p)
+	}
+	changed(`{"roots": {"src": ".src"}}`)
+	if d := diagnostics(); len(d) != 1 {
+		t.Errorf("the project read again after its file was fixed: %v", d)
 	}
 }
 
@@ -207,6 +266,35 @@ func TestWatch(t *testing.T) {
 	if !strings.Contains(string(data), "$a-$b") {
 		t.Errorf("the change was not built:\n%s", data)
 	}
+}
+
+const brokenSource = "namespace App;\n\nfunction broken(): int => 'x';\n"
+
+// phn watch reads phaenon.json and composer.json again when either changes:
+// the next run leaves out what "exclude" names now, and checks for the
+// target composer.json states now. A project file that has become invalid
+// is reported at every run, which checks the project as last read and
+// builds nothing, and the watcher goes on.
+func TestWatchRereadsTheProject(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	writeTree(t, root, map[string]string{"src/Broken.phn": brokenSource})
+	wait := startWatch(t, bin, root)
+	change := func(files map[string]string) {
+		t.Helper()
+		wait("waiting for changes")
+		time.Sleep(100 * time.Millisecond) // a modification time the poll can tell apart
+		writeTree(t, root, files)
+	}
+	wait("3 files checked: 1 errors")
+	change(map[string]string{"phaenon.json": `{"roots": {"src": ".src"}, "exclude": ["src/Broken.phn"]}`})
+	wait("2 files checked: 0 errors")
+	change(map[string]string{"composer.json": `{"name": "acme/app", "require": {"php": ">=8.4"}}`})
+	wait("warning P4008") // composer.json admits PHP 8.4, older than phn compiles for
+	change(map[string]string{"phaenon.json": `{"roots": {"src": "src"}}`})
+	wait(`phaenon.json: the output of "src" must be another directory; until it is fixed`)
+	change(map[string]string{"phaenon.json": `{"roots": {"src": ".src"}}`})
+	wait("3 files checked: 1 errors")
 }
 
 // phn watch started in a directory of the project watches the project, as
