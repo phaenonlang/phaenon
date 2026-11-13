@@ -223,6 +223,13 @@ func TestErrors(t *testing.T) {
 		"$y = $x is int;":           "A.phn:1: `is` left the language (P1001)",
 		"fun f(): void {}":          "A.phn:1: `fun` left the language (P1001)",
 		"echo 1\necho 2;":           "A.phn:2: ",
+		// The types PHP has no name for are Phaenon syntax on their own,
+		// bytes among them: passed through, it would name a class.
+		"function f(list $xs): void {}":              "A.phn:1: Phaenon syntax needs type information",
+		"function f(bytes $b): bytes { return $b; }": "A.phn:1: Phaenon syntax needs type information",
+		"class C { public ?bytes $b = null; }":       "A.phn:1: Phaenon syntax needs type information",
+		"class C { const bytes K = 'k'; }":           "A.phn:1: Phaenon syntax needs type information",
+		"$b = (bytes) $s;":                           "A.phn:1: Phaenon syntax needs type information",
 	}
 	for in, want := range cases {
 		_, err := File([]byte(in), Options{SourceName: "A.phn"})

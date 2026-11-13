@@ -57,7 +57,7 @@ func hasGenerics(f *ast.File) bool {
 		case *ast.Cast:
 			found = found || n.Op == token.T_BYTES_CAST
 		case *ast.NamedType:
-			if len(n.TypeArgs) > 0 || isAliasCandidate(n) {
+			if len(n.TypeArgs) > 0 || isAliasCandidate(n) || isBytes(n) {
 				found = true
 			}
 		case *ast.Call:
@@ -483,12 +483,19 @@ func (l *lowering) eraseType(t ast.TypeExpr, sc *scope, override string) bool {
 func mentionsBytes(t ast.TypeExpr) bool {
 	found := false
 	ast.Inspect(t, func(n ast.Node) bool {
-		if nt, ok := n.(*ast.NamedType); ok && len(nt.Name.Parts) == 1 && strings.EqualFold(nt.Name.Parts[0], "bytes") {
+		if nt, ok := n.(*ast.NamedType); ok && isBytes(nt) {
 			found = true
 		}
 		return !found
 	})
 	return found
+}
+
+// isBytes: the type bytes, which PHP would read as a class of that name.
+// It is Phaenon syntax (hasGenerics) and no alias candidate: its erasure,
+// string, says all a docblock could.
+func isBytes(n *ast.NamedType) bool {
+	return len(n.Name.Parts) == 1 && strings.EqualFold(n.Name.Parts[0], "bytes")
 }
 
 // ------------------------------------------------------------------ docblocks
