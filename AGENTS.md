@@ -45,6 +45,7 @@ output. `../design/roadmap.md` §3 names the milestones and what each one brings
 | Open questions and deferred work | `../design/roadmap.md` §6, `checker.md` §10, `tooling.md` §13; the repository's issues |
 | Every `PHAENON_*` test variable | [Test variables](#test-variables) |
 | A diagnostic code | `internal/checker/codes.go` |
+| The release a `phaenon.json` key came in | `keyReleases` in `cmd/phn/conflict.go`: a new key is added there too, `earlierReleases` extended to the last release without it (`TestKeyReleases`) and `composer.json`'s alias of `dev-main` moved to the key's release line (`TestBranchAliasCoversTheKeys`) |
 | What PHP does | `php` itself (the oracle), then `../php-src` |
 | A PHP function's signature | `stdlib/php-src/**/*.stub.php`, refined by `stdlib/overlay/` |
 
@@ -71,6 +72,7 @@ internal/fix          `phn fix`: a PHP tool's changes of the outputs carried bac
 internal/trace        `phn trace`: positions in compiled files → `.phn` positions, in text, GitHub workflow commands and CI reports (Checkstyle, JUnit, Clover, Cobertura)
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` lifted off methods
 internal/playground   one file checked and compiled in memory, the embedded stdlib alone: what cmd/phn-wasm answers (design/tooling.md §3.6)
+internal/semver       Composer's versions and version constraints, read as composer/semver reads them or refused: whether a release satisfies a `conflict` (design/tooling.md §3.7)
 internal/conformance  suites over the php-src corpus with `php` as the oracle
 stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/debug sources (runtime/**/*.phn);
                       suggested/: the Monolog and Sentry API the Debug integrations are checked against, loaded only by the stdlib's own programs
@@ -98,6 +100,7 @@ PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite
 PHAENON_PHP86=/path/to/php8.6 go test ./internal/emit                  # goldens compiled for 8.6: php -l, loading, behaviour
 go generate ./stdlib                                                   # refresh stubs + version table from the php-src clone
 PHAENON_COMPOSER=$(which composer) go test ./internal/distribution     # the Composer plugin under a real Composer
+PHAENON_COMPOSER=$(which composer) go test ./internal/semver           # the constraint vectors, asked of Composer's own reader
 GOOS=js GOARCH=wasm go build -o bin/phn.wasm ./cmd/phn-wasm            # the playground's compiler (tests: internal/playground)
 ```
 
@@ -115,7 +118,7 @@ a php of the newest release.
 
 CI (`.github/workflows/ci.yml`) runs `gofmt -l`, `go vet` (native and wasm) and `go test ./...` with
 PHP 8.5 and Composer on the runner; the suites gated by a variable skip there, while the plugin's
-suite runs, `PHAENON_COMPOSER` naming the runner's Composer.
+suite and the constraint vectors' run, `PHAENON_COMPOSER` naming the runner's Composer.
 
 ### Test variables
 
@@ -132,9 +135,9 @@ PHPStan parity.
 | `PHAENON_SHOW_DIFFS` | printer round trip, execution suites | How many differences to print (default 25) |
 | `PHAENON_SHOW_FALSE_ACCEPT` | `TestParserAgainstPHP` | Lists (up to 30) files PHP rejects but Phaenon parses |
 | `PHAENON_PHPSTAN` | `TestPHPStanParity` (checker), `TestGenerics` (emit) | Path to a PHPStan binary (`/path/to/phpstan`), run at level max with `treatPhpDocTypesAsCertain: false` (`../design/checker.md` §9) |
-| `PHAENON_UPDATE` | the emit, format, migrate and trace goldens | Rewrites the expected files from the current output |
+| `PHAENON_UPDATE` | the emit, format, migrate and trace goldens; `TestComposerAgrees` (semver) | Rewrites the expected files from the current output; for the constraint vectors, their answers from Composer's |
 | `PHAENON_GOLDEN` | `TestGolden` (checker) | Only the golden files whose name contains this substring |
-| `PHAENON_COMPOSER` | `internal/distribution` | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects that install it alone; one of them builds `phn` and runs what it compiles |
+| `PHAENON_COMPOSER` | `internal/distribution`; `TestComposerAgrees` (semver) | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects that install it alone; one of them builds `phn` and runs what it compiles. The constraint vectors are asked of its composer/semver, in a script of a project that installs nothing |
 | `PHAENON_COMPOSER_PROJECT` | `TestComposer` (program) | A Composer project to exercise the vendor reader on |
 | `PHAENON_FMT_TREE` | `TestTree` (format) | Any Phaenon tree: each `.phn` must format, and to itself a second time (`-v` lists the files it would change) |
 | `PHAENON_LINEMAP_TREE` | `TestLineMapTree` (emit) | Any Phaenon tree: `TestLineMapProperty`'s invariant over every `.phn` in it, and `TestOutputsDependOnPHPOnly`'s promise over every output (nothing under `Phaenon\`) |
@@ -217,6 +220,18 @@ from the package by hand.
   TestTree` formats a dogfood tree in memory.
 - **Printer golden** `internal/printer/testdata/sample.golden`: regenerate with
   `phn print --php testdata/sample.php`.
+- **Constraint vectors** `internal/semver/testdata/constraints.json`: Composer constraints, each
+  with the versions of the file's list that satisfy it, `"refused"` where Composer refuses it and
+  `"unread"` where Composer reads it and `internal/semver` does not. Composer is the oracle: a
+  vector is added as its constraint alone and filled with `PHAENON_UPDATE=1 PHAENON_COMPOSER=…
+  go test ./internal/semver -run TestComposerAgrees`. The reader is to read less than Composer
+  and never differently, which is an aim the vectors measure and do not prove: a difference
+  found becomes a vector, and a spelling the reader is not sure of becomes `"unread"`, not a
+  guess. The test asks whatever Composer the machine has, so a new composer/semver can turn it
+  red in a pull request that touched nothing here. Then run it with `PHAENON_UPDATE=1` and read
+  the diff of the file: an answer that changed for a constraint the reader reads is a change of
+  the reader to make, or the constraint becomes `"unread"`; nothing else in the diff asks for
+  code.
 - A `.phn` fixture is PHP without `<?php`. Docblocks: one tag per line (PHPStan ignores the rest).
 - Golden files and `stdlib/php-src` are byte-sensitive: no formatters, no whitespace clean-up
   (`.editorconfig` exempts them).
@@ -234,6 +249,34 @@ from the package by hand.
   version the next release and write `CHANGELOG.md`: the title is a Conventional Commit header whose
   release impact (`!` or a `BREAKING CHANGE:` footer, then `feat`, then `fix` and `revert`, then the
   rest) equals the highest of the PR's commits, which `pr-semantics.yml` checks.
+- **`composer.json`'s branch alias of `dev-main`** (`extra.branch-alias`) is the version Composer
+  takes the main branch for. The release PR's workflow writes it at each release's minor version
+  (`tools/release`), and `release.yml` checks it there, so it is not edited by hand, with one
+  exception: a change that adds a key to `phaenon.json` is a `feat`, comes in the next minor
+  release, and moves the alias to that line (`0.5.x-dev` for a key of 0.5.0) together with the
+  key's entry in `keyReleases`. A library's `conflict` below that release would otherwise keep
+  out a project on the main branch, whose compiler reads the key; `TestBranchAliasCoversTheKeys`
+  fails for a key whose release is above the alias.
+- **A key of `phaenon.json` is added with its release** (`cmd/phn/conflict.go`): the next release
+  in `keyReleases`, `earlierReleases` extended to the last release made, the alias moved as above.
+  `TestKeyReleases` holds the three to the reader's keys and to `CHANGELOG.md`.
+  - **What the tests cannot see is when a key was merged.** A key given a release that was
+    already made passes them, although that release does not read the key and a library's
+    `conflict` then lets it in. Whoever reviews a change that adds a key checks that the release
+    it is given is not in `CHANGELOG.md`, and again at the merge when a release came in between.
+  - **When a release gets another number than the table assumed** (a `Release-As`, a key merged
+    as something else than a `feat`), CI is red on the release PR, and the message says which
+    case it is. The first release made after a key was merged is the one that reads it: give the
+    key that release in `keyReleases`. `earlierReleases` stays the releases from before it, and
+    the alias on `main` stands at that release's line or above. Then change what names the old
+    number: the tests of the check (`cmd/phn/conflict_test.go`,
+    `internal/distribution/alias_test.go`), the usage text in `cmd/phn/main.go`, the README's
+    section on the compilers a library keeps out, and `../design/tooling.md` §3.7 and T20. The
+    edit is made on `main`, which release-please rebuilds its branch from.
+  - A release the changelog lists and `earlierReleases` lacks is one of two things, which the
+    tree does not tell apart: cut before the key was merged, it goes into the list; cut after,
+    the key's release in the table is what is wrong. `git tag --contains` of the commit that
+    added the key says which, and the two repairs go opposite ways.
 - `go.mod`'s module line is `github.com/phaenonlang/phaenon`. GoLand has rewritten it to `module
   phaenon` before, which breaks every import of the repository's own packages: put the line back by
   hand and never commit the rewritten one (`go mod init` or `go mod tidy` repairs it the wrong way).

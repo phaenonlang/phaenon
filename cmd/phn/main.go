@@ -123,10 +123,15 @@ check skips them, build compiles them without reporting their diagnostics (--exc
 "php" is the target, the oldest PHP the output must run on (8.5 or 8.6); without it, the lowest
 version composer.json's require.php admits.
 "committed": ["src"] lists the roots whose outputs the project's repository tracks, each a key of
-"roots": a library installed as plain PHP by projects without phn. Here it changes nothing: every
-command builds such a root as any other. Where the project is an installed package, build --vendor
+"roots": a library installed as plain PHP by projects without phn. Here every command builds such
+a root as any other. Where the project is an installed package, build --vendor
 leaves the root as installed, writing and removing nothing, and fails when it came without its
 outputs: its output directory, or the .php of one of its .phn.
+A project that commits a root is installed by projects whose phn reads its phaenon.json, so its
+composer.json keeps out the releases that cannot: "conflict": {"phaenon/phn": "<0.5.0"} for
+"committed", which 0.5.0 is the first to know. build of the project, and its --check, fail while
+a release from before the newest key the file uses can be installed beside the package, or the
+constraint is one phn cannot judge; the outputs are written all the same.
 Without a project file, build writes Foo.php next to Foo.phn, or under DIR (mirroring the path
 given) with --out. A file with type errors is not written unless --emit-on-error is given (the
 exit status still reports the errors). --check writes nothing and fails when any output is
@@ -279,6 +284,17 @@ func build(args []string) {
 	job := buildJob{proj: proj, roots: roots, target: tgt, out: *out, check: *check, emitOnError: *emitOnError,
 		mirror: proj != nil && *out == "" && fs.NArg() == 0}
 	res := job.run()
+	// The project's whole build also answers for its composer.json: the
+	// compilers that cannot read the project file are kept out (conflict.go).
+	// The outputs are written all the same, and the exit status reports it:
+	// in the command's last line, or before the failure that is.
+	unguarded := ""
+	if job.mirror {
+		unguarded = proj.conflictFloor()
+	}
+	if unguarded != "" && (res.failed > 0 || *check && res.stale+res.copied+res.removed > 0) {
+		fmt.Fprintln(os.Stderr, unguarded)
+	}
 	switch {
 	case res.failed > 0:
 		fail("%d of %d files failed to compile", res.failed, res.files)
@@ -292,6 +308,9 @@ func build(args []string) {
 		fmt.Printf("%d files compiled, %d written, %d files copied, %d stale outputs removed\n", res.files, res.written, res.copied, res.removed)
 	default:
 		fmt.Printf("%d files compiled, %d written\n", res.files, res.written)
+	}
+	if unguarded != "" {
+		fail("%s", unguarded)
 	}
 }
 
