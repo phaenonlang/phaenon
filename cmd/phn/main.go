@@ -65,7 +65,8 @@ usage:
                                                            type-check and compile .phn files to .php
   phn build --vendor                                       compile the installed Composer packages that carry a
                                                            phaenon.json, each for its own target, their findings as
-                                                           warnings; a package nothing changed in is skipped
+                                                           warnings; a package nothing changed in is skipped, and a
+                                                           root a package commits the outputs of is left as installed
   phn check [--format=F] [--no-deprecations] [--exclude PATH]... [<path>...]
                                                            type-check .phn files, write nothing; the findings as
                                                            text, json (an object per line, also --json), github
@@ -121,6 +122,11 @@ outputs with no source behind them are removed. "exclude" lists paths the checke
 check skips them, build compiles them without reporting their diagnostics (--exclude adds more).
 "php" is the target, the oldest PHP the output must run on (8.5 or 8.6); without it, the lowest
 version composer.json's require.php admits.
+"committed": ["src"] lists the roots whose outputs the project's repository tracks, each a key of
+"roots": a library installed as plain PHP by projects without phn. Here it changes nothing: every
+command builds such a root as any other. Where the project is an installed package, build --vendor
+leaves the root as installed, writing and removing nothing, and fails when it came without its
+outputs: its output directory, or the .php of one of its .phn.
 Without a project file, build writes Foo.php next to Foo.phn, or under DIR (mirroring the path
 given) with --out. A file with type errors is not written unless --emit-on-error is given (the
 exit status still reports the errors). --check writes nothing and fails when any output is

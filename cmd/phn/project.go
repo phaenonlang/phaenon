@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -30,9 +34,16 @@ const ProjectFile = "phaenon.json"
 // under a root that are not Phaenon sources (fixtures, YAML, data) are copied
 // into the output for the same reason: __DIR__.'/Fixture' must exist there.
 type project struct {
-	Roots   map[string]string `json:"roots"`
-	Exclude []string          `json:"exclude"`
-	PHP     string            `json:"php"`
+	Roots map[string]string `json:"roots"`
+	// Committed names the source roots whose outputs the project's
+	// repository tracks, each a key of Roots (design/roadmap.md D28,
+	// design/tooling.md §3.7). It says something only of an installed
+	// package: `phn build --vendor` leaves those roots as installed
+	// (vendor.go). In the project's own directory every command treats a
+	// committed root as any other.
+	Committed []string `json:"committed"`
+	Exclude   []string `json:"exclude"`
+	PHP       string   `json:"php"`
 	// Fmt is the command of phn fmt's second layer, the project's fixer run
 	// through phn fix (fmt.go); an empty list turns the layer off.
 	Fmt *[]string `json:"fmt"`
@@ -85,9 +96,20 @@ func readProject(path string) (*project, error) {
 	if err := dec.Decode(&p); err != nil {
 		return nil, fmt.Errorf("%s: %v", path, err)
 	}
+	// encoding/json reads the first value and stops, and matches a key to
+	// a field whatever its letter case. A project file is one object whose
+	// keys are spelt as documented: the Composer plugin's reader of "roots"
+	// and "committed" (composer/src/ProjectFile.php) reads no other, and
+	// the two must give one answer.
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("%s: the project file is one JSON object, and text follows it", path)
+	}
+	if key, want := misspeltKey(data, reflect.TypeFor[project]()); key != "" {
+		return nil, fmt.Errorf("%s: the key %q is written %q", path, key, want)
+	}
 	roots := make(map[string]string, len(p.Roots))
-	for src, out := range p.Roots {
-		src, out = filepath.Clean(src), filepath.Clean(out)
+	for _, key := range slices.Sorted(maps.Keys(p.Roots)) {
+		src, out := filepath.Clean(key), filepath.Clean(p.Roots[key])
 		switch {
 		case src == "." || out == "." || filepath.IsAbs(src) || filepath.IsAbs(out) ||
 			src == ".." || out == ".." || strings.HasPrefix(src, "../") || strings.HasPrefix(out, "../"):
@@ -97,9 +119,28 @@ func readProject(path string) (*project, error) {
 		case filepath.Dir(src) != filepath.Dir(out):
 			return nil, fmt.Errorf("%s: the output of %q must be its sibling, a directory with the same parent, so that __DIR__ keeps its depth; %q is not", path, src, out)
 		}
+		// Two spellings of one root ("src", "./src") are one root when
+		// they name one output.
+		if other, twice := roots[src]; twice && other != out {
+			return nil, fmt.Errorf("%s: the root %q is named twice, with the outputs %q and %q", path, src, other, out)
+		}
 		roots[src] = out
 	}
+	if err := separateDirectories(roots); err != nil {
+		return nil, fmt.Errorf("%s: %v", path, err)
+	}
 	p.Roots = roots
+	committed := make([]string, 0, len(p.Committed))
+	for _, entry := range p.Committed {
+		src := filepath.Clean(entry)
+		if _, ok := roots[src]; !ok {
+			return nil, fmt.Errorf(`%s: "committed" lists source roots, each of them a key of "roots"; %q is not one`, path, entry)
+		}
+		if !slices.Contains(committed, src) {
+			committed = append(committed, src)
+		}
+	}
+	p.Committed = committed
 	for i, e := range p.Exclude {
 		p.Exclude[i] = filepath.Clean(e)
 	}
@@ -111,6 +152,77 @@ func readProject(path string) (*project, error) {
 		}
 	}
 	return &p, nil
+}
+
+// misspeltKey finds, in the JSON object data read into a struct of type t,
+// a key that names a field in another letter case than the field's tag,
+// and returns it with the tag; the objects of the fields that are structs
+// are looked into as well. It returns "", "" when every key is a tag, or
+// none (which the decoder has refused already).
+func misspeltKey(data []byte, t reflect.Type) (key, want string) {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	var object map[string]json.RawMessage
+	if t.Kind() != reflect.Struct || json.Unmarshal(data, &object) != nil {
+		return "", ""
+	}
+	for _, key := range slices.Sorted(maps.Keys(object)) {
+		for i := range t.NumField() {
+			tag, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+			switch {
+			case tag == "" || !strings.EqualFold(tag, key):
+				continue
+			case tag != key:
+				return key, tag
+			}
+			if key, want := misspeltKey(object[key], t.Field(i).Type); key != "" {
+				return key, want
+			}
+		}
+	}
+	return "", ""
+}
+
+// separateDirectories fails unless the roots and their outputs are separate
+// directories, none of them another or inside another. With a root inside a
+// root, or two roots compiling into one directory, a source has two places
+// to compile into and an output two roots to be mirrored from: which one
+// the build took depended on the order of a map, and an output a package
+// commits could be rewritten or removed by the build of the root beside it.
+func separateDirectories(roots map[string]string) error {
+	type directory struct {
+		path string
+		root string // the root it is the output of; "" for a root
+	}
+	// The roots first, then their outputs, each by name: the error names
+	// the same pair at every run, and two roots before a root's output.
+	var dirs []directory
+	sources := slices.Sorted(maps.Keys(roots))
+	for _, src := range sources {
+		dirs = append(dirs, directory{path: src})
+	}
+	for _, src := range sources {
+		dirs = append(dirs, directory{path: roots[src], root: src})
+	}
+	for i, a := range dirs {
+		for _, b := range dirs[i+1:] {
+			inner, outer := b.path, a.path
+			if _, ok := under(a.path, b.path); ok {
+				inner, outer = a.path, b.path
+			}
+			_, inside := under(inner, outer)
+			switch {
+			case a.path == b.path && a.root != "":
+				return fmt.Errorf("the roots %q and %q have one output, %q: each root compiles into a directory of its own", a.root, b.root, a.path)
+			case a.path == b.path:
+				return fmt.Errorf("%q is a root and the output of %q: roots and their outputs are separate directories", a.path, b.root)
+			case inside:
+				return fmt.Errorf("%q lies inside %q: roots and their outputs are separate directories, none inside another, so that every file compiles into one place", inner, outer)
+			}
+		}
+	}
+	return nil
 }
 
 // isClassName reports whether s is a fully qualified class name: identifiers
@@ -129,19 +241,50 @@ func isClassName(s string) bool {
 	return true
 }
 
-// rebased is the project with its roots and excludes made relative to the
-// working directory, for a project file in dir: an installed package's.
+// rebased is the project with its roots, committed roots and excludes made
+// relative to the working directory, for a project file in dir: an
+// installed package's.
 func (p *project) rebased(dir string) *project {
 	q := *p
 	q.Roots = make(map[string]string, len(p.Roots))
 	for src, out := range p.Roots {
 		q.Roots[filepath.Join(dir, src)] = filepath.Join(dir, out)
 	}
+	q.Committed = make([]string, len(p.Committed))
+	for i, src := range p.Committed {
+		q.Committed[i] = filepath.Join(dir, src)
+	}
 	q.Exclude = make([]string, len(p.Exclude))
 	for i, e := range p.Exclude {
 		q.Exclude[i] = filepath.Join(dir, e)
 	}
 	return &q
+}
+
+// commits reports whether src is a root whose outputs the project commits.
+func (p *project) commits(src string) bool {
+	return slices.Contains(p.Committed, src)
+}
+
+// missingOutputs lists what the output directory of the root src lacks of
+// its compiled files, sorted: the directory itself when there is none, else
+// the .php of each .phn the build would compile. It asks for presence only,
+// so it needs no program: whether an output is current is for the project's
+// own gate to say (design/tooling.md §3.7).
+func (p *project) missingOutputs(src string) []string {
+	out := p.Roots[src]
+	if st, err := os.Stat(out); err != nil || !st.IsDir() {
+		return []string{out}
+	}
+	var missing []string
+	for _, in := range collect([]string{src}, p.isOutput, ".phn") {
+		dst := p.outputPath(in)
+		if st, err := os.Stat(dst); err != nil || st.IsDir() {
+			missing = append(missing, dst)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 // requireRoots fails unless the project file names roots: build and check
