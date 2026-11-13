@@ -501,17 +501,23 @@ func (p *Parser) typeArgs() []ast.TypeExpr {
 }
 
 // closeAngle consumes a '>' — splitting a '>>' or '>=' token when nested
-// type arguments end together.
+// type arguments end together. The split goes into a new token slice and
+// never into the one it found: a guess (looksLikeTypeArgs) holds the old
+// slice to go back to, and going back must find every token as the lexer
+// left it.
 func (p *Parser) closeAngle() {
 	switch p.kind() {
 	case token.Kind('>'):
 		p.next()
 	case token.T_SR, token.T_IS_GREATER_OR_EQUAL:
-		// Split the token in place: keep the second half as the current token.
+		// The first half is consumed, the second is the current token.
 		t := p.toks[p.i]
-		rest := token.Token{Kind: token.Kind(t.Text(p.src)[1]), Start: t.Start + 1, End: t.End, Line: t.Line}
-		p.toks[p.i] = token.Token{Kind: token.Kind('>'), Start: t.Start, End: t.Start + 1, Line: t.Line}
-		p.toks = append(p.toks[:p.i+1], append([]token.Token{rest}, p.toks[p.i+1:]...)...)
+		toks := make([]token.Token, 0, len(p.toks)+1)
+		toks = append(toks, p.toks[:p.i]...)
+		toks = append(toks,
+			token.Token{Kind: token.Kind('>'), Start: t.Start, End: t.Start + 1, Line: t.Line},
+			token.Token{Kind: token.Kind(t.Text(p.src)[1]), Start: t.Start + 1, End: t.End, Line: t.Line})
+		p.toks = append(toks, p.toks[p.i+1:]...)
 		p.next()
 	default:
 		p.errorf("unexpected %s, expecting '>'", p.describe())
