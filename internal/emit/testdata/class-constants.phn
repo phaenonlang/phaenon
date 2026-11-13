@@ -1,0 +1,71 @@
+namespace App\Constants;
+
+use Closure;
+
+// A class constant's type is erased as a property's is: PHP gets the
+// native type, a @var tag keeps what the erasure lost.
+
+type Weights = map<string, int>;
+
+interface Limits
+{
+    const list<int> STEPS = [1, 2, 3];
+
+    /** The step taken first. */
+    const int FIRST = 1;
+}
+
+class Table implements Limits
+{
+    const list<string> NAMES = ['a', 'b'];
+
+    private const map<string, int> WEIGHTS = ['a' => 1, 'b' => 2];
+
+    /** What a missing name weighs. */
+    final protected const ?list<int> FALLBACK = null;
+
+    /**
+     * Two constants, one type.
+     */
+    public const list<string> HEAD = ['a'], TAIL = ['b'];
+
+    #[\Deprecated(message: 'use NAMES')]
+    const list<string> OLD = self::NAMES;
+
+    const (int, string) PAIR = [1, 'a'];
+
+    const Weights DEFAULTS = ['a' => 1];
+
+    const class<Limits> KIND = self::class;
+
+    const bytes MAGIC = (bytes) "\x89PNG";
+
+    // Plain PHP types stay as written.
+    const int MAX = 3;
+    const string|int EITHER = 'x';
+    const ?Closure NONE = null;
+    const array UNTYPED = [];
+    const MIXED = 1;
+
+    weight(string $name): int => self::WEIGHTS[$name] ?? self::MAX;
+}
+
+enum Level: string
+{
+    case Low = 'low';
+    case High = 'high';
+
+    const list<Level> ALL = [self::Low, self::High];
+}
+
+trait Named
+{
+    protected const list<string> ALIASES = [];
+}
+
+function limits(): Limits
+{
+    return new class implements Limits {
+        const list<int> MORE = [4, 5];
+    };
+}

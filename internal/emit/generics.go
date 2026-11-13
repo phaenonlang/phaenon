@@ -57,7 +57,7 @@ func hasGenerics(f *ast.File) bool {
 		case *ast.Cast:
 			found = found || n.Op == token.T_BYTES_CAST
 		case *ast.NamedType:
-			if len(n.TypeArgs) > 0 || isAliasCandidate(n) {
+			if len(n.TypeArgs) > 0 || isAliasCandidate(n) || isBytes(n) {
 				found = true
 			}
 		case *ast.Call:
@@ -130,7 +130,7 @@ func (l *lowering) stmt(s ast.Stmt) error {
 		l.blank(s.S)
 		return nil
 	case *ast.ClassDecl:
-		return l.classDecl(s)
+		return l.classDecl(s, nil)
 	case *ast.FunctionDecl:
 		return l.funcDecl(s)
 	case *ast.Block:
@@ -483,12 +483,19 @@ func (l *lowering) eraseType(t ast.TypeExpr, sc *scope, override string) bool {
 func mentionsBytes(t ast.TypeExpr) bool {
 	found := false
 	ast.Inspect(t, func(n ast.Node) bool {
-		if nt, ok := n.(*ast.NamedType); ok && len(nt.Name.Parts) == 1 && strings.EqualFold(nt.Name.Parts[0], "bytes") {
+		if nt, ok := n.(*ast.NamedType); ok && isBytes(nt) {
 			found = true
 		}
 		return !found
 	})
 	return found
+}
+
+// isBytes: the type bytes, which PHP would read as a class of that name.
+// It is Phaenon syntax (hasGenerics) and no alias candidate: its erasure,
+// string, says all a docblock could.
+func isBytes(n *ast.NamedType) bool {
+	return len(n.Name.Parts) == 1 && strings.EqualFold(n.Name.Parts[0], "bytes")
 }
 
 // ------------------------------------------------------------------ docblocks
@@ -825,11 +832,22 @@ func (l *lowering) funcDecl(d *ast.FunctionDecl) error {
 
 // ------------------------------------------------------------------ classes
 
-func (l *lowering) classDecl(d *ast.ClassDecl) error {
+// classDecl lowers a class-like declaration. An anonymous class is one as
+// well: its `extends Box<int>` and the Phaenon types of its members are no
+// more PHP than a named class's, and a method of it that overrides a
+// generic one is held to the override-erasure rule. The program keeps no
+// anonymous class by its declaration, so it is declared here as the
+// checker declared it; outer is the scope of the expression it stands in,
+// which its constructor arguments belong to.
+func (l *lowering) classDecl(d *ast.ClassDecl, outer *scope) error {
 	sc := l.topScope(d.S.Start)
 	var cl *program.Class
+	doc := d.Doc
 	if d.Name != nil {
 		cl = l.p.Class(sc.res.Scope().Prefix() + d.Name.Name)
+	} else {
+		cl = l.p.DeclareAnonymous(l.f, sc.res.Scope(), d)
+		doc = l.e.docBefore(d.S.Start)
 	}
 	if cl == nil {
 		return l.errorf(d, "class not found in the program (internal error)")
@@ -861,9 +879,14 @@ func (l *lowering) classDecl(d *ast.ClassDecl) error {
 			l.removeTypeArgs(e)
 		}
 	}
-	l.addDoc(d.S.Start, d.Doc, tags)
+	l.addDoc(d.S.Start, doc, tags)
 	if err := l.declHead(d.Attrs, nil, sc); err != nil {
 		return err
+	}
+	if d.Args != nil && outer != nil {
+		if err := l.walk(d.Args, outer); err != nil {
+			return err
+		}
 	}
 
 	for _, m := range d.Members {
@@ -887,17 +910,50 @@ func (l *lowering) classDecl(d *ast.ClassDecl) error {
 					}
 				}
 			}
-			for _, h := range m.Hooks {
-				if err := l.walk(h, psc); err != nil {
+			if err := l.hooks(m.Hooks, psc); err != nil {
+				return err
+			}
+		case *ast.ClassConstDecl:
+			// A typed constant's type is native PHP like a property's.
+			csc := sc.child()
+			if l.eraseType(m.Type, csc, "") {
+				l.addDoc(m.S.Start, m.Doc, []string{"@var " + l.docType(m.Type, csc)})
+			}
+			if err := l.declHead(m.Attrs, nil, csc); err != nil {
+				return err
+			}
+			for _, it := range m.Consts {
+				if err := l.walk(it.Value, csc); err != nil {
 					return err
 				}
 			}
-		case *ast.ClassConstDecl:
+		case *ast.EnumCase:
 			if err := l.walk(m, sc.child()); err != nil {
 				return err
 			}
-		case *ast.EnumCase:
-			if err := l.walk(m, sc.child()); err != nil {
+		}
+	}
+	return nil
+}
+
+// hooks lowers the hooks of a property or of a promoted constructor
+// parameter. A set hook's parameter is typed like any other: its Phaenon
+// type is erased and kept in a @param tag before the hook, where PHPStan
+// reads it (the tag matters when the hook takes more than the property
+// holds). The tree keeps no docblock for a hook, so the one before it is
+// looked up in the source.
+func (l *lowering) hooks(hooks []*ast.PropertyHook, sc *scope) error {
+	for _, h := range hooks {
+		tags := l.signature(h.Params, nil, sc, nil)
+		l.addDoc(h.S.Start, l.e.docBefore(h.S.Start), tags)
+		if err := l.declHead(h.Attrs, h.Params, sc); err != nil {
+			return err
+		}
+		if err := l.walkBody(h.Body, sc); err != nil {
+			return err
+		}
+		if h.Expr != nil {
+			if err := l.walk(h.Expr, sc); err != nil {
 				return err
 			}
 		}
@@ -989,11 +1045,8 @@ func (l *lowering) walk(root ast.Node, sc *scope) error {
 		}
 		switch n := n.(type) {
 		case *ast.ClassDecl:
-			if n.Name != nil {
-				err = l.classDecl(n)
-				return false
-			}
-			return true // anonymous classes are walked as code
+			err = l.classDecl(n, sc)
+			return false
 		case *ast.FunctionDecl:
 			err = l.funcDecl(n)
 			return false
@@ -1081,8 +1134,9 @@ func (l *lowering) attrGroup(g *ast.AttrGroup, sc *scope) error {
 }
 
 // declHead lowers what a declaration holds outside its body and signature:
-// its attributes, and its parameters' attributes and defaults. The walk
-// does not descend into declarations, so each kind calls this itself.
+// its attributes, and its parameters' attributes, defaults and, on a
+// promoted constructor parameter, hooks. The walk does not descend into
+// declarations, so each kind calls this itself.
 func (l *lowering) declHead(attrs []*ast.AttrGroup, params []*ast.Param, sc *scope) error {
 	for _, g := range attrs {
 		if err := l.attrGroup(g, sc); err != nil {
@@ -1099,6 +1153,9 @@ func (l *lowering) declHead(attrs []*ast.AttrGroup, params []*ast.Param, sc *sco
 			if err := l.walk(p.Default, sc); err != nil {
 				return err
 			}
+		}
+		if err := l.hooks(p.Hooks, sc); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1139,7 +1196,7 @@ func (l *lowering) callSite(argsAfter int, args *ast.ArgList, typeArgs []ast.Typ
 
 func (l *lowering) newExpr(n *ast.New, sc *scope) error {
 	if n.Anon != nil {
-		return l.walk(n.Anon, sc)
+		return l.classDecl(n.Anon, sc)
 	}
 	if _, ok := n.Class.(*ast.Name); !ok {
 		if err := l.walk(n.Class, sc); err != nil {
