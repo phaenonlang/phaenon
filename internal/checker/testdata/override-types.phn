@@ -1,0 +1,427 @@
+// An override is held to the types PHP erases. `list<int>` and
+// `list<string>` are both PHP's array, so PHP links the class; the override
+// is wrong all the same when the two types are certainly apart, which is
+// what PHPStan reports as method.childParameterType and
+// method.childReturnType. A type that only may fit passes, there and here:
+// a child may narrow what its parent accepts. Written as PHP with
+// docblocks, so that PHPStan judges the same lines.
+namespace App\OverrideTypes;
+
+interface Thing
+{
+}
+
+interface Unrelated
+{
+}
+
+class Open implements Thing
+{
+}
+
+class Other
+{
+}
+
+final class Leaf implements Thing
+{
+}
+
+/**
+ * @template T of object
+ */
+interface Box
+{
+}
+
+/**
+ * @template K of array-key
+ * @template V
+ */
+interface Coll
+{
+}
+
+abstract class Base
+{
+    /** @param list<int> $x */
+    abstract public function listParam(array $x): void;
+
+    /** @return list<int> */
+    abstract public function listReturn(): array;
+
+    /** @return array<string, int> */
+    abstract public function mapValue(): array;
+
+    /** @return array<int, string> */
+    abstract public function mapKey(): array;
+
+    /** @return list<string> */
+    abstract public function listOrMap(): array;
+
+    /** @param array<string> $x */
+    abstract public function mapOrList(array $x): void;
+
+    /** @return array{a: int} */
+    abstract public function shapeValue(): array;
+
+    /** @return array{a: int, b: int} */
+    abstract public function shapeKey(): array;
+
+    /** @param array{a: int} $x */
+    abstract public function shapeParam(array $x): void;
+
+    /** @return array<string, int> */
+    abstract public function shapeForMap(): array;
+
+    /** @return array{a: int} */
+    abstract public function mapForShape(): array;
+
+    /** @return non-empty-array<string, int> */
+    abstract public function emptyShape(): array;
+
+    /** @return array{int, string} */
+    abstract public function tuple(): array;
+
+    /** @return array<string, list<int>> */
+    abstract public function nested(): array;
+
+    /** @return iterable<int> */
+    abstract public function iterableValue(): iterable;
+
+    /** @return iterable<string, Open> */
+    abstract public function arrayForIterable(): iterable;
+
+    /** @return class-string<Open> */
+    abstract public function classString(): string;
+
+    /** @return Box<Open> */
+    abstract public function typeArgument(): Box;
+
+    /** @param Box<Thing> $x */
+    abstract public function invariantArgument(Box $x): void;
+
+    /** @return list<Open> */
+    abstract public function unrelatedClasses(): array;
+
+    /** @return list<Unrelated> */
+    abstract public function finalClass(): array;
+
+    /** @return callable(int): string */
+    abstract public function signature(): callable;
+
+    /** @param \Closure(int): string $x */
+    abstract public function closureParam(\Closure $x): void;
+
+    /** @return 'a'|'b' */
+    abstract public function literal(): string;
+
+    /** @return int<0, 10> */
+    abstract public function range(): int;
+
+    /** @return true */
+    abstract public function boolean(): bool;
+
+    /**
+     * @template T of object
+     * @param class-string<T> $x
+     * @return Box<T>
+     */
+    abstract public function narrowerBound(string $x): Box;
+
+    /** @return list<int> */
+    abstract public static function staticReturn(): array;
+
+    // What may fit.
+
+    /** @param array<string, mixed> $x */
+    abstract public function narrowedValue(array $x): void;
+
+    /** @param class-string $x */
+    abstract public function narrowedClass(string $x): void;
+
+    /** @param 'a'|'b' $x */
+    abstract public function narrowedLiteral(string $x): void;
+
+    /** @param list<Thing> $x */
+    abstract public function narrowedElement(array $x): void;
+
+    /** @return list<int> */
+    abstract public function widened(): array;
+
+    /** @return list<Open> */
+    abstract public function interfaceElement(): array;
+
+    /** @return list<int>|null */
+    abstract public function sharedNull(): ?array;
+
+    /** @return Coll<array-key, Open> */
+    abstract public function arrayKey(): Coll;
+
+    /** @return string|array<string> */
+    abstract public function sharedMember(): string|array;
+
+    /**
+     * @template T of object
+     * @param class-string<T> $x
+     * @return Box<T>
+     */
+    abstract public function renamedParameter(string $x): Box;
+}
+
+abstract class Child extends Base
+{
+    /** @param list<string> $x */
+    public function listParam(array $x): void // want P2502 "parameter $x of App\OverrideTypes\Child::listParam() (list<string>) is not contravariant with App\OverrideTypes\Base::listParam() (list<int>)"
+    {
+    }
+
+    /** @return list<string> */
+    public function listReturn(): array // want P2502 "return type list<string> of App\OverrideTypes\Child::listReturn() is not covariant with App\OverrideTypes\Base::listReturn() (list<int>)"
+    {
+        return [];
+    }
+
+    /** @return array<string, string> */
+    public function mapValue(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return array<string, string> */
+    public function mapKey(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return array<string, string> */
+    public function listOrMap(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @param list<int> $x */
+    public function mapOrList(array $x): void // want P2502
+    {
+    }
+
+    /** @return array{a: string} */
+    public function shapeValue(): array // want P2502
+    {
+        return ['a' => 'x'];
+    }
+
+    /** @return array{a: int} */
+    public function shapeKey(): array // want P2502
+    {
+        return ['a' => 1];
+    }
+
+    /** @param array{a: int, b: int} $x */
+    public function shapeParam(array $x): void // want P2502
+    {
+    }
+
+    /** @return array{a: string} */
+    public function shapeForMap(): array // want P2502
+    {
+        return ['a' => 'x'];
+    }
+
+    /** @return array<string, string> */
+    public function mapForShape(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return array{} */
+    public function emptyShape(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return array{string, int} */
+    public function tuple(): array // want P2502
+    {
+        return ['a', 1];
+    }
+
+    /** @return array<string, list<string>> */
+    public function nested(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return iterable<string> */
+    public function iterableValue(): iterable // want P2502
+    {
+        return [];
+    }
+
+    /** @return array<int, Open> */
+    public function arrayForIterable(): iterable // want P2502
+    {
+        return [];
+    }
+
+    /** @return class-string<Other> */
+    public function classString(): string // want P2502
+    {
+        return Other::class;
+    }
+
+    /** @return Box<Other> */
+    public function typeArgument(): Box // want P2502
+    {
+        throw new \LogicException();
+    }
+
+    /** @param Box<Open> $x */
+    public function invariantArgument(Box $x): void // want P2502
+    {
+    }
+
+    /** @return list<Other> */
+    public function unrelatedClasses(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return list<Leaf> */
+    public function finalClass(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return callable(string): int */
+    public function signature(): callable // want P2502
+    {
+        return 'strlen';
+    }
+
+    /** @param \Closure(string): int $x */
+    public function closureParam(\Closure $x): void // want P2502
+    {
+    }
+
+    /** @return 'c' */
+    public function literal(): string // want P2502
+    {
+        return 'c';
+    }
+
+    /** @return int<20, 30> */
+    public function range(): int // want P2502
+    {
+        return 20;
+    }
+
+    /** @return false */
+    public function boolean(): bool // want P2502
+    {
+        return false;
+    }
+
+    /**
+     * @template TOpen of Open
+     * @param class-string<TOpen> $x
+     * @return Box<TOpen>
+     */
+    public function narrowerBound(string $x): Box // want P2502
+    {
+        throw new \LogicException();
+    }
+
+    // PHP holds a static method to its parent's signature as it does any
+    // other; PHPStan compares these only with reportStaticMethodSignatures.
+    /** @return list<string> */
+    public static function staticReturn(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @param array<string, string> $x */
+    public function narrowedValue(array $x): void
+    {
+    }
+
+    /** @param class-string<Thing> $x */
+    public function narrowedClass(string $x): void
+    {
+    }
+
+    /** @param 'a' $x */
+    public function narrowedLiteral(string $x): void
+    {
+    }
+
+    /** @param list<Leaf> $x */
+    public function narrowedElement(array $x): void
+    {
+    }
+
+    /** @return array<int> */
+    public function widened(): array
+    {
+        return [];
+    }
+
+    // A subclass of Open may implement Unrelated.
+    /** @return list<Unrelated> */
+    public function interfaceElement(): array
+    {
+        return [];
+    }
+
+    // Both may be null: PHPStan lets it pass, and so does the checker.
+    /** @return list<string>|null */
+    public function sharedNull(): ?array
+    {
+        return null;
+    }
+
+    /** @return Coll<int, Open> */
+    public function arrayKey(): Coll
+    {
+        throw new \LogicException();
+    }
+
+    /** @return string|array<int> */
+    public function sharedMember(): string|array
+    {
+        return '';
+    }
+
+    /**
+     * @template TObject of object
+     * @param class-string<TObject> $x
+     * @return Box<TObject>
+     */
+    public function renamedParameter(string $x): Box
+    {
+        throw new \LogicException();
+    }
+}
+
+// Every interface that declares the method counts (override-interfaces.phn),
+// with the types its docblock gives.
+interface Ids
+{
+    /** @return list<int> */
+    public function all(): array;
+}
+
+interface Labels
+{
+    /** @return list<string> */
+    public function all(): array;
+}
+
+abstract class IdsAndLabels implements Ids, Labels
+{
+    /** @return list<int> */
+    public function all(): array // want P2502 "Labels::all() (list<string>)"
+    {
+        return [];
+    }
+}

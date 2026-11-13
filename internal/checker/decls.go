@@ -1013,7 +1013,7 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method) 
 			mismatch(cp.Span, "parameter $%s of %s::%s() must be optional like in %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
 		}
 		pt, ct := bind(pp.Type, parent.Class), bind(cp.Type, cl)
-		if pt != nil && ct != nil && !types.IsSubtype(types.Erase(pt), types.Erase(ct), c.p) && !types.IsSubtype(pt, ct, c.p) {
+		if pt != nil && ct != nil && !c.overrideFits(pt, ct) {
 			mismatch(cp.Span, "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
 				cp.Name, cl.Name, m.Name, types.Print(ct), parent.Class.Name, parent.Name, types.Print(pt))
 		}
@@ -1033,7 +1033,7 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method) 
 			if _, isVoid := pr.(types.Void); !isVoid && !types.IsMixed(pr) {
 				mismatch(m.Span, "%s::%s() must declare a return type compatible with %s::%s() (%s)", cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
 			}
-		} else if !types.IsSubtype(cr, pr, c.p) && !types.IsSubtype(types.Erase(cr), types.Erase(pr), c.p) {
+		} else if !c.overrideFits(cr, pr) {
 			if _, parentVoid := pr.(types.Void); !(parentVoid && isVoidLike(cr)) {
 				mismatch(m.Span, "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
 					types.Print(cr), cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
@@ -1041,6 +1041,27 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method) 
 		}
 	}
 	return broken
+}
+
+// overrideFits reports whether sub may stand where an overridden method
+// declares super: the child's return type for the parent's, the parent's
+// parameter type for the child's. PHP's own rule is on the types it sees,
+// the erased ones, and it is kept whole. Phaenon's types say more
+// (`list<int>` and `list<string>` are both PHP's array), and there the
+// override is wrong when the two are certainly apart: what PHPStan reports
+// as method.childParameterType and method.childReturnType. A type that
+// only may fit passes, as it does there. A child that writes
+// `map<string, mixed>` where a vendor parent has a bare `array`, or
+// `class<User>` for its `class-string`, narrows what the parent left
+// open, and code that works is full of it.
+func (c *Checker) overrideFits(sub, super types.Type) bool {
+	if types.IsSubtype(sub, super, c.p) {
+		return true
+	}
+	if !types.IsSubtype(types.Erase(sub), types.Erase(super), c.p) {
+		return false
+	}
+	return !types.NeverSubtype(sub, super, c.p)
 }
 
 func isVoidLike(t types.Type) bool {

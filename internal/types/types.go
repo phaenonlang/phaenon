@@ -49,6 +49,10 @@ type Hierarchy interface {
 	IteratorArgs(c Class) (key, value Type, ok bool)
 	// IsInvokable reports a class with an __invoke() method: a callable.
 	IsInvokable(name string) bool
+	// IsInterface reports whether the name is an interface's. Two classes
+	// neither of which extends the other share no instance; a class and an
+	// interface it does not implement may, in a subclass.
+	IsInterface(name string) bool
 }
 
 // Variance of a class type parameter.
