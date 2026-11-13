@@ -17,9 +17,13 @@
 // A library that commits its outputs (design/roadmap.md D28) is a fixture
 // of its own: a git repository the real phn built, installed from the
 // archive git makes of it and as a path repository, by projects with the
-// plugin and without it (committed_test.go). TestProjectFileReadersAgree
-// holds the plugin's reader of phaenon.json to the compiler's reference,
-// and needs php alone.
+// plugin and without it (committed_test.go). A library that goes from
+// shipping its sources to committing its outputs is another: a repository
+// with a tag for each, upgraded as a git checkout and as an archive
+// (upgrade_test.go). TestProjectFileReadersAgree holds the plugin's reader
+// of phaenon.json to the compiler's reference, and needs php alone, as do
+// TestCommittedOutputChecksAgree and TestEarlierBuildsAgree for its check
+// of committed outputs and its removal of what an earlier build left.
 //
 // The package holds no Go code; it exists for its tests.
 package distribution
