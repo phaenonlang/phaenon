@@ -186,6 +186,14 @@ func (k *kit) checkout() dependency {
 	return dependency{name: "acme/kit", constraint: "*", repository: pathRepository(k.dir, "acme/kit", "1.0.0", true)}
 }
 
+// mirrored is the library as a path repository Composer copies, as it does
+// where it cannot link: the working tree without what .gitattributes keeps
+// out of an archive, and with what git ignores, the outputs of tests among
+// them.
+func (k *kit) mirrored() dependency {
+	return dependency{name: "acme/kit", constraint: "*", repository: pathRepository(k.dir, "acme/kit", "1.0.0", false)}
+}
+
 // expectCommitted fails the test unless the checkout's .src/ is what the
 // commit holds, which is the question the library's own gate asks of git
 // (design/tooling.md §3.7): nothing changed or removed, nothing added.
@@ -319,7 +327,10 @@ func TestCommittedLibraryIsPlainPHP(t *testing.T) {
 		expectAbsent(t, filepath.Join(p.dir, "vendor", "phaenon"))
 	}
 	w.expectRuns()
-	if strings.Contains(out, "phaenon") {
+	// Composer names the directory a path repository links to, and the
+	// test's own directory may be named after the project: what must not
+	// appear is the plugin, installed or speaking.
+	if strings.Contains(strings.ReplaceAll(out, w.base, ""), "phaenon") {
 		t.Errorf("Composer spoke of Phaenon to a project of plain PHP:\n%s", out)
 	}
 }
@@ -354,6 +365,33 @@ func TestCommittedLibraryIsLeftAsInstalled(t *testing.T) {
 		t.Errorf("phn build --vendor: %v\n%s%s", err, stdout, stderr)
 	}
 	p.expectShipped(shipped)
+}
+
+// TestCommittedLibraryMirrored: a path repository Composer copies holds the
+// library's outputs of tests, which git ignores, and not tests/ itself,
+// which the archive leaves out. The install has no root to build: nothing
+// is fetched or run, and .src/ is the checkout's, with no stamp.
+func TestCommittedLibraryMirrored(t *testing.T) {
+	w := newWorld(t, "")
+	k := w.newKit("kit", nil)
+	p := w.newProject("app", project{dependencies: []dependency{k.mirrored()}})
+
+	out := p.mustComposer("install")
+
+	w.expectRuns()
+	expectAbsent(t, p.installed())
+	if strings.Contains(out, "phaenon/phn:") {
+		t.Errorf("the plugin spoke with nothing to build:\n%s", out)
+	}
+	installed := filepath.Join(p.dir, "vendor", "acme", "kit")
+	if info, err := os.Lstat(installed); err != nil || !info.IsDir() {
+		t.Fatalf("vendor/acme/kit is not a copy (%v)", err)
+	}
+	expectAbsent(t, filepath.Join(installed, "tests"))
+	if got, want := snapshot(t, filepath.Join(installed, ".src")), snapshot(t, filepath.Join(k.dir, ".src")); !maps.Equal(got, want) {
+		t.Errorf("vendor/acme/kit/.src holds %v, want the checkout's %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
+	}
+	p.greet()
 }
 
 // TestCommittedRootBuiltByAnEarlierRelease: a committed root that holds the
