@@ -1,7 +1,7 @@
 namespace UnusedImports;
 
-// An import is used when the file mentions its alias outside the use
-// statement: alone, or as the first segment of a qualified name, as
+// An import is used when the file names its alias outside the use
+// statements: alone, or as the first segment of a qualified name, as
 // `#[ORM\Column]` after `use Doctrine\ORM\Mapping as ORM;` is. The same
 // word after a backslash is another name's segment.
 
@@ -11,6 +11,31 @@ use ArrayObject as Bag;
 use SplStack as Stack; // want P2013 "SplStack"
 use Random as Rnd;
 use Countable as Counter; // want P2013 "Countable"
+
+// What only looks like the alias is no use of it: a variable, a member
+// after -> or ::, a string, a // or # comment, a name in another import.
+use ArrayIterator; // want P2013
+use SplQueue; // want P2013
+use SplObjectStorage as Storage; // want P2013 "SplObjectStorage"
+use SplFixedArray; // want P2013
+use SplHeap as Heap; // want P2013 "SplHeap"
+use SplDoublyLinkedList as Linked; // want P2013 "SplDoublyLinkedList"
+use Linked\Node; // want P2013 "Linked\Node"
+use function strtoupper as upper; // want P2013 "strtoupper"
+use const PHP_INT_MAX as MAX; // want P2013 "PHP_INT_MAX"
+
+// What names a class, a function or a constant is: a docblock's type, a
+// block comment's, ::class, instanceof, catch, an attribute, a call.
+use SplMinHeap;
+use SplMaxHeap;
+use SplPriorityQueue as Queue;
+use SplTempFileObject as Temp;
+use Throwable as Failure;
+use Attribute;
+use JsonSerializable as Json;
+use Stringable;
+use function strlen as length;
+use const PHP_EOL as EOL;
 
 final class Uses
 {
@@ -29,5 +54,70 @@ final class Uses
     {
         // Not the import: Vendor\Counter names another class.
         return new DateTimeImmutable('now');
+    }
+}
+
+#[Attribute]
+final class Lookalikes implements Json
+{
+    public const MAX = 10;
+
+    public int $arrayIterator = 0;
+
+    public int $storage = 0;
+
+    /** @var list<int> */
+    public array $heap = [];
+
+    public function storage(): int
+    {
+        return $this->storage;
+    }
+
+    public static function upper(): int
+    {
+        return self::MAX;
+    }
+
+    /**
+     * @param int $arrayIterator
+     * @return array<string, int>
+     */
+    public function variables(int $arrayIterator, ?self $other): array
+    {
+        // SplFixedArray would do as well.
+        # So would a SplFixedArray of ints.
+        $heap = $other?->storage;
+        $splQueue = $arrayIterator + $this->arrayIterator + $this->storage() + ($heap ?? 0);
+        $linked = "SplQueue {$this->storage} $this->arrayIterator";
+        $text = <<<Heap
+            A Heap of {$this->heap[0]} and {$other?->storage}
+            Heap;
+        return [
+            'SplQueue' => $splQueue,
+            'ArrayIterator' => self::upper() + static::MAX,
+            'Storage' => strlen($linked . $text . 'Linked\Node'),
+        ];
+    }
+
+    /**
+     * @return array{min: class-string, text: Stringable|null}
+     */
+    public function jsonSerialize(): array
+    {
+        return ['min' => SplMinHeap::class, 'text' => null];
+    }
+
+    /**
+     * @param Queue<int, string> $queue
+     */
+    public function names(object $value, object $queue): string
+    {
+        /* @var Temp $value */
+        try {
+            return ($value instanceof SplMaxHeap ? 'heap' : 'other') . length($queue::class) . EOL;
+        } catch (Failure) {
+            return '';
+        }
     }
 }
