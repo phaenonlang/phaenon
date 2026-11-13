@@ -451,6 +451,7 @@ phn stdlib --out DIR [--check]                         # the compiled stdlib (De
 phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them, but for the roots they commit
 phn trace [--root PREFIX=LOCAL]... [text...]  # positions in compiled files → .phn: text, workflow commands, XML reports on stdin
 phn version                               # the version a release sets, dev otherwise
+phn help                                  # the usage, on standard output (also -h, --help); phn <command> --help: its options
 phn lex   [--php] file                    # token stream
 phn print [--php] file                    # parse and pretty-print
 ```
