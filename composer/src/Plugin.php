@@ -20,10 +20,11 @@ use Composer\Util\ProcessExecutor;
  * the autoloader, `--classmap-authoritative` included, is written over outputs that exist.
  *
  * An installed package may commit the outputs of some roots (its phaenon.json's `committed`,
- * design/tooling.md §3.7, T18): those are left as installed. A package whose installed roots are
- * all committed is nothing to build, and one that came without the outputs it commits fails the
- * dump before any binary is fetched, as a failed build does. Only a package says so, about itself:
- * the root project is built whatever it commits.
+ * design/tooling.md §3.7, T18): those are left as installed, but for what a build of an earlier
+ * release left in them, which is removed (EarlierBuild). A package whose installed roots are all
+ * committed is nothing to build, and one that came without the outputs it commits fails the dump
+ * before any binary is fetched and before anything is removed, as a failed build does. Only a
+ * package says so, about itself: the root project is built whatever it commits.
  *
  * A project with nothing to build, its own or installed, needs no binary, and the plugin does
  * nothing. An `install --no-autoloader` builds at the `dump-autoload` that follows. Under
@@ -67,6 +68,7 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         // directory its autoload paths are relative to.
         $projectDir = ComposerPlatform::getCwd();
         $packages = [];
+        $committing = [];
         $incomplete = 0;
         foreach (self::phaenonPackages($composer) as $name => [$version, $dir]) {
             // A file this reader refuses, or a root it cannot read, is phn's to report: the
@@ -81,17 +83,27 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
             foreach ($errors as $error) {
                 self::error($io, $error);
             }
-            foreach ($file->builtBefore($dir) as $output) {
-                self::warnOfAnEarlierBuild($io, trim($name . ' ' . $version), $dir, $output, $projectDir);
-            }
             if ($errors !== []) {
                 ++$incomplete;
-            } elseif (!$file->leavesNothingToBuild($dir)) {
+
+                continue;
+            }
+            if ($file->committed !== []) {
+                $committing[trim($name . ' ' . $version)] = [$file, $dir];
+            }
+            if (!$file->leavesNothingToBuild($dir)) {
                 $packages[] = $name;
             }
         }
         if ($incomplete > 0) {
             throw self::failure($io, ProjectFile::summary($incomplete), 1);
+        }
+        // Then, and only when every package came whole, what an earlier build left in a root its
+        // package now commits is removed. It takes no compiler.
+        foreach ($committing as $package => [$file, $dir]) {
+            foreach (EarlierBuild::clear($file, $dir) as $build) {
+                self::reportAnEarlierBuild($io, $build, (string) $package);
+            }
         }
         $buildsProject = $settings->buildRoot && is_file($projectDir . '/phaenon.json');
         if ($packages === [] && !$buildsProject) {
@@ -164,23 +176,17 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
      * A committed root that holds the stamp of a build was built here by an earlier release of
      * the package, one that shipped its sources alone, and an upgrade that kept the directory (a
      * source install, which is a git checkout) left that build's outputs in it: a class the new
-     * release dropped still loads. The root is left as installed all the same, and the project
-     * is told how to clear it.
+     * release dropped still loads. EarlierBuild has removed them and the stamp, and one line
+     * says so; the next dump finds no stamp and says nothing. Where it could not, the line is a
+     * warning, and comes again until the directory is put right.
      */
-    private static function warnOfAnEarlierBuild(IOInterface $io, string $package, string $dir, string $output, string $projectDir): void
+    private static function reportAnEarlierBuild(IOInterface $io, EarlierBuild $build, string $package): void
     {
-        $shown = str_starts_with($dir, $projectDir . '/') ? substr($dir, \strlen($projectDir) + 1) : $dir;
-        $message = sprintf(
-            '%s: %s/%s is the stamp of an earlier build of this package, in a root it now commits. '
-            . 'Outputs of that build were left there, and those the release no longer has still load. %s',
-            $package,
-            $output,
-            ProjectFile::STAMP,
-            is_link($dir)
-                ? sprintf('The package is a link to a checkout: run `phn build` in %s, which removes them, and delete the stamp', $shown)
-                : sprintf('Reinstalling the package clears them: remove %s and run `composer install`', $shown),
-        );
-        $io->writeError('<warning>phaenon/phn: ' . str_replace('<', '\\<', $message) . '</warning>');
+        $message = 'phaenon/phn: ' . str_replace('<', '\\<', $build->report($package));
+        $io->writeError($build->isWarning() ? '<warning>' . $message . '</warning>' : $message);
+        foreach ($build->removed as $file) {
+            $io->writeError('  - removed ' . str_replace('<', '\\<', $file), true, IOInterface::VERBOSE);
+        }
     }
 
     private static function resolver(Composer $composer, IOInterface $io, Settings $settings): BinaryResolver

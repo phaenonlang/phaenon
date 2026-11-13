@@ -394,12 +394,21 @@ func TestCommittedLibraryMirrored(t *testing.T) {
 	p.greet()
 }
 
+// earlierBuildLine is the plugin's line about a committed root of acme/kit
+// that held the stamp of a build, up to what it did there.
+func earlierBuildLine(version string) string {
+	return "phaenon/phn: acme/kit " + version + ": .src/.phn-build is the stamp of an earlier build of this package, in a root it now commits: "
+}
+
 // TestCommittedRootBuiltByAnEarlierRelease: a committed root that holds the
 // stamp of a build was built here by a release that shipped its sources
 // alone, and an upgrade that kept the directory left that build's outputs
-// beside the committed ones. The plugin deletes nothing in a committed
-// root: it warns at each dump, naming the package and the way to clear the
-// directory, which differs for a copy and for a link to a checkout.
+// beside the committed ones. At the next dump the plugin removes the files
+// no source stands behind and the stamp, with no compiler, says so in one
+// line (and names each file under -v), and the package is byte for byte
+// what its archive shipped. The dump after that says nothing. In a link to
+// a checkout the files removed are the ones the library's own `phn build`
+// finds without a source.
 func TestCommittedRootBuiltByAnEarlierRelease(t *testing.T) {
 	w := newWorld(t, "")
 	k := w.newKit("kit", nil)
@@ -409,30 +418,42 @@ func TestCommittedRootBuiltByAnEarlierRelease(t *testing.T) {
 	left := map[string]string{".src/.phn-build": "phn 0.4.1\n", ".src/Legacy.php": "<?php\n\nnamespace Acme\\Kit;\n\nfinal class Legacy\n{\n}\n"}
 	for path, text := range left {
 		writeFile(t, filepath.Join(p.dir, "vendor", "acme", "kit", path), []byte(text), 0o644)
-		shipped[path] = text
 	}
 
-	out := p.mustComposer("dump-autoload")
+	out := p.mustComposer("dump-autoload", "-v")
 
-	want := "phaenon/phn: acme/kit 1.0.0: .src/.phn-build is the stamp of an earlier build of this package, in a root it now commits. " +
-		"Outputs of that build were left there, and those the release no longer has still load. " +
-		"Reinstalling the package clears them: remove vendor/acme/kit and run `composer install`\n"
+	want := earlierBuildLine("1.0.0") + "removed 1 file with no source behind it (.src/Legacy.php) and the stamp\n  - removed .src/Legacy.php\n"
 	if !strings.Contains(out, want) {
-		t.Errorf("composer's output lacks the warning:\n%s\nwant\n%s", out, want)
+		t.Errorf("composer's output lacks the line:\n%s\nwant\n%s", out, want)
 	}
 	w.expectRuns()
 	expectAbsent(t, p.installed())
 	p.expectShipped(shipped)
 
-	writeFile(t, filepath.Join(k.dir, ".src", ".phn-build"), []byte("phn 0.4.1\n"), 0o644)
+	if out := p.mustComposer("dump-autoload"); strings.Contains(out, "phaenon/phn:") {
+		t.Errorf("the dump after the clean-up should say nothing:\n%s", out)
+	}
+	p.expectShipped(shipped)
+
+	for path, text := range left {
+		writeFile(t, filepath.Join(k.dir, path), []byte(text), 0o644)
+	}
+	check := exec.Command(w.buildPhn(), "build", "--check")
+	check.Dir = k.dir
+	if found, err := check.CombinedOutput(); err == nil || !strings.Contains(string(found), ".src/Legacy.php: no source behind it\n") || strings.Count(string(found), "no source behind it") != 1 {
+		t.Fatalf("phn build --check in the library should find the one output with no source (%v):\n%s", err, found)
+	}
 	linked := w.newProject("linked", project{dependencies: []dependency{k.checkout()}, override: true})
 	out = linked.mustComposer("install")
-	if want := "phaenon/phn: acme/kit 1.0.0: .src/.phn-build is the stamp of an earlier build"; !strings.Contains(out, want) ||
-		!strings.Contains(out, "The package is a link to a checkout: run `phn build` in vendor/acme/kit, which removes them, and delete the stamp\n") {
-		t.Errorf("composer's output lacks the warning for a checkout:\n%s", out)
+	if want := earlierBuildLine("1.0.0") + "removed 1 file with no source behind it (.src/Legacy.php) and the stamp\n"; !strings.Contains(out, want) {
+		t.Errorf("composer's output lacks the line for a checkout:\n%s\nwant\n%s", out, want)
 	}
-	if _, err := os.Stat(filepath.Join(k.dir, ".src", ".phn-build")); err != nil {
-		t.Errorf("the stamp was removed from the committed root: %v", err)
+	// Nothing changed, added or removed under .src/, the stamp included.
+	k.expectCommitted()
+	check = exec.Command(w.buildPhn(), "build", "--check")
+	check.Dir = k.dir
+	if found, err := check.CombinedOutput(); err != nil {
+		t.Errorf("phn build --check in the library should find nothing left to remove (%v):\n%s", err, found)
 	}
 }
 
@@ -516,8 +537,9 @@ final class Keys
 // does, with an error naming the package, its version and the root and a
 // line saying what the project can do, before a binary is fetched or run:
 // PHN_BINARY names one, and it stays unused. The plugin does not build the
-// root instead. Under --quiet the error is all Composer prints. The real
-// phn, run by hand on the same install, fails with the same lines, whole.
+// root instead, and removes nothing from it, the stamp of an earlier build
+// or not. Under --quiet the error is all Composer prints. The real phn,
+// run by hand on the same install, fails with the same lines, whole.
 func TestCommittedLibraryWithoutItsOutputs(t *testing.T) {
 	const gap = "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: "
 	for name, c := range map[string]struct {
@@ -562,11 +584,21 @@ func TestCommittedLibraryWithoutItsOutputs(t *testing.T) {
 			w.expectRuns()
 			p.expectShipped(shipped)
 
+			// The stamp of an earlier build beside the gap changes nothing:
+			// a package in error is not touched, by the plugin or by phn.
+			if _, err := os.Stat(filepath.Join(p.dir, "vendor", "acme", "kit", ".src")); err == nil {
+				for path, text := range map[string]string{".src/.phn-build": "phn 0.4.1\n", ".src/Legacy.php": "<?php\n"} {
+					writeFile(t, filepath.Join(p.dir, "vendor", "acme", "kit", path), []byte(text), 0o644)
+					shipped[path] = text
+				}
+			}
+
 			out, err = p.composer("install", "--quiet")
 			if !errors.As(err, &exit) || exit.ExitCode() != 1 || out != plugins {
 				t.Errorf("composer install --quiet: %v, want exit status 1 and the plugin's error alone:\n%s", err, out)
 			}
 			w.expectRuns()
+			p.expectShipped(shipped)
 
 			stdout, stderr, err := p.phn("build", "--vendor")
 			if !errors.As(err, &exit) || exit.ExitCode() != 1 || stdout != "" {
@@ -578,6 +610,57 @@ func TestCommittedLibraryWithoutItsOutputs(t *testing.T) {
 			p.expectShipped(shipped)
 			expectAbsent(t, filepath.Join(p.dir, "vendor", "acme", "lib", ".src"))
 		})
+	}
+}
+
+// TestAPackageInErrorSparesTheOthers: when one installed package came
+// without the outputs it commits, the dump fails and nothing is removed
+// anywhere, as nothing is built: acme/base, a whole package whose committed
+// root holds the stamp of an earlier build, keeps the stamp and the file
+// beside it, under the plugin and under phn run by hand. The clean-up
+// comes once every package has passed the check.
+func TestAPackageInErrorSparesTheOthers(t *testing.T) {
+	w := newWorld(t, "")
+	broken, _ := w.newKit("kit", func(dir string) {
+		if err := os.Remove(filepath.Join(dir, ".src", "Greeter.php")); err != nil {
+			t.Fatal(err)
+		}
+	}).archive()
+	base := filepath.Join(w.base, "libraries", "acme", "base")
+	for path, text := range map[string]string{
+		"composer.json":   `{"name": "acme/base", "autoload": {"psr-4": {"Acme\\Base\\": ".src/"}}}` + "\n",
+		"phaenon.json":    `{"roots": {"src": ".src"}, "committed": ["src"]}` + "\n",
+		"src/Thing.phn":   "namespace Acme\\Base;\n\nfinal class Thing\n{\n}\n",
+		".src/Thing.php":  "<?php\n\nnamespace Acme\\Base;\n\nfinal class Thing\n{\n}\n",
+		".src/Legacy.php": "<?php\n",
+		".src/.phn-build": "phn 0.4.1\n",
+	} {
+		writeFile(t, filepath.Join(base, path), []byte(text), 0o644)
+	}
+	whole := dependency{name: "acme/base", constraint: "*", repository: pathRepository(base, "acme/base", "1.0.0", false)}
+	p := w.newProject("app", project{dependencies: []dependency{broken, whole}})
+	installed := filepath.Join(p.dir, "vendor", "acme", "base")
+
+	out, err := p.composer("install")
+
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(out, "phaenon/phn: acme/kit 1.0.0: its phaenon.json commits the outputs of the root src") {
+		t.Fatalf("composer install: %v, want exit status 1 and the error of acme/kit\n%s", err, out)
+	}
+	if strings.Contains(out, "acme/base") && strings.Contains(out, "earlier build") {
+		t.Errorf("the plugin spoke of acme/base's earlier build in a dump that failed:\n%s", out)
+	}
+	want := snapshot(t, base)
+	if got := snapshot(t, installed); !maps.Equal(got, want) {
+		t.Errorf("vendor/acme/base holds %v after the failed dump, want %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
+	}
+
+	stdout, stderr, err := p.phn("build", "--vendor")
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || stdout != "" || strings.Contains(stderr, "acme/base") {
+		t.Errorf("phn build --vendor: %v, want exit status 1 and no word of acme/base\n%s%s", err, stdout, stderr)
+	}
+	if got := snapshot(t, installed); !maps.Equal(got, want) {
+		t.Errorf("vendor/acme/base holds %v after phn build --vendor failed, want %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
 	}
 }
 

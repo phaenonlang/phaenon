@@ -341,8 +341,10 @@ whose installed roots are all committed is nothing to build: alone, it makes the
 fetch the binary nor run it. A package that came without the outputs it commits fails the command
 before any binary is fetched, with the error `phn build --vendor` gives, under `--quiet` too. A
 committed root that holds the stamp of a build (`.phn-build`) was built there by an earlier
-release, before its outputs were committed, and may still hold that build's files: the plugin
-deletes nothing in a committed root, and warns at each dump, saying how to clear the directory.
+release, before its outputs were committed: the plugin removes what that build left, the files no
+source stands behind and the stamp, as `phn build --vendor` does (above) and without a compiler,
+and says so in one line (`-v` names each file). Where it is not sure, it removes nothing and
+warns at each dump.
 It requires no other package, since the compiled output needs none, and suggests
 `phaenon/debug`, which points production errors at `.phn` positions (`design/line-map.md` §4.3).
 It conflicts with `phaenon/runtime` below 0.4, that package's name until then, which declares the

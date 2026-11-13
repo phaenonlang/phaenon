@@ -76,7 +76,7 @@ stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/de
                       suggested/: the Monolog and Sentry API the Debug integrations are checked against, loaded only by the stdlib's own programs
 stdlib/gen            generator of stdlib/php-src (the newest release branch's stubs), versions_gen.go (the release each symbol came in) and constants.php
 internal/distribution tests of the phaenon/phn Composer plugin under a real Composer (PHAENON_COMPOSER)
-composer/             the phaenon/phn Composer plugin (PHP): the pinned binary, vendor/bin/phn, the builds at the autoload dump, the presence of the outputs an installed package commits (ProjectFile.php, its reader of phaenon.json's roots and committed); composer.json at the root, .gitattributes keeps the dist to it
+composer/             the phaenon/phn Composer plugin (PHP): the pinned binary, vendor/bin/phn, the builds at the autoload dump, the presence of the outputs an installed package commits (ProjectFile.php, its reader of phaenon.json's roots and committed), the removal of what an earlier build left in a committed root (EarlierBuild.php); composer.json at the root, .gitattributes keeps the dist to it
 tools/release         the release assets: reproducible builds for five platforms and the playground's phn.wasm.gz + wasm_exec.js, their checksums in composer/checksums.json
 .github/workflows     CI; the PR semantics gate (.github/scripts); release-please's release PR, pinned by release-checksums.yml, published when merged (design/tooling.md §3.2)
 ```
@@ -217,6 +217,11 @@ from the package by hand.
   it is the same for the check of an installed package's committed roots, trees with the errors
   they give, whole (`TestCommittedOutputVectors`, `TestCommittedOutputChecksAgree`): the error's
   text is changed there, and then in `cmd/phn/vendor.go` and `composer/src/ProjectFile.php`.
+  `earlier-builds.json` is the same for what both remove from a committed root that holds the
+  stamp of an earlier build, trees with the lines printed and every path left
+  (`TestEarlierBuildVectors`, `TestEarlierBuildsAgree`): `cmd/phn/earlier.go` and
+  `composer/src/EarlierBuild.php` delete files in an installed package, so a change of either
+  starts as a vector, and a new way to be unsure removes nothing.
 - **Migrate goldens** `internal/migrate/testdata/lift/X.php` → `X.phn` + `X.notes` (the tags left
   in place and why): same `PHAENON_UPDATE=1` rule; the `.phn` must parse and lift to itself.
 - **Format goldens** `internal/format/testdata/X.phn` → `X.golden.phn`: the same `PHAENON_UPDATE=1`
