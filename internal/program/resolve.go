@@ -654,6 +654,12 @@ func nativeTypeParams(tps []*ast.TypeParam, r *resolver) []*TypeParam {
 // declaration means `K of int|string` (design/collections.md §2). Runs
 // before the declaration's types are resolved, since a parameter's bound
 // travels with every type that mentions it.
+//
+// The K of a `map<K, V>` is the one in scope where it is written. Under a
+// class, a method, a function or a closure that declares a K of its own
+// shadows the class's, and a class declared inside sees none of the outer
+// type parameters: neither says anything about the class's K. What those
+// declare is bounded when their own signature is resolved.
 func ImplyMapKeyBounds(tps []*TypeParam, roots ...ast.Node) {
 	if len(tps) == 0 {
 		return
@@ -668,19 +674,87 @@ func ImplyMapKeyBounds(tps []*TypeParam, roots ...ast.Node) {
 		return
 	}
 	for _, root := range roots {
-		ast.Inspect(root, func(n ast.Node) bool {
-			t, ok := n.(*ast.NamedType)
-			if !ok || len(t.TypeArgs) != 2 || len(t.Name.Parts) != 1 || !strings.EqualFold(t.Name.Parts[0], "map") {
-				return true
+		implyMapKeyBounds(byName, root)
+	}
+}
+
+// implyMapKeyBounds bounds the parameters of byName used as a map key under
+// root, which is the declaration that owns them or a part of it.
+func implyMapKeyBounds(byName map[string]*TypeParam, root ast.Node) {
+	ast.Inspect(root, func(n ast.Node) bool {
+		if n != root {
+			if c, ok := n.(*ast.ClassDecl); ok {
+				// Another class: only the arguments of an anonymous one are
+				// written in this scope.
+				if c.Args != nil {
+					implyMapKeyBounds(byName, c.Args)
+				}
+				return false
 			}
-			if k, ok := t.TypeArgs[0].(*ast.NamedType); ok && len(k.Name.Parts) == 1 && k.Name.Kind == ast.NameUnqualified {
-				if tp := byName[k.Name.Parts[0]]; tp != nil {
-					tp.Bound = types.TArrayKey
+			if own := declaredTypeParams(n); len(own) > 0 {
+				visible := make(map[string]*TypeParam, len(byName))
+				for name, tp := range byName {
+					if !own[name] {
+						visible[name] = tp
+					}
+				}
+				if len(visible) < len(byName) {
+					if len(visible) > 0 {
+						implyMapKeyBounds(visible, n)
+					}
+					return false
 				}
 			}
+		}
+		t, ok := n.(*ast.NamedType)
+		if !ok || len(t.TypeArgs) != 2 || len(t.Name.Parts) != 1 || !strings.EqualFold(t.Name.Parts[0], "map") {
 			return true
-		})
+		}
+		if k, ok := t.TypeArgs[0].(*ast.NamedType); ok && len(k.Name.Parts) == 1 && k.Name.Kind == ast.NameUnqualified {
+			if tp := byName[k.Name.Parts[0]]; tp != nil {
+				tp.Bound = types.TArrayKey
+			}
+		}
+		return true
+	})
+}
+
+// declaredTypeParams names the type parameters a method, a function or a
+// closure declares: those of its `<…>`, or else, as typeParamsOf reads
+// them, its docblock's templates.
+func declaredTypeParams(n ast.Node) map[string]bool {
+	var native []*ast.TypeParam
+	doc := ""
+	switch n := n.(type) {
+	case *ast.MethodDecl:
+		native, doc = n.TypeParams, n.Doc
+	case *ast.FunctionDecl:
+		native, doc = n.TypeParams, n.Doc
+	case *ast.Closure:
+		native = n.TypeParams
+	case *ast.ArrowFunc:
+		native = n.TypeParams
+	default:
+		return nil
 	}
+	var own map[string]bool
+	if len(native) > 0 {
+		own = make(map[string]bool, len(native))
+		for _, tp := range native {
+			own[tp.Name.Name] = true
+		}
+		return own
+	}
+	if !strings.Contains(doc, "template") {
+		return nil
+	}
+	if d := parseDoc(doc); d != nil && len(d.Templates) > 0 {
+		own = make(map[string]bool, len(d.Templates))
+		for _, t := range d.Templates {
+			own[t.Name] = true
+		}
+	}
+	return own
 }
 
 // signatureNodes lists the type expressions of a parameter list and a
