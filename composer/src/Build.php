@@ -24,8 +24,8 @@ final readonly class Build
     /**
      * @param list<string>                    $arguments
      * @param string                          $meaning     what a failure means, for the message
-     * @param array<non-empty-string, string> $environment variables phn is run with, and that are
-     *                                                     unset again when it has run
+     * @param array<non-empty-string, string> $environment variables phn is run with, each put
+     *                                                     back as it was when phn has run
      *
      * @throws BuildFailed when phn exits with a non-zero status, which is its code
      */
@@ -44,15 +44,21 @@ final readonly class Build
                 $io->writeRaw($buffer, false);
             }
         };
-        // The process inherits Composer's environment.
+        // The process inherits Composer's environment, which is given back as it was.
+        $before = [];
         foreach ($environment as $name => $value) {
+            $before[$name] = Platform::getEnv($name);
             Platform::putEnv($name, $value);
         }
         try {
             $status = $this->executor->execute([$this->binary, ...$arguments], $forward, $this->projectDir);
         } finally {
-            foreach (array_keys($environment) as $name) {
-                Platform::clearEnv($name);
+            foreach ($before as $name => $value) {
+                if ($value === false) {
+                    Platform::clearEnv($name);
+                } else {
+                    Platform::putEnv($name, $value);
+                }
             }
         }
         if ($status !== 0) {

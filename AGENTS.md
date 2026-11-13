@@ -216,7 +216,13 @@ from the package by hand.
   change of either reader starts as a vector. Each vector is read two ways, as the project's own
   file (`readProject`, where a key the compiler does not know is an error) and as an installed
   package's (`readInstalledProject` and the plugin, where it is passed over: `../design/tooling.md`
-  T19); the two differ in nothing else. A new key is one an older compiler may pass over; a
+  T19); the two differ in nothing else, and the plugin reads an installed package's file as the
+  compiler does, over every vector. The two decode with different libraries (Go's, PHP's), so the
+  compiler refuses by name what PHP's decoder refuses and Go's would read (bytes that are no
+  UTF-8, half a surrogate pair, a key that begins with U+0000, nesting past 511 values, `null` in
+  a list of strings, the text `null`); no file is known that one reads and the other refuses, and
+  one that turned up would go into the vectors. The list of known keys is in the vectors too,
+  and both readers are held to it. A new key is one an older compiler may pass over; a
   change that must never be passed over is a new shape of a known key's value, which every
   reader refuses. `committed-outputs.json` beside
   it is the same for the check of an installed package's committed roots, trees with the errors

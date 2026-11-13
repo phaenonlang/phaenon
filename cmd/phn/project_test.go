@@ -27,7 +27,7 @@ func TestReadProjectReflectedAttributes(t *testing.T) {
 			want: []string{`App\Mapping`, `\Doctrine\ORM\Mapping\MappingAttribute`}},
 		{json: `{"unused": {"reflectedAttributes": ["App\\"]}}`, err: `"App\\" is not one`},
 		{json: `{"unused": {"reflectedAttributes": ["App/Mapping"]}}`, err: "is not one"},
-		{json: `{"unused": {"reflected": []}}`, err: `unknown key "reflected" (this is phn ` + version + `; a newer release may know it)`},
+		{json: `{"unused": {"reflected": []}}`, err: `unknown key "unused.reflected" (this is phn ` + version + `; a newer release may know it)`},
 	} {
 		path := filepath.Join(t.TempDir(), ProjectFile)
 		writeTree(t, filepath.Dir(path), map[string]string{ProjectFile: c.json})

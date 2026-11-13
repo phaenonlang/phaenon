@@ -669,10 +669,10 @@ func committedSummary(t *testing.T) string {
 // nothing to build and as shipped; a library that ships its sources alone
 // is built by the real phn; and nothing is said of the key, since the
 // project cannot change another package's file. Under -v the plugin names
-// the keys.
+// the keys, as phn would quote them.
 func TestInstalledPackagesWithAKeyOfALaterCompiler(t *testing.T) {
 	w := newWorld(t, "")
-	const later = `, "later": {"than": ["this"]}}` + "\n"
+	const later = `, "la\u001bter": {"than": ["this"]}}` + "\n"
 	release, shipped := w.newKit("kit", func(dir string) {
 		writeFile(t, filepath.Join(dir, "phaenon.json"), []byte(`{"roots": {"src": ".src", "tests": ".tests"}, "committed": ["src"]`+later), 0o644)
 	}).archive()
@@ -684,7 +684,7 @@ func TestInstalledPackagesWithAKeyOfALaterCompiler(t *testing.T) {
 	if !strings.Contains(out, "acme/lib: 1 files compiled, 1 written\n") || !strings.Contains(out, "1 installed packages built, 0 up to date, 1 left as installed with their committed outputs\n") {
 		t.Errorf("composer's output:\n%s\nwant acme/lib built and acme/kit left as installed", out)
 	}
-	if strings.Contains(out, "later") || strings.Contains(out, "unknown") || strings.Contains(out, "does not know") {
+	if strings.Contains(out, "ter") && strings.Contains(out, "la\\u001b") || strings.Contains(out, "\x1b") || strings.Contains(out, "unknown") || strings.Contains(out, "does not know") {
 		t.Errorf("composer spoke of a key the project cannot change:\n%s", out)
 	}
 	p.expectShipped(shipped)
@@ -695,7 +695,9 @@ func TestInstalledPackagesWithAKeyOfALaterCompiler(t *testing.T) {
 
 	out = p.mustComposer("dump-autoload", "-v")
 	for _, name := range []string{"acme/kit", "acme/lib"} {
-		if want := "phaenon/phn: " + name + ": its phaenon.json has keys this version of phn does not know, and passes over: later\n"; !strings.Contains(out, want) {
+		// The key holds an escape character, which is written out and does not
+		// reach the terminal.
+		if want := "phaenon/phn: " + name + ": its phaenon.json has keys this version of phn does not know, and passes over: \"la\\u001bter\"\n"; !strings.Contains(out, want) || strings.Contains(out, "\x1b") {
 			t.Errorf("composer dump-autoload -v lacks\n%s\nin\n%s", want, out)
 		}
 	}

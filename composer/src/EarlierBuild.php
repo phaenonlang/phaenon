@@ -49,8 +49,9 @@ namespace Phaenon\Composer;
  *
  * phn does the same when it is run by hand (`phn build --vendor`, cmd/phn/earlier.go). In a dump
  * the plugin does it, always and before it resolves a binary, so that it never depends on which
- * compiler the project has; when it then runs phn it says so (Plugin::EARLIER_BUILDS_CLEARED),
- * and phn leaves the committed roots alone. cmd/phn/testdata/earlier-builds.json in the
+ * compiler the project has; when it then runs phn it names the packages it has looked at
+ * (Plugin::EARLIER_BUILDS_CLEARED), and phn leaves the committed roots of those alone, and of
+ * no other. cmd/phn/testdata/earlier-builds.json in the
  * compiler's repository holds the two to each other, the lines they print included: wherever
  * phn removes nothing, this class removes nothing.
  */
@@ -100,8 +101,8 @@ final readonly class EarlierBuild
      * Clears what earlier builds left in the committed roots of the package installed in
      * $packageDir, and returns what was found and done, by root. A root whose output directory
      * holds no stamp is not touched and not returned. Nothing is touched, and nothing returned,
-     * for a package no earlier build can have survived in: `phn build --vendor` removes nothing
-     * there either. Nor for a package whose directory is
+     * for a package no earlier build can have survived in, or whose project file phn refuses:
+     * `phn build --vendor` removes nothing there either. Nor for a package whose directory is
      * the project's own, or cannot be told from it: Composer installs none there, and a record
      * that says so is not followed into removing the project's files.
      *
@@ -116,7 +117,7 @@ final readonly class EarlierBuild
         // one is answered as the directory it leads to.
         $trimmed = rtrim($packageDir, '/' . \DIRECTORY_SEPARATOR);
         $packageDir = $trimmed === '' ? $packageDir : $trimmed;
-        if (!self::survives($installationSource, $packageDir)) {
+        if ($file->refusal !== null || !self::survives($installationSource, $packageDir)) {
             return [];
         }
         $package = realpath($packageDir);
@@ -163,8 +164,9 @@ final readonly class EarlierBuild
      */
     public function report(string $package, string $shown): array
     {
-        // A name with a line break in it stays on its line.
-        return array_map(static fn (string $line): string => strtr($line, ["\n" => '\n', "\r" => '\r']), $this->lines($package, $shown));
+        // A name with a line break in it stays on its line, and one with an escape sequence in
+        // it does not reach the terminal as one.
+        return array_map(ProjectFile::unprintable(...), $this->lines($package, $shown));
     }
 
     /**
@@ -218,14 +220,14 @@ final readonly class EarlierBuild
     /**
      * @param string       $source  the root, relative to the package
      * @param string       $output  its output directory, likewise
-     * @param list<string> $unknown the keys of the package's project file that are not known:
-     *                              with any, nothing is removed. The package is checked and
-     *                              built all the same, but a removal does not rest on a file
-     *                              its reader understands in part
+     * @param list<string> $unknownKeys the keys of the package's project file that are not
+     *                                  known: with any, nothing is removed here. The package
+     *                                  is checked and built all the same, but this removal
+     *                                  does not rest on a file its reader understands in part
      *
      * @return ?self null when the output directory holds no stamp, and nothing was touched
      */
-    private static function clearRoot(string $packageDir, string $source, string $output, array $unknown): ?self
+    private static function clearRoot(string $packageDir, string $source, string $output, array $unknownKeys): ?self
     {
         $stamp = $output . '/' . ProjectFile::STAMP;
         if (!self::isStamp($packageDir . '/' . $stamp)) {
@@ -233,8 +235,8 @@ final readonly class EarlierBuild
         }
         $linked = is_link($packageDir);
         $kept = static fn (string $obstacle, bool $unbuilt = false, bool $confined = false): self => new self($output, [], [], $obstacle, $linked, $unbuilt, $confined);
-        if ($unknown !== []) {
-            return $kept(sprintf('its phaenon.json has the key "%s", which this version of phn does not know', addcslashes($unknown[0], '"\\')), unbuilt: true);
+        if ($unknownKeys !== []) {
+            return $kept(sprintf('its phaenon.json has the key %s, which this version of phn does not know', ProjectFile::quoted($unknownKeys[0])), unbuilt: true);
         }
         // Under open_basedir a path PHP refuses to look at reads as one that does not exist.
         if ((string) \ini_get('open_basedir') !== '') {

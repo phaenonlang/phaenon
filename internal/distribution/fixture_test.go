@@ -215,6 +215,7 @@ type project struct {
 	baseURL       bool           // binary-url as a base URL rather than a template
 	override      bool           // PHN_BINARY names the fake
 	symlinkPlugin bool           // the package is symlinked into vendor, not copied
+	environment   []string       // more of the environment Composer runs in, as NAME=value
 	binary        string         // PHN_BINARY names this binary, a real phn, instead
 }
 
@@ -419,6 +420,7 @@ func (p *project) environ() []string {
 		"COMPOSER_NO_AUDIT=1",
 		"COMPOSER_ROOT_VERSION=1.0.0",
 	)
+	env = append(env, p.environment...)
 	switch {
 	case p.binary != "":
 		env = append(env, "PHN_BINARY="+p.binary)

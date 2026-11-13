@@ -34,10 +34,14 @@ import (
 )
 
 // earlierBuildsCleared names the environment variable the Composer plugin
-// sets, to any value, when it runs `phn build --vendor` after it has itself
-// removed what earlier builds left in committed roots
-// (composer/src/Plugin.php). It is the plugin's word to this command, not
-// a setting.
+// sets when it runs `phn build --vendor` (composer/src/Plugin.php). Its
+// value lists, with spaces between them, the names of the installed
+// packages whose committed roots the plugin has itself looked at for what
+// earlier builds left: this command leaves those alone, and makes its own
+// pass for every other package, among them the ones whose project file
+// the plugin could not read. It is the plugin's word to this command, not
+// a setting: a value that names no installed package, as "1" does, leaves
+// nothing out.
 const earlierBuildsCleared = "PHN_EARLIER_BUILDS_CLEARED"
 
 // stampFile records, in each output directory of an installed package, what
@@ -263,10 +267,11 @@ func buildVendor() {
 	}
 	// Then, and only when every package came whole, what an earlier build
 	// left in a root its package now commits is removed (earlier.go), in
-	// the packages an earlier build can have survived in, unless the
-	// Composer plugin says it has done so in this dump.
+	// the packages an earlier build can have survived in, but for the
+	// ones the Composer plugin says it has looked at in this dump.
+	cleared := strings.Fields(strings.ToLower(os.Getenv(earlierBuildsCleared)))
 	for _, p := range pkgs {
-		if os.Getenv(earlierBuildsCleared) != "" || !p.keepsItsDirectory() || p.mayBeTheProject() {
+		if slices.Contains(cleared, strings.ToLower(p.Name)) || !p.keepsItsDirectory() || p.mayBeTheProject() {
 			continue
 		}
 		for _, e := range p.earlierBuilds() {

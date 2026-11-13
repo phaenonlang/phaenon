@@ -16,10 +16,23 @@ namespace Phaenon\Composer;
  * The plugin reads the file as phn reads an installed package's (readInstalledProject in
  * cmd/phn/project.go; design/tooling.md T19): a key of the file's object that it does not know
  * is passed over and remembered ($unknown), since the project that installed the package cannot
- * change its file; everything else phn refuses there, the plugin refuses, among it a known key
- * with a value it cannot have and a key written twice. cmd/phn/testdata/project-files.json in the
- * compiler's repository is the reference both are tested against, and phn makes the same check of
- * presence, in the same words (`phn build --vendor`, cmd/phn/vendor.go).
+ * change its file; everything else phn refuses there, the plugin refuses. It refuses in two
+ * ways. Where it cannot tell the roots (text that is no JSON object, `roots` or `committed`
+ * that are not what they must be, a key written twice), there is nothing to read, and the
+ * package is left to phn. Where the roots are plain and phn refuses the file for something
+ * beside them (a known key with a value it cannot have, a key under `unused` that is not
+ * known), the roots are read and the refusal remembered ($refusal): phn leaves such a package
+ * out, and so does the plugin, without fetching a compiler to say so for a package that has
+ * nothing to build.
+ *
+ * cmd/phn/testdata/project-files.json in the compiler's repository is the reference both are
+ * tested against: over it the two refuse the same files and read the others alike. The two
+ * decoders are not one, and phn refuses by name what PHP's refuses and Go's would take (bytes
+ * that are no UTF-8, half a surrogate pair, a key that begins with U+0000, nesting past PHP's
+ * depth). What is known to remain is in the vectors' own description; a file the plugin
+ * refuses and phn reads is left to phn, which then does for that package all that the plugin
+ * did not (Plugin::EARLIER_BUILDS_CLEARED). phn makes the same check of presence, in the same
+ * words (`phn build --vendor`, cmd/phn/vendor.go).
  */
 final readonly class ProjectFile
 {
@@ -39,13 +52,17 @@ final readonly class ProjectFile
      *                                         know and has passed over, sorted. With none, phn
      *                                         would read the file as a project's own as well.
      *                                         The package is checked and built whatever they
-     *                                         are; nothing is removed from it while there is one
-     *                                         (EarlierBuild)
+     *                                         are; an earlier build's leftovers are not
+     *                                         removed from it while there is one (EarlierBuild)
+     * @param ?string               $refusal   the key for which phn refuses the file, where
+     *                                         that is none of `roots` and `committed`: phn
+     *                                         leaves the package out, warning of its file
      */
     private function __construct(
         public array $roots,
         public array $committed,
         public array $unknown,
+        public ?string $refusal = null,
     ) {
     }
 
@@ -56,8 +73,8 @@ final readonly class ProjectFile
     private const string UNUSED_KEY = 'reflectedAttributes';
 
     /**
-     * @return ?self null when there is no file to read or phn would refuse it as an installed
-     *               package's: phn then says what is wrong with it
+     * @return ?self null when there is no file to read, or its roots cannot be told: phn then
+     *               says what is wrong with it
      */
     public static function read(string $path): ?self
     {
@@ -67,7 +84,9 @@ final readonly class ProjectFile
     }
 
     /**
-     * @return ?self null when phn would refuse the file as an installed package's
+     * @return ?self null when the file's roots cannot be told, for which phn refuses it as an
+     *               installed package's; a file phn refuses for another key is returned with
+     *               that key as its $refusal
      */
     public static function parse(string $json): ?self
     {
@@ -79,19 +98,20 @@ final readonly class ProjectFile
         // A key phn knows is spelt as documented: it refuses "Roots" and "COMMITTED". Any
         // other key is one it does not know, and is passed over.
         $unknown = [];
+        $refusal = null;
         foreach (array_keys(get_object_vars($data)) as $key) {
             $key = (string) $key;
             $named = self::names($key, self::KEYS);
             if ($named === null) {
                 $unknown[] = $key;
-            } elseif ($named !== $key) {
+            } elseif ($named !== $key && \in_array($named, ['roots', 'committed'], true)) {
                 return null;
+            } elseif ($named !== $key) {
+                $refusal ??= $key;
             }
         }
         sort($unknown, \SORT_STRING);
-        if (!self::readsTheOtherKeys($data)) {
-            return null;
-        }
+        $refusal ??= self::keyPhnRefuses($data);
         $roots = [];
         $given = $data->roots ?? new \stdClass();
         if (!$given instanceof \stdClass) {
@@ -138,7 +158,48 @@ final readonly class ProjectFile
             }
         }
 
-        return new self($roots, $committed, $unknown);
+        return new self($roots, $committed, $unknown, $refusal);
+    }
+
+    /**
+     * A key for a message, as both readers of a project file write it (quoted in
+     * cmd/phn/project.go): between quotes, a quote and a backslash after a backslash, and what
+     * would not show, or would move the cursor, as \u and four digits.
+     */
+    public static function quoted(string $key): string
+    {
+        return '"' . self::unprintable(addcslashes($key, '"\\')) . '"';
+    }
+
+    /**
+     * Text for one line of a terminal: the control characters, the line and paragraph
+     * separators, and the characters that have no width or turn the direction of the text, as
+     * \u and four digits. Text that is not UTF-8, as a file's name may be, keeps its other
+     * bytes. It is phn's unprintable (cmd/phn/project.go).
+     */
+    public static function unprintable(string $text): string
+    {
+        $hidden = '/[\x{0}-\x{1F}\x{7F}-\x{9F}\x{200B}-\x{200F}\x{2028}-\x{202E}\x{2060}-\x{206F}\x{FEFF}]/u';
+
+        return preg_replace_callback($hidden, self::escaped(...), $text)
+            ?? (string) preg_replace_callback('/[\x00-\x1F\x7F]/', self::escaped(...), $text);
+    }
+
+    /**
+     * A character of up to three bytes as \u and the four digits of its code point.
+     *
+     * @param array<array-key, string> $match
+     */
+    private static function escaped(array $match): string
+    {
+        $char = $match[0] ?? '';
+        $point = match (\strlen($char)) {
+            1 => \ord($char),
+            2 => (\ord($char[0]) & 0x1F) << 6 | \ord($char[1]) & 0x3F,
+            default => (\ord($char[0]) & 0x0F) << 12 | (\ord($char[1]) & 0x3F) << 6 | \ord($char[2]) & 0x3F,
+        };
+
+        return sprintf('\\u%04x', $point);
     }
 
     /**
@@ -160,13 +221,14 @@ final readonly class ProjectFile
     }
 
     /**
-     * Whether phn reads the keys it knows beside `roots` and `committed` (readProjectFile in
-     * cmd/phn/project.go): `exclude` and `fmt` lists of strings, `php` a string, `unused` an
-     * object whose one key, `reflectedAttributes`, lists class names, each of them or null. A
-     * key under `unused` that phn does not know is refused, not passed over: only a key of the
-     * file's own object is.
+     * The key beside `roots` and `committed` for whose value phn refuses the file
+     * (readProjectFile in cmd/phn/project.go), when there is one. phn reads `exclude` and `fmt`
+     * as lists of strings, `php` as a string, `unused` as an object whose one key,
+     * `reflectedAttributes`, lists class names, and each of them as null. A key under `unused`
+     * that phn does not know is refused, not passed over: only a key of the file's own object
+     * is.
      */
-    private static function readsTheOtherKeys(\stdClass $data): bool
+    private static function keyPhnRefuses(\stdClass $data): ?string
     {
         $strings = static function (mixed $list): bool {
             return $list === null || (\is_array($list) && array_is_list($list) && array_filter($list, is_string(...)) === $list);
@@ -179,11 +241,11 @@ final readonly class ProjectFile
                 default => true, // parse() reads roots and committed, and passes over the rest
             };
             if (!$read) {
-                return false;
+                return (string) $key;
             }
         }
 
-        return true;
+        return null;
     }
 
     private static function readsUnused(\stdClass $unused): bool

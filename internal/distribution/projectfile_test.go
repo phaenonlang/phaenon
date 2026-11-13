@@ -33,7 +33,9 @@ func TestProjectFileReadersAgree(t *testing.T) {
 		t.Fatal(err)
 	}
 	var vectors struct {
-		Vectors []struct {
+		Keys         []string `json:"keys"`
+		KeysOfUnused []string `json:"keys-of-unused"`
+		Vectors      []struct {
 			Name      string            `json:"name"`
 			Refused   bool              `json:"refused"`
 			Roots     map[string]string `json:"roots"`
@@ -48,10 +50,14 @@ func TestProjectFileReadersAgree(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "read.php")
 	writeFile(t, script, []byte(`<?php
 require $argv[1];
-$answers = [];
-foreach (json_decode((string) file_get_contents($argv[2]), true)['vectors'] as $vector) {
-    $file = Phaenon\Composer\ProjectFile::parse($vector['file']);
-    $answers[] = $file === null ? null : ['roots' => (object) $file->roots, 'committed' => $file->committed, 'unknown' => $file->unknown];
+$reference = json_decode((string) file_get_contents($argv[2]), true);
+$class = new ReflectionClass(Phaenon\Composer\ProjectFile::class);
+$answers = ['keys' => $class->getConstant('KEYS'), 'keys-of-unused' => [$class->getConstant('UNUSED_KEY')], 'vectors' => []];
+foreach ($reference['vectors'] as $vector) {
+    $file = Phaenon\Composer\ProjectFile::parse(isset($vector['bytes']) ? (string) base64_decode($vector['bytes'], true) : $vector['file']);
+    // The plugin refuses a file in two ways: it reads nothing of it, or it reads the roots
+    // and remembers the key phn refuses the file for.
+    $answers['vectors'][] = $file === null || $file->refusal !== null ? null : ['roots' => (object) $file->roots, 'committed' => $file->committed, 'unknown' => $file->unknown];
 }
 echo json_encode($answers);
 `), 0o644)
@@ -59,14 +65,24 @@ echo json_encode($answers);
 	if err != nil {
 		t.Fatalf("php: %v\n%s", err, out)
 	}
-	var answers []*struct {
-		Roots     map[string]string `json:"roots"`
-		Committed []string          `json:"committed"`
-		Unknown   []string          `json:"unknown"`
+	var reader struct {
+		Keys         []string `json:"keys"`
+		KeysOfUnused []string `json:"keys-of-unused"`
+		Vectors      []*struct {
+			Roots     map[string]string `json:"roots"`
+			Committed []string          `json:"committed"`
+			Unknown   []string          `json:"unknown"`
+		} `json:"vectors"`
 	}
-	if err := json.Unmarshal(out, &answers); err != nil {
+	if err := json.Unmarshal(out, &reader); err != nil {
 		t.Fatalf("the reader's answers: %v\n%s", err, out)
 	}
+	// A key the compiler's reader learns is one the plugin's must learn:
+	// one it does not know is one it passes over, and removes nothing for.
+	if !slices.Equal(reader.Keys, vectors.Keys) || !slices.Equal(reader.KeysOfUnused, vectors.KeysOfUnused) {
+		t.Errorf("the plugin knows the keys %v, and %v under \"unused\"; the vectors list %v and %v", reader.Keys, reader.KeysOfUnused, vectors.Keys, vectors.KeysOfUnused)
+	}
+	answers := reader.Vectors
 	if len(answers) != len(vectors.Vectors) || len(answers) == 0 {
 		t.Fatalf("%d answers for %d vectors", len(answers), len(vectors.Vectors))
 	}

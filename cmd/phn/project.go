@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/phaenonlang/phaenon/internal/checker"
 )
@@ -122,36 +123,73 @@ func readProjectFile(path string, installed bool) (*project, error) {
 		return nil, err
 	}
 	p := project{data: data, path: path}
-	text, unknown := withoutUnknownKeys(data, reflect.TypeFor[project]())
+	// A project file is one JSON object in UTF-8 whose keys are spelt as
+	// documented, each written once. encoding/json takes more: bytes that
+	// are no UTF-8 and half a surrogate pair, read as U+FFFD; the text
+	// null, read as an empty object, and null in a list of strings, read
+	// as ""; a key in another letter case, or written twice, the later
+	// taken or the two merged. Each is refused here, by name. The Composer
+	// plugin reads the file of an installed package too
+	// (composer/src/ProjectFile.php), with PHP's decoder, which refuses
+	// most of these and more: a key that begins with U+0000, and a value
+	// nested 512 deep. The two must give one answer, so those are refused
+	// as well; they are nothing a project file has reason to hold.
+	if !utf8.Valid(data) {
+		return nil, fmt.Errorf("%s: the project file is not UTF-8 text", path)
+	}
+	first := json.NewDecoder(bytes.NewReader(data))
+	var object json.RawMessage
+	if err := first.Decode(&object); err != nil {
+		return nil, fmt.Errorf("%s: %v", path, err)
+	}
+	if _, err := first.Token(); err != io.EOF {
+		return nil, fmt.Errorf("%s: the project file is one JSON object, and text follows it", path)
+	}
+	if bytes.Equal(bytes.TrimSpace(object), []byte("null")) {
+		return nil, fmt.Errorf("%s: the project file is one JSON object, and this is null", path)
+	}
+	if halfSurrogate(object) {
+		return nil, fmt.Errorf(`%s: a string has half of a surrogate pair, written as a \u escape`, path)
+	}
+	if reason := unreadableShape(object); reason != "" {
+		return nil, fmt.Errorf("%s: %s", path, reason)
+	}
+	text, unknown := withoutUnknownKeys(object, reflect.TypeFor[project]())
 	switch {
 	case installed:
 		p.ignored = unknown
 	case len(unknown) > 0:
-		return nil, unknownKey(path, strconv.Quote(unknown[0]))
+		return nil, unknownKey(path, unknown[0])
 	}
 	dec := json.NewDecoder(bytes.NewReader(text))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
-		// A key under a known key that the decoder does not know.
-		if key, isKey := strings.CutPrefix(err.Error(), "json: unknown field "); isKey {
-			return nil, unknownKey(path, key)
+		// A key under a known key that the decoder does not know. It is
+		// not passed over, in an installed package either, and the error
+		// says where it is.
+		if _, isKey := strings.CutPrefix(err.Error(), "json: unknown field "); isKey {
+			if key := unknownNestedKey(text, reflect.TypeFor[project](), ""); key != "" {
+				return nil, unknownKey(path, key)
+			}
 		}
 		return nil, fmt.Errorf("%s: %v", path, err)
 	}
-	// encoding/json reads the first value and stops, matches a key to a
-	// field whatever its letter case, and takes the later of a key written
-	// twice, or merges the two. A project file is one object whose keys
-	// are spelt as documented, each written once: the Composer plugin
-	// reads the file of an installed package too
-	// (composer/src/ProjectFile.php), and the two must give one answer.
-	if _, err := dec.Token(); err != io.EOF {
-		return nil, fmt.Errorf("%s: the project file is one JSON object, and text follows it", path)
-	}
-	if key, want := misspeltKey(data, reflect.TypeFor[project]()); key != "" {
+	if key, want := misspeltKey(object, reflect.TypeFor[project]()); key != "" {
 		return nil, fmt.Errorf("%s: the key %q is written %q", path, key, want)
 	}
-	if key, twice := repeatedKey(data); twice {
-		return nil, fmt.Errorf("%s: the key %q is written twice", path, key)
+	var lists struct {
+		Exclude []*string `json:"exclude"`
+		Fmt     []*string `json:"fmt"`
+	}
+	if json.Unmarshal(text, &lists) == nil {
+		for _, list := range []struct {
+			key      string
+			elements []*string
+		}{{"exclude", lists.Exclude}, {"fmt", lists.Fmt}} {
+			if slices.Contains(list.elements, nil) {
+				return nil, fmt.Errorf("%s: %q lists strings, and null is not one", path, list.key)
+			}
+		}
 	}
 	roots := make(map[string]string, len(p.Roots))
 	for _, key := range slices.Sorted(maps.Keys(p.Roots)) {
@@ -200,26 +238,33 @@ func readProjectFile(path string, installed bool) (*project, error) {
 	return &p, nil
 }
 
-// unknownKey is the error of a key the compiler does not know, quoted as
-// key gives it. It says which phn has read the file, since that is not
-// always the one the project pins: an editor's language server from PATH,
-// or PHN_BINARY, may be an older release, and to its reader a key of a
-// newer one looks misspelt.
+// unknownKey is the error of a key the compiler does not know; a key under
+// a known key is named with it, as in unused.later. It says which phn has
+// read the file, since that is not always the one the project pins: an
+// editor's language server from PATH, or PHN_BINARY, may be an older
+// release, and to its reader a key of a newer one looks misspelt.
 func unknownKey(path, key string) error {
-	return fmt.Errorf("%s: unknown key %s (this is phn %s; a newer release may know it)", path, key, version)
+	return fmt.Errorf("%s: unknown key %s (this is phn %s; a newer release may know it)", path, quoted(key), version)
 }
 
-// withoutUnknownKeys returns the JSON object data without the keys that
-// name no field of the struct type t, in whatever letter case, and those
-// keys, sorted. A key that names a field in another letter case stays, for
-// misspeltKey to refuse. Text that is no object is returned as it is, for
-// the decoder to refuse.
-func withoutUnknownKeys(data []byte, t reflect.Type) (known []byte, unknown []string) {
-	var object map[string]json.RawMessage
-	if json.Unmarshal(data, &object) != nil || object == nil {
-		return data, nil
+// withoutUnknownKeys returns the JSON object without the members whose keys
+// name no field of the struct type t, in whatever letter case, the others
+// in the order of the file, and those keys, sorted. A key that names a
+// field in another letter case stays, for misspeltKey to refuse. Text that
+// is no object is returned as it is, for the decoder to refuse.
+func withoutUnknownKeys(object []byte, t reflect.Type) (known []byte, unknown []string) {
+	dec := json.NewDecoder(bytes.NewReader(object))
+	if token, err := dec.Token(); err != nil || token != json.Delim('{') {
+		return object, nil
 	}
-	for _, key := range slices.Sorted(maps.Keys(object)) {
+	members := []byte{'{'}
+	for dec.More() {
+		name, err := dec.Token()
+		key, isKey := name.(string)
+		var value json.RawMessage
+		if err != nil || !isKey || dec.Decode(&value) != nil {
+			return object, nil
+		}
 		named := false
 		for i := range t.NumField() {
 			tag, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
@@ -227,58 +272,172 @@ func withoutUnknownKeys(data []byte, t reflect.Type) (known []byte, unknown []st
 		}
 		if !named {
 			unknown = append(unknown, key)
-			delete(object, key)
+			continue
 		}
+		spelt, err := json.Marshal(key)
+		if err != nil {
+			return object, nil
+		}
+		if len(members) > 1 {
+			members = append(members, ',')
+		}
+		members = append(append(append(members, spelt...), ':'), value...)
 	}
 	if len(unknown) == 0 {
-		return data, nil
+		return object, nil
 	}
-	known, err := json.Marshal(object)
-	if err != nil {
-		return data, nil
-	}
-	return known, unknown
+	sort.Strings(unknown)
+	return append(members, '}'), unknown
 }
 
-// repeatedKey finds a key that an object of the JSON text data has twice,
-// at any depth. Text that is not JSON has none: the decoder has refused it.
-func repeatedKey(data []byte) (key string, twice bool) {
+// unknownNestedKey finds, in the JSON object data read into a struct of
+// type t, a key under a known key that names no field there, and returns
+// it with the keys above it, as in unused.later; "" when there is none.
+func unknownNestedKey(data []byte, t reflect.Type, above string) string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	var object map[string]json.RawMessage
+	if t.Kind() != reflect.Struct || json.Unmarshal(data, &object) != nil {
+		return ""
+	}
+	for _, key := range slices.Sorted(maps.Keys(object)) {
+		named := false
+		for i := range t.NumField() {
+			tag, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+			if tag == "" || !strings.EqualFold(tag, key) {
+				continue
+			}
+			named = true
+			if nested := unknownNestedKey(object[key], t.Field(i).Type, above+key+"."); nested != "" {
+				return nested
+			}
+		}
+		if !named && above != "" {
+			return above + key
+		}
+	}
+	return ""
+}
+
+// unreadableShape finds, in JSON text the decoder has read, what a project
+// file may not hold at any depth, and says it: a key that an object has
+// twice, a key that begins with U+0000, a value nested too deep. The last
+// two are what PHP's decoder refuses, at its own depth: 511 values, each
+// inside the one before it, are read, and one more is not.
+func unreadableShape(data []byte) string {
+	const deepest = 511
 	dec := json.NewDecoder(bytes.NewReader(data))
-	var value func() (string, bool)
-	value = func() (string, bool) {
+	var value func(depth int) string
+	value = func(depth int) string {
 		token, err := dec.Token()
 		if err != nil {
-			return "", false
+			return ""
 		}
-		switch token {
-		case json.Delim('{'):
-			seen := map[string]bool{}
-			for dec.More() {
+		delim, opens := token.(json.Delim)
+		if !opens {
+			return ""
+		}
+		if depth > deepest {
+			return fmt.Sprintf("the project file is nested deeper than %d values", deepest)
+		}
+		seen := map[string]bool{}
+		for dec.More() {
+			if delim == '{' {
 				name, err := dec.Token()
 				key, isKey := name.(string)
-				if err != nil || !isKey {
-					return "", false
-				}
-				if seen[key] {
-					return key, true
+				switch {
+				case err != nil || !isKey:
+					return ""
+				case seen[key]:
+					return fmt.Sprintf("the key %s is written twice", quoted(key))
+				case strings.HasPrefix(key, "\x00"):
+					return "a key begins with U+0000"
 				}
 				seen[key] = true
-				if key, twice := value(); twice {
-					return key, true
-				}
 			}
-			dec.Token()
-		case json.Delim('['):
-			for dec.More() {
-				if key, twice := value(); twice {
-					return key, true
-				}
+			if reason := value(depth + 1); reason != "" {
+				return reason
 			}
-			dec.Token()
 		}
-		return "", false
+		dec.Token()
+		return ""
 	}
-	return value()
+	return value(1)
+}
+
+// halfSurrogate reports whether a string of the JSON text data, which the
+// decoder has read, holds a \u escape of a surrogate that is not half of a
+// pair: a high one with no low one after it, or a low one alone. The
+// decoder reads it as U+FFFD, and PHP's refuses the text.
+func halfSurrogate(data []byte) bool {
+	escape := func(at int) (value uint64, ok bool) {
+		if at+6 > len(data) || data[at] != '\\' || data[at+1] != 'u' {
+			return 0, false
+		}
+		value, err := strconv.ParseUint(string(data[at+2:at+6]), 16, 32)
+		return value, err == nil
+	}
+	inString := false
+	for i := 0; i < len(data); i++ {
+		switch c := data[i]; {
+		case !inString:
+			inString = c == '"'
+		case c == '"':
+			inString = false
+		case c == '\\':
+			value, isUnicode := escape(i)
+			low, paired := escape(i + 6)
+			switch {
+			case !isUnicode:
+				i++ // the character escaped, a quote or a backslash among them
+			case value >= 0xD800 && value <= 0xDBFF && paired && low >= 0xDC00 && low <= 0xDFFF:
+				i += 11
+			case value >= 0xD800 && value <= 0xDFFF:
+				return true
+			default:
+				i += 5
+			}
+		}
+	}
+	return false
+}
+
+// quoted writes a key for a message as both readers of a project file
+// write it (the Composer plugin's ProjectFile::quoted): between quotes, a
+// quote and a backslash after a backslash, and what would not show, or
+// would move the cursor, as \u and four digits (unprintable).
+func quoted(key string) string {
+	return `"` + unprintable(strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(key)) + `"`
+}
+
+// unprintable writes text for one line of a terminal: the control
+// characters, the line and paragraph separators, and the characters that
+// have no width or turn the direction of the text, as \u and four digits.
+// Text that is not UTF-8, as a file's name may be, keeps its other bytes.
+func unprintable(text string) string {
+	hidden := func(r rune) bool {
+		return r < 0x20 || r >= 0x7F && r <= 0x9F || r >= 0x200B && r <= 0x200F || r >= 0x2028 && r <= 0x202E || r >= 0x2060 && r <= 0x206F || r == 0xFEFF
+	}
+	var b strings.Builder
+	if !utf8.ValidString(text) {
+		for _, c := range []byte(text) {
+			if c < 0x20 || c == 0x7F {
+				fmt.Fprintf(&b, `\u%04x`, c)
+			} else {
+				b.WriteByte(c)
+			}
+		}
+		return b.String()
+	}
+	for _, r := range text {
+		if hidden(r) {
+			fmt.Fprintf(&b, `\u%04x`, r)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // misspeltKey finds, in the JSON object data read into a struct of type t,

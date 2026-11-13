@@ -1,5 +1,16 @@
 {
-  "format": "phaenon.json as its readers answer it (../design/tooling.md §3.7, T19): the compiler reading a project's own file (readProject in cmd/phn/project.go), the compiler reading an installed package's (readInstalledProject), and the Composer plugin, which reads installed packages alone (composer/src/ProjectFile.php). \"file\" is the project file's text. \"refused\" marks a file that is in error for all three, and \"error\" is then part of the compiler's error, where the vector holds it to one. Otherwise \"roots\" maps each source root to its output directory and \"committed\" lists the roots whose outputs the project commits, in the file's order, all as cleaned paths with forward slashes. \"root\" marks a file that is in error as a project's own, with part of that error, and is read as given as an installed package's: it has keys the compiler does not know, which \"unknown\" lists, sorted, as both readers of an installed package name them. A file without \"root\" is read alike in both ways, and has no unknown key.",
+  "format": "phaenon.json as its readers answer it (../design/tooling.md §3.7, T19): the compiler reading a project's own file (readProject in cmd/phn/project.go), the compiler reading an installed package's (readInstalledProject), and the Composer plugin, which reads installed packages alone (composer/src/ProjectFile.php). \"file\" is the project file's text. Where the file is not text, \"bytes\" holds it in base64. \"refused\" marks a file that is in error for all three, and \"error\" is then part of the compiler's error, where the vector holds it to one. Otherwise \"roots\" maps each source root to its output directory and \"committed\" lists the roots whose outputs the project commits, in the file's order, all as cleaned paths with forward slashes. \"root\" marks a file that is in error as a project's own, with part of that error, and is read as given as an installed package's: it has keys the compiler does not know, which \"unknown\" lists, sorted, as both readers of an installed package name them. A file without \"root\" is read alike in both ways, and has no unknown key. \"keys\" are the keys of the file's object that the readers know, and \"keys-of-unused\" those under \"unused\": both readers are held to these lists, so that a key one of them learns is one the other learns. The two readers decode with different libraries, and the compiler refuses by name what PHP's decoder refuses and Go's would read: bytes that are no UTF-8, half a surrogate pair, a key that begins with U+0000, nesting past 511 values. No file is known that one reads and the other refuses; should one turn up, the plugin leaves its package to the compiler, which then does for it all the plugin did not.",
+  "keys": [
+    "roots",
+    "committed",
+    "exclude",
+    "php",
+    "fmt",
+    "unused"
+  ],
+  "keys-of-unused": [
+    "reflectedAttributes"
+  ],
   "vectors": [
     {
       "name": "no key: the project commits no outputs (D13)",
@@ -363,7 +374,7 @@
       "name": "a key of unused the compiler does not know",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"attributes\": []}}",
       "refused": true,
-      "error": "unknown key"
+      "error": "unknown key \"unused.attributes\""
     },
     {
       "name": "a class name of unused that starts with a digit",
@@ -438,7 +449,8 @@
     {
       "name": "an unknown key, and text after the object",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"later\": true} {}",
-      "refused": true
+      "refused": true,
+      "error": "text follows it"
     },
     {
       "name": "a known key in another letter case is not an unknown key",
@@ -455,7 +467,7 @@
       "name": "an unknown key under a known key is refused: only a key of the file's own object is passed over",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [], \"later\": true}}",
       "refused": true,
-      "error": "unknown key"
+      "error": "unknown key \"unused.later\""
     },
     {
       "name": "roots written twice",
@@ -477,6 +489,143 @@
       "root": "unknown key \"later\"",
       "unknown": [
         "later"
+      ]
+    },
+    {
+      "name": "a byte that is no UTF-8, as an editor that saves Latin-1 writes an accented letter",
+      "bytes": "eyJyb290cyI6IHsic3JjIjogIi5zcmMifSwgImNvbW1pdHRlZCI6IFsic3JjIl0sICJleGNsdWRlIjogWyJzcmMvY2Fm6SJdfQ==",
+      "refused": true,
+      "error": "not UTF-8"
+    },
+    {
+      "name": "a byte that is no UTF-8 in the value of an unknown key",
+      "bytes": "eyJyb290cyI6IHsic3JjIjogIi5zcmMifSwgImNvbW1pdHRlZCI6IFsic3JjIl0sICJkZXNjcmlwdGlvbiI6ICJCaWJsaW90aOhxdWUifQ==",
+      "refused": true,
+      "error": "not UTF-8"
+    },
+    {
+      "name": "null in the list of fmt",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"fmt\": [null]}",
+      "refused": true,
+      "error": "\"fmt\" lists strings, and null is not one"
+    },
+    {
+      "name": "null among the paths of exclude",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"src/Fixture\", null]}",
+      "refused": true,
+      "error": "\"exclude\" lists strings, and null is not one"
+    },
+    {
+      "name": "the text null is no object",
+      "file": "null",
+      "refused": true,
+      "error": "this is null"
+    },
+    {
+      "name": "the text null with space about it",
+      "file": " null\n",
+      "refused": true
+    },
+    {
+      "name": "half a surrogate pair in a string: a high one alone",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"x\": \"\\ud800\"}",
+      "refused": true,
+      "error": "half of a surrogate pair"
+    },
+    {
+      "name": "a low surrogate alone, in a key",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"\\udc00\": 1}",
+      "refused": true,
+      "error": "half of a surrogate pair"
+    },
+    {
+      "name": "a high surrogate before an escape that is no low one",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"x\": \"\\uD83D\\u0041\"}",
+      "refused": true
+    },
+    {
+      "name": "a surrogate pair is a character, and a backslash before \\\\ud800 makes it text",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"\\ud83d\\ude00\", \"\\\\ud800\"]}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "510 lists inside one another under the object are read",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"x\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [],
+      "root": "unknown key \"x\"",
+      "unknown": [
+        "x"
+      ]
+    },
+    {
+      "name": "511 lists inside one another under the object are too deep",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"x\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+      "refused": true,
+      "error": "nested deeper"
+    },
+    {
+      "name": "a key that begins with U+0000, at any depth",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"x\": [{\"\\u0000a\": 1}]}",
+      "refused": true,
+      "error": "begins with U+0000"
+    },
+    {
+      "name": "U+0000 inside a key is a key like another",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"a\\u0000\": 1}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [],
+      "root": "unknown key",
+      "unknown": [
+        "a\u0000"
+      ]
+    },
+    {
+      "name": "a key written twice in an object inside a list",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"x\": [[{\"b\": {\"a\": 1, \"a\": 2}}]]}",
+      "refused": true,
+      "error": "is written twice"
+    },
+    {
+      "name": "two elements of a list with the same key are two objects",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"later\": [{\"a\": 1}, {\"a\": 2}]}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "root": "unknown key \"later\"",
+      "unknown": [
+        "later"
+      ]
+    },
+    {
+      "name": "with an unknown key beside them, the known keys are still refused in the order of the file",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"php\": 8.5, \"later\": 1, \"committed\": \"src\"}",
+      "refused": true
+    },
+    {
+      "name": "an unknown key with an escape character in it is named with the character written out",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"a\\u001bb\": 1}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "root": "unknown key \"a\\u001bb\" (this is phn",
+      "unknown": [
+        "a\u001bb"
       ]
     }
   ]

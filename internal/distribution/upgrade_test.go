@@ -616,8 +616,10 @@ func TestLinkedWarningSaysWhatToDo(t *testing.T) {
 // standing in that knows nothing of earlier builds, as a compiler older
 // than the plugin does not: the class the library dropped is gone all the
 // same, the plugin said so, and it told the `phn build --vendor` it ran
-// that it had, through PHN_EARLIER_BUILDS_CLEARED, which the project's own
-// build is not given.
+// which package it had looked at, through PHN_EARLIER_BUILDS_CLEARED,
+// which the project's own build is not given. A value of that name in the
+// environment Composer was started in is not the plugin's, and is there
+// again when phn has run.
 func TestClearedWhateverTheCompiler(t *testing.T) {
 	w := newWorld(t, "")
 	k := w.newReleases("kit", true)
@@ -635,13 +637,135 @@ func TestClearedWhateverTheCompiler(t *testing.T) {
 		t.Errorf("the plugin cleared after it ran phn:\n%s", out)
 	}
 	w.expectRuns(run{p.dir, []string{"build", "--vendor"}}, run{p.dir, []string{"build"}})
-	if got := w.cleared(); !slices.Equal(got, []string{"1", "unset"}) {
-		t.Errorf("PHN_EARLIER_BUILDS_CLEARED at the two runs of phn: %v, want it set for build --vendor alone", got)
+	if got := w.cleared(); !slices.Equal(got, []string{"acme/kit", "unset"}) {
+		t.Errorf("PHN_EARLIER_BUILDS_CLEARED at the two runs of phn: %v, want it to name acme/kit for build --vendor alone", got)
 	}
 	if status := k.git("status", "--porcelain", "--ignored", "--", ".src"); status != "" {
 		t.Errorf("the library's .src/ is not as committed:\n%s", status)
 	}
 	p.expectKit("2.0.0", false)
+
+	p.environment = []string{"PHN_EARLIER_BUILDS_CLEARED=mine"}
+	p.mustComposer("dump-autoload")
+	if got := w.cleared(); !slices.Equal(got, []string{"acme/kit", "unset", "acme/kit", "mine"}) {
+		t.Errorf("PHN_EARLIER_BUILDS_CLEARED at the four runs of phn: %v, want the value Composer was started with back for the project's build", got)
+	}
+}
+
+// TestPackagesThePluginCannotRead: the plugin names to phn the packages it
+// has looked at, and no other, so that what it could not read is phn's in
+// the same dump. acme/kit is a linked checkout that holds an earlier build.
+//
+// Where its project file is one both readers refuse for its roots, here a
+// key written twice, the plugin reads nothing of it and leaves the package
+// to phn: phn is run, the variable does not name the package, and phn
+// warns of the file.
+//
+// Where the file is refused for a key beside the roots, here null in the
+// list of "fmt", phn leaves the package out and so does the plugin. The
+// package has nothing to build, and the dump fetches no compiler to say
+// so: none is to be had in this project, and the install passes. Nothing
+// is removed, by the plugin or by phn run by hand, which warns of the
+// file; under -v the plugin names the key.
+func TestPackagesThePluginCannotRead(t *testing.T) {
+	leftovers := func(k *kit) {
+		t.Helper()
+		stamped(k.dir)
+		writeFile(t, filepath.Join(k.dir, ".src", "Legacy.php"), []byte("<?php\n"), 0o644)
+	}
+	kept := func(k *kit, when string) {
+		t.Helper()
+		for _, f := range []string{".phn-build", "Legacy.php"} {
+			if _, err := os.Stat(filepath.Join(k.dir, ".src", f)); err != nil {
+				t.Errorf("%s: %v", when, err)
+			}
+		}
+	}
+
+	t.Run("a file whose roots cannot be told", func(t *testing.T) {
+		w := newWorld(t, "")
+		k := w.newReleasesWith("kit", true, nil, func(dir string) {
+			writeFile(t, filepath.Join(dir, "phaenon.json"), []byte(`{"roots": {"src": ".src"}, "committed": ["src"], "committed": ["src"]}`+"\n"), 0o644)
+		})
+		leftovers(k)
+		base := filepath.Join(w.base, "libraries", "acme", "base")
+		for path, text := range map[string]string{
+			"composer.json":   `{"name": "acme/base", "autoload": {"psr-4": {"Acme\\Base\\": ".src/"}}}` + "\n",
+			"phaenon.json":    `{"roots": {"src": ".src"}, "committed": ["src"]}` + "\n",
+			"src/Thing.phn":   "namespace Acme\\Base;\n\nfinal class Thing\n{\n}\n",
+			".src/Thing.php":  "<?php\n\nnamespace Acme\\Base;\n\nfinal class Thing\n{\n}\n",
+			".src/Legacy.php": "<?php\n",
+			".src/.phn-build": "phn 0.4.1\n",
+		} {
+			writeFile(t, filepath.Join(base, path), []byte(text), 0o644)
+		}
+		whole := dependency{name: "acme/base", constraint: "*", repository: pathRepository(base, "acme/base", "1.0.0", true)}
+
+		// With a phn standing in: what the plugin tells it.
+		told := w.newProject("told", project{dependencies: []dependency{k.path(true), whole}, override: true})
+		out := told.mustComposer("install")
+		if !strings.Contains(out, "phaenon/phn: acme/base 1.0.0: .src/.phn-build is the stamp of a build") || strings.Contains(out, "acme/kit 2.0.0: .src/.phn-build") {
+			t.Errorf("composer's output:\n%s\nwant the plugin's line for acme/base, which it read, and none for acme/kit", out)
+		}
+		w.expectRuns(run{told.dir, []string{"build", "--vendor"}})
+		if got := w.cleared(); !slices.Equal(got, []string{"acme/base"}) {
+			t.Errorf("PHN_EARLIER_BUILDS_CLEARED: %v, want it to name acme/base alone: acme/kit is phn's", got)
+		}
+		kept(k, "the package left to phn, after a dump with a phn that does nothing")
+
+		// With the real phn: it says what is wrong with the file.
+		real := w.newProject("real", project{dependencies: []dependency{k.path(true)}, binary: w.buildPhn()})
+		out = real.mustComposer("install")
+		if want := `warning: vendor/acme/kit/phaenon.json: the key "committed" is written twice`; !strings.Contains(out, want) {
+			t.Errorf("composer's output lacks phn's warning %q:\n%s", want, out)
+		}
+		kept(k, "a package whose file phn refuses")
+	})
+
+	t.Run("a file refused for a key beside the roots", func(t *testing.T) {
+		w := newWorld(t, "")
+		k := w.newReleasesWith("kit", true, nil, func(dir string) {
+			writeFile(t, filepath.Join(dir, "phaenon.json"), []byte(`{"roots": {"src": ".src"}, "committed": ["src"], "fmt": [null]}`+"\n"), 0o644)
+		})
+		leftovers(k)
+		p := w.newProject("app", project{dependencies: []dependency{k.path(true)}})
+
+		out := p.mustComposer("install")
+
+		if strings.Contains(out, "phaenon/phn:") {
+			t.Errorf("the plugin spoke of a package phn leaves out:\n%s", out)
+		}
+		w.expectRuns()
+		expectAbsent(t, p.installed())
+		kept(k, "a package phn leaves out")
+
+		out = p.mustComposer("dump-autoload", "-v")
+		if want := `phaenon/phn: acme/kit: phn refuses its phaenon.json for the key "fmt", and the package is left out, as installed` + "\n"; !strings.Contains(out, want) {
+			t.Errorf("composer dump-autoload -v lacks\n%s\nin\n%s", want, out)
+		}
+
+		stdout, stderr, err := p.phn("build", "--vendor")
+		if want := `warning: vendor/acme/kit/phaenon.json: "fmt" lists strings, and null is not one` + "\n"; err != nil || stderr != want || strings.Contains(stdout, "acme/kit") {
+			t.Errorf("phn build --vendor: %v\n%s%s\nwant the warning\n%s", err, stdout, stderr, want)
+		}
+		kept(k, "phn build --vendor by hand")
+	})
+
+	t.Run("a file that is not UTF-8", func(t *testing.T) {
+		w := newWorld(t, "")
+		k := w.newReleasesWith("kit", true, nil, func(dir string) {
+			writeFile(t, filepath.Join(dir, "phaenon.json"), []byte("{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"src/caf\xe9\"]}\n"), 0o644)
+		})
+		leftovers(k)
+		p := w.newProject("app", project{dependencies: []dependency{k.path(true)}, binary: w.buildPhn()})
+
+		out := p.mustComposer("install")
+
+		if want := "warning: vendor/acme/kit/phaenon.json: the project file is not UTF-8 text\n"; !strings.Contains(out, want) || strings.Contains(out, "is the stamp of a build") {
+			t.Errorf("composer's output:\n%s\nwant phn's warning of the file, and no word of a stamp:\n%s", out, want)
+		}
+		kept(k, "a package whose file neither reader takes")
+	})
 }
 
 // TestReleaseThatTracksAStamp: the limit that is left, as it behaves. A

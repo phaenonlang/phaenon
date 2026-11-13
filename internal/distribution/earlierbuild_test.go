@@ -109,9 +109,13 @@ require $argv[2];
 $answers = [];
 foreach (array_chunk(array_slice($argv, 3), 3) as [$dir, $source, $project]) {
     $file = Phaenon\Composer\ProjectFile::read($dir . '/phaenon.json');
-    $errors = $file?->missingOutputs('acme/kit', '1.0.0', $dir);
-    if ($file === null || $errors === null) {
-        $answers[] = ['undecided' => true];
+    // A file whose roots the plugin cannot tell, and one phn refuses for another key, are
+    // not judged: the package is left to phn, or left out as phn leaves it.
+    $errors = $file === null || $file->refusal !== null ? null : $file->missingOutputs('acme/kit', '1.0.0', $dir);
+    if ($errors === null) {
+        // Asked all the same, the clean-up does nothing for a file phn refuses.
+        $asked = $file?->refusal === null ? [] : Phaenon\Composer\EarlierBuild::clear($file, $dir, $source === '' ? null : $source, $project);
+        $answers[] = ['undecided' => $asked === []];
         continue;
     }
     $answer = ['errors' => $errors, 'said' => [], 'warned' => []];

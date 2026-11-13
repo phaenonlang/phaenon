@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,9 +27,12 @@ import (
 // projectFileVectors is testdata/project-files.json, the reference of how
 // a project file is read: a project's own, and an installed package's.
 type projectFileVectors struct {
-	Vectors []struct {
+	Keys         []string `json:"keys"`
+	KeysOfUnused []string `json:"keys-of-unused"`
+	Vectors      []struct {
 		Name      string            `json:"name"`
 		File      string            `json:"file"`
+		Bytes     []byte            `json:"bytes"`
 		Refused   bool              `json:"refused"`
 		Error     string            `json:"error"`
 		Roots     map[string]string `json:"roots"`
@@ -55,9 +59,28 @@ func TestProjectFileVectors(t *testing.T) {
 	if len(vectors.Vectors) == 0 {
 		t.Fatal("no vectors")
 	}
+	// The keys the vectors list are the ones this reader knows; the
+	// plugin's reader is held to the same lists.
+	tags := func(t reflect.Type) (tags []string) {
+		for i := range t.NumField() {
+			if tag, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ","); tag != "" {
+				tags = append(tags, tag)
+			}
+		}
+		return tags
+	}
+	if got := tags(reflect.TypeFor[project]()); !slices.Equal(got, vectors.Keys) {
+		t.Errorf("the reader knows the keys %v, the vectors list %v", got, vectors.Keys)
+	}
+	if got := tags(reflect.TypeFor[unusedSettings]()); !slices.Equal(got, vectors.KeysOfUnused) {
+		t.Errorf("the reader knows the keys %v under \"unused\", the vectors list %v", got, vectors.KeysOfUnused)
+	}
 	tolerated := 0
 	for _, v := range vectors.Vectors {
 		path := filepath.Join(t.TempDir(), ProjectFile)
+		if v.Bytes != nil {
+			v.File = string(v.Bytes)
+		}
 		writeTree(t, filepath.Dir(path), map[string]string{ProjectFile: v.File})
 		if (v.Root != "") != (len(v.Unknown) > 0) {
 			t.Errorf("%s: a file is refused as a project's own and read as a package's exactly when it has unknown keys", v.Name)

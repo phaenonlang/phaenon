@@ -132,7 +132,7 @@ func clearEarlierBuild(dir, src, out string, unknown []string) *earlierBuild {
 	}
 	e := &earlierBuild{out: filepath.ToSlash(out)}
 	if len(unknown) > 0 {
-		e.obstacle, e.unbuilt = fmt.Sprintf("its %s has the key %q, which this version of phn does not know", ProjectFile, unknown[0]), true
+		e.obstacle, e.unbuilt = fmt.Sprintf("its %s has the key %s, which this version of phn does not know", ProjectFile, quoted(unknown[0])), true
 		return e
 	}
 	for _, root := range []string{src, out} {
@@ -237,10 +237,11 @@ const stampBegins = "phn "
 // in the way is put right, but for a directory that build does not look
 // at, which is cleared by hand.
 func (e *earlierBuild) report(pkg, dir string, linked bool) (lines []string, warning bool) {
-	// A name with a line break in it stays on its line.
+	// A name with a line break in it stays on its line, and one with an
+	// escape sequence in it does not reach the terminal as one.
 	defer func() {
 		for i, line := range lines {
-			lines[i] = strings.NewReplacer("\n", `\n`, "\r", `\r`).Replace(line)
+			lines[i] = unprintable(line)
 		}
 	}()
 	head := fmt.Sprintf("%s: %s/%s is the stamp of a build, in a root the package commits", pkg, e.out, stampFile)

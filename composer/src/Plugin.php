@@ -34,9 +34,13 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
 {
     /**
      * The environment variable `phn build --vendor` is run with by the plugin, which has by then
-     * removed what earlier builds left in committed roots: phn, seeing it, leaves those roots
-     * alone. It is the plugin's word to phn and no setting of a project; a phn from before it
-     * ignores it, and has no such pass to skip.
+     * removed what earlier builds left in committed roots. Its value names, with spaces between
+     * them, the packages the plugin has itself looked at: phn leaves the committed roots of
+     * those alone and makes its own pass for every other, so that a package whose project file
+     * the plugin could not read is cleared, or warned of, in the same dump, and a warning comes
+     * once. It is the plugin's word to phn and no setting of a project: a value that names no
+     * installed package leaves nothing out, and a phn from before the variable ignores it, and
+     * has no such pass to skip.
      */
     public const string EARLIER_BUILDS_CLEARED = 'PHN_EARLIER_BUILDS_CLEARED';
 
@@ -79,11 +83,33 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         $committing = [];
         $incomplete = 0;
         foreach (self::phaenonPackages($composer) as $name => [$version, $dir, $installationSource]) {
-            // A file this reader refuses, as phn refuses it, or a root it cannot read, is
-            // phn's to report: the package is left to it.
+            // A file whose roots this reader cannot tell is phn's to report: the package is
+            // left to it, with everything the plugin does for a package.
             $file = ProjectFile::read($dir . '/phaenon.json');
-            $errors = $file?->missingOutputs($name, $version, $dir);
-            if ($file === null || $errors === null) {
+            if ($file === null) {
+                $packages[] = $name;
+
+                continue;
+            }
+            // A file phn refuses for a key beside its roots: phn warns of it and leaves the
+            // package out, neither checking nor building it. So does the plugin. Where the
+            // package has a root to build, phn is run and says so; a package with nothing to
+            // build makes the dump fetch no compiler for the sake of the warning.
+            if ($file->refusal !== null) {
+                $io->writeError(str_replace('<', '\\<', sprintf(
+                    'phaenon/phn: %s: phn refuses its phaenon.json for the key %s, and the package is left out, as installed',
+                    $name,
+                    ProjectFile::quoted($file->refusal),
+                )), true, IOInterface::VERBOSE);
+                if (!$file->leavesNothingToBuild($dir)) {
+                    $packages[] = $name;
+                }
+
+                continue;
+            }
+            // A root it cannot read is phn's to report as well.
+            $errors = $file->missingOutputs($name, $version, $dir);
+            if ($errors === null) {
                 $packages[] = $name;
 
                 continue;
@@ -94,7 +120,7 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
                 $io->writeError(str_replace('<', '\\<', sprintf(
                     'phaenon/phn: %s: its phaenon.json has keys this version of phn does not know, and passes over: %s',
                     $name,
-                    implode(', ', $file->unknown),
+                    implode(', ', array_map(ProjectFile::quoted(...), $file->unknown)),
                 )), true, IOInterface::VERBOSE);
             }
             foreach ($errors as $error) {
@@ -106,7 +132,7 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
                 continue;
             }
             if ($file->committed !== []) {
-                $committing[trim($name . ' ' . $version)] = [$file, $dir, $installationSource];
+                $committing[$name] = [$file, $dir, $installationSource, trim($name . ' ' . $version)];
             }
             if (!$file->leavesNothingToBuild($dir)) {
                 $packages[] = $name;
@@ -120,9 +146,9 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         // (EarlierBuild). It is done here, in every dump and before a binary is resolved: it
         // takes no compiler, and so does not depend on which one the project has. A phn older
         // than the plugin, PHN_BINARY's or a checkout's own build, has no such pass.
-        foreach ($committing as $package => [$file, $dir, $installationSource]) {
+        foreach ($committing as [$file, $dir, $installationSource, $package]) {
             foreach (EarlierBuild::clear($file, $dir, $installationSource, $projectDir) as $build) {
-                self::reportAnEarlierBuild($io, $build, (string) $package, self::shown($dir, $projectDir));
+                self::reportAnEarlierBuild($io, $build, $package, self::shown($dir, $projectDir));
             }
         }
         $buildsProject = $settings->buildRoot && is_file($projectDir . '/phaenon.json');
@@ -156,9 +182,10 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
                     ['build', '--vendor'],
                     'an installed package\'s output could not be written, as phn\'s messages above say '
                     . '(the findings of installed packages are only warnings)',
-                    // phn has the same pass, for when it is run by hand: here it would say a
-                    // second time what could not be removed.
-                    [self::EARLIER_BUILDS_CLEARED => '1'],
+                    // phn has the same pass, for when it is run by hand: for the packages
+                    // looked at above it would say a second time what could not be removed.
+                    // The others, whose file the plugin could not read among them, are phn's.
+                    $committing === [] ? [] : [self::EARLIER_BUILDS_CLEARED => implode(' ', array_map(strval(...), array_keys($committing)))],
                 );
             }
             if ($buildsProject) {

@@ -344,29 +344,44 @@ func TestBuildVendorLeavesAStampThatCameWithTheFiles(t *testing.T) {
 }
 
 // The Composer plugin clears what earlier builds left before it runs this
-// command, and says so through PHN_EARLIER_BUILDS_CLEARED: with the
-// variable set, `phn build --vendor` removes nothing from a committed root
-// and says nothing of it, where without it the same tree is cleared.
-func TestBuildVendorLeavesEarlierBuildsToThePlugin(t *testing.T) {
+// command, and names the packages it has looked at in
+// PHN_EARLIER_BUILDS_CLEARED. `phn build --vendor` leaves the committed
+// roots of those alone and says nothing of them; every other package it
+// clears itself, as it does without the variable. So a package the plugin
+// could not read is still cleared in the same dump, and a value that names
+// no installed package, as a bare "1" does, leaves nothing out.
+func TestBuildVendorLeavesToThePluginWhatItNames(t *testing.T) {
 	bin := phnBinary(t)
-	root := committedTree(t)
-	checkedOut(t, root)
-	kit := filepath.Join(root, "vendor/acme/kit")
-	writeTree(t, kit, map[string]string{".src/" + stampFile: "phn 0.4.1\n", ".src/Legacy.php": "<?php\n"})
-	held := snapshot(t, kit)
+	for value, skipped := range map[string]bool{
+		"acme/kit":            true,
+		"acme/other acme/kit": true,
+		"Acme/Kit":            true, // a package's name is its name in any letter case
+		"acme/other":          false,
+		"1":                   false,
+		"":                    false,
+	} {
+		root := committedTree(t)
+		checkedOut(t, root)
+		kit := filepath.Join(root, "vendor/acme/kit")
+		writeTree(t, kit, map[string]string{".src/" + stampFile: "phn 0.4.1\n", ".src/Legacy.php": "<?php\n"})
+		held := snapshot(t, kit)
 
-	cmd := exec.Command(bin, "build", "--vendor")
-	cmd.Dir = root
-	cmd.Env = append(os.Environ(), earlierBuildsCleared+"=1")
-	out, err := cmd.CombinedOutput()
+		cmd := exec.Command(bin, "build", "--vendor")
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), earlierBuildsCleared+"="+value)
+		out, err := cmd.CombinedOutput()
 
-	if err != nil || strings.Contains(string(out), "acme/kit") {
-		t.Errorf("phn build --vendor with %s set (%v) spoke of acme/kit:\n%s", earlierBuildsCleared, err, out)
-	}
-	expectSnapshot(t, "acme/kit", kit, held)
-
-	stdout, stderr, err := run(t, root, bin, "build", "--vendor")
-	if err != nil || !strings.Contains(stdout, "  - removed .src/Legacy.php\n") {
-		t.Errorf("phn build --vendor without the variable should clear the root (%v):\n%s%s", err, stdout, stderr)
+		cleared := strings.Contains(string(out), "  - removed .src/Legacy.php\n")
+		switch {
+		case err != nil:
+			t.Errorf("%s=%q: phn build --vendor: %v\n%s", earlierBuildsCleared, value, err, out)
+		case skipped && (cleared || strings.Contains(string(out), "acme/kit")):
+			t.Errorf("%s=%q: phn build --vendor spoke of a package the plugin has looked at:\n%s", earlierBuildsCleared, value, out)
+		case !skipped && !cleared:
+			t.Errorf("%s=%q names no such package, and phn build --vendor should clear the root:\n%s", earlierBuildsCleared, value, out)
+		}
+		if skipped {
+			expectSnapshot(t, "acme/kit", kit, held)
+		}
 	}
 }
