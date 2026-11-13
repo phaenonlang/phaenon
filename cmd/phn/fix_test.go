@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -420,6 +421,23 @@ func TestFmtFailsOnAFileThatDoesNotParse(t *testing.T) {
 	stdout, stderr, err = run(t, root, bin, "fmt", "--check")
 	if exitStatus(err) != 1 || !strings.Contains(stderr, "src/Broken.phn:") {
 		t.Errorf("phn fmt --check should fail on Broken.phn (%v):\n%s%s", err, stdout, stderr)
+	}
+}
+
+// A change's text in the report is cut between characters, never inside
+// one: a string of PHP, a comment, holds any text.
+func TestClipCutsBetweenCharacters(t *testing.T) {
+	head := strings.Repeat("a", 56) + "€"
+	if got, want := clip(head+strings.Repeat("b", 10)), strconv.Quote(head+"…"); got != want {
+		t.Errorf("clip = %s, want %s", got, want)
+	}
+	short := strings.Repeat("é", 40) // 80 bytes, 40 characters
+	if got, want := clip(short), strconv.Quote(short); got != want {
+		t.Errorf("clip = %s, want %s", got, want)
+	}
+	raw := strings.Repeat("\xff", 70) // a PHP string of bytes keeps them
+	if got, want := clip(raw), strconv.Quote(strings.Repeat("\xff", 57)+"…"); got != want {
+		t.Errorf("clip = %s, want %s", got, want)
 	}
 }
 
