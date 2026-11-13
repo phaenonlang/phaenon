@@ -224,8 +224,14 @@ from the package by hand.
   with the versions of the file's list that satisfy it, `"refused"` where Composer refuses it and
   `"unread"` where Composer reads it and `internal/semver` does not. Composer is the oracle: a
   vector is added as its constraint alone and filled with `PHAENON_UPDATE=1 PHAENON_COMPOSER=…
-  go test ./internal/semver -run TestComposerAgrees`. The reader may read less than Composer,
-  never differently: a spelling it is not sure of becomes `"unread"`, not a guess.
+  go test ./internal/semver -run TestComposerAgrees`. The reader is to read less than Composer
+  and never differently, which is an aim the vectors measure and do not prove: a difference
+  found becomes a vector, and a spelling the reader is not sure of becomes `"unread"`, not a
+  guess. The test asks whatever Composer the machine has, so a new composer/semver can turn it
+  red in a pull request that touched nothing here. Then run it with `PHAENON_UPDATE=1` and read
+  the diff of the file: an answer that changed for a constraint the reader reads is a change of
+  the reader to make, or the constraint becomes `"unread"`; nothing else in the diff asks for
+  code.
 - A `.phn` fixture is PHP without `<?php`. Docblocks: one tag per line (PHPStan ignores the rest).
 - Golden files and `stdlib/php-src` are byte-sensitive: no formatters, no whitespace clean-up
   (`.editorconfig` exempts them).

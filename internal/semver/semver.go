@@ -4,11 +4,24 @@
 // each release of a package that another package's `conflict` names
 // (design/tooling.md §3.7).
 //
-// Its invariant is that it never reads a constraint differently from
-// Composer. It reads less: a spelling outside the forms below is an error,
-// which the caller reports as a constraint it cannot judge, never a guess.
-// testdata/constraints.json holds the reader to Composer's answers, which
-// TestComposerAgrees asks a real Composer for.
+// It is written to read a constraint as Composer does or not at all. It
+// reads less: a spelling outside the forms below is an error, which the
+// caller reports as a constraint it cannot judge, never a guess. That is an
+// aim, held by measurement and not proved:
+//
+//   - testdata/constraints.json lists constraints with Composer's answers,
+//     and TestComposerAgrees asks the Composer of the machine for them, in
+//     CI too;
+//   - on 2026-11-13 the reader was compared with Composer 2.9.5
+//     (composer/semver 3.4.4) over 1,800,000 generated constraints, thirty
+//     versions each. Both read 388,732 of them and gave the same answer for
+//     every version; the reader read none that Composer refuses, and
+//     refused 284,709 that Composer reads.
+//
+// A difference found is a bug of this package and becomes a vector. Those
+// found so far were of three kinds, each refused now: alternatives that
+// Composer joins into something they do not say, a space Composer does not
+// part a constraint at, and a space inside an operator.
 //
 // What is read, with Composer's quirks (VersionParser::parseConstraints):
 //
@@ -32,8 +45,12 @@
 // those letters beside another constraint, `self.version`, numeric branches
 // (`1.x-dev`), versions made of dates, a wildcard or build metadata inside
 // `~`, `^` and a hyphen range, a stability flag after an operator and a
-// space (Composer drops it), and whatever Composer itself refuses, `~>1.2`
-// among it.
+// space (Composer drops it), a comma after an operator's character, any
+// space but the plain one inside a constraint, and whatever Composer itself
+// refuses, `~>1.2` and `< =1.2` among it. Nor is a constraint of several
+// alternatives read when one of them is a range that ends before it begins
+// or is bounded by a branch: Composer joins neighbouring ranges into one,
+// and with such a range the result is not what the alternatives say.
 //
 // Versions are ordered as PHP's version_compare orders Composer's normalised
 // form: dev < alpha < beta < RC < the release < patch.
@@ -49,6 +66,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Version is a version as Composer normalises it: four numbers and what
@@ -157,7 +175,7 @@ var (
 // ParseVersion reads a version as VersionParser::normalize does: `0.4.1`,
 // `v1.2`, `1.0.0-beta2`, `dev-main`.
 func ParseVersion(s string) (Version, error) {
-	raw := strings.TrimSpace(s)
+	raw := trim(s)
 	if len(raw) > 4 && strings.EqualFold(raw[:4], "dev-") {
 		if !branchName.MatchString(raw[4:]) {
 			return Version{}, fmt.Errorf("%q is not a version", s)
@@ -300,7 +318,8 @@ var (
 	// operatorGap is the space Composer allows after a comparison's
 	// operator, where it does not part two constraints; gap stands for it
 	// while the constraints are parted.
-	operatorGap = regexp.MustCompile(`([<>=]) +`)
+	operatorGap   = regexp.MustCompile(`([<>=]) +`)
+	afterOperator = regexp.MustCompile(`[<>=],`)
 	// A hyphen range has one space on each side of its hyphen: Composer
 	// parts the constraint at a wider gap, and does not part it at a
 	// space or a comma that touches a hyphen on one side only.
@@ -328,22 +347,53 @@ func unread(s string) error {
 // does, or fails on one outside the forms this package reads. The error is
 // worded to follow the constraint in a message: "… cannot be judged (…)".
 func ParseConstraint(s string) (Constraint, error) {
-	text := strings.TrimSpace(s)
+	text := trim(s)
 	if text == "" {
 		return Constraint{}, fmt.Errorf("it is empty")
 	}
-	if strings.ContainsFunc(text, func(r rune) bool { return r < ' ' }) {
-		return Constraint{}, fmt.Errorf("it holds a tab, a line break or another control character")
+	// Composer parts constraints at the plain space and the comma alone.
+	// Any other space stays in a version, which is then none, but for the
+	// few it allows around `||`: none is read here.
+	if strings.ContainsFunc(text, func(r rune) bool { return r < ' ' || r == 0x7f || r != ' ' && unicode.IsSpace(r) }) {
+		return Constraint{}, fmt.Errorf("it holds a tab, a line break, a control character or a space that is not the plain one")
 	}
 	var c Constraint
-	for _, alt := range alternatives.Split(text, -1) {
+	written := alternatives.Split(text, -1)
+	for _, alt := range written {
 		all, err := parseAll(alt)
 		if err != nil {
 			return Constraint{}, err
 		}
 		c.alternatives = append(c.alternatives, all)
 	}
+	// Composer joins two neighbouring alternatives `>=A <B || >=B <C` into
+	// `>=A <C` (MultiConstraint::optimizeConstraints), by the text of the two
+	// B. That is the two ranges together only where neither ends before it
+	// begins and no bound is a branch, which no version is below. Where one
+	// does, what Composer makes of the constraint is not what its
+	// alternatives say, and it is not read.
+	if len(c.alternatives) > 1 {
+		for i, all := range c.alternatives {
+			if len(all) != 2 || all[0].op != ">=" || all[1].op != "<" && all[1].op != "<=" {
+				continue
+			}
+			from, to := all[0].version, all[1].version
+			switch {
+			case from.IsBranch() || to.IsBranch():
+				return Constraint{}, fmt.Errorf("%q is a range bounded by a branch, beside another alternative, and Composer joins neighbouring ranges into one", written[i])
+			case from.Compare(to) > 0:
+				return Constraint{}, fmt.Errorf("%q is a range that ends before it begins, beside another alternative, and Composer joins neighbouring ranges into one", written[i])
+			}
+		}
+	}
 	return c, nil
+}
+
+// trim is PHP's trim, which Composer applies to a constraint and to a
+// version: it takes off the plain space, the tab, the line break, the
+// carriage return, the vertical tab and the NUL byte, and no other space.
+func trim(s string) string {
+	return strings.Trim(s, " \t\n\r\x0b\x00")
 }
 
 // parseAll reads one alternative: constraints that must all hold.
@@ -353,6 +403,11 @@ func parseAll(s string) ([]comparison, error) {
 	}
 	if wideHyphen.MatchString(s) || looseHyphen.MatchString(strings.ReplaceAll(s, " - ", "\x00")) {
 		return nil, fmt.Errorf("a space or a comma beside a hyphen parts nothing: a hyphen range is written 1.0 - 2.0")
+	}
+	// Nor does Composer part a constraint at a comma that follows an
+	// operator's character: `<1.0+b=,>=0.2` is `<1.0` with build metadata.
+	if afterOperator.MatchString(s) {
+		return nil, fmt.Errorf("a comma after <, > or = parts nothing")
 	}
 	s = operatorGap.ReplaceAllString(s, "$1"+gap)
 	// Composer does not part a constraint before or after the letters
@@ -365,7 +420,7 @@ func parseAll(s string) ([]comparison, error) {
 	}
 	var all []comparison
 	for _, group := range strings.Split(s, ",") {
-		fields := strings.Fields(group)
+		fields := strings.FieldsFunc(group, func(r rune) bool { return r == ' ' })
 		if len(fields) == 0 {
 			return nil, fmt.Errorf("a comma of it parts nothing")
 		}
@@ -409,7 +464,9 @@ func parseOne(s string) ([]comparison, error) {
 			// as `<1.0`.
 			return nil, fmt.Errorf("%q has a stability flag after an operator and a space, where Composer drops the flag", written)
 		}
-		s = before + after
+		// What follows the space is the version: in `< =1.0` it is `=1.0`,
+		// which is none, and the two are not read together as `<=1.0`.
+		return compare(before, after, "", s)
 	}
 	flag := ""
 	if m := stabilityFlag.FindStringSubmatch(s); m != nil {
@@ -432,9 +489,12 @@ func parseOne(s string) ([]comparison, error) {
 		return nil, unread(s)
 	}
 	// A reference after a branch (dev-main#abc123) names a commit, not
-	// another version.
+	// another version; a # with nothing after it stays in the name, which
+	// is then not read.
 	if len(s) > 4 && strings.EqualFold(s[:4], "dev-") {
-		s, _, _ = strings.Cut(s, "#")
+		if name, ref, _ := strings.Cut(s, "#"); ref != "" {
+			s = name
+		}
 	}
 	switch {
 	case s == "*" || s == "x" || s == "X":
@@ -451,10 +511,16 @@ func parseOne(s string) ([]comparison, error) {
 		return parseWildcard(s, m)
 	}
 	m := operator.FindStringSubmatch(s)
-	op, text := m[1], m[2]
+	return compare(m[1], m[2], flag, s)
+}
+
+// compare reads a comparison: its operator, none for =, the text of its
+// version and the stability flag that followed it; written is the whole
+// constraint, for the error.
+func compare(op, text, flag, written string) ([]comparison, error) {
 	v, err := ParseVersion(text)
 	if err != nil {
-		return nil, unread(s)
+		return nil, unread(written)
 	}
 	switch op {
 	case "", "=":

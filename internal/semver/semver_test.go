@@ -2,6 +2,7 @@ package semver
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -188,6 +189,15 @@ final class Probe
 // or satisfied by exactly the versions the file lists. PHAENON_UPDATE
 // rewrites the file's answers from Composer's, keeping what it says this
 // package does not read.
+//
+// The test asks whatever Composer PHAENON_COMPOSER names, so it can turn
+// red with no change in this repository: a new composer/semver reads a
+// constraint another way. That is no fault of the change under test. Run
+// the test with PHAENON_UPDATE=1 and read the diff of the file. Where the
+// answer changed for a constraint this package reads, TestConstraintVectors
+// now fails: the reader follows Composer, or the constraint is marked
+// "unread" until it does. Where it changed for a constraint that is
+// "refused" or "unread", the file is all there is to commit.
 func TestComposerAgrees(t *testing.T) {
 	composer := os.Getenv("PHAENON_COMPOSER")
 	if composer == "" {
@@ -270,7 +280,16 @@ func (v vectors) encode() []byte {
 		if err := enc.Encode(value); err != nil {
 			panic(err)
 		}
-		return strings.ReplaceAll(strings.TrimSpace(text.String()), `","`, `", "`)
+		// A space that is not the plain one must show in the file.
+		var ascii strings.Builder
+		for _, r := range strings.ReplaceAll(strings.TrimSpace(text.String()), `","`, `", "`) {
+			if r > '~' {
+				fmt.Fprintf(&ascii, `\u%04x`, r)
+			} else {
+				ascii.WriteRune(r)
+			}
+		}
+		return ascii.String()
 	}
 	var b strings.Builder
 	b.WriteString("{\n  \"versions\": " + quote(v.Versions) + ",\n  \"constraints\": [\n")

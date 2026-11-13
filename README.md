@@ -151,10 +151,17 @@ composer.json: "conflict": {"phaenon/phn": "<0.4"} does not keep this package fr
   the newest key's release line (`0.5.x-dev`).
 - **A constraint `phn` cannot read fails the build as well**, as one that "cannot be judged", with
   the reason: it is not known to keep anything out. `phn` reads the comparisons, `~`, `^`,
-  wildcards, hyphen ranges, alternatives, stability suffixes and flags, and branches as Composer
-  does; it does not read an inline alias (`as`), a numeric branch (`0.5.x-dev`), a version made of
-  a date, or what Composer itself refuses (`~>0.4`). A `composer.json` that cannot be read fails
-  the same way.
+  wildcards, hyphen ranges, alternatives, stability suffixes and flags, and branches. It does not
+  read an inline alias (`as`), a numeric branch (`0.5.x-dev`), a version made of a date, a space
+  that is not the plain one, alternatives of which one is a range that ends before it begins
+  (Composer joins such ranges into something else), or what Composer itself refuses (`~>0.4`). A
+  `composer.json` that cannot be read fails the same way.
+- **The reader is its own, and is held to Composer's.** `phn` depends on no package, so it reads
+  the constraint itself, aiming to read it as Composer does or not at all. That is measured, not
+  proved: a table of constraints with Composer's answers is asked of a real Composer in CI, and
+  the reader was compared with Composer 2.9.5 over generated constraints, each difference found
+  becoming a row of the table. A constraint Composer reads another way than `phn` would be a bug
+  to report.
 - **It is asked of the project's whole build only**: not by `phn check`, `phn watch`, the editor's
   build on save or a build of some paths; not of a project that commits no root or has no
   `composer.json`; and never of an installed package, whose release is its maintainers' to repair.
