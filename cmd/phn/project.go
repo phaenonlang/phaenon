@@ -40,7 +40,8 @@ type project struct {
 	// design/tooling.md §3.7). It says something only of an installed
 	// package: `phn build --vendor` leaves those roots as installed
 	// (vendor.go). In the project's own directory every command treats a
-	// committed root as any other.
+	// committed root as any other, but that a build keeps no stamp there
+	// (mirror).
 	Committed []string `json:"committed"`
 	Exclude   []string `json:"exclude"`
 	PHP       string   `json:"php"`
@@ -368,6 +369,19 @@ func under(path, dir string) (string, bool) {
 // renamed .phn, a removed fixture — is deleted, since a stale .php would
 // declare a class a second time. With check nothing is written; the return
 // values count what was (or would be) copied and removed.
+//
+// The stamp of a build as an installed package (.phn-build, vendor.go) is
+// spared, in a root the project does not commit: a project linked into
+// another as a path repository is built there, and the stamp is that
+// build's record. In a root the project commits it is removed with the
+// files that have no source. No build writes one there: an installed
+// package's committed roots are left as installed. One found there is what
+// a build left before the root was committed, and were it to stay, a
+// release could track it, and every project that installs that release as
+// a checkout would take it for the mark of a build made there (earlier.go).
+// Removed, a tracked stamp shows in `git status`, so the library's gate,
+// which is the state of the tree (design/tooling.md §3.7), fails until the
+// removal is committed.
 func (p *project) mirror(src string, check bool) (copied, removed int) {
 	out := p.Roots[src]
 	filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
@@ -415,8 +429,8 @@ func (p *project) mirror(src string, check bool) (copied, removed int) {
 			return nil
 		}
 		rel, _ := under(path, out)
-		if rel == stampFile {
-			return nil // the build's own record (vendor.go)
+		if rel == stampFile && !p.commits(src) {
+			return nil // the record of a build as an installed package (vendor.go)
 		}
 		for _, source := range sourcesBehind(rel) {
 			if _, err := os.Stat(filepath.Join(src, source)); err == nil {

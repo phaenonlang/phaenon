@@ -440,8 +440,8 @@ func TestCommittedRootBuiltByAnEarlierRelease(t *testing.T) {
 	}
 	check := exec.Command(w.buildPhn(), "build", "--check")
 	check.Dir = k.dir
-	if found, err := check.CombinedOutput(); err == nil || !strings.Contains(string(found), ".src/Legacy.php: no source behind it\n") || strings.Count(string(found), "no source behind it") != 1 {
-		t.Fatalf("phn build --check in the library should find the one output with no source (%v):\n%s", err, found)
+	if found, err := check.CombinedOutput(); err == nil || !strings.Contains(string(found), ".src/Legacy.php: no source behind it\n") || !strings.Contains(string(found), ".src/.phn-build: no source behind it\n") {
+		t.Fatalf("phn build --check in the library should find the output with no source, and the stamp (%v):\n%s", err, found)
 	}
 	linked := w.newProject("linked", project{dependencies: []dependency{k.checkout()}, override: true})
 	out = linked.mustComposer("install")

@@ -4,7 +4,8 @@ package main
 // T18): the roots whose outputs a library's repository tracks. Where the
 // library is installed, `phn build --vendor` leaves them as installed and
 // fails when they came without their outputs; in the library's own project
-// every command treats them as any root.
+// every command treats them as any root, but that a build keeps no stamp
+// there (earlier_test.go).
 
 import (
 	"bufio"
@@ -462,9 +463,11 @@ func ownTrees(t *testing.T) (plain, committed string) {
 	return plain, committed
 }
 
-// In the library's own project nothing changes (T4 stands): build, its
-// --check, check, fmt and fix do in a project that commits its root exactly
-// what they do in the same project without the key, to the same outputs.
+// In the library's own project nothing changes (T4 stands) but what a build
+// does with a stamp (TestBuildRemovesAStampFromItsOwnCommittedRoot): build,
+// its --check, check, fmt and fix do in a project that commits its root
+// exactly what they do in the same project without the key, to the same
+// outputs.
 func TestCommittedRootInItsOwnProject(t *testing.T) {
 	bin := phnBinary(t)
 	plain, committed := ownTrees(t)
@@ -501,6 +504,48 @@ func TestCommittedRootInItsOwnProject(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(committed, ".src/Box.php")); !strings.Contains(string(data), "final class Box") {
 		t.Errorf("the committed root was not built:\n%s", data)
+	}
+}
+
+// In its own project a library's committed root keeps no stamp: one found
+// there is what a build as an installed package left before the root was
+// committed. `phn build --check` reports it as it reports an output with no
+// source, and `phn build` removes it, so that a stamp git tracks shows as
+// a change of the tree and the library's gate fails. A root the project
+// does not commit keeps its stamp, which is the record of such a build.
+func TestBuildRemovesAStampFromItsOwnCommittedRoot(t *testing.T) {
+	bin := phnBinary(t)
+	plain, committed := ownTrees(t)
+	for _, root := range []string{plain, committed} {
+		writeTree(t, root, map[string]string{".src/" + stampFile: "phn 0.4.1\n"})
+		if stdout, stderr, err := run(t, root, bin, "build"); err != nil {
+			t.Fatalf("phn build: %v\n%s%s", err, stdout, stderr)
+		}
+		writeTree(t, root, map[string]string{".src/" + stampFile: "phn 0.4.1\n"})
+	}
+
+	_, stderr, err := run(t, committed, bin, "build", "--check")
+	if want := ".src/" + stampFile + ": no source behind it\n"; err == nil || !strings.Contains(stderr, want) {
+		t.Errorf("phn build --check in the project that commits its root: %v\n%s\nwant a failure saying\n%s", err, stderr, want)
+	}
+	if stdout, stderr, err := run(t, committed, bin, "build"); err != nil || !strings.Contains(stdout, "1 stale outputs removed") {
+		t.Errorf("phn build in the project that commits its root: %v\n%s%s", err, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(committed, ".src", stampFile)); err == nil {
+		t.Error("the stamp is still in the committed root")
+	}
+	if stdout, stderr, err := run(t, committed, bin, "build", "--check"); err != nil {
+		t.Errorf("phn build --check after the build: %v\n%s%s", err, stdout, stderr)
+	}
+
+	if stdout, stderr, err := run(t, plain, bin, "build", "--check"); err != nil {
+		t.Errorf("phn build --check in the project that commits nothing: %v\n%s%s", err, stdout, stderr)
+	}
+	if stdout, stderr, err := run(t, plain, bin, "build"); err != nil || !strings.Contains(stdout, "0 stale outputs removed") {
+		t.Errorf("phn build in the project that commits nothing: %v\n%s%s", err, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(plain, ".src", stampFile)); err != nil {
+		t.Errorf("the stamp of a root the project does not commit: %v", err)
 	}
 }
 

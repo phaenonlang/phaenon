@@ -96,9 +96,10 @@ that is not one is an error of the project file:
 ```
 
 It is for a library published for PHP projects at large, which a project that has no `phn` then
-installs as the plain PHP it compiles to (`roadmap.md` D28). In the library's own project the key
-changes nothing: `phn build`, `phn watch` and the editor build a committed root as any other, which
-is how its outputs are made and kept current. It speaks where the library is an installed package:
+installs as the plain PHP it compiles to (`roadmap.md` D28). In the library's own project `phn
+build`, `phn watch` and the editor build a committed root as any other, which is how its outputs
+are made and kept current; the one difference is a stamp found there (below). The key speaks
+where the library is an installed package:
 `phn build --vendor` leaves such a root as installed, with no output written and no stamp, and
 builds the package's other roots as before. A committed root that came without its
 outputs (no output directory, or a `.phn` with no `.php` there) fails the command with an error
@@ -119,6 +120,17 @@ directory it cannot read, or a link among the sources that leads nowhere, it lea
 as it is and warns; a symbolic link in the output directory is neither followed nor removed; a
 file that cannot be removed is a warning, and the stamp then stays for the next run. A package
 that came without its outputs is not touched at all.
+
+In the library's own project, `phn build` removes a `.phn-build` from the output directory of a
+root the project commits, as it removes a file with no source, and `phn build --check` reports
+it: no build writes a stamp there, so one found there was left by a build of the checkout as an
+installed package, before the root was committed. Were it to stay, a release could track it, and
+a project that installs that release as a checkout would have a tracked file removed: its
+checkout is then modified, and a `composer update` of the package made without interaction fails
+on "has uncommitted changes". With the stamp removed by the build, a tracked one shows in `git
+status`, and the gate of a library that commits its outputs, the state of the tree after a
+build, fails until the removal is committed. The stamp of a root the project does not commit
+stays, as the record of the build that wrote it.
 
 ```sh
 phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function title()` → `title()`, nested calls as |> pipelines, canonical layout
