@@ -1,0 +1,92 @@
+namespace NamedArguments;
+
+// A named argument for a parameter an argument before it already fills:
+// PHP throws "Named parameter $prefix overwrites previous argument" when
+// the call is made (P2010, as for a name no parameter has). PHPStan reports
+// it too (argument.duplicate).
+
+function label(string $prefix, string $text = 'x'): string { return "$prefix:$text"; }
+function glue(string $prefix, string ...$rest): string { return $prefix . implode(',', $rest); }
+function needsTwo(int $a, int $b): int { return $a + $b; }
+
+/**
+ * @template T
+ * @param T $a
+ * @param T $b
+ * @return list<T>
+ */
+function pair(mixed $a, mixed $b): array { return [$a, $b]; }
+
+final class Label {
+    __construct(public string $prefix = '', public string $text = 'x') {}
+    render(string $prefix, string $text = 'x'): string { return "$prefix:$text"; }
+    static of(string $prefix, string $text = 'x'): string { return "$prefix:$text"; }
+}
+
+function calls(Label $l): void {
+    label('a', prefix: 'b'); // want P2010 "named argument $prefix of NamedArguments\label() overwrites the argument before it"
+    label(prefix: 'a', prefix: 'b'); // want P2010 "overwrites the argument before it"
+    label('a', text: 'b', text: 'c'); // want P2010
+    label('a', text: 'b');
+    label(text: 'b', prefix: 'a');
+    $l->render('a', prefix: 'b'); // want P2010 "NamedArguments\Label::render()"
+    Label::of('a', prefix: 'b'); // want P2010 "NamedArguments\Label::of()"
+    new Label('a', prefix: 'b'); // want P2010
+    str_pad('a', 4, string: 'b'); // want P2010 "str_pad()"
+}
+
+function closures(): void {
+    $render = label(...);
+    $render('a', prefix: 'b'); // want P2010
+    $render('a', text: 'b');
+}
+
+// A name the function does not declare goes into its variadic parameter
+// under that name: a positional argument there is numbered and never
+// collides, the same name twice does.
+function variadics(): void {
+    glue('a', prefix: 'b'); // want P2010
+    glue('a', x: 'b', x: 'c'); // want P2010 "named argument $x of NamedArguments\glue()"
+    glue('a', rest: 'b', rest: 'c'); // want P2010
+    glue('a', 'b', rest: 'c');
+    glue('a', x: 'b', y: 'c');
+}
+
+// PHP throws the overwrite before it counts or checks types: the parameter
+// it leaves unbound and the overwriting value's type are not reported as
+// well. One mistake, one diagnostic.
+function consequences(): void {
+    needsTwo(1, a: 2); // want P2010
+    label(text: 'a', text: 'b'); // want P2010
+    label('a', prefix: 1); // want P2010
+    pair(1, a: 2); // want P2010
+    $add = needsTwo(...);
+    $add(1, a: 2); // want P2010
+}
+
+// An unpacked array whose type says its entries fills what they say: an
+// integer key the next position, a string key a name.
+function unpacking(): void {
+    label(...['a'], prefix: 'b'); // want P2010 "named argument $prefix of NamedArguments\label()"
+    label(...['a', 'b'], text: 'c'); // want P2010
+    label(...['a'], text: 'c');
+    glue(...['prefix' => 'a'], prefix: 'b'); // want P2010
+    glue('a', ...['x' => 'b'], x: 'c'); // want P2010
+    glue('a', ...['x' => 'b'], ...['x' => 'c']); // want P2010
+    label('a', ...['prefix' => 'b']); // want P2010
+    $args = ['text' => 'q'];
+    label('a', ...$args, text: 'b'); // want P2010
+}
+
+/** @param list<string> $xs */
+function unpackingUnknown(array $xs): void {
+    label(...$xs, text: 'b');
+    label('a', ...$xs, prefix: 'b'); // want P2010
+}
+
+// A name no parameter has is P2010 as an unknown name, each time it is
+// written, and never also as an overwrite.
+function unknown(): void {
+    label('a', nope: 'b'); // want P2010 "unknown named argument $nope"
+    label('a', nope: 'b', nope: 'c'); // want P2010, P2010
+}

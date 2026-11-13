@@ -48,3 +48,23 @@ function mistakes(): void {
     // Two placeholders: the closure needs two arguments, the pipe passes one.
     $sum = 1 |> needsTwo(?, ?); // want P2101
 }
+
+// The call a pipe becomes: a named argument for the parameter the
+// placeholder stands for overwrites the piped value, PHP's "Named
+// parameter $string overwrites previous argument".
+function overwrites(Out $out): void {
+    $padded = 'a' |> str_pad(?, 4, string: 'b'); // want P2010 "named argument $string of str_pad() overwrites the argument before it"
+    $twice = 'a' |> str_pad(?, length: 4, length: 5); // want P2010
+    $sum = 1 |> needsTwo(?, 2, b: 3); // want P2010
+    $line = 'a' |> Style::line(?, s: 'b'); // want P2010 "Style::line()"
+    'a' |> $out->writeln(?, s: 'b'); // want P2010 "Out::writeln()"
+    $fine = 'a' |> str_pad(?, 4, pad_string: '-');
+    // The parameter the overwrite leaves unbound follows from it.
+    $left = 1 |> needsTwo(?, a: 2); // want P2010
+    $named = 1 |> needsTwo(b: ?, b: 2); // want P2010
+    // A named placeholder that overwrites is reported where it is written,
+    // not at the pipe's left side.
+    $padded = 'z'
+        |> trim(...)
+        |> str_pad('a', 4, string: ?); // want P2010 "named placeholder $string of str_pad() overwrites the argument before it"
+}

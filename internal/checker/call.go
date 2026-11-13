@@ -1678,13 +1678,164 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	return ret
 }
 
+// overwrite is a named argument, or a string key of an unpacked array, that
+// names a parameter an argument or a placeholder before it already fills.
+type overwrite struct {
+	arg, prev *ast.Arg
+	name      string
+}
+
+// findOverwrites lays a call's arguments over the callee's parameters in
+// order and returns each name that overwrites: PHP's Error "Named
+// parameter $x overwrites previous argument" (or "previous placeholder"),
+// thrown when the call is made or when a partial application creates its
+// closure, a pipe stage's `A |> f(?, x: B)` included. A positional
+// argument fills the parameter at its position; one past the declared
+// parameters goes into the variadic parameter under a number, which no
+// name meets. A variadic function collects a name it does not declare
+// under that name, so the same name twice collides. A name no parameter
+// has is P2010 of its own (unknown named argument), and a named
+// placeholder stands only for a declared parameter (partialShape), so
+// neither is counted here.
+//
+// unpacked gives the entries of an unpacked argument, in order, when its
+// type says them all: an integer key fills the next position and a string
+// key a name, as PHP unpacks them. An unpacked list it cannot say fills
+// positions nobody knows, so no later position is counted; the names
+// before it still are.
+func findOverwrites(sig *signature, args *ast.ArgList, unpacked func(*ast.Arg) ([]types.ShapeEntry, bool)) []overwrite {
+	if args == nil {
+		return nil
+	}
+	params, variadic := sig.params, false
+	if n := len(params); n > 0 && params[n-1].Variadic {
+		params, variadic = params[:n-1], true
+	}
+	declared := func(name string) bool {
+		for _, p := range params {
+			if p.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	filled := map[string]*ast.Arg{} // a parameter's name → the argument that fills it
+	var found []overwrite
+	position, lost := 0, false
+	fillPosition := func(a *ast.Arg) {
+		// A positional argument after a named one is P2110, not an
+		// overwrite: the first to fill a parameter keeps it.
+		if !lost && position < len(params) && filled[params[position].Name] == nil {
+			filled[params[position].Name] = a
+		}
+		position++
+	}
+	fillName := func(a *ast.Arg, name string) {
+		if !declared(name) && (!variadic || a.Placeholder != nil) {
+			return
+		}
+		if prev := filled[name]; prev != nil {
+			found = append(found, overwrite{arg: a, prev: prev, name: name})
+			return
+		}
+		filled[name] = a
+	}
+	for _, a := range args.Args {
+		switch {
+		case a.Placeholder != nil && a.Placeholder.Variadic:
+			// `...` comes last and stands for what is left.
+		case a.Unpack:
+			var entries []types.ShapeEntry
+			ok := false
+			if unpacked != nil {
+				entries, ok = unpacked(a)
+			}
+			if !ok {
+				lost = true
+				continue
+			}
+			for _, e := range entries {
+				if e.IsInt {
+					fillPosition(a)
+				} else {
+					fillName(a, e.Key)
+				}
+			}
+		case a.Name == nil:
+			fillPosition(a)
+		default:
+			fillName(a, a.Name.Name)
+		}
+	}
+	return found
+}
+
+// shapeEntries is what unpacking a value of type t passes, when the type
+// says it entry by entry: a sealed array shape with no optional entry.
+func shapeEntries(t types.Type) ([]types.ShapeEntry, bool) {
+	s, ok := t.(types.Shape)
+	if !ok || s.Unsealed {
+		return nil, false
+	}
+	for _, e := range s.Entries {
+		if e.Optional {
+			return nil, false
+		}
+	}
+	return s.Entries, true
+}
+
+// reportOverwrites reports what findOverwrites found as P2010, the code a
+// name no parameter has gets too (design/php-versions.md §9, "Overwriting
+// names"), at the overwriting argument. In a pipe stage pipeCall gives a named placeholder
+// the left side as its value and its span: the finding goes to the name
+// the source wrote, as the placeholder it is.
+func (x *fnCtx) reportOverwrites(sig *signature, found []overwrite) {
+	for _, o := range found {
+		span, kind, before := o.arg.S, "argument", "argument"
+		switch {
+		case o.arg.Placeholder != nil:
+			kind = "placeholder"
+		case o.arg.Name != nil && o.arg.Value != nil && o.arg.Value == x.pipeOperand:
+			span, kind = o.arg.Name.S, "placeholder"
+		}
+		if o.prev.Placeholder != nil {
+			before = "placeholder"
+		}
+		x.report(span, P2010, "named %s $%s of %s overwrites the %s before it", kind, o.name, sig.name, before)
+	}
+}
+
 func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, span ast.Span, expected types.Type) types.Type {
 	// A partial application binds its arguments now and leaves the
 	// placeholders' parameters to the closure it creates.
 	partial := args.Partial()
+	// The names that overwrite an argument before them, found here when no
+	// argument is unpacked and otherwise once the unpacked values are typed
+	// (below). PHP throws the overwrite first, so what follows from it — a
+	// parameter it leaves unbound, the overwriting value against the
+	// parameter's type — is not reported as well, and neither is the
+	// overwrite in a closure PHP's compiler rejects (P1003).
+	hasUnpack := false
+	if args != nil {
+		for _, a := range args.Args {
+			hasUnpack = hasUnpack || a.Unpack
+		}
+	}
+	rejected := rejectedClosure(sig.node, args)
+	over := map[*ast.Arg]bool{}
+	if !hasUnpack {
+		found := findOverwrites(sig, args, nil)
+		if !rejected {
+			x.reportOverwrites(sig, found)
+		}
+		for _, o := range found {
+			over[o.arg] = true
+		}
+	}
 	var shape *pfaShape
 	if partial {
-		shape = x.partialShape(sig, args, span)
+		shape = x.partialShape(sig, args, span, len(over) > 0)
 	}
 	known := func(e ast.Expr) types.Type {
 		if t, ok := sig.known[e]; ok {
@@ -1784,6 +1935,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 	seenNamed := false
 	unpacked := false
 	placeholder := false
+	unpackTypes := map[*ast.Arg]types.Type{}
 	if args != nil {
 		for i, a := range args.Args {
 			if a.Placeholder != nil {
@@ -1799,8 +1951,18 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 					continue
 				}
 				t := x.expr(a.Value, env, nil)
+				unpackTypes[a] = t
 				if _, _, ok := types.IterableKV(t, x.p()); (!ok && !types.IsMixed(t)) || mayNotIterate(t) {
 					x.report(a.S, P2303, "cannot unpack %s", x.typeName(t))
+				}
+				continue
+			}
+			if a.Name != nil && over[a] {
+				// PHP binds nothing to it; its value is typed for what
+				// it holds.
+				seenNamed = true
+				if known(a.Value) == nil {
+					x.expr(a.Value, env, nil)
 				}
 				continue
 			}
@@ -1848,8 +2010,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			x.c.libraryParam(b.arg.S, sig.name, b.param.Name)
 		}
 	}
-	// Required parameters present?
-	if !unpacked && !placeholder {
+	// Required parameters present? Not after an overwrite: PHP throws it
+	// before it counts.
+	if !unpacked && !placeholder && len(over) == 0 {
 		required := 0
 		for _, p := range sig.params {
 			if !p.HasDefault && !p.Variadic {
@@ -2033,9 +2196,28 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			x.report(span, P3002, "type argument %s inferred for %s of %s is not a subtype of its bound %s", x.typeName(v), tp.Name, sig.name, x.typeName(bound))
 		}
 	}
+	// With an unpacked argument the overwrites wait for its type: a sealed
+	// shape says what it fills, `label(...['a'], prefix: 'b')` and
+	// `label('a', ...$args, text: 'b')` with `$args` an array{text: …}.
+	if hasUnpack && !rejected {
+		for i, b := range bindings {
+			if b.arg.Unpack {
+				unpackTypes[b.arg] = argTypes[i]
+			}
+		}
+		found := findOverwrites(sig, args, func(a *ast.Arg) ([]types.ShapeEntry, bool) {
+			return shapeEntries(unpackTypes[a])
+		})
+		x.reportOverwrites(sig, found)
+		for _, o := range found {
+			if !o.arg.Unpack {
+				over[o.arg] = true
+			}
+		}
+	}
 	// Check acceptability with the final substitution.
 	for i, b := range bindings {
-		if b.param.ByRef {
+		if b.param.ByRef || over[b.arg] {
 			continue
 		}
 		pt := paramType(b.param)

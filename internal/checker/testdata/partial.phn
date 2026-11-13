@@ -71,6 +71,33 @@ $overwrite = opt(?, a: ?); // want P2010
 $ok = three(?, ...);
 $restFew = three(?, ?, ?, ?, ...); // want P2102
 
+// A named argument or placeholder for a parameter an argument or a
+// placeholder before it fills: PHP's Error when the closure is created,
+// "Named parameter $a overwrites previous argument" (or "placeholder").
+$overArg = opt(1, a: 2, ...); // want P2010 "named argument $a of opt() overwrites the argument before it"
+$overTwice = opt(a: 1, a: 2, ...); // want P2010
+$overBound = three(1, 'x', b: 'y', ...); // want P2010
+$overQ = opt(?, a: 2); // want P2010 "named argument $a of opt() overwrites the placeholder before it"
+$overQRest = opt(?, a: 2, ...); // want P2010
+$overQs = opt(?, ?, a: 1); // want P2010
+$overNamedQ = opt(?, b: ?, b: 'y'); // want P2010 "named argument $b of opt() overwrites the placeholder before it"
+$overThenQ = opt(1, b: 'x', b: ?); // want P2010 "named placeholder $b of opt() overwrites the argument before it"
+$overMethod = $greeter->greet('a', name: 'b', ...); // want P2010 "Greeter::greet()"
+$overMethodQ = $greeter->greet(?, name: 'b'); // want P2010
+$overStatic = Greeter::shout('a', s: 'b', ...); // want P2010 "Greeter::shout()"
+$overStaticQ = Greeter::shout(?, 2, s: 'b'); // want P2010
+$overClosure = $h(1, a: 2, ...); // want P2010
+$overVari = vari(1, x: 'a', x: 'b', ...); // want P2010
+$overPiped = 'z' |> opt(1, a: 2, ...); // want P2010
+$unknownRest = opt(1, d: 2, ...); // want P2010 "unknown named argument $d"
+$intoVari = vari(1, x: 'a', ...);
+$namedOk = opt(?, b: 'y');
+// PHP throws the overwrite before it counts: the parameters it leaves out
+// are not reported as well; nor is the overwrite where PHP's compiler
+// already rejects the closure.
+$overLeaves = three(?, a: 1); // want P2010
+$overNullsafe = $greeter?->greet(?, name: 'b'); // want P1003, P2307
+
 // What PHP's compiler rejects.
 $twice = three(..., ...); // want P1003
 $notLast = three(..., 'x'); // want P1003
