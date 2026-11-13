@@ -76,7 +76,7 @@ stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/de
                       suggested/: the Monolog and Sentry API the Debug integrations are checked against, loaded only by the stdlib's own programs
 stdlib/gen            generator of stdlib/php-src (the newest release branch's stubs), versions_gen.go (the release each symbol came in) and constants.php
 internal/distribution tests of the phaenon/phn Composer plugin under a real Composer (PHAENON_COMPOSER)
-composer/             the phaenon/phn Composer plugin (PHP): the pinned binary, vendor/bin/phn, the builds at the autoload dump; composer.json at the root, .gitattributes keeps the dist to it
+composer/             the phaenon/phn Composer plugin (PHP): the pinned binary, vendor/bin/phn, the builds at the autoload dump, the presence of the outputs an installed package commits (ProjectFile.php, its reader of phaenon.json's roots and committed); composer.json at the root, .gitattributes keeps the dist to it
 tools/release         the release assets: reproducible builds for five platforms and the playground's phn.wasm.gz + wasm_exec.js, their checksums in composer/checksums.json
 .github/workflows     CI; the PR semantics gate (.github/scripts); release-please's release PR, pinned by release-checksums.yml, published when merged (design/tooling.md §3.2)
 ```
@@ -210,6 +210,10 @@ from the package by hand.
 - **Line map vectors** `internal/linemap/testdata/vectors.json` are the reference of the format's
   three readers; the PhpStorm plugin and `phaenon/debug` keep copies, which
   `TestVectorCopiesFresh` compares.
+- **Project file vectors** `cmd/phn/testdata/project-files.json` are the reference of how
+  `phaenon.json`'s `roots` and `committed` are read, by the compiler (`TestProjectFileVectors`) and
+  by the plugin's PHP (`TestProjectFileReadersAgree` in `internal/distribution`, which needs `php`
+  and no Composer): a change of either reader starts as a vector.
 - **Migrate goldens** `internal/migrate/testdata/lift/X.php` → `X.phn` + `X.notes` (the tags left
   in place and why): same `PHAENON_UPDATE=1` rule; the `.phn` must parse and lift to itself.
 - **Format goldens** `internal/format/testdata/X.phn` → `X.golden.phn`: the same `PHAENON_UPDATE=1`

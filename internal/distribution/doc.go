@@ -14,5 +14,8 @@
 // ran, and the tests serve it as the release asset when they exercise the
 // download. One test builds the real phn instead, and runs what it compiles.
 //
+// TestProjectFileReadersAgree holds the plugin's reader of phaenon.json to
+// the compiler's reference, and needs php alone.
+//
 // The package holds no Go code; it exists for its tests.
 package distribution

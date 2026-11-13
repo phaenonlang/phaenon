@@ -19,7 +19,13 @@ use Composer\Util\ProcessExecutor;
  * every installed package that has a phaenon.json, then the root project if it has one, so that
  * the autoloader, `--classmap-authoritative` included, is written over outputs that exist.
  *
- * A project with no Phaenon code, its own or installed, needs no binary, and the plugin does
+ * An installed package may commit the outputs of some roots (its phaenon.json's `committed`,
+ * design/tooling.md §3.7, T18): those are left as installed. A package whose installed roots are
+ * all committed is nothing to build, and one that came without the outputs it commits fails the
+ * dump before any binary is fetched, as a failed build does. Only a package says so, about itself:
+ * the root project is built whatever it commits.
+ *
+ * A project with nothing to build, its own or installed, needs no binary, and the plugin does
  * nothing. An `install --no-autoloader` builds at the `dump-autoload` that follows. Under
  * `--no-plugins` nothing here runs, and vendor/bin/phn fetches the binary when it is first used.
  */
@@ -60,11 +66,33 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         // Composer runs in the root project's directory (--working-dir moves it there), the
         // directory its autoload paths are relative to.
         $projectDir = ComposerPlatform::getCwd();
-        $packages = self::phaenonPackages($composer);
+        $packages = [];
+        $incomplete = 0;
+        foreach (self::phaenonPackages($composer) as $name => $dir) {
+            // A file this reader refuses is phn's to report: its package is built as before.
+            $file = ProjectFile::read($dir . '/phaenon.json');
+            $errors = $file?->missingOutputs($name, $dir) ?? [];
+            foreach ($errors as $error) {
+                self::error($io, $error);
+            }
+            if ($errors !== []) {
+                ++$incomplete;
+            } elseif ($file === null || !$file->leavesNothingToBuild($dir)) {
+                $packages[] = $name;
+            }
+        }
+        if ($incomplete > 0) {
+            // phn build --vendor fails the same way, in the same words (cmd/phn/vendor.go).
+            throw self::failure($io, sprintf(
+                '%d installed packages lack outputs they commit, and nothing was built: '
+                . 'a build here would hide a release that is broken for every project without phn',
+                $incomplete,
+            ), 1);
+        }
         $buildsProject = $settings->buildRoot && is_file($projectDir . '/phaenon.json');
         if ($packages === [] && !$buildsProject) {
             $io->writeError(
-                'phaenon/phn: nothing to build: no installed package has a phaenon.json, and the project builds none',
+                'phaenon/phn: nothing to build: no installed package has a root to build, and the project builds none',
                 true,
                 IOInterface::VERBOSE,
             );
@@ -107,22 +135,22 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
     }
 
     /**
-     * The installed packages that have a phaenon.json, the ones `phn build --vendor` builds.
+     * The installed packages that have a phaenon.json, the ones `phn build --vendor` reads.
      *
-     * @return list<string> their names
+     * @return array<string, string> where each is installed, by its name
      */
     private static function phaenonPackages(Composer $composer): array
     {
         $installationManager = $composer->getInstallationManager();
-        $names = [];
+        $packages = [];
         foreach ($composer->getRepositoryManager()->getLocalRepository()->getCanonicalPackages() as $package) {
             $path = $installationManager->getInstallPath($package);
             if ($path !== null && is_file($path . '/phaenon.json')) {
-                $names[] = $package->getPrettyName();
+                $packages[$package->getPrettyName()] = $path;
             }
         }
 
-        return $names;
+        return $packages;
     }
 
     private static function resolver(Composer $composer, IOInterface $io, Settings $settings): BinaryResolver
@@ -146,10 +174,15 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
      * prints nothing, so the message is printed here, on one line. Composer's box around an
      * exception's message would break checksums and paths across lines.
      */
-    private static function failure(IOInterface $io, string $message, int $status, \Throwable $previous): ScriptExecutionException
+    private static function failure(IOInterface $io, string $message, int $status, ?\Throwable $previous = null): ScriptExecutionException
     {
-        $io->writeError('<error>phaenon/phn: ' . str_replace('<', '\\<', $message) . '</error>');
+        self::error($io, $message);
 
         return new ScriptExecutionException($message, $status, $previous);
+    }
+
+    private static function error(IOInterface $io, string $message): void
+    {
+        $io->writeError('<error>phaenon/phn: ' . str_replace('<', '\\<', $message) . '</error>');
     }
 }

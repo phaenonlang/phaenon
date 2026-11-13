@@ -1,0 +1,225 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Phaenon\Composer;
+
+/**
+ * An installed package's phaenon.json as the plugin reads it: `roots` and `committed`, whatever
+ * other keys the file has (design/tooling.md §3.7, T18).
+ *
+ * `{"roots": {"src": ".src", "tests": ".tests"}, "committed": ["src"]}` is a library that commits
+ * the outputs of `src`: where it is installed, that root is left as installed and never built, and
+ * it must have come with its outputs. The plugin asks whether they are there before it fetches a
+ * compiler, which is why it reads the file itself; phn stays the reader of everything else in it.
+ *
+ * The two readers give one answer for the two keys. cmd/phn/testdata/project-files.json in the
+ * compiler's repository is the reference both are tested against, and phn makes the same check of
+ * presence, in the same words (`phn build --vendor`, cmd/phn/vendor.go).
+ */
+final readonly class ProjectFile
+{
+    /**
+     * @param array<string, string> $roots     each source root with its output directory, as
+     *                                         cleaned paths relative to the package
+     * @param list<string>          $committed the roots whose outputs the package commits, each a
+     *                                         key of $roots
+     */
+    private function __construct(
+        public array $roots,
+        public array $committed,
+    ) {
+    }
+
+    /**
+     * @return ?self null when there is no file to read or phn would refuse its two keys: phn then
+     *               says what is wrong with it
+     */
+    public static function read(string $path): ?self
+    {
+        $json = @file_get_contents($path);
+
+        return $json === false ? null : self::parse($json);
+    }
+
+    /**
+     * @return ?self null when phn would refuse the file's `roots` or `committed`
+     */
+    public static function parse(string $json): ?self
+    {
+        // Objects stay objects, so that a list where phn wants an object is told from one.
+        $data = json_decode($json);
+        if (!$data instanceof \stdClass) {
+            return null;
+        }
+        $roots = [];
+        $given = $data->roots ?? new \stdClass();
+        if (!$given instanceof \stdClass) {
+            return null;
+        }
+        foreach (get_object_vars($given) as $source => $output) {
+            if (!\is_string($output)) {
+                return null;
+            }
+            $source = self::clean((string) $source);
+            $output = self::clean($output);
+            // A root and its output are directories inside the package, and siblings: phn's rules
+            // (cmd/phn/project.go).
+            if (
+                self::leavesThePackage($source) || self::leavesThePackage($output)
+                || $source === $output || \dirname($source) !== \dirname($output)
+            ) {
+                return null;
+            }
+            $roots[$source] = $output;
+        }
+        $committed = [];
+        $listed = $data->committed ?? [];
+        if (!\is_array($listed)) {
+            return null;
+        }
+        foreach ($listed as $entry) {
+            if (!\is_string($entry)) {
+                return null;
+            }
+            $source = self::clean($entry);
+            if (!isset($roots[$source])) {
+                return null;
+            }
+            if (!\in_array($source, $committed, true)) {
+                $committed[] = $source;
+            }
+        }
+
+        return new self($roots, $committed);
+    }
+
+    /**
+     * Whether the package, installed in $packageDir, has nothing for phn to build: it commits
+     * outputs, and every root the install has is one of those. A dist archive leaves out the roots
+     * it does not commit (`tests/`).
+     */
+    public function leavesNothingToBuild(string $packageDir): bool
+    {
+        if ($this->committed === []) {
+            return false;
+        }
+        foreach (array_keys($this->roots) as $source) {
+            // PHP turns a key such as "2024" into an integer.
+            $source = (string) $source;
+            if (!\in_array($source, $this->committed, true) && is_dir($packageDir . '/' . $source)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The committed roots that $package, installed in $packageDir, came without the outputs of:
+     * no output directory, or a .phn with no .php there. The check is of presence only; whether an
+     * output is current is for the package's own gate to say.
+     *
+     * @return list<string> an error for each such root, naming the package and the root
+     */
+    public function missingOutputs(string $package, string $packageDir): array
+    {
+        $errors = [];
+        foreach ($this->committed as $source) {
+            if (!is_dir($packageDir . '/' . $source)) {
+                continue; // the install does not have the root
+            }
+            $output = $this->roots[$source];
+            $missing = [];
+            if (!is_dir($packageDir . '/' . $output)) {
+                $missing[] = $output;
+            } else {
+                foreach ($this->sources($packageDir, $source) as $file) {
+                    $compiled = $output . substr($file, \strlen($source), -\strlen('.phn')) . '.php';
+                    if (!is_file($packageDir . '/' . $compiled)) {
+                        $missing[] = $compiled;
+                    }
+                }
+                sort($missing, \SORT_STRING);
+            }
+            if ($missing !== []) {
+                $errors[] = sprintf(
+                    '%s: its phaenon.json commits the outputs of the root %s, but the package is installed without them: %s is missing%s',
+                    $package,
+                    $source,
+                    $missing[0],
+                    \count($missing) > 1 ? sprintf(', and %d more', \count($missing) - 1) : '',
+                );
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * The .phn files phn compiles under a directory of a root, as paths relative to the package:
+     * not those of a nested vendor directory or of an output directory, and a symbolic link is
+     * not followed.
+     *
+     * @return list<string>
+     */
+    private function sources(string $packageDir, string $dir): array
+    {
+        $files = [];
+        foreach (@scandir($packageDir . '/' . $dir) ?: [] as $name) {
+            if ($name === '.' || $name === '..') {
+                continue;
+            }
+            $path = $dir . '/' . $name;
+            if (\in_array($path, $this->roots, true)) {
+                continue;
+            }
+            $full = $packageDir . '/' . $path;
+            if (!is_link($full) && is_dir($full)) {
+                if ($name !== 'vendor') {
+                    $files = [...$files, ...$this->sources($packageDir, $path)];
+                }
+            } elseif (str_ends_with($name, '.phn')) {
+                $files[] = $path;
+            }
+        }
+
+        return $files;
+    }
+
+    /**
+     * Whether a cleaned path is the package's directory, absolute, or outside the package.
+     */
+    private static function leavesThePackage(string $path): bool
+    {
+        return $path === '.' || $path === '..' || str_starts_with($path, '/') || str_starts_with($path, '../');
+    }
+
+    /**
+     * A path as Go's filepath.Clean leaves it, the form phn compares roots in: no empty or `.`
+     * elements, no trailing slash, `..` resolved against the element before it.
+     */
+    private static function clean(string $path): string
+    {
+        $absolute = str_starts_with($path, '/');
+        $elements = [];
+        foreach (explode('/', $path) as $element) {
+            if ($element === '' || $element === '.') {
+                continue;
+            }
+            if ($element !== '..') {
+                $elements[] = $element;
+            } elseif ($elements !== [] && end($elements) !== '..') {
+                array_pop($elements);
+            } elseif (!$absolute) {
+                $elements[] = '..';
+            }
+        }
+        $clean = implode('/', $elements);
+        if ($absolute) {
+            return '/' . $clean;
+        }
+
+        return $clean === '' ? '.' : $clean;
+    }
+}
