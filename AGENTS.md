@@ -234,6 +234,12 @@ from the package by hand.
   version the next release and write `CHANGELOG.md`: the title is a Conventional Commit header whose
   release impact (`!` or a `BREAKING CHANGE:` footer, then `feat`, then `fix` and `revert`, then the
   rest) equals the highest of the PR's commits, which `pr-semantics.yml` checks.
+- **Every PR targets `main`; none is stacked on another PR's branch.** CI and the semantics gate
+  start only on PRs into `main`, and when the branch under a stacked PR is deleted GitHub closes
+  the PR, which cannot be given another base afterwards and has to be opened anew (2026-11-13:
+  #21, stacked on #20). Work that depends on an unmerged PR goes into that PR, or waits for the
+  merge and then branches from `main`. The same rule holds in `design`, `debug`, `jetbrains` and
+  `vscode`.
 - `go.mod`'s module line is `github.com/phaenonlang/phaenon`. GoLand has rewritten it to `module
   phaenon` before, which breaks every import of the repository's own packages: put the line back by
   hand and never commit the rewritten one (`go mod init` or `go mod tidy` repairs it the wrong way).
