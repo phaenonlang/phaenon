@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -386,6 +387,39 @@ func TestFmtDirectories(t *testing.T) {
 	}
 	if box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn")); !strings.Contains(string(box), "int $a,int $b") {
 		t.Errorf("the fixer ran on a file outside the paths given:\n%s", box)
+	}
+}
+
+// A file that does not parse is reported and left as it is, the others
+// are formatted, and phn fmt fails, with --check too.
+func TestFmtFailsOnAFileThatDoesNotParse(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	broken := "namespace App;\n\nfunction broken( {\n"
+	writeTree(t, root, map[string]string{
+		"phaenon.json":   `{"roots": {"src": ".src"}, "fmt": []}`,
+		"src/Broken.phn": broken,
+	})
+	exitStatus := func(err error) int {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return exit.ExitCode()
+		}
+		return 0
+	}
+	stdout, stderr, err := run(t, root, bin, "fmt")
+	if exitStatus(err) != 1 || !strings.Contains(stderr, "src/Broken.phn:") || !strings.Contains(stdout, "1 that do not parse") {
+		t.Errorf("phn fmt should fail on Broken.phn (%v):\n%s%s", err, stdout, stderr)
+	}
+	if box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn")); !strings.Contains(string(box), "final class Box\n{") {
+		t.Errorf("the file that parses was not formatted:\n%s", box)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "src/Broken.phn")); string(got) != broken {
+		t.Errorf("Broken.phn was written:\n%s", got)
+	}
+	stdout, stderr, err = run(t, root, bin, "fmt", "--check")
+	if exitStatus(err) != 1 || !strings.Contains(stderr, "src/Broken.phn:") {
+		t.Errorf("phn fmt --check should fail on Broken.phn (%v):\n%s%s", err, stdout, stderr)
 	}
 }
 

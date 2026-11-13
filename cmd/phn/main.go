@@ -85,7 +85,8 @@ usage:
                                                            (phaenon.json "fmt", or tools/php-cs-fixer or
                                                            vendor/bin/php-cs-fixer); a directory: its .phn, the
                                                            outputs left out; no paths: the roots; --check writes
-                                                           nothing and fails on a change;
+                                                           nothing and fails on a change; a file that does not
+                                                           parse is left as it is and fails either;
                                                            --stdin: the first layer, standard input to output
   phn lsp                                                  the language server of the project around the working
                                                            directory, on stdin and stdout: diagnostics, hover, go to

@@ -289,6 +289,7 @@ project checks the files that hold one first; `phn fmt --stdin`, with no program
 phn fmt                 # the roots: Phaenon's layout, then the fixer (phaenon.json "fmt", or tools/php-cs-fixer)
 phn fmt src/Foo.phn     # given files only; a directory stands for the .phn under it
 phn fmt --check         # CI: fail when either layer would change a file; nothing written
+                        # either form fails on a file that does not parse, and formats the others
 ```
 
 In editors, `phn lsp` is the checker as a language server (LSP over stdio, `design/tooling.md`
