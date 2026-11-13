@@ -7,6 +7,15 @@ namespace NamedArguments;
 
 function label(string $prefix, string $text = 'x'): string { return "$prefix:$text"; }
 function glue(string $prefix, string ...$rest): string { return $prefix . implode(',', $rest); }
+function needsTwo(int $a, int $b): int { return $a + $b; }
+
+/**
+ * @template T
+ * @param T $a
+ * @param T $b
+ * @return list<T>
+ */
+function pair(mixed $a, mixed $b): array { return [$a, $b]; }
 
 final class Label {
     __construct(public string $prefix = '', public string $text = 'x') {}
@@ -43,7 +52,21 @@ function variadics(): void {
     glue('a', x: 'b', y: 'c');
 }
 
-// A name no parameter has is P2010 once, not once more for its repetition.
+// PHP throws the overwrite before it counts or checks types: the parameter
+// it leaves unbound and the overwriting value's type are not reported as
+// well. One mistake, one diagnostic.
+function consequences(): void {
+    needsTwo(1, a: 2); // want P2010
+    label(text: 'a', text: 'b'); // want P2010
+    label('a', prefix: 1); // want P2010
+    pair(1, a: 2); // want P2010
+    $add = needsTwo(...);
+    $add(1, a: 2); // want P2010
+}
+
+// A name no parameter has is P2010 as an unknown name, each time it is
+// written, and never also as an overwrite.
 function unknown(): void {
     label('a', nope: 'b'); // want P2010 "unknown named argument $nope"
+    label('a', nope: 'b', nope: 'c'); // want P2010, P2010
 }

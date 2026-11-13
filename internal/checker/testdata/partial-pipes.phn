@@ -59,4 +59,12 @@ function overwrites(Out $out): void {
     $line = 'a' |> Style::line(?, s: 'b'); // want P2010 "Style::line()"
     'a' |> $out->writeln(?, s: 'b'); // want P2010 "Out::writeln()"
     $fine = 'a' |> str_pad(?, 4, pad_string: '-');
+    // The parameter the overwrite leaves unbound follows from it.
+    $left = 1 |> needsTwo(?, a: 2); // want P2010
+    $named = 1 |> needsTwo(b: ?, b: 2); // want P2010
+    // A named placeholder that overwrites is reported where it is written,
+    // not at the pipe's left side.
+    $padded = 'z'
+        |> trim(...)
+        |> str_pad('a', 4, string: ?); // want P2010 "named placeholder $string of str_pad() overwrites the argument before it"
 }

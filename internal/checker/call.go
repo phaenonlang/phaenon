@@ -1678,21 +1678,29 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	return ret
 }
 
-// namedOverwrites reports each named argument or named placeholder whose
-// parameter an argument or a placeholder before it already fills: PHP's
-// Error "Named parameter $x overwrites previous argument" (or "previous
-// placeholder"), thrown when the call is made or when a partial
-// application creates its closure, a pipe's `A |> f(?, x: B)` included.
-// A positional argument fills the parameter at its position; one past the
-// declared parameters goes into the variadic parameter under a number,
-// which no name meets. A variadic function collects a name it does not
-// declare under that name, so the same name twice collides. A name no
-// parameter has is P2010 of its own (unknown named argument), and a named
+// overwrite is a named argument or a named placeholder that names a
+// parameter an argument or a placeholder before it already fills.
+type overwrite struct {
+	arg, prev *ast.Arg
+	name      string
+}
+
+// findOverwrites lays a call's arguments over the callee's parameters in
+// order and returns each name that overwrites: PHP's Error "Named
+// parameter $x overwrites previous argument" (or "previous placeholder"),
+// thrown when the call is made or when a partial application creates its
+// closure, a pipe stage's `A |> f(?, x: B)` included. A positional
+// argument fills the parameter at its position; one past the declared
+// parameters goes into the variadic parameter under a number, which no
+// name meets. A variadic function collects a name it does not declare
+// under that name, so the same name twice collides. A name no parameter
+// has is P2010 of its own (unknown named argument), and a named
 // placeholder stands only for a declared parameter (partialShape), so
-// neither is counted here. It returns whether it reported.
-func (x *fnCtx) namedOverwrites(sig *signature, args *ast.ArgList) bool {
+// neither is counted here. An unpacked list fills positions nobody knows,
+// so no later position is counted; the names before it still are.
+func findOverwrites(sig *signature, args *ast.ArgList) []overwrite {
 	if args == nil {
-		return false
+		return nil
 	}
 	params, variadic := sig.params, false
 	if n := len(params); n > 0 && params[n-1].Variadic {
@@ -1707,53 +1715,82 @@ func (x *fnCtx) namedOverwrites(sig *signature, args *ast.ArgList) bool {
 		return false
 	}
 	filled := map[string]*ast.Arg{} // a parameter's name → the argument that fills it
-	position, reported := 0, false
+	var found []overwrite
+	position, lost := 0, false
+	fillPosition := func(a *ast.Arg) {
+		// A positional argument after a named one is P2110, not an
+		// overwrite: the first to fill a parameter keeps it.
+		if !lost && position < len(params) && filled[params[position].Name] == nil {
+			filled[params[position].Name] = a
+		}
+		position++
+	}
+	fillName := func(a *ast.Arg, name string) {
+		if !declared(name) && (!variadic || a.Placeholder != nil) {
+			return
+		}
+		if prev := filled[name]; prev != nil {
+			found = append(found, overwrite{arg: a, prev: prev, name: name})
+			return
+		}
+		filled[name] = a
+	}
 	for _, a := range args.Args {
 		switch {
-		case a.Unpack, a.Placeholder != nil && a.Placeholder.Variadic:
-			// What an unpacked list fills is not known; `...` comes last.
+		case a.Placeholder != nil && a.Placeholder.Variadic:
+			// `...` comes last and stands for what is left.
+		case a.Unpack:
+			lost = true
 		case a.Name == nil:
-			// A positional argument after a named one is P2110, not an
-			// overwrite.
-			if position < len(params) && filled[params[position].Name] == nil {
-				filled[params[position].Name] = a
-			}
-			position++
+			fillPosition(a)
 		default:
-			name := a.Name.Name
-			if !declared(name) && (!variadic || a.Placeholder != nil) {
-				continue
-			}
-			prev := filled[name]
-			if prev == nil {
-				filled[name] = a
-				continue
-			}
-			kind, before := "argument", "argument"
-			if a.Placeholder != nil {
-				kind = "placeholder"
-			}
-			if prev.Placeholder != nil {
-				before = "placeholder"
-			}
-			x.report(a.S, P2010, "named %s $%s of %s overwrites the %s before it", kind, name, sig.name, before)
-			reported = true
+			fillName(a, a.Name.Name)
 		}
 	}
-	return reported
+	return found
+}
+
+// reportOverwrites reports what findOverwrites found as P2010, the code a
+// name no parameter has gets too (design/php-versions.md §9), at the
+// overwriting argument. In a pipe stage pipeCall gives a named placeholder
+// the left side as its value and its span: the finding goes to the name
+// the source wrote, as the placeholder it is.
+func (x *fnCtx) reportOverwrites(sig *signature, found []overwrite) {
+	for _, o := range found {
+		span, kind, before := o.arg.S, "argument", "argument"
+		switch {
+		case o.arg.Placeholder != nil:
+			kind = "placeholder"
+		case o.arg.Name != nil && o.arg.Value != nil && o.arg.Value == x.pipeOperand:
+			span, kind = o.arg.Name.S, "placeholder"
+		}
+		if o.prev.Placeholder != nil {
+			before = "placeholder"
+		}
+		x.report(span, P2010, "named %s $%s of %s overwrites the %s before it", kind, o.name, sig.name, before)
+	}
 }
 
 func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, span ast.Span, expected types.Type) types.Type {
 	// A partial application binds its arguments now and leaves the
 	// placeholders' parameters to the closure it creates.
 	partial := args.Partial()
-	overwritten := x.namedOverwrites(sig, args)
+	// The names that overwrite an argument before them. PHP throws the
+	// overwrite first, so what follows from it — a parameter it leaves
+	// unbound, the overwriting value against the parameter's type — is not
+	// reported as well, and neither is the overwrite in a closure PHP's
+	// compiler rejects (P1003).
+	found := findOverwrites(sig, args)
+	if !rejectedClosure(sig.node, args) {
+		x.reportOverwrites(sig, found)
+	}
+	over := map[*ast.Arg]bool{}
+	for _, o := range found {
+		over[o.arg] = true
+	}
 	var shape *pfaShape
 	if partial {
-		shape = x.partialShape(sig, args, span)
-		if overwritten {
-			shape.ok = false
-		}
+		shape = x.partialShape(sig, args, span, len(over) > 0)
 	}
 	known := func(e ast.Expr) types.Type {
 		if t, ok := sig.known[e]; ok {
@@ -1873,6 +1910,15 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				}
 				continue
 			}
+			if a.Name != nil && over[a] {
+				// PHP binds nothing to it; its value is typed for what
+				// it holds.
+				seenNamed = true
+				if known(a.Value) == nil {
+					x.expr(a.Value, env, nil)
+				}
+				continue
+			}
 			if a.Name != nil {
 				seenNamed = true
 				var p *program.Param
@@ -1917,8 +1963,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			x.c.libraryParam(b.arg.S, sig.name, b.param.Name)
 		}
 	}
-	// Required parameters present?
-	if !unpacked && !placeholder {
+	// Required parameters present? Not after an overwrite: PHP throws it
+	// before it counts.
+	if !unpacked && !placeholder && len(over) == 0 {
 		required := 0
 		for _, p := range sig.params {
 			if !p.HasDefault && !p.Variadic {
