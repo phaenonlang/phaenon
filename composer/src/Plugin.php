@@ -79,14 +79,23 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         $committing = [];
         $incomplete = 0;
         foreach (self::phaenonPackages($composer) as $name => [$version, $dir, $installationSource]) {
-            // A file this reader refuses, or a root it cannot read, is phn's to report: the
-            // package is built as before.
+            // A file this reader refuses, as phn refuses it, or a root it cannot read, is
+            // phn's to report: the package is left to it.
             $file = ProjectFile::read($dir . '/phaenon.json');
             $errors = $file?->missingOutputs($name, $version, $dir);
             if ($file === null || $errors === null) {
                 $packages[] = $name;
 
                 continue;
+            }
+            // A key of a later compiler is passed over (design/tooling.md T19). The project
+            // cannot change another package's file, so it is told only when it asks for more.
+            if ($file->unknown !== []) {
+                $io->writeError(str_replace('<', '\\<', sprintf(
+                    'phaenon/phn: %s: its phaenon.json has keys this version of phn does not know, and passes over: %s',
+                    $name,
+                    implode(', ', $file->unknown),
+                )), true, IOInterface::VERBOSE);
             }
             foreach ($errors as $error) {
                 self::error($io, $error);

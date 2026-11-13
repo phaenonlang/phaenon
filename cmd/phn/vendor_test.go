@@ -108,3 +108,48 @@ func TestBuildVendor(t *testing.T) {
 		t.Errorf("the root project should see Box<T> from the package's sources (%v):\n%s%s", err, stdout, stderr)
 	}
 }
+
+// A key of a later compiler in an installed package's project file is
+// passed over (design/tooling.md T19): the package is built, nothing is
+// said of the key, and the root project still reads the package from its
+// sources. The same key in the root project's own file is an error, as it
+// was: its author can put it right, and it catches a key misspelt.
+func TestInstalledPackageWithAKeyOfALaterCompiler(t *testing.T) {
+	bin := phnBinary(t)
+	root := vendorTree(t)
+	const later = `{"roots": {"src": ".src", "tests": ".tests"}, "later": {"than": ["this"]}}`
+	writeTree(t, root, map[string]string{"vendor/acme/lib/phaenon.json": later})
+
+	stdout, stderr, err := run(t, root, bin, "build", "--vendor")
+	if err != nil || !strings.HasSuffix(stdout, "1 installed packages built, 0 up to date\n") || strings.Contains(stderr, "later") || strings.Contains(stderr, "unknown") {
+		t.Errorf("phn build --vendor: %v\n%s%s\nwant the package built, and no word of the key", err, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "vendor/acme/lib/.src/Box.php")); err != nil {
+		t.Errorf("the package's output: %v", err)
+	}
+	// Box<int> is generic only in the package's sources.
+	for _, cmd := range []string{"check", "build"} {
+		if stdout, stderr, err := run(t, root, bin, cmd); err != nil {
+			t.Errorf("phn %s should read the package from its sources (%v):\n%s%s", cmd, err, stdout, stderr)
+		}
+	}
+
+	// A known key with a value it cannot have is refused as before: the
+	// package is warned of and left out.
+	writeTree(t, root, map[string]string{"vendor/acme/lib/phaenon.json": `{"roots": {"src": ".src"}, "later": true, "php": 8}`})
+	stdout, stderr, err = run(t, root, bin, "build", "--vendor")
+	if err != nil || !strings.Contains(stderr, "warning: vendor/acme/lib/phaenon.json: ") || !strings.HasSuffix(stdout, "0 installed packages built, 0 up to date\n") {
+		t.Errorf("phn build --vendor with a value the key cannot have: %v\n%s%s\nwant a warning of the file, and the package left out", err, stdout, stderr)
+	}
+
+	writeTree(t, root, map[string]string{"phaenon.json": `{"roots": {"src": ".src"}, "later": true}`})
+	for _, cmd := range []string{"check", "build"} {
+		_, stderr, err := run(t, root, bin, cmd)
+		var exit *exec.ExitError
+		// The message says which phn has read the file: an older one than the
+		// project pins takes a key of a newer release for one misspelt.
+		if want := `phaenon.json: unknown key "later" (this is phn ` + version + `; a newer release may know it)`; !asExit(err, &exit) || exit.ExitCode() != 1 || strings.TrimSpace(stderr) != want {
+			t.Errorf("phn %s with the key in the project's own file: %v, stderr %q; want status 1 and %q", cmd, err, stderr, want)
+		}
+	}
+}

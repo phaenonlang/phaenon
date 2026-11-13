@@ -5,15 +5,19 @@ declare(strict_types=1);
 namespace Phaenon\Composer;
 
 /**
- * An installed package's phaenon.json as the plugin reads it: `roots` and `committed`, whatever
- * other keys the file has (design/tooling.md §3.7, T18).
+ * An installed package's phaenon.json as the plugin reads it: `roots` and `committed`
+ * (design/tooling.md §3.7, T18).
  *
  * `{"roots": {"src": ".src", "tests": ".tests"}, "committed": ["src"]}` is a library that commits
  * the outputs of `src`: where it is installed, that root is left as installed and never built, and
  * it must have come with its outputs. The plugin asks whether they are there before it fetches a
  * compiler, which is why it reads the file itself; phn stays the reader of everything else in it.
  *
- * The two readers give one answer for the two keys. cmd/phn/testdata/project-files.json in the
+ * The plugin reads the file as phn reads an installed package's (readInstalledProject in
+ * cmd/phn/project.go; design/tooling.md T19): a key of the file's object that it does not know
+ * is passed over and remembered ($unknown), since the project that installed the package cannot
+ * change its file; everything else phn refuses there, the plugin refuses, among it a known key
+ * with a value it cannot have and a key written twice. cmd/phn/testdata/project-files.json in the
  * compiler's repository is the reference both are tested against, and phn makes the same check of
  * presence, in the same words (`phn build --vendor`, cmd/phn/vendor.go).
  */
@@ -31,24 +35,29 @@ final readonly class ProjectFile
      *                                         cleaned paths relative to the package
      * @param list<string>          $committed the roots whose outputs the package commits, each a
      *                                         key of $roots
-     * @param bool                  $strict    whether phn would read the file as well: it has no key
-     *                                         phn does not know, each key has the type phn wants,
-     *                                         and none is written twice. The check of presence
-     *                                         does not ask, and reads `roots` and `committed`
-     *                                         whatever stands beside them; a removal does
-     *                                         (EarlierBuild), since phn refuses a file with a key
-     *                                         it does not know and removes nothing for it
+     * @param list<string>          $unknown   the keys of the file that this reader does not
+     *                                         know and has passed over, sorted. With none, phn
+     *                                         would read the file as a project's own as well.
+     *                                         The package is checked and built whatever they
+     *                                         are; nothing is removed from it while there is one
+     *                                         (EarlierBuild)
      */
     private function __construct(
         public array $roots,
         public array $committed,
-        public bool $strict,
+        public array $unknown,
     ) {
     }
 
     /**
-     * @return ?self null when there is no file to read or phn would refuse its two keys: phn then
-     *               says what is wrong with it
+     * The keys phn knows in a project file, and the one under `unused`.
+     */
+    private const array KEYS = ['roots', 'committed', 'exclude', 'php', 'fmt', 'unused'];
+    private const string UNUSED_KEY = 'reflectedAttributes';
+
+    /**
+     * @return ?self null when there is no file to read or phn would refuse it as an installed
+     *               package's: phn then says what is wrong with it
      */
     public static function read(string $path): ?self
     {
@@ -58,22 +67,30 @@ final readonly class ProjectFile
     }
 
     /**
-     * @return ?self null when phn would refuse the file's `roots` or `committed`
+     * @return ?self null when phn would refuse the file as an installed package's
      */
     public static function parse(string $json): ?self
     {
         // Objects stay objects, so that a list where phn wants an object is told from one.
         $data = json_decode($json);
-        if (!$data instanceof \stdClass) {
+        if (!$data instanceof \stdClass || self::repeatsAKey($json)) {
             return null;
         }
-        // A key is spelt as documented: phn refuses "Roots" and "COMMITTED".
+        // A key phn knows is spelt as documented: it refuses "Roots" and "COMMITTED". Any
+        // other key is one it does not know, and is passed over.
+        $unknown = [];
         foreach (array_keys(get_object_vars($data)) as $key) {
-            foreach (['roots', 'committed'] as $name) {
-                if ((string) $key !== $name && strcasecmp((string) $key, $name) === 0) {
-                    return null;
-                }
+            $key = (string) $key;
+            $named = self::names($key, self::KEYS);
+            if ($named === null) {
+                $unknown[] = $key;
+            } elseif ($named !== $key) {
+                return null;
             }
+        }
+        sort($unknown, \SORT_STRING);
+        if (!self::readsTheOtherKeys($data)) {
+            return null;
         }
         $roots = [];
         $given = $data->roots ?? new \stdClass();
@@ -121,27 +138,45 @@ final readonly class ProjectFile
             }
         }
 
-        return new self($roots, $committed, self::phnReads($data) && !self::repeatsAKey($json));
+        return new self($roots, $committed, $unknown);
     }
 
     /**
-     * Whether phn reads the keys beside `roots` and `committed` too (readProject in
-     * cmd/phn/project.go): `exclude` and `fmt` lists of strings, `php` a string, `unused` an
-     * object whose one key, `reflectedAttributes`, lists class names, each of them or null, and
-     * no other key. It may refuse a file phn reads; it accepts none phn refuses.
+     * The key of $known that $key names, in whatever letter case, as phn's decoder matches a
+     * key to a field: the long s and the Kelvin sign count as s and k.
+     *
+     * @param list<string> $known
      */
-    private static function phnReads(\stdClass $data): bool
+    private static function names(string $key, array $known): ?string
+    {
+        $folded = strtr($key, ["\u{017F}" => 's', "\u{212A}" => 'k']);
+        foreach ($known as $name) {
+            if (strcasecmp($folded, $name) === 0) {
+                return $name;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether phn reads the keys it knows beside `roots` and `committed` (readProjectFile in
+     * cmd/phn/project.go): `exclude` and `fmt` lists of strings, `php` a string, `unused` an
+     * object whose one key, `reflectedAttributes`, lists class names, each of them or null. A
+     * key under `unused` that phn does not know is refused, not passed over: only a key of the
+     * file's own object is.
+     */
+    private static function readsTheOtherKeys(\stdClass $data): bool
     {
         $strings = static function (mixed $list): bool {
             return $list === null || (\is_array($list) && array_is_list($list) && array_filter($list, is_string(...)) === $list);
         };
         foreach (get_object_vars($data) as $key => $value) {
             $read = match ((string) $key) {
-                'roots', 'committed' => true, // parse() has read them
                 'exclude', 'fmt' => $strings($value),
                 'php' => $value === null || \is_string($value),
-                'unused' => $value === null || ($value instanceof \stdClass && self::phnReadsUnused($value)),
-                default => false,
+                'unused' => $value === null || ($value instanceof \stdClass && self::readsUnused($value)),
+                default => true, // parse() reads roots and committed, and passes over the rest
             };
             if (!$read) {
                 return false;
@@ -151,10 +186,10 @@ final readonly class ProjectFile
         return true;
     }
 
-    private static function phnReadsUnused(\stdClass $unused): bool
+    private static function readsUnused(\stdClass $unused): bool
     {
         foreach (get_object_vars($unused) as $key => $value) {
-            if ((string) $key !== 'reflectedAttributes') {
+            if ((string) $key !== self::UNUSED_KEY) {
                 return false;
             }
             if ($value === null) {
@@ -176,9 +211,9 @@ final readonly class ProjectFile
     }
 
     /**
-     * Whether an object of the JSON text, which json_decode has accepted, has a key twice.
-     * json_decode keeps the last of them and phn merges or replaces by rules of its own, so the
-     * two may not read such a file alike.
+     * Whether an object of the JSON text, which json_decode has accepted, has a key twice, at any
+     * depth. phn refuses such a file: a decoder keeps the later of the two or merges them, by
+     * rules of its own.
      */
     private static function repeatsAKey(string $json): bool
     {

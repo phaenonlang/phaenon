@@ -24,21 +24,25 @@ import (
 )
 
 // projectFileVectors is testdata/project-files.json, the reference of how
-// "roots" and "committed" are read.
+// a project file is read: a project's own, and an installed package's.
 type projectFileVectors struct {
 	Vectors []struct {
 		Name      string            `json:"name"`
 		File      string            `json:"file"`
 		Refused   bool              `json:"refused"`
+		Error     string            `json:"error"`
 		Roots     map[string]string `json:"roots"`
 		Committed []string          `json:"committed"`
-		Compiler  string            `json:"compiler"`
+		Root      string            `json:"root"`
+		Unknown   []string          `json:"unknown"`
 	} `json:"vectors"`
 }
 
-// The key lists source roots, each a key of "roots"; anything else is an
-// error of the project file, and no key or an empty list is a project that
-// commits nothing.
+// Each vector is read both ways. A project's own file is refused for a key
+// the compiler does not know; an installed package's is read without it,
+// the key remembered. Everything else is refused alike or read alike: the
+// key lists source roots, each a key of "roots", and no key or an empty
+// list is a project that commits nothing.
 func TestProjectFileVectors(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "project-files.json"))
 	if err != nil {
@@ -51,36 +55,59 @@ func TestProjectFileVectors(t *testing.T) {
 	if len(vectors.Vectors) == 0 {
 		t.Fatal("no vectors")
 	}
+	tolerated := 0
 	for _, v := range vectors.Vectors {
 		path := filepath.Join(t.TempDir(), ProjectFile)
 		writeTree(t, filepath.Dir(path), map[string]string{ProjectFile: v.File})
-		p, err := readProject(path)
-		switch {
-		case v.Compiler != "":
-			if err == nil || !strings.Contains(err.Error(), v.Compiler) {
-				t.Errorf("%s: error %v, want one saying %q", v.Name, err, v.Compiler)
-			}
-		case v.Refused:
-			if err == nil {
-				t.Errorf("%s: read as roots %v, committed %v; want an error", v.Name, p.Roots, p.Committed)
-			} else if !strings.HasPrefix(err.Error(), path+": ") {
-				t.Errorf("%s: the error does not name the file: %v", v.Name, err)
-			}
-		case err != nil:
-			t.Errorf("%s: %v", v.Name, err)
-		default:
-			roots := map[string]string{}
-			for src, out := range v.Roots {
-				roots[filepath.FromSlash(src)] = filepath.FromSlash(out)
-			}
-			committed := []string{}
-			for _, src := range v.Committed {
-				committed = append(committed, filepath.FromSlash(src))
-			}
-			if !maps.Equal(p.Roots, roots) || !slices.Equal(p.Committed, committed) {
-				t.Errorf("%s: roots %v, committed %v; want %v, %v", v.Name, p.Roots, p.Committed, roots, committed)
+		if (v.Root != "") != (len(v.Unknown) > 0) {
+			t.Errorf("%s: a file is refused as a project's own and read as a package's exactly when it has unknown keys", v.Name)
+		}
+		for _, mode := range []struct {
+			name    string
+			read    func(string) (*project, error)
+			refused bool
+			err     string
+			unknown []string
+		}{
+			{"a project's own file", readProject, v.Refused || v.Root != "", v.Error + v.Root, nil},
+			{"an installed package's file", readInstalledProject, v.Refused, v.Error, v.Unknown},
+		} {
+			p, err := mode.read(path)
+			switch {
+			case mode.refused:
+				switch {
+				case err == nil:
+					t.Errorf("%s, as %s: read as roots %v, committed %v; want an error", v.Name, mode.name, p.Roots, p.Committed)
+				case !strings.HasPrefix(err.Error(), path+": "):
+					t.Errorf("%s, as %s: the error does not name the file: %v", v.Name, mode.name, err)
+				case !strings.Contains(err.Error(), mode.err):
+					t.Errorf("%s, as %s: error %v, want one saying %q", v.Name, mode.name, err, mode.err)
+				}
+			case err != nil:
+				t.Errorf("%s, as %s: %v", v.Name, mode.name, err)
+			default:
+				roots := map[string]string{}
+				for src, out := range v.Roots {
+					roots[filepath.FromSlash(src)] = filepath.FromSlash(out)
+				}
+				committed := []string{}
+				for _, src := range v.Committed {
+					committed = append(committed, filepath.FromSlash(src))
+				}
+				if !maps.Equal(p.Roots, roots) || !slices.Equal(p.Committed, committed) {
+					t.Errorf("%s, as %s: roots %v, committed %v; want %v, %v", v.Name, mode.name, p.Roots, p.Committed, roots, committed)
+				}
+				if !slices.Equal(p.ignored, mode.unknown) {
+					t.Errorf("%s, as %s: the keys passed over are %v, want %v", v.Name, mode.name, p.ignored, mode.unknown)
+				}
+				if len(p.ignored) > 0 {
+					tolerated++
+				}
 			}
 		}
+	}
+	if tolerated == 0 {
+		t.Error("no vector has a key that is passed over")
 	}
 }
 

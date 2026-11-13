@@ -37,7 +37,6 @@ type earlierBuildVector struct {
 	Errors      []string          `json:"errors"`
 	Undecided   bool              `json:"undecided"`
 	Compiler    string            `json:"compiler"`
-	Plugin      string            `json:"plugin"`
 }
 
 // takesOneNameForAnother reports whether the file system of dir finds a
@@ -133,11 +132,11 @@ echo json_encode($answers, JSON_UNESCAPED_UNICODE);
 // TestEarlierBuildVectors runs `phn build --vendor` over: the same lines,
 // whole and in order, as information or as a warning, exactly the same
 // paths left, and nothing removed where the check of presence fails or is
-// left to phn, where no earlier build can have survived, or where phn
-// refuses the project file. Where a vector says the plugin is unsure of a
-// tree phn clears, it removes nothing and says nothing. A second run says
-// nothing where the first cleared the root, and repeats the warning where
-// it could not. It needs php, and no Composer.
+// left to phn, where no earlier build can have survived, or where the
+// project file has a key that is not known. A file phn refuses the plugin
+// refuses too, and leaves its package to phn. A second run says nothing
+// where the first cleared the root, and repeats the warning where it could
+// not. It needs php, and no Composer.
 func TestEarlierBuildsAgree(t *testing.T) {
 	php, err := exec.LookPath("php")
 	if err != nil {
@@ -173,7 +172,6 @@ func TestEarlierBuildsAgree(t *testing.T) {
 	// Each vector is the package as installed, in a directory of its own;
 	// for a linked one that is a link to its directory.
 	var dirs, installs []string
-	var before [][]string
 	for i, v := range vectors {
 		dir := filepath.Join(base, strconv.Itoa(i), "acme", "kit")
 		source := ""
@@ -213,7 +211,6 @@ func TestEarlierBuildsAgree(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		before = append(before, holds(t, dir))
 	}
 	chmod := func(restrict bool) {
 		for i, v := range vectors {
@@ -260,11 +257,8 @@ func TestEarlierBuildsAgree(t *testing.T) {
 					warned = v.Again
 				}
 			}
-			if v.Plugin == "unsure" {
-				said, warned, left = nil, nil, before[i]
-			}
 			switch {
-			case got.Undecided != v.Undecided:
+			case got.Undecided != (v.Undecided || v.Compiler != ""):
 				t.Errorf("%s, %s: left to phn: %v, want %v", v.Name, name, got.Undecided, v.Undecided)
 			case !slices.Equal(got.Errors, v.Errors):
 				t.Errorf("%s, %s: errors\n\t%s\nwant\n\t%s", v.Name, name, strings.Join(got.Errors, "\n\t"), strings.Join(v.Errors, "\n\t"))

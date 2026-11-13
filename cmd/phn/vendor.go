@@ -147,7 +147,12 @@ type phaenonPackage struct {
 
 // phaenonPackages lists the installed packages that carry a phaenon.json
 // naming roots. A project file that cannot be read is passed to warn and
-// its package left out.
+// its package left out; a key it has that this compiler does not know is
+// passed over, and no reason to leave the package out (readInstalledProject).
+// Every reader of an installed package's project file comes through here:
+// the build of installed packages, and the sources the project's own
+// check, build and language server read such packages from
+// (installedSources).
 func phaenonPackages(composerDir string, warn func(error)) []phaenonPackage {
 	pkgs, err := installedPackages(composerDir)
 	if err != nil {
@@ -156,7 +161,7 @@ func phaenonPackages(composerDir string, warn func(error)) []phaenonPackage {
 	}
 	var out []phaenonPackage
 	for _, p := range pkgs {
-		proj, err := readProject(filepath.Join(p.dir, ProjectFile))
+		proj, err := readInstalledProject(filepath.Join(p.dir, ProjectFile))
 		switch {
 		case err != nil:
 			warn(err)

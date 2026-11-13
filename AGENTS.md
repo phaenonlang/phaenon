@@ -211,9 +211,14 @@ from the package by hand.
   three readers; the PhpStorm plugin and `phaenon/debug` keep copies, which
   `TestVectorCopiesFresh` compares.
 - **Project file vectors** `cmd/phn/testdata/project-files.json` are the reference of how
-  `phaenon.json`'s `roots` and `committed` are read, by the compiler (`TestProjectFileVectors`) and
-  by the plugin's PHP (`TestProjectFileReadersAgree` in `internal/distribution`, which needs `php`
-  and no Composer): a change of either reader starts as a vector. `committed-outputs.json` beside
+  `phaenon.json` is read, by the compiler (`TestProjectFileVectors`) and by the plugin's PHP
+  (`TestProjectFileReadersAgree` in `internal/distribution`, which needs `php` and no Composer): a
+  change of either reader starts as a vector. Each vector is read two ways, as the project's own
+  file (`readProject`, where a key the compiler does not know is an error) and as an installed
+  package's (`readInstalledProject` and the plugin, where it is passed over: `../design/tooling.md`
+  T19); the two differ in nothing else. A new key is one an older compiler may pass over; a
+  change that must never be passed over is a new shape of a known key's value, which every
+  reader refuses. `committed-outputs.json` beside
   it is the same for the check of an installed package's committed roots, trees with the errors
   they give, whole (`TestCommittedOutputVectors`, `TestCommittedOutputChecksAgree`): the error's
   text is changed there, and then in `cmd/phn/vendor.go` and `composer/src/ProjectFile.php`.
@@ -222,10 +227,10 @@ from the package by hand.
   (`TestEarlierBuildVectors`, `TestEarlierBuildsAgree`): `cmd/phn/earlier.go` and
   `composer/src/EarlierBuild.php` delete files in an installed package, so a change of either
   starts as a vector, and a new way to be unsure removes nothing. The plugin may refuse where
-  `phn` removes (a vector then says `"plugin": "unsure"`), and never removes where `phn` refuses:
-  that includes the plugin's walk of the sources (`ProjectFile::sources`), which decides whether
-  a package is whole, and its answer to whether `phn` would read the project file at all
-  (`ProjectFile::$strict`, held to `project-files.json`).
+  `phn` removes, and never removes where `phn` refuses: that includes the plugin's walk of the
+  sources (`ProjectFile::sources`), which decides whether a package is whole. Neither removes
+  anything from a package whose project file has a key it does not know (`ProjectFile::$unknown`,
+  `project.ignored`), though both read, check and build it.
 - **Migrate goldens** `internal/migrate/testdata/lift/X.php` → `X.phn` + `X.notes` (the tags left
   in place and why): same `PHAENON_UPDATE=1` rule; the `.phn` must parse and lift to itself.
 - **Format goldens** `internal/format/testdata/X.phn` → `X.golden.phn`: the same `PHAENON_UPDATE=1`

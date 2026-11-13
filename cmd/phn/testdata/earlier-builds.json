@@ -1,5 +1,5 @@
 {
-  "format": "What `phn build --vendor` and the Composer plugin do about a build of an earlier release in a root an installed package now commits (../design/tooling.md §3.7): where the root's output directory holds a stamp, .phn-build, and the package is one an earlier build can have survived in, the files no source stands behind are removed, then the stamp. Each vector is the package acme/kit 1.0.0 as installed in vendor/acme/kit: \"project\" is its phaenon.json, \"files\" its other files by path, \"dirs\" directories that are empty, \"links\" symbolic links with their targets. \"installation-source\" is what installed.json records for the package, \"source\" for a checkout of its repository and \"dist\" for an archive or a path repository, null when it records nothing; \"linked\" says that vendor/acme/kit is a link to the package's directory, as for a linked path repository. For a linked package the install path is given with a slash at its end, as some installers give it. \"is-the-project\" says that the package's directory is the project's own root. \"unreadable\" are directories nobody may read or search (mode 0), \"unlisted\" directories that may be searched and not read (mode 0311), \"unsearchable\" directories that may be read and not searched (mode 0444), \"readonly\" directories nothing can be removed from (mode 0555), and \"permissions\" marks a vector that rests on them, which the superuser cannot run. \"folds\" marks a vector that needs a file system which takes one letter case of a name for another, \"normalises\" one which takes one Unicode normalisation for another; elsewhere they are skipped. \"said\" are the lines printed, whole and in order, a line for what was done and one for each file; \"warned\" those printed as a warning, and \"again\" the warning of a second run when it differs; a second run says nothing where the first only \"said\". \"left\" is every path the package holds afterwards, sorted, a directory with a trailing slash and a symbolic link with a trailing @; a link is not looked through. \"errors\" are the errors of the check of presence (committed-outputs.json), after which nothing is removed. \"undecided\" marks a tree the plugin does not judge, leaving the package in the build, where phn fails before it removes anything. \"compiler\" is part of phn's warning about a project file it refuses: it leaves the package out, and the plugin removes nothing for it. \"plugin\": \"unsure\" marks a tree phn clears as the vector says and the plugin leaves as it is, saying nothing: the plugin may refuse where phn removes, and never removes where phn refuses.",
+  "format": "What `phn build --vendor` and the Composer plugin do about a build of an earlier release in a root an installed package now commits (../design/tooling.md §3.7): where the root's output directory holds a stamp, .phn-build, and the package is one an earlier build can have survived in, the files no source stands behind are removed, then the stamp. Each vector is the package acme/kit 1.0.0 as installed in vendor/acme/kit: \"project\" is its phaenon.json, \"files\" its other files by path, \"dirs\" directories that are empty, \"links\" symbolic links with their targets. \"installation-source\" is what installed.json records for the package, \"source\" for a checkout of its repository and \"dist\" for an archive or a path repository, null when it records nothing; \"linked\" says that vendor/acme/kit is a link to the package's directory, as for a linked path repository. For a linked package the install path is given with a slash at its end, as some installers give it. \"is-the-project\" says that the package's directory is the project's own root. \"unreadable\" are directories nobody may read or search (mode 0), \"unlisted\" directories that may be searched and not read (mode 0311), \"unsearchable\" directories that may be read and not searched (mode 0444), \"readonly\" directories nothing can be removed from (mode 0555), and \"permissions\" marks a vector that rests on them, which the superuser cannot run. \"folds\" marks a vector that needs a file system which takes one letter case of a name for another, \"normalises\" one which takes one Unicode normalisation for another; elsewhere they are skipped. \"said\" are the lines printed, whole and in order, a line for what was done and one for each file; \"warned\" those printed as a warning, and \"again\" the warning of a second run when it differs; a second run says nothing where the first only \"said\". \"left\" is every path the package holds afterwards, sorted, a directory with a trailing slash and a symbolic link with a trailing @; a link is not looked through. \"errors\" are the errors of the check of presence (committed-outputs.json), after which nothing is removed. \"undecided\" marks a tree the plugin does not judge, leaving the package in the build, where phn fails before it removes anything. \"compiler\" is part of phn's warning about a project file both readers refuse: phn leaves the package out, the plugin leaves the package to phn, and nothing is removed.",
   "vectors": [
     {
       "name": "no stamp: a file with no source is left where it is, and nothing is said",
@@ -240,7 +240,7 @@
       },
       "linked": true,
       "warned": [
-        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: the package is installed without src. What a build left there may still load. The package is a link to a checkout, where no build looks at this directory: remove .src/.phn-build there by hand, and what a build left beside it"
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: the package is installed without src. What a build left there may still load. The package is a link to a checkout, where `phn build` does not get to this directory: remove .src/.phn-build there by hand, and what a build left beside it"
       ],
       "left": [
         ".src/",
@@ -309,7 +309,7 @@
       "installation-source": "dist",
       "linked": true,
       "warned": [
-        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: .src is a symbolic link. What a build left there may still load. The package is a link to a checkout, where no build looks at this directory: remove .src/.phn-build there by hand, and what a build left beside it"
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: .src is a symbolic link. What a build left there may still load. The package is a link to a checkout, where `phn build` does not get to this directory: remove .src/.phn-build there by hand, and what a build left beside it"
       ],
       "left": [
         ".src@",
@@ -416,7 +416,7 @@
       ]
     },
     {
-      "name": "a project file with a key the compiler does not know: phn leaves the package out with a warning, the plugin removes nothing for it either",
+      "name": "a project file with a key the reader does not know: the package is read, checked and built, and nothing is removed from it",
       "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"], \"later\": true}",
       "files": {
         "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
@@ -428,7 +428,6 @@
         ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
         ".src/Legacy.php": "<?php\n"
       },
-      "compiler": "unknown field \"later\"",
       "left": [
         ".src/",
         ".src/.phn-build",
@@ -444,10 +443,80 @@
         "src/Sub/B.phn",
         "src/data.json"
       ],
-      "installation-source": "source"
+      "installation-source": "source",
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: its phaenon.json has the key \"later\", which this version of phn does not know. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ]
     },
     {
-      "name": "a project file with a key written twice: phn reads it its way and clears the package, the plugin is not sure of it and removes nothing",
+      "name": "the same in a linked checkout, whose own `phn build` refuses the file: the warning says to clear it by hand",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"], \"later\": true}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "dist",
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: its phaenon.json has the key \"later\", which this version of phn does not know. What a build left there may still load. The package is a link to a checkout, where `phn build` does not get to this directory: remove .src/.phn-build there by hand, and what a build left beside it"
+      ],
+      "linked": true
+    },
+    {
+      "name": "several unknown keys: the first by its spelling is named",
+      "project": "{\"zeta\": 1, \"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"], \"a \\\"key\\\"\": null}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source",
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: its phaenon.json has the key \"a \\\"key\\\"\", which this version of phn does not know. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ]
+    },
+    {
+      "name": "a project file with a key written twice: both readers refuse it, phn warns of the file and leaves the package out, and nothing is removed",
       "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"], \"php\": \"8.5\", \"php\": \"8.5\"}",
       "files": {
         "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
@@ -459,14 +528,11 @@
         ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
         ".src/Legacy.php": "<?php\n"
       },
-      "plugin": "unsure",
-      "said": [
-        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 1 file with no source behind it",
-        "  - removed .src/Legacy.php"
-      ],
       "left": [
         ".src/",
+        ".src/.phn-build",
         ".src/A.php",
+        ".src/Legacy.php",
         ".src/Sub/",
         ".src/Sub/B.php",
         ".src/data.json",
@@ -477,7 +543,8 @@
         "src/Sub/B.phn",
         "src/data.json"
       ],
-      "installation-source": "source"
+      "installation-source": "source",
+      "compiler": "is written twice"
     },
     {
       "name": "the stamp alone",

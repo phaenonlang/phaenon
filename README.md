@@ -88,6 +88,18 @@ them another or inside another, so that every file compiles into one place. `exc
 (fixtures another analyser owns); `phn build` compiles them all the same. `unused` narrows which
 attributes spare a private property the dead-code warnings (above).
 
+A key `phn` does not know is an error of the project's own file, which catches a key misspelt;
+so are a known key in another letter case and a key written twice. The error says which `phn`
+read the file (`unknown key "…" (this is phn 0.5.0; a newer release may know it)`): an editor's
+`phn lsp` from `PATH`, or `PHN_BINARY`, may be older than the release the project pins, and takes
+a key of a newer one for a mistake. In the file of an installed
+package a key it does not know is passed over, in silence (`composer dump-autoload -v` names it):
+the project that installed the package cannot change its file, and a later compiler may have
+given the library a key this one has not heard of. That an older compiler does not meet a key it
+must not ignore is for the library's Composer `conflict` on `phaenon/phn` to see to. Everything
+else is refused in an installed package's file as in the project's own, and such a package is
+warned of and left out.
+
 `committed` lists the roots whose outputs the repository tracks, each a key of `roots`; an entry
 that is not one is an error of the project file:
 
@@ -137,8 +149,9 @@ finds no stamp and says nothing.
   directories a removal empties go with the files.
 - A file that cannot be removed is a warning, and the stamp then stays for the next run.
 - A package that came without its outputs is not touched, nor is any package beside it.
-- A project file `phn` refuses, for a key it does not know among other things, leaves its package
-  out as it always did.
+- A package whose project file has a key `phn` does not know is read, checked and built all the
+  same (below), but nothing is removed from it: a removal does not rest on a file its reader
+  understands in part. The warning names the key.
 
 In the library's own project, `phn build` removes a `.phn-build` from the output directory of a
 root the project commits, as it removes a file with no source, and `phn build --check` reports
@@ -380,9 +393,8 @@ When it then runs `phn build --vendor` for the packages that are built, it sets
 `PHN_EARLIER_BUILDS_CLEARED`, and a `phn` that sees the variable leaves the committed roots
 alone, so that one dump says a thing once; the variable is the plugin's word to `phn`, not a
 setting. Where it is not sure, it removes nothing and warns at each dump, saying what to do; the
-plugin is no less careful than `phn`, and removes nothing either for a project file `phn` would
-refuse, or when PHP runs under `open_basedir`, where the warning points at `phn build --vendor`,
-which is not bound by it. Under `--quiet` the removal is made and nothing is printed. `composer
+plugin is no less careful than `phn`, and removes nothing either when PHP runs under
+`open_basedir`, where the warning points at `phn build --vendor`, which is not bound by it. Under `--quiet` the removal is made and nothing is printed. `composer
 dump-autoload --dry-run` builds and clears as a dump does: Composer sends the plugin the same
 event and does not say that the run is a dry one.
 It requires no other package, since the compiled output needs none, and suggests

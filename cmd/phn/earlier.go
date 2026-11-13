@@ -93,8 +93,9 @@ type earlierBuild struct {
 	obstacle string   // why nothing was removed, when nothing could be
 	// unbuilt says of an obstacle that the project's own build does not
 	// get past it either: `phn build` looks at the output directory of a
-	// root only when the root is a directory, and walks through no link.
-	// What to do in a linked checkout depends on it.
+	// root only when the root is a directory, walks through no link, and
+	// refuses a project file of its own with a key it does not know. What
+	// to do in a linked checkout depends on it.
 	unbuilt bool
 }
 
@@ -108,7 +109,7 @@ func (p phaenonPackage) earlierBuilds() []*earlierBuild {
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		if e := clearEarlierBuild(p.dir, root, out); e != nil {
+		if e := clearEarlierBuild(p.dir, root, out, p.proj.ignored); e != nil {
 			found = append(found, e)
 		}
 	}
@@ -119,13 +120,21 @@ func (p phaenonPackage) earlierBuilds() []*earlierBuild {
 // both relative to the package in dir, what an earlier build left there:
 // the files no source stands behind, the directories that empties, and the
 // stamp. It returns nil when the directory holds no stamp, and touches
-// nothing then.
-func clearEarlierBuild(dir, src, out string) *earlierBuild {
+// nothing then. unknown are the keys of the package's project file that
+// this compiler does not know: with any, nothing is removed. The package
+// is built and checked all the same (readInstalledProject), but a removal
+// does not rest on a file its reader understands in part: a key of a later
+// compiler may change what stands behind a file.
+func clearEarlierBuild(dir, src, out string, unknown []string) *earlierBuild {
 	stamp := filepath.Join(out, stampFile)
 	if !isStamp(filepath.Join(dir, stamp)) {
 		return nil
 	}
 	e := &earlierBuild{out: filepath.ToSlash(out)}
+	if len(unknown) > 0 {
+		e.obstacle, e.unbuilt = fmt.Sprintf("its %s has the key %q, which this version of phn does not know", ProjectFile, unknown[0]), true
+		return e
+	}
 	for _, root := range []string{src, out} {
 		if link := linkOnPath(dir, root); link != "" {
 			e.obstacle, e.unbuilt = filepath.ToSlash(link)+" is a symbolic link", true
@@ -244,7 +253,7 @@ func (e *earlierBuild) report(pkg, dir string, linked bool) (lines []string, war
 	remedy := fmt.Sprintf("To clear the directory, remove %s and install the package again", dir)
 	switch {
 	case linked && e.unbuilt:
-		remedy = fmt.Sprintf("The package is a link to a checkout, where no build looks at this directory: remove %s/%s there by hand, and what a build left beside it", e.out, stampFile)
+		remedy = fmt.Sprintf("The package is a link to a checkout, where `phn build` does not get to this directory: remove %s/%s there by hand, and what a build left beside it", e.out, stampFile)
 	case linked:
 		remedy = "The package is a link to a checkout: with that put right there, `phn build` removes what a build left, the stamp with it"
 	}

@@ -1,5 +1,5 @@
 {
-  "format": "phaenon.json's \"roots\" and \"committed\" as its two readers answer them, the compiler (cmd/phn/project.go) and the Composer plugin (composer/src/ProjectFile.php; ../design/tooling.md §3.7): \"file\" is the project file's text. \"refused\" marks a file that is in error. Otherwise \"roots\" maps each source root to its output directory and \"committed\" lists the roots whose outputs the project commits, in the file's order, all as cleaned paths with forward slashes. \"compiler\" is part of the error of a file the compiler refuses for something other than the two keys, which the plugin, reading the two keys alone, answers as given. The plugin also says whether the compiler would read the file, which it asks before it removes anything from the package (EarlierBuild.php): it must say no for every file marked \"compiler\", may say no for a file the compiler reads, which \"strict\": false marks, and says yes for the rest.",
+  "format": "phaenon.json as its readers answer it (../design/tooling.md §3.7, T19): the compiler reading a project's own file (readProject in cmd/phn/project.go), the compiler reading an installed package's (readInstalledProject), and the Composer plugin, which reads installed packages alone (composer/src/ProjectFile.php). \"file\" is the project file's text. \"refused\" marks a file that is in error for all three, and \"error\" is then part of the compiler's error, where the vector holds it to one. Otherwise \"roots\" maps each source root to its output directory and \"committed\" lists the roots whose outputs the project commits, in the file's order, all as cleaned paths with forward slashes. \"root\" marks a file that is in error as a project's own, with part of that error, and is read as given as an installed package's: it has keys the compiler does not know, which \"unknown\" lists, sorted, as both readers of an installed package name them. A file without \"root\" is read alike in both ways, and has no unknown key.",
   "vectors": [
     {
       "name": "no key: the project commits no outputs (D13)",
@@ -268,7 +268,7 @@
       "refused": true
     },
     {
-      "name": "a key the compiler does not know: it refuses the file, a reader of the two keys does not",
+      "name": "a key the compiler does not know: an error of a project's own file, passed over in an installed package's",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"later\": true}",
       "roots": {
         "src": ".src"
@@ -276,40 +276,28 @@
       "committed": [
         "src"
       ],
-      "compiler": "unknown field"
+      "root": "unknown key \"later\"",
+      "unknown": [
+        "later"
+      ]
     },
     {
       "name": "another key's value the compiler refuses",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [\"App/Mapping\"]}}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "compiler": "is not one"
+      "refused": true,
+      "error": "is not one"
     },
     {
       "name": "another key in another letter case",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"Exclude\": [\"src/Fixture\"]}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "compiler": "the key \"Exclude\" is written \"exclude\""
+      "refused": true,
+      "error": "the key \"Exclude\" is written \"exclude\""
     },
     {
       "name": "a key of another key's object in another letter case",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"ReflectedAttributes\": []}}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "compiler": "the key \"ReflectedAttributes\" is written \"reflectedAttributes\""
+      "refused": true,
+      "error": "the key \"ReflectedAttributes\" is written \"reflectedAttributes\""
     },
     {
       "name": "every other key, as the compiler reads it: the plugin's strict reading takes the file too",
@@ -344,113 +332,62 @@
     {
       "name": "php that is not a string",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"php\": 8.5}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "compiler": "cannot unmarshal"
+      "refused": true,
+      "error": "cannot unmarshal"
     },
     {
       "name": "exclude that is not a list",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": \"src/Fixture\"}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "compiler": "cannot unmarshal"
+      "refused": true,
+      "error": "cannot unmarshal"
     },
     {
       "name": "exclude that lists something other than strings",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"src/Fixture\", 1]}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "compiler": "cannot unmarshal"
+      "refused": true,
+      "error": "cannot unmarshal"
     },
     {
       "name": "fmt that is not a list",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"fmt\": {\"0\": \"fix\"}}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "compiler": "cannot unmarshal"
+      "refused": true,
+      "error": "cannot unmarshal"
     },
     {
       "name": "unused that is not an object",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": []}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "compiler": "cannot unmarshal"
+      "refused": true,
+      "error": "cannot unmarshal"
     },
     {
       "name": "a key of unused the compiler does not know",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"attributes\": []}}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "compiler": "unknown field"
+      "refused": true,
+      "error": "unknown key"
     },
     {
       "name": "a class name of unused that starts with a digit",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [\"1App\\\\Mapped\"]}}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "compiler": "is not one"
+      "refused": true,
+      "error": "is not one"
     },
     {
-      "name": "a key written twice: the compiler takes the later, and a strict reading takes neither",
+      "name": "a key written twice",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"php\": \"8.5\", \"php\": \"8.6\"}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "strict": false
+      "refused": true,
+      "error": "is written twice"
     },
     {
       "name": "committed written twice",
       "file": "{\"roots\": {\"src\": \".src\", \"lib\": \".lib\"}, \"committed\": [\"src\"], \"committed\": [\"lib\"]}",
-      "roots": {
-        "src": ".src",
-        "lib": ".lib"
-      },
-      "committed": [
-        "lib"
-      ],
-      "strict": false
+      "refused": true,
+      "error": "is written twice"
     },
     {
       "name": "a key of unused written twice",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [], \"reflectedAttributes\": []}}",
-      "roots": {
-        "src": ".src"
-      },
-      "committed": [
-        "src"
-      ],
-      "strict": false
+      "refused": true,
+      "error": "is written twice"
     },
     {
       "name": "a colon and a quote inside a string are no key",
@@ -470,6 +407,76 @@
       },
       "committed": [
         "src"
+      ]
+    },
+    {
+      "name": "several keys the compiler does not know, of any value: named in the order of their spelling",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"zeta\": {\"roots\": {\"a\": \".a\"}}, \"alpha\": [1, null], \"Later\": null}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "root": "unknown key",
+      "unknown": [
+        "Later",
+        "alpha",
+        "zeta"
+      ]
+    },
+    {
+      "name": "an unknown key beside a known key with a value it cannot have: refused, in an installed package too",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"later\": true, \"php\": 8.5}",
+      "refused": true
+    },
+    {
+      "name": "an unknown key written twice",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"later\": 1, \"later\": 2}",
+      "refused": true
+    },
+    {
+      "name": "an unknown key, and text after the object",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"later\": true} {}",
+      "refused": true
+    },
+    {
+      "name": "a known key in another letter case is not an unknown key",
+      "file": "{\"Roots\": {\"src\": \".src\"}, \"later\": true}",
+      "refused": true
+    },
+    {
+      "name": "a known key spelt with the long s, which the decoder takes for s",
+      "file": "{\"rootſ\": {\"src\": \".src\"}}",
+      "refused": true,
+      "error": "is written \"roots\""
+    },
+    {
+      "name": "an unknown key under a known key is refused: only a key of the file's own object is passed over",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [], \"later\": true}}",
+      "refused": true,
+      "error": "unknown key"
+    },
+    {
+      "name": "roots written twice",
+      "file": "{\"roots\": {\"lib\": \".lib\"}, \"roots\": {\"src\": \".src\"}}",
+      "refused": true,
+      "error": "is written twice"
+    },
+    {
+      "name": "a root written twice in roots",
+      "file": "{\"roots\": {\"src\": \".src\", \"src\": \".out\"}}",
+      "refused": true,
+      "error": "is written twice"
+    },
+    {
+      "name": "an unknown key and nothing else: an installed package without roots",
+      "file": "{\"later\": {\"than\": \"this\"}}",
+      "roots": {},
+      "committed": [],
+      "root": "unknown key \"later\"",
+      "unknown": [
+        "later"
       ]
     }
   ]

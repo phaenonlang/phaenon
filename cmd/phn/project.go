@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/checker"
@@ -52,6 +53,9 @@ type project struct {
 	Unused *unusedSettings `json:"unused"`
 	data   []byte          // the file as read, to place diagnostics
 	path   string          // the file's path, for diagnostics
+	// ignored lists, sorted, the keys of an installed package's file that
+	// this compiler does not know and has passed over (readInstalledProject).
+	ignored []string
 }
 
 // unusedSettings is phaenon.json's "unused".
@@ -81,9 +85,35 @@ func loadProject() *project {
 	return p
 }
 
-// readProject reads and validates a project file; nil, nil when there is
-// none. Its roots and excludes are relative to the file's directory.
+// readProject reads and validates the project file of the project the
+// compiler works on; nil, nil when there is none. Its roots and excludes
+// are relative to the file's directory. A key it does not know is an
+// error: the file is its reader's own, a key misspelt there would
+// otherwise be passed over in silence, and its author can put it right.
 func readProject(path string) (*project, error) {
+	return readProjectFile(path, false)
+}
+
+// readInstalledProject reads the project file of an installed package,
+// which differs from readProject in one thing (design/tooling.md T19): a
+// key of the file's object that this compiler does not know is passed
+// over, and listed in the project's ignored. The project that installed
+// the package cannot change its file, and a refusal there would be a
+// warning at each build and a library that is not built at all; that an
+// older compiler does not meet a key it must not ignore is for the
+// library's Composer conflict on phaenon/phn to see to, as it is for
+// syntax an older compiler cannot parse.
+//
+// Everything else is refused as in a project's own file: a known key with
+// a value it cannot have, a key under a known key that is not known (a
+// change that must never be ignored is made there, as a new shape of a
+// known key's value), a known key in another letter case, a key written
+// twice, text after the object, roots that overlap.
+func readInstalledProject(path string) (*project, error) {
+	return readProjectFile(path, true)
+}
+
+func readProjectFile(path string, installed bool) (*project, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -92,21 +122,36 @@ func readProject(path string) (*project, error) {
 		return nil, err
 	}
 	p := project{data: data, path: path}
-	dec := json.NewDecoder(bytes.NewReader(data))
+	text, unknown := withoutUnknownKeys(data, reflect.TypeFor[project]())
+	switch {
+	case installed:
+		p.ignored = unknown
+	case len(unknown) > 0:
+		return nil, unknownKey(path, strconv.Quote(unknown[0]))
+	}
+	dec := json.NewDecoder(bytes.NewReader(text))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
+		// A key under a known key that the decoder does not know.
+		if key, isKey := strings.CutPrefix(err.Error(), "json: unknown field "); isKey {
+			return nil, unknownKey(path, key)
+		}
 		return nil, fmt.Errorf("%s: %v", path, err)
 	}
-	// encoding/json reads the first value and stops, and matches a key to
-	// a field whatever its letter case. A project file is one object whose
-	// keys are spelt as documented: the Composer plugin's reader of "roots"
-	// and "committed" (composer/src/ProjectFile.php) reads no other, and
-	// the two must give one answer.
+	// encoding/json reads the first value and stops, matches a key to a
+	// field whatever its letter case, and takes the later of a key written
+	// twice, or merges the two. A project file is one object whose keys
+	// are spelt as documented, each written once: the Composer plugin
+	// reads the file of an installed package too
+	// (composer/src/ProjectFile.php), and the two must give one answer.
 	if _, err := dec.Token(); err != io.EOF {
 		return nil, fmt.Errorf("%s: the project file is one JSON object, and text follows it", path)
 	}
 	if key, want := misspeltKey(data, reflect.TypeFor[project]()); key != "" {
 		return nil, fmt.Errorf("%s: the key %q is written %q", path, key, want)
+	}
+	if key, twice := repeatedKey(data); twice {
+		return nil, fmt.Errorf("%s: the key %q is written twice", path, key)
 	}
 	roots := make(map[string]string, len(p.Roots))
 	for _, key := range slices.Sorted(maps.Keys(p.Roots)) {
@@ -153,6 +198,87 @@ func readProject(path string) (*project, error) {
 		}
 	}
 	return &p, nil
+}
+
+// unknownKey is the error of a key the compiler does not know, quoted as
+// key gives it. It says which phn has read the file, since that is not
+// always the one the project pins: an editor's language server from PATH,
+// or PHN_BINARY, may be an older release, and to its reader a key of a
+// newer one looks misspelt.
+func unknownKey(path, key string) error {
+	return fmt.Errorf("%s: unknown key %s (this is phn %s; a newer release may know it)", path, key, version)
+}
+
+// withoutUnknownKeys returns the JSON object data without the keys that
+// name no field of the struct type t, in whatever letter case, and those
+// keys, sorted. A key that names a field in another letter case stays, for
+// misspeltKey to refuse. Text that is no object is returned as it is, for
+// the decoder to refuse.
+func withoutUnknownKeys(data []byte, t reflect.Type) (known []byte, unknown []string) {
+	var object map[string]json.RawMessage
+	if json.Unmarshal(data, &object) != nil || object == nil {
+		return data, nil
+	}
+	for _, key := range slices.Sorted(maps.Keys(object)) {
+		named := false
+		for i := range t.NumField() {
+			tag, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+			named = named || tag != "" && strings.EqualFold(tag, key)
+		}
+		if !named {
+			unknown = append(unknown, key)
+			delete(object, key)
+		}
+	}
+	if len(unknown) == 0 {
+		return data, nil
+	}
+	known, err := json.Marshal(object)
+	if err != nil {
+		return data, nil
+	}
+	return known, unknown
+}
+
+// repeatedKey finds a key that an object of the JSON text data has twice,
+// at any depth. Text that is not JSON has none: the decoder has refused it.
+func repeatedKey(data []byte) (key string, twice bool) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var value func() (string, bool)
+	value = func() (string, bool) {
+		token, err := dec.Token()
+		if err != nil {
+			return "", false
+		}
+		switch token {
+		case json.Delim('{'):
+			seen := map[string]bool{}
+			for dec.More() {
+				name, err := dec.Token()
+				key, isKey := name.(string)
+				if err != nil || !isKey {
+					return "", false
+				}
+				if seen[key] {
+					return key, true
+				}
+				seen[key] = true
+				if key, twice := value(); twice {
+					return key, true
+				}
+			}
+			dec.Token()
+		case json.Delim('['):
+			for dec.More() {
+				if key, twice := value(); twice {
+					return key, true
+				}
+			}
+			dec.Token()
+		}
+		return "", false
+	}
+	return value()
 }
 
 // misspeltKey finds, in the JSON object data read into a struct of type t,

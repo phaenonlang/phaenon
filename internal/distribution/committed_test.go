@@ -662,3 +662,41 @@ func committedSummary(t *testing.T) string {
 	}
 	return reference.Summary["1"]
 }
+
+// TestInstalledPackagesWithAKeyOfALaterCompiler: a key in an installed
+// package's phaenon.json that neither the plugin nor phn knows is passed
+// over (design/tooling.md T19). A library with committed outputs stays
+// nothing to build and as shipped; a library that ships its sources alone
+// is built by the real phn; and nothing is said of the key, since the
+// project cannot change another package's file. Under -v the plugin names
+// the keys.
+func TestInstalledPackagesWithAKeyOfALaterCompiler(t *testing.T) {
+	w := newWorld(t, "")
+	const later = `, "later": {"than": ["this"]}}` + "\n"
+	release, shipped := w.newKit("kit", func(dir string) {
+		writeFile(t, filepath.Join(dir, "phaenon.json"), []byte(`{"roots": {"src": ".src", "tests": ".tests"}, "committed": ["src"]`+later), 0o644)
+	}).archive()
+	p := w.newProject("app", project{dependencies: []dependency{release}, libraries: []string{"acme/lib"}, binary: w.buildPhn()})
+	writeFile(t, filepath.Join(w.library("acme/lib"), "phaenon.json"), []byte(`{"roots": {"src": ".src"}`+later), 0o644)
+
+	out := p.mustComposer("install")
+
+	if !strings.Contains(out, "acme/lib: 1 files compiled, 1 written\n") || !strings.Contains(out, "1 installed packages built, 0 up to date, 1 left as installed with their committed outputs\n") {
+		t.Errorf("composer's output:\n%s\nwant acme/lib built and acme/kit left as installed", out)
+	}
+	if strings.Contains(out, "later") || strings.Contains(out, "unknown") || strings.Contains(out, "does not know") {
+		t.Errorf("composer spoke of a key the project cannot change:\n%s", out)
+	}
+	p.expectShipped(shipped)
+	p.greet()
+	if _, err := os.Stat(filepath.Join(p.dir, "vendor", "acme", "lib", ".src", "Thing.php")); err != nil {
+		t.Errorf("acme/lib was not built: %v", err)
+	}
+
+	out = p.mustComposer("dump-autoload", "-v")
+	for _, name := range []string{"acme/kit", "acme/lib"} {
+		if want := "phaenon/phn: " + name + ": its phaenon.json has keys this version of phn does not know, and passes over: later\n"; !strings.Contains(out, want) {
+			t.Errorf("composer dump-autoload -v lacks\n%s\nin\n%s", want, out)
+		}
+	}
+}

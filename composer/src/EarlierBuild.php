@@ -19,9 +19,10 @@ namespace Phaenon\Composer;
  * A stamp alone proves little: a file of that name can come with a release that tracks one, or
  * with the copy Composer makes of a checkout that holds one. An archive and a copied path
  * repository are installed into an emptied directory, so a stamp there came with the files, and
- * it is left alone with everything beside it. The plugin asks for one thing more before it
- * removes anything: that phn would read the package's project file (ProjectFile::$strict). A key
- * a later compiler adds may change what stands behind a file, and phn refuses such a file.
+ * it is left alone with everything beside it. One thing more stands in the way of a removal: a
+ * key of the package's project file that is not known (ProjectFile::$unknown). Such a package is
+ * checked and built as any other, but a key a later compiler adds may change what stands behind
+ * a file, and a deletion does not rest on a file its reader understands in part.
  *
  * What is removed is what phn's build removes from an output directory (mirror and sourcesBehind
  * in cmd/phn/project.go): a file whose path does not exist under the root, nor, for a `.php`, the
@@ -64,8 +65,9 @@ final readonly class EarlierBuild
      * @param bool         $linked   whether the package's directory is a link to a checkout
      * @param bool         $unbuilt  whether the obstacle is one the project's own build does not
      *                               get past either: `phn build` looks at the output directory of
-     *                               a root only when the root is a directory, and walks through
-     *                               no link
+     *                               a root only when the root is a directory, walks through no
+     *                               link, and refuses a project file of its own with a key it
+     *                               does not know
      * @param bool         $confined whether the obstacle is PHP's own, open_basedir
      */
     private function __construct(
@@ -98,8 +100,8 @@ final readonly class EarlierBuild
      * Clears what earlier builds left in the committed roots of the package installed in
      * $packageDir, and returns what was found and done, by root. A root whose output directory
      * holds no stamp is not touched and not returned. Nothing is touched, and nothing returned,
-     * for a package no earlier build can have survived in, or whose project file phn would not
-     * read: `phn build --vendor` removes nothing for either. Nor for a package whose directory is
+     * for a package no earlier build can have survived in: `phn build --vendor` removes nothing
+     * there either. Nor for a package whose directory is
      * the project's own, or cannot be told from it: Composer installs none there, and a record
      * that says so is not followed into removing the project's files.
      *
@@ -114,7 +116,7 @@ final readonly class EarlierBuild
         // one is answered as the directory it leads to.
         $trimmed = rtrim($packageDir, '/' . \DIRECTORY_SEPARATOR);
         $packageDir = $trimmed === '' ? $packageDir : $trimmed;
-        if (!$file->strict || !self::survives($installationSource, $packageDir)) {
+        if (!self::survives($installationSource, $packageDir)) {
             return [];
         }
         $package = realpath($packageDir);
@@ -127,7 +129,7 @@ final readonly class EarlierBuild
         sort($committed, \SORT_STRING);
         $found = [];
         foreach ($committed as $source) {
-            $build = self::clearRoot($packageDir, $source, $file->roots[$source]);
+            $build = self::clearRoot($packageDir, $source, $file->roots[$source], $file->unknown);
             if ($build !== null) {
                 $found[] = $build;
             }
@@ -179,7 +181,7 @@ final readonly class EarlierBuild
         $remedy = match (true) {
             $this->confined => '`phn build --vendor`, run in the project, is not bound by it and clears the directory',
             $this->linked && $this->unbuilt => sprintf(
-                'The package is a link to a checkout, where no build looks at this directory: remove %s/%s there by hand, and what a build left beside it',
+                'The package is a link to a checkout, where `phn build` does not get to this directory: remove %s/%s there by hand, and what a build left beside it',
                 $this->output,
                 ProjectFile::STAMP,
             ),
@@ -214,12 +216,16 @@ final readonly class EarlierBuild
     }
 
     /**
-     * @param string $source the root, relative to the package
-     * @param string $output its output directory, likewise
+     * @param string       $source  the root, relative to the package
+     * @param string       $output  its output directory, likewise
+     * @param list<string> $unknown the keys of the package's project file that are not known:
+     *                              with any, nothing is removed. The package is checked and
+     *                              built all the same, but a removal does not rest on a file
+     *                              its reader understands in part
      *
      * @return ?self null when the output directory holds no stamp, and nothing was touched
      */
-    private static function clearRoot(string $packageDir, string $source, string $output): ?self
+    private static function clearRoot(string $packageDir, string $source, string $output, array $unknown): ?self
     {
         $stamp = $output . '/' . ProjectFile::STAMP;
         if (!self::isStamp($packageDir . '/' . $stamp)) {
@@ -227,6 +233,9 @@ final readonly class EarlierBuild
         }
         $linked = is_link($packageDir);
         $kept = static fn (string $obstacle, bool $unbuilt = false, bool $confined = false): self => new self($output, [], [], $obstacle, $linked, $unbuilt, $confined);
+        if ($unknown !== []) {
+            return $kept(sprintf('its phaenon.json has the key "%s", which this version of phn does not know', addcslashes($unknown[0], '"\\')), unbuilt: true);
+        }
         // Under open_basedir a path PHP refuses to look at reads as one that does not exist.
         if ((string) \ini_get('open_basedir') !== '') {
             return $kept('PHP runs with open_basedir, under which a source it may not read looks like one that is gone', confined: true);

@@ -527,7 +527,7 @@ func TestOneDumpSaysItOnce(t *testing.T) {
 	writeFile(t, filepath.Join(k.dir, ".gen", "Old.php"), []byte("<?php\n"), 0o644)
 	const warning = "phaenon/phn: acme/kit 2.0.0: .gen/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: " +
 		"the package is installed without gen. What a build left there may still load. " +
-		"The package is a link to a checkout, where no build looks at this directory: remove .gen/.phn-build there by hand, and what a build left beside it\n"
+		"The package is a link to a checkout, where `phn build` does not get to this directory: remove .gen/.phn-build there by hand, and what a build left beside it\n"
 
 	alone := w.newProject("alone", project{dependencies: []dependency{k.path(true)}})
 	out := alone.mustComposer("install")
