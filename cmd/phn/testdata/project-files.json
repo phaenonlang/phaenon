@@ -1,0 +1,218 @@
+{
+  "format": "phaenon.json's \"roots\" and \"committed\" as a reader answers them (../design/tooling.md §3.7): \"file\" is the project file's text. \"refused\" marks a file that is in error. Otherwise \"roots\" maps each source root to its output directory and \"committed\" lists the roots whose outputs the project commits, in the file's order, all as cleaned paths with forward slashes. \"compiler\" is part of the error of a file the compiler refuses for something other than the two keys, which a reader of them alone answers as given.",
+  "vectors": [
+    {
+      "name": "no key: the project commits no outputs (D13)",
+      "file": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}}",
+      "roots": {
+        "src": ".src",
+        "tests": ".tests"
+      },
+      "committed": []
+    },
+    {
+      "name": "an empty list is no key",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": []}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": []
+    },
+    {
+      "name": "null is no key",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": null}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": []
+    },
+    {
+      "name": "one root of two: a library commits what its consumers load, not its tests",
+      "file": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "roots": {
+        "src": ".src",
+        "tests": ".tests"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "every root",
+      "file": "{\"roots\": {\"src\": \".src\", \"lib\": \".lib\"}, \"committed\": [\"src\", \"lib\"]}",
+      "roots": {
+        "src": ".src",
+        "lib": ".lib"
+      },
+      "committed": [
+        "src",
+        "lib"
+      ]
+    },
+    {
+      "name": "a root below the project's directory",
+      "file": "{\"roots\": {\"packages/kit/src\": \"packages/kit/.src\"}, \"committed\": [\"packages/kit/src\"]}",
+      "roots": {
+        "packages/kit/src": "packages/kit/.src"
+      },
+      "committed": [
+        "packages/kit/src"
+      ]
+    },
+    {
+      "name": "roots and entries are compared as cleaned paths",
+      "file": "{\"roots\": {\"./src\": \".src/\", \"lib/\": \"./.lib\"}, \"committed\": [\"src/\", \"./lib\", \"lib/../src\"]}",
+      "roots": {
+        "src": ".src",
+        "lib": ".lib"
+      },
+      "committed": [
+        "src",
+        "lib"
+      ]
+    },
+    {
+      "name": "an entry given twice counts once",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\", \"src\"]}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "the keys beside it that the compiler reads",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"src/Fixture\"], \"php\": \"8.6\", \"fmt\": [], \"unused\": {\"reflectedAttributes\": []}}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "no roots and no key: a project file that states only the target",
+      "file": "{\"php\": \"8.6\"}",
+      "roots": {},
+      "committed": []
+    },
+    {
+      "name": "an entry that is no root",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"lib\"]}",
+      "refused": true
+    },
+    {
+      "name": "an output directory is not a root",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\".src\"]}",
+      "refused": true
+    },
+    {
+      "name": "a root's name in another case is another directory",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"Src\"]}",
+      "refused": true
+    },
+    {
+      "name": "the key without roots",
+      "file": "{\"committed\": [\"src\"]}",
+      "refused": true
+    },
+    {
+      "name": "an empty entry",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"\"]}",
+      "refused": true
+    },
+    {
+      "name": "a string, not a list",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": \"src\"}",
+      "refused": true
+    },
+    {
+      "name": "true, not a list",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": true}",
+      "refused": true
+    },
+    {
+      "name": "an object, not a list",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": {\"src\": true}}",
+      "refused": true
+    },
+    {
+      "name": "an entry that is a number",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [1]}",
+      "refused": true
+    },
+    {
+      "name": "an entry that is null",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [null]}",
+      "refused": true
+    },
+    {
+      "name": "roots as a list",
+      "file": "{\"roots\": [\"src\"], \"committed\": [\"src\"]}",
+      "refused": true
+    },
+    {
+      "name": "an output that is not a string",
+      "file": "{\"roots\": {\"src\": true}, \"committed\": [\"src\"]}",
+      "refused": true
+    },
+    {
+      "name": "an output that is not the root's sibling",
+      "file": "{\"roots\": {\"src\": \"build/src\"}, \"committed\": [\"src\"]}",
+      "refused": true
+    },
+    {
+      "name": "an output that is its root",
+      "file": "{\"roots\": {\"src\": \"./src\"}, \"committed\": [\"src\"]}",
+      "refused": true
+    },
+    {
+      "name": "a root outside the project",
+      "file": "{\"roots\": {\"../src\": \"../.src\"}, \"committed\": [\"../src\"]}",
+      "refused": true
+    },
+    {
+      "name": "an absolute root",
+      "file": "{\"roots\": {\"/srv/src\": \"/srv/.src\"}, \"committed\": [\"/srv/src\"]}",
+      "refused": true
+    },
+    {
+      "name": "the project's directory as a root",
+      "file": "{\"roots\": {\".\": \".out\"}, \"committed\": [\".\"]}",
+      "refused": true
+    },
+    {
+      "name": "a list, not an object",
+      "file": "[{\"roots\": {\"src\": \".src\"}}]",
+      "refused": true
+    },
+    {
+      "name": "not JSON",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"]",
+      "refused": true
+    },
+    {
+      "name": "a key the compiler does not know: it refuses the file, a reader of the two keys does not",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"later\": true}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "compiler": "unknown field"
+    },
+    {
+      "name": "another key's value the compiler refuses",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [\"App/Mapping\"]}}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "compiler": "is not one"
+    }
+  ]
+}

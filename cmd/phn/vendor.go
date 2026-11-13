@@ -7,6 +7,16 @@ package main
 // each into its own output directories, for its own target, its findings
 // printed as warnings: the package's CI gave its verdict, and a newer phn
 // may be stricter than the one it was released with.
+//
+// A package may commit the outputs of some roots, which its phaenon.json
+// lists under "committed" (design/roadmap.md D28, design/tooling.md §3.7,
+// T18): a library published for PHP projects at large, installed as plain
+// PHP by a project without phn. The build leaves such a root as installed:
+// it writes no output and no stamp there and removes nothing. A committed
+// root that came without its outputs fails the build, which does not
+// compile it instead: the same release is broken for every project without
+// phn. The project's check and build still read such a package from its
+// sources.
 
 import (
 	"crypto/sha256"
@@ -18,6 +28,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 )
 
@@ -134,9 +145,29 @@ func installedSources(composerDir string) map[string]string {
 	return m
 }
 
+// committedGap is the error of a package installed without the outputs of
+// the root src, which it commits: missing is what missingOutputs found. The
+// paths are relative to the package, as its project file writes them.
+func committedGap(p phaenonPackage, src string, missing []string) string {
+	rel := func(path string) string {
+		if r, err := filepath.Rel(p.dir, path); err == nil {
+			return filepath.ToSlash(r)
+		}
+		return filepath.ToSlash(path)
+	}
+	more := ""
+	if n := len(missing) - 1; n > 0 {
+		more = fmt.Sprintf(", and %d more", n)
+	}
+	return fmt.Sprintf("%s: its %s commits the outputs of the root %s, but the package is installed without them: %s is missing%s",
+		p.Name, ProjectFile, rel(src), rel(missing[0]), more)
+}
+
 // buildVendor is `phn build --vendor`: every installed Phaenon package is
 // compiled whose sources, compiler, target or installed set changed since
-// its last build. It fails only when an output cannot be written.
+// its last build, but for the roots it commits. It fails when an output
+// cannot be written, and before it builds anything when a committed root
+// came without its outputs.
 func buildVendor() {
 	dir := vendorComposerDir()
 	installed := filepath.Join(dir, "installed.json")
@@ -149,11 +180,37 @@ func buildVendor() {
 	// package's own (a path repository's checkout has one).
 	composerDir = dir
 	pkgs := phaenonPackages(dir, func(err error) { fmt.Fprintf(os.Stderr, "warning: %v\n", err) })
-	compiler := compilerStamp()
-	built, current, failed := 0, 0, 0
+	// The committed roots are checked first, and for presence only: the
+	// Composer plugin makes the same check before it fetches a compiler,
+	// and builds nothing either when it fails.
+	broken := 0
 	for _, p := range pkgs {
-		roots := p.proj.roots() // only the roots present: a dist archive may leave out tests/
+		gaps := 0
+		for _, r := range p.proj.roots() {
+			if !p.proj.commits(r) {
+				continue
+			}
+			if missing := p.proj.missingOutputs(r); len(missing) > 0 {
+				fmt.Fprintln(os.Stderr, committedGap(p, r, missing))
+				gaps++
+			}
+		}
+		if gaps > 0 {
+			broken++
+		}
+	}
+	if broken > 0 {
+		fail("%d installed packages lack outputs they commit, and nothing was built: a build here would hide a release that is broken for every project without phn", broken)
+	}
+	compiler := compilerStamp()
+	built, current, failed, left := 0, 0, 0, 0
+	for _, p := range pkgs {
+		present := p.proj.roots() // only the roots present: a dist archive may leave out tests/
+		roots := slices.DeleteFunc(slices.Clone(present), p.proj.commits)
 		if len(roots) == 0 {
+			if len(present) > 0 {
+				left++ // every installed root is committed: nothing to build
+			}
 			continue
 		}
 		tgt := projectTarget(p.proj, roots)
@@ -190,7 +247,11 @@ func buildVendor() {
 		built++
 		fmt.Printf("%s: %d files compiled, %d written\n", p.Name, res.files, res.written)
 	}
-	fmt.Printf("%d installed packages built, %d up to date\n", built, current)
+	summary := fmt.Sprintf("%d installed packages built, %d up to date", built, current)
+	if left > 0 {
+		summary += fmt.Sprintf(", %d left as installed with their committed outputs", left)
+	}
+	fmt.Println(summary)
 	if failed > 0 {
 		fail("%d installed packages could not be built", failed)
 	}

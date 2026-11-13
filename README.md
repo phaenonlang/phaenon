@@ -87,6 +87,24 @@ output whose source is gone is removed. `exclude` names the paths the checker le
 (fixtures another analyser owns); `phn build` compiles them all the same. `unused` narrows which
 attributes spare a private property the dead-code warnings (above).
 
+`committed` lists the roots whose outputs the repository tracks, each a key of `roots`; an entry
+that is not one is an error of the project file:
+
+```json
+{"roots": {"src": ".src", "tests": ".tests"}, "committed": ["src"]}
+```
+
+It is for a library published for PHP projects at large, which a project that has no `phn` then
+installs as the plain PHP it compiles to (`roadmap.md` D28). In the library's own project the key
+changes nothing: `phn build`, `phn watch` and the editor build a committed root as any other, which
+is how its outputs are made and kept current. It speaks where the library is an installed package:
+`phn build --vendor` leaves such a root as installed, with no output written, no stamp and nothing
+removed, and builds the package's other roots as before. A committed root that came without its
+outputs (no output directory, or a `.phn` with no `.php` there) fails the command with an error
+naming the package and the root, and nothing is built in its place: the same release is broken for
+every project without `phn`. A project written in Phaenon still reads such a package from its
+`.phn`, as it reads any installed Phaenon package.
+
 ```sh
 phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function title()` → `title()`, nested calls as |> pipelines, canonical layout
 phn build                      # the roots of phaenon.json → their outputs
@@ -424,7 +442,7 @@ phn lsp                                               # the language server: dia
 phn watch [--no-build] [--interval D]                 # check and build the roots each time a file changes
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Debug/…), as phaenon/debug ships it
-phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them
+phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them, but for the roots they commit
 phn trace [--root PREFIX=LOCAL]... [text...]  # positions in compiled files → .phn: text, workflow commands, XML reports on stdin
 phn version                               # the version a release sets, dev otherwise
 phn lex   [--php] file                    # token stream

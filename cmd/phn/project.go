@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -30,9 +31,16 @@ const ProjectFile = "phaenon.json"
 // under a root that are not Phaenon sources (fixtures, YAML, data) are copied
 // into the output for the same reason: __DIR__.'/Fixture' must exist there.
 type project struct {
-	Roots   map[string]string `json:"roots"`
-	Exclude []string          `json:"exclude"`
-	PHP     string            `json:"php"`
+	Roots map[string]string `json:"roots"`
+	// Committed names the source roots whose outputs the project's
+	// repository tracks, each a key of Roots (design/roadmap.md D28,
+	// design/tooling.md §3.7). It says something only of an installed
+	// package: `phn build --vendor` leaves those roots as installed
+	// (vendor.go). In the project's own directory every command treats a
+	// committed root as any other.
+	Committed []string `json:"committed"`
+	Exclude   []string `json:"exclude"`
+	PHP       string   `json:"php"`
 	// Fmt is the command of phn fmt's second layer, the project's fixer run
 	// through phn fix (fmt.go); an empty list turns the layer off.
 	Fmt *[]string `json:"fmt"`
@@ -100,6 +108,17 @@ func readProject(path string) (*project, error) {
 		roots[src] = out
 	}
 	p.Roots = roots
+	committed := make([]string, 0, len(p.Committed))
+	for _, entry := range p.Committed {
+		src := filepath.Clean(entry)
+		if _, ok := roots[src]; !ok {
+			return nil, fmt.Errorf(`%s: "committed" lists source roots, each of them a key of "roots"; %q is not one`, path, entry)
+		}
+		if !slices.Contains(committed, src) {
+			committed = append(committed, src)
+		}
+	}
+	p.Committed = committed
 	for i, e := range p.Exclude {
 		p.Exclude[i] = filepath.Clean(e)
 	}
@@ -129,19 +148,50 @@ func isClassName(s string) bool {
 	return true
 }
 
-// rebased is the project with its roots and excludes made relative to the
-// working directory, for a project file in dir: an installed package's.
+// rebased is the project with its roots, committed roots and excludes made
+// relative to the working directory, for a project file in dir: an
+// installed package's.
 func (p *project) rebased(dir string) *project {
 	q := *p
 	q.Roots = make(map[string]string, len(p.Roots))
 	for src, out := range p.Roots {
 		q.Roots[filepath.Join(dir, src)] = filepath.Join(dir, out)
 	}
+	q.Committed = make([]string, len(p.Committed))
+	for i, src := range p.Committed {
+		q.Committed[i] = filepath.Join(dir, src)
+	}
 	q.Exclude = make([]string, len(p.Exclude))
 	for i, e := range p.Exclude {
 		q.Exclude[i] = filepath.Join(dir, e)
 	}
 	return &q
+}
+
+// commits reports whether src is a root whose outputs the project commits.
+func (p *project) commits(src string) bool {
+	return slices.Contains(p.Committed, src)
+}
+
+// missingOutputs lists what the output directory of the root src lacks of
+// its compiled files, sorted: the directory itself when there is none, else
+// the .php of each .phn the build would compile. It asks for presence only,
+// so it needs no program: whether an output is current is for the project's
+// own gate to say (design/tooling.md §3.7).
+func (p *project) missingOutputs(src string) []string {
+	out := p.Roots[src]
+	if st, err := os.Stat(out); err != nil || !st.IsDir() {
+		return []string{out}
+	}
+	var missing []string
+	for _, in := range collect([]string{src}, p.isOutput, ".phn") {
+		dst := p.outputPath(in)
+		if st, err := os.Stat(dst); err != nil || st.IsDir() {
+			missing = append(missing, dst)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 // requireRoots fails unless the project file names roots: build and check
