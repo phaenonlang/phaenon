@@ -1786,8 +1786,8 @@ func shapeEntries(t types.Type) ([]types.ShapeEntry, bool) {
 }
 
 // reportOverwrites reports what findOverwrites found as P2010, the code a
-// name no parameter has gets too (design/php-versions.md §9), at the
-// overwriting argument. In a pipe stage pipeCall gives a named placeholder
+// name no parameter has gets too (design/php-versions.md §9, "Overwriting
+// names"), at the overwriting argument. In a pipe stage pipeCall gives a named placeholder
 // the left side as its value and its span: the finding goes to the name
 // the source wrote, as the placeholder it is.
 func (x *fnCtx) reportOverwrites(sig *signature, found []overwrite) {
