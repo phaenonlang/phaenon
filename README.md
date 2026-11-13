@@ -287,7 +287,7 @@ project checks the files that hold one first; `phn fmt --stdin`, with no program
 
 ```sh
 phn fmt                 # the roots: Phaenon's layout, then the fixer (phaenon.json "fmt", or tools/php-cs-fixer)
-phn fmt src/Foo.phn     # given files only
+phn fmt src/Foo.phn     # given files only; a directory stands for the .phn under it
 phn fmt --check         # CI: fail when either layer would change a file; nothing written
 ```
 
@@ -438,7 +438,7 @@ every other edit keeps line numbers exact. Design: `design/generics.md`, decisio
 phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] # type-check and compile .phn → .php; no paths: phaenon.json
 phn check [--format=text|json|github|checkstyle] [--no-deprecations] [--exclude PATH]... path... # type-check .phn (and .php) files
 phn fix [--check] -- command [arg...]                 # run php-cs-fixer, Rector… on the outputs; carry their changes back to the .phn
-phn fmt [--check] [file...]                           # Phaenon's layout, then the project's fixer through phn fix; no files: the roots
+phn fmt [--check] [path...]                           # Phaenon's layout, then the project's fixer through phn fix; no paths: the roots
 phn fmt --stdin                                       # Phaenon's layout of standard input, onto standard output
 phn lsp                                               # the language server: diagnostics, hover, definition, completion, build on save
 phn watch [--no-build] [--interval D]                 # check and build the project around the working directory each time a file changes

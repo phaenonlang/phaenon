@@ -347,6 +347,48 @@ func TestFmtNamesAFixerThatUndoesTheLayout(t *testing.T) {
 	}
 }
 
+// phn fmt takes directories as build and check take them: the .phn under
+// them, the outputs left out as phn fmt without paths leaves them.
+func TestFmtDirectories(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	odd := "namespace App;\n\nfinal class Odd {\n    get(): list < int > => [];\n}\n"
+	writeTree(t, root, map[string]string{
+		"phaenon.json":     `{"roots": {"src": ".src"}, "fmt": []}`,
+		"src/Deep/Odd.phn": odd,
+		".src/Stray.phn":   odd,
+	})
+	stdout, stderr, err := run(t, root, bin, "fmt", "src/")
+	if err != nil || !strings.Contains(stdout, "2 files formatted, 2 changed") {
+		t.Fatalf("phn fmt src/ (%v):\n%s%s", err, stdout, stderr)
+	}
+	want := "namespace App;\n\nfinal class Odd\n{\n    get(): list<int> => [];\n}\n"
+	if got, _ := os.ReadFile(filepath.Join(root, "src/Deep/Odd.phn")); string(got) != want {
+		t.Errorf("Odd.phn:\n%s\nwant\n%s", got, want)
+	}
+	stdout, stderr, err = run(t, root, bin, "fmt", "--check", ".")
+	if err != nil || !strings.Contains(stdout, "2 files checked, 0 not in Phaenon's layout") || strings.Contains(stderr, "Stray") {
+		t.Errorf("phn fmt --check . (%v):\n%s%s", err, stdout, stderr)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, ".src/Stray.phn")); string(got) != odd {
+		t.Errorf("a file of an output directory was formatted:\n%s", got)
+	}
+
+	// A directory with no .phn hands the fixer nothing, and the fixer is
+	// not run on the files its configuration names instead.
+	tool := fakeToolCommand(t, fakeSpec{Replace: [][2]string{{"int $a,int $b", "int $a, int $b"}}})
+	writeTree(t, root, map[string]string{
+		"phaenon.json":       `{"roots": {"src": ".src"}, "fmt": [` + strconvQuote(tool) + `, "fix"]}`,
+		"src/Fixture/a.json": "{}\n",
+	})
+	if stdout, stderr, err := run(t, root, bin, "fmt", "src/Fixture"); err != nil || !strings.Contains(stdout, "0 files formatted") {
+		t.Errorf("phn fmt src/Fixture (%v):\n%s%s", err, stdout, stderr)
+	}
+	if box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn")); !strings.Contains(string(box), "int $a,int $b") {
+		t.Errorf("the fixer ran on a file outside the paths given:\n%s", box)
+	}
+}
+
 func strconvQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)

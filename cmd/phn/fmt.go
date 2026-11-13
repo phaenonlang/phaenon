@@ -14,15 +14,17 @@ import (
 	"github.com/phaenonlang/phaenon/internal/parser"
 )
 
-// fmtCmd is `phn fmt [--check] [<file>...]` (design/tooling.md §5). Its
+// fmtCmd is `phn fmt [--check] [<path>...]` (design/tooling.md §5). Its
 // first layer is Phaenon's own layout (internal/format), on the .phn; its
 // second the project's PHP style: the project's fixer run on the outputs
 // through phn fix, which carries what it changes back to the .phn. The
 // first layer runs again after the second, since the fixer's changes can
 // leave what only it lays out, such as a blank line before the first line.
 //
-// Without files it formats the roots of phaenon.json. With --check nothing
-// is written and the status is 1 when either layer would change a file.
+// Without paths it formats the roots of phaenon.json; a directory given
+// stands for the .phn under it, the output directories left out. With
+// --check nothing is written and the status is 1 when either layer would
+// change a file.
 // With --stdin the first layer lays out standard input onto standard
 // output: the PhpStorm plugin's Reformat Code runs it after PhpStorm's own
 // formatter (design/tooling.md §5.1).
@@ -59,11 +61,12 @@ func fmtCmd(args []string) {
 		return
 	}
 	proj := loadProject()
-	files := fs.Args()
-	if len(files) == 0 {
+	paths := fs.Args()
+	if len(paths) == 0 {
 		proj.requireRoots("fmt")
-		files = collect(proj.roots(), proj.isOutput, ".phn")
+		paths = proj.roots()
 	}
+	files := collect(paths, func(path string) bool { return proj != nil && proj.isOutput(path) }, ".phn")
 	changed, withdrawn := layoutWith(files, *check, withdrawnTests(proj, files))
 	if *check {
 		fmt.Printf("%d files checked, %d not in Phaenon's layout\n", len(files), changed)
@@ -71,7 +74,9 @@ func fmtCmd(args []string) {
 		fmt.Printf("%d files formatted, %d changed in Phaenon's layout\n", len(files), changed)
 	}
 	status, left := 0, false
-	if fixer := proj.fixer(); fixer != nil {
+	// Given paths with no .phn under them, the fixer is not run: without
+	// files to fix it would fix every file its configuration names.
+	if fixer := proj.fixer(); fixer != nil && (fs.NArg() == 0 || len(files) > 0) {
 		command := fixer
 		if fs.NArg() > 0 {
 			command = append(append([]string(nil), fixer...), outputsOf(proj, files)...)

@@ -77,14 +77,15 @@ usage:
                                                            rebuild, run the tool again and report what it still
                                                            changes, with the rule behind each change for php-cs-fixer
                                                            and Rector; --check reports and writes no source
-  phn fmt [--check] [<file>...] | --stdin                  lay .phn files out: Phaenon's layout (the withdrawn fun,
+  phn fmt [--check] [<path>...] | --stdin                  lay .phn files out: Phaenon's layout (the withdrawn fun,
                                                            is and as rewritten, function lifted off methods, spaces
                                                            for tabs, braces, {}, one-line docblocks, the spacing of
                                                            type parameters and arguments, throws), then the
                                                            project's fixer through phn fix
                                                            (phaenon.json "fmt", or tools/php-cs-fixer or
-                                                           vendor/bin/php-cs-fixer); no files:
-                                                           the roots; --check writes nothing and fails on a change;
+                                                           vendor/bin/php-cs-fixer); a directory: its .phn, the
+                                                           outputs left out; no paths: the roots; --check writes
+                                                           nothing and fails on a change;
                                                            --stdin: the first layer, standard input to output
   phn lsp                                                  the language server of the project around the working
                                                            directory, on stdin and stdout: diagnostics, hover, go to
