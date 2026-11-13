@@ -44,7 +44,9 @@ type pfaShape struct {
 // parameter left, with its own optionality, the variadic one last. A
 // placeholder makes its parameter required. It reports what PHP throws when
 // the closure is created: too many or too few arguments, a required
-// parameter left out, a named placeholder for no parameter.
+// parameter left out, a named placeholder for no parameter. A name that
+// overwrites an argument or a placeholder before it is namedOverwrites',
+// as in any call.
 func (x *fnCtx) partialShape(sig *signature, args *ast.ArgList, span ast.Span) *pfaShape {
 	shape := &pfaShape{ok: true}
 	params := sig.params
@@ -91,8 +93,7 @@ func (x *fnCtx) partialShape(sig *signature, args *ast.ArgList, span ast.Span) *
 				continue
 			}
 			if covered[p] {
-				x.report(a.S, P2010, "named placeholder $%s of %s overwrites the argument before it", a.Name.Name, sig.name)
-				shape.ok = false
+				shape.ok = false // namedOverwrites' P2010, as in any call
 				continue
 			}
 			covered[p] = true

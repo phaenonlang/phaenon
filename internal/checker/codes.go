@@ -57,6 +57,10 @@ var (
 	P2007 = Code{"P2007", Error, "unknown static property"}
 	P2008 = Code{"P2008", Error, "undefined variable"}
 	P2009 = Code{"P2009", Error, "variable might not be defined"}
+	// P2010 is also a name that overwrites an argument or a placeholder
+	// before it, PHP's "Named parameter $x overwrites previous argument"
+	// (design/php-versions.md §9, "Argument count of a partial
+	// application").
 	P2010 = Code{"P2010", Error, "unknown named argument"}
 	P2011 = Code{"P2011", Error, "parent without a parent class"}
 	P2012 = Code{"P2012", Error, "self or static outside a class"}

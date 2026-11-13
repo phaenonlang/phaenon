@@ -1,0 +1,49 @@
+namespace NamedArguments;
+
+// A named argument for a parameter an argument before it already fills:
+// PHP throws "Named parameter $prefix overwrites previous argument" when
+// the call is made (P2010, as for a name no parameter has). PHPStan reports
+// it too (argument.duplicate).
+
+function label(string $prefix, string $text = 'x'): string { return "$prefix:$text"; }
+function glue(string $prefix, string ...$rest): string { return $prefix . implode(',', $rest); }
+
+final class Label {
+    __construct(public string $prefix = '', public string $text = 'x') {}
+    render(string $prefix, string $text = 'x'): string { return "$prefix:$text"; }
+    static of(string $prefix, string $text = 'x'): string { return "$prefix:$text"; }
+}
+
+function calls(Label $l): void {
+    label('a', prefix: 'b'); // want P2010 "named argument $prefix of NamedArguments\label() overwrites the argument before it"
+    label(prefix: 'a', prefix: 'b'); // want P2010 "overwrites the argument before it"
+    label('a', text: 'b', text: 'c'); // want P2010
+    label('a', text: 'b');
+    label(text: 'b', prefix: 'a');
+    $l->render('a', prefix: 'b'); // want P2010 "NamedArguments\Label::render()"
+    Label::of('a', prefix: 'b'); // want P2010 "NamedArguments\Label::of()"
+    new Label('a', prefix: 'b'); // want P2010
+    str_pad('a', 4, string: 'b'); // want P2010 "str_pad()"
+}
+
+function closures(): void {
+    $render = label(...);
+    $render('a', prefix: 'b'); // want P2010
+    $render('a', text: 'b');
+}
+
+// A name the function does not declare goes into its variadic parameter
+// under that name: a positional argument there is numbered and never
+// collides, the same name twice does.
+function variadics(): void {
+    glue('a', prefix: 'b'); // want P2010
+    glue('a', x: 'b', x: 'c'); // want P2010 "named argument $x of NamedArguments\glue()"
+    glue('a', rest: 'b', rest: 'c'); // want P2010
+    glue('a', 'b', rest: 'c');
+    glue('a', x: 'b', y: 'c');
+}
+
+// A name no parameter has is P2010 once, not once more for its repetition.
+function unknown(): void {
+    label('a', nope: 'b'); // want P2010 "unknown named argument $nope"
+}

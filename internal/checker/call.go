@@ -1678,13 +1678,82 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	return ret
 }
 
+// namedOverwrites reports each named argument or named placeholder whose
+// parameter an argument or a placeholder before it already fills: PHP's
+// Error "Named parameter $x overwrites previous argument" (or "previous
+// placeholder"), thrown when the call is made or when a partial
+// application creates its closure, a pipe's `A |> f(?, x: B)` included.
+// A positional argument fills the parameter at its position; one past the
+// declared parameters goes into the variadic parameter under a number,
+// which no name meets. A variadic function collects a name it does not
+// declare under that name, so the same name twice collides. A name no
+// parameter has is P2010 of its own (unknown named argument), and a named
+// placeholder stands only for a declared parameter (partialShape), so
+// neither is counted here. It returns whether it reported.
+func (x *fnCtx) namedOverwrites(sig *signature, args *ast.ArgList) bool {
+	if args == nil {
+		return false
+	}
+	params, variadic := sig.params, false
+	if n := len(params); n > 0 && params[n-1].Variadic {
+		params, variadic = params[:n-1], true
+	}
+	declared := func(name string) bool {
+		for _, p := range params {
+			if p.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	filled := map[string]*ast.Arg{} // a parameter's name → the argument that fills it
+	position, reported := 0, false
+	for _, a := range args.Args {
+		switch {
+		case a.Unpack, a.Placeholder != nil && a.Placeholder.Variadic:
+			// What an unpacked list fills is not known; `...` comes last.
+		case a.Name == nil:
+			// A positional argument after a named one is P2110, not an
+			// overwrite.
+			if position < len(params) && filled[params[position].Name] == nil {
+				filled[params[position].Name] = a
+			}
+			position++
+		default:
+			name := a.Name.Name
+			if !declared(name) && (!variadic || a.Placeholder != nil) {
+				continue
+			}
+			prev := filled[name]
+			if prev == nil {
+				filled[name] = a
+				continue
+			}
+			kind, before := "argument", "argument"
+			if a.Placeholder != nil {
+				kind = "placeholder"
+			}
+			if prev.Placeholder != nil {
+				before = "placeholder"
+			}
+			x.report(a.S, P2010, "named %s $%s of %s overwrites the %s before it", kind, name, sig.name, before)
+			reported = true
+		}
+	}
+	return reported
+}
+
 func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, span ast.Span, expected types.Type) types.Type {
 	// A partial application binds its arguments now and leaves the
 	// placeholders' parameters to the closure it creates.
 	partial := args.Partial()
+	overwritten := x.namedOverwrites(sig, args)
 	var shape *pfaShape
 	if partial {
 		shape = x.partialShape(sig, args, span)
+		if overwritten {
+			shape.ok = false
+		}
 	}
 	known := func(e ast.Expr) types.Type {
 		if t, ok := sig.known[e]; ok {
