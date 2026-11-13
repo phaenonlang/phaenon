@@ -372,7 +372,7 @@ func (e *emitter) tokenAt(off int) int {
 
 // docBefore is the text of the doc comment that stands before off with
 // nothing but whitespace between them, or "": the docblock of a declaration
-// the tree keeps none for (an anonymous class).
+// the tree keeps none for (an anonymous class, a property hook).
 func (e *emitter) docBefore(off int) string {
 	toks := e.tokens()
 	i := e.tokenAt(off) - 1

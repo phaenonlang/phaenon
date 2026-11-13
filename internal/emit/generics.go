@@ -903,10 +903,8 @@ func (l *lowering) classDecl(d *ast.ClassDecl, outer *scope) error {
 					}
 				}
 			}
-			for _, h := range m.Hooks {
-				if err := l.walk(h, psc); err != nil {
-					return err
-				}
+			if err := l.hooks(m.Hooks, psc); err != nil {
+				return err
 			}
 		case *ast.ClassConstDecl:
 			// A typed constant's type is native PHP like a property's.
@@ -924,6 +922,31 @@ func (l *lowering) classDecl(d *ast.ClassDecl, outer *scope) error {
 			}
 		case *ast.EnumCase:
 			if err := l.walk(m, sc.child()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// hooks lowers the hooks of a property or of a promoted constructor
+// parameter. A set hook's parameter is typed like any other: its Phaenon
+// type is erased and kept in a @param tag before the hook, where PHPStan
+// reads it (the tag matters when the hook takes more than the property
+// holds). The tree keeps no docblock for a hook, so the one before it is
+// looked up in the source.
+func (l *lowering) hooks(hooks []*ast.PropertyHook, sc *scope) error {
+	for _, h := range hooks {
+		tags := l.signature(h.Params, nil, sc, nil)
+		l.addDoc(h.S.Start, l.e.docBefore(h.S.Start), tags)
+		if err := l.declHead(h.Attrs, h.Params, sc); err != nil {
+			return err
+		}
+		if err := l.walkBody(h.Body, sc); err != nil {
+			return err
+		}
+		if h.Expr != nil {
+			if err := l.walk(h.Expr, sc); err != nil {
 				return err
 			}
 		}
@@ -1104,8 +1127,9 @@ func (l *lowering) attrGroup(g *ast.AttrGroup, sc *scope) error {
 }
 
 // declHead lowers what a declaration holds outside its body and signature:
-// its attributes, and its parameters' attributes and defaults. The walk
-// does not descend into declarations, so each kind calls this itself.
+// its attributes, and its parameters' attributes, defaults and, on a
+// promoted constructor parameter, hooks. The walk does not descend into
+// declarations, so each kind calls this itself.
 func (l *lowering) declHead(attrs []*ast.AttrGroup, params []*ast.Param, sc *scope) error {
 	for _, g := range attrs {
 		if err := l.attrGroup(g, sc); err != nil {
@@ -1122,6 +1146,9 @@ func (l *lowering) declHead(attrs []*ast.AttrGroup, params []*ast.Param, sc *sco
 			if err := l.walk(p.Default, sc); err != nil {
 				return err
 			}
+		}
+		if err := l.hooks(p.Hooks, sc); err != nil {
+			return err
 		}
 	}
 	return nil
