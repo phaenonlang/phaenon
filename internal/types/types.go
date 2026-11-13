@@ -322,7 +322,7 @@ func Equal(a, b Type) bool {
 		return true
 	case Shape:
 		b, ok := b.(Shape)
-		if !ok || a.Unsealed != b.Unsealed || a.List != b.List || len(a.Entries) != len(b.Entries) {
+		if !ok || a.Unsealed != b.Unsealed || a.List != b.List || a.Callable != b.Callable || len(a.Entries) != len(b.Entries) {
 			return false
 		}
 		for i := range a.Entries {
@@ -1258,8 +1258,10 @@ func Map(t Type, f func(Type) Type) Type {
 }
 
 // MapDeep rebuilds t bottom-up, applying f to every node after its parts
-// were mapped: array keys and values, shape entries, type arguments,
-// callable signatures, conditional branches, union and intersection members.
+// were mapped: array keys and values, the entries of array and object
+// shapes, type arguments, callable signatures, a conditional's subject,
+// target and branches, union and intersection members. The parts are those
+// Walk visits.
 func MapDeep(t Type, f func(Type) Type) Type {
 	if t == nil {
 		return nil
@@ -1282,6 +1284,14 @@ func MapDeep(t Type, f func(Type) Type) Type {
 		v.Value = MapDeep(v.Value, f)
 		return f(v)
 	case Shape:
+		entries := make([]ShapeEntry, len(v.Entries))
+		for i, e := range v.Entries {
+			e.Type = MapDeep(e.Type, f)
+			entries[i] = e
+		}
+		v.Entries = entries
+		return f(v)
+	case ObjectShape:
 		entries := make([]ShapeEntry, len(v.Entries))
 		for i, e := range v.Entries {
 			e.Type = MapDeep(e.Type, f)
@@ -1319,6 +1329,11 @@ func MapDeep(t Type, f func(Type) Type) Type {
 		}
 		return f(v)
 	case Conditional:
+		// The subject (nil for a conditional on a parameter's argument)
+		// and the target hold types as the branches do: a type parameter
+		// or a static in them is the one the branches mention.
+		v.Subject = MapDeep(v.Subject, f)
+		v.Target = MapDeep(v.Target, f)
 		v.Then = MapDeep(v.Then, f)
 		v.Else = MapDeep(v.Else, f)
 		return f(v)
@@ -1356,7 +1371,15 @@ func Substitute(t Type, subst map[string]Type) Type {
 			e.Type = Substitute(e.Type, subst)
 			es[i] = e
 		}
-		return Shape{Entries: es, Unsealed: t.Unsealed, List: t.List}
+		t.Entries = es // Unsealed, List and Callable stay
+		return t
+	case ObjectShape:
+		es := make([]ShapeEntry, len(t.Entries))
+		for i, e := range t.Entries {
+			e.Type = Substitute(e.Type, subst)
+			es[i] = e
+		}
+		return ObjectShape{Entries: es}
 	case Iterable:
 		return Iterable{Substitute(t.Key, subst), Substitute(t.Value, subst)}
 	case ClassString:
@@ -1420,6 +1443,10 @@ func Walk(t Type, f func(Type)) {
 		Walk(t.Key, f)
 		Walk(t.Value, f)
 	case Shape:
+		for _, e := range t.Entries {
+			Walk(e.Type, f)
+		}
+	case ObjectShape:
 		for _, e := range t.Entries {
 			Walk(e.Type, f)
 		}

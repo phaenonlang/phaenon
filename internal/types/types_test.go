@@ -236,6 +236,97 @@ func TestNative(t *testing.T) {
 	}
 }
 
+// TestTraversal: Walk, MapDeep and Substitute reach a type wherever a type
+// can hold one, an object shape's properties and a conditional's subject
+// and target included.
+func TestTraversal(t *testing.T) {
+	param := Param{Name: "T"}
+	holders := []struct {
+		name string
+		t    Type
+	}{
+		{"union", Union{[]Type{param, TNull}}},
+		{"intersection", Intersection{[]Type{NewClass("Entity"), param}}},
+		{"array key", Array{Key: param, Value: TInt}},
+		{"array value", Array{Key: TInt, Value: param}},
+		{"shape", Shape{Entries: []ShapeEntry{{Key: "value", Type: param}}}},
+		{"object shape", ObjectShape{Entries: []ShapeEntry{{Key: "value", Type: param}}}},
+		{"object shape in an intersection", Intersection{[]Type{NewClass("Entity"), ObjectShape{Entries: []ShapeEntry{{Key: "value", Type: param}}}}}},
+		{"type argument", Class{Name: "Collection", Args: []Type{param}}},
+		{"class-string", ClassString{Of: param}},
+		{"iterable", Iterable{Key: TInt, Value: param}},
+		{"callable parameter", Callable{HasSig: true, Params: []CallableParam{{Type: param}}, Return: TVoid}},
+		{"callable return", Callable{HasSig: true, Return: param}},
+		{"conditional subject", Conditional{Subject: param, Target: TInt, Then: TString, Else: TNull}},
+		{"conditional target", Conditional{ParamName: "x", Target: Class{Name: "Collection", Args: []Type{param}}, Then: TString, Else: TNull}},
+		{"conditional branch", Conditional{ParamName: "x", Target: TInt, Then: param, Else: TNull}},
+	}
+	toInt := func(m Type) Type {
+		if _, ok := m.(Param); ok {
+			return TInt
+		}
+		return m
+	}
+	for _, h := range holders {
+		if !ContainsParam(h.t, "T") {
+			t.Errorf("%s: Walk does not reach T in %s", h.name, Print(h.t))
+		}
+		if got := MapDeep(h.t, toInt); ContainsParam(got, "T") {
+			t.Errorf("%s: MapDeep leaves T in %s", h.name, Print(got))
+		}
+		if got := Substitute(h.t, map[string]Type{"T": TInt}); ContainsParam(got, "T") {
+			t.Errorf("%s: Substitute leaves T in %s", h.name, Print(got))
+		}
+	}
+	// A conditional on a parameter's argument (`$x is T ? … : …`) has no
+	// subject of its own, and gets none.
+	c, ok := MapDeep(Conditional{ParamName: "x", Target: param, Then: TString, Else: TNull}, toInt).(Conditional)
+	if !ok || c.Subject != nil || c.ParamName != "x" || !Equal(c.Target, TInt) {
+		t.Errorf("MapDeep of a conditional on a parameter: %#v", c)
+	}
+}
+
+// TestCallableShape: the array form of a callable is another type than the
+// shape that lists the same entries, and stays callable when a type
+// parameter in it is substituted.
+func TestCallableShape(t *testing.T) {
+	entries := []ShapeEntry{{IsInt: true, IntKey: 0, Type: Param{Name: "T"}}, {IsInt: true, IntKey: 1, Type: TString}}
+	callable := Shape{List: true, Callable: true, Entries: entries}
+	plain := Shape{List: true, Entries: entries}
+	if Equal(callable, plain) || Equal(plain, callable) {
+		t.Error("a callable array equals the shape that is not known to be callable")
+	}
+	if !Equal(callable, Shape{List: true, Callable: true, Entries: entries}) {
+		t.Error("a callable array does not equal itself")
+	}
+	if got, ok := Substitute(callable, map[string]Type{"T": TObject}).(Shape); !ok || !got.Callable || !got.List {
+		t.Errorf("Substitute: %#v, want the callable list shape", got)
+	}
+	if got, ok := Substitute(plain, map[string]Type{"T": TObject}).(Shape); !ok || got.Callable {
+		t.Errorf("Substitute: %#v, want a shape that is not callable", got)
+	}
+}
+
+// TestFalsyObjects: no object is falsy, one known by its properties included.
+func TestFalsyObjects(t *testing.T) {
+	shape := ObjectShape{Entries: []ShapeEntry{{Key: "a", Type: TInt}}}
+	cases := []struct {
+		got  Type
+		want string
+	}{
+		{Falsy(shape), "never"},
+		{Falsy(Nullable(shape)), "null"},
+		{Falsy(MakeUnion(shape, TInt)), "0"},
+		{Falsy(Intersection{[]Type{NewClass("Entity"), shape}}), "never"},
+		{Truthy(Nullable(shape)), "object{a: int}"},
+	}
+	for _, c := range cases {
+		if got := Print(c.got); got != c.want {
+			t.Errorf("got %q, want %q", got, c.want)
+		}
+	}
+}
+
 // TestTextBytes: string&bytes, what `is string` makes of bytes
 // (design/strings.md §6), is a value of both types, absorbed by either in
 // a union, disjoint from what neither is, and a string to PHP.

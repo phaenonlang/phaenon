@@ -1,0 +1,79 @@
+namespace ObjectShapes;
+
+// An object shape is a type like the others: a type parameter in it is
+// inferred and substituted, a class's as well as a function's, and the
+// object it describes is never falsy.
+
+function takesInt(int $x): void
+{
+}
+
+function takesString(string $x): void
+{
+}
+
+/**
+ * @template T
+ * @param T $value
+ * @return object{value: T, copy: T}
+ */
+function twice(mixed $value): object
+{
+    throw new \LogicException('not called');
+}
+
+/**
+ * @template T
+ */
+final class Holder
+{
+    /**
+     * @param object{value: T} $held
+     */
+    public function __construct(private object $held)
+    {
+    }
+
+    /**
+     * @return object{value: T}
+     */
+    public function held(): object
+    {
+        return $this->held;
+    }
+}
+
+/**
+ * @param Holder<string> $holder
+ */
+function substituted(int $value, Holder $holder): void
+{
+    $both = twice($value);
+    takesInt($both->value);
+    takesInt($both->copy);
+    takesString($both->copy); // want P2103 "int given"
+    takesString($holder->held()->value);
+    takesInt($holder->held()->value); // want P2103 "string given"
+}
+
+/**
+ * @param object{a: int}|null $o
+ */
+function neverFalsy(?object $o): ?int
+{
+    if (!$o) {
+        return $o;
+    }
+    return $o->a;
+}
+
+/**
+ * @param object{a: int}|int $o
+ */
+function zeroIsFalsy(object|int $o): int
+{
+    if (!$o) {
+        return $o;
+    }
+    return 1;
+}

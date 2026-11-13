@@ -107,7 +107,7 @@ func Falsy(t Type) Type {
 			return Shape{}
 		case Mixed:
 			return MakeUnion(TNull, TFalse, IntLit(0), FloatLit{0}, StringLit{""}, StringLit{"0"}, Shape{})
-		case Class, Object, Static, This, EnumCase, Callable, Resource, Param, Unknown, Intersection, Iterable:
+		case Class, Object, ObjectShape, Static, This, EnumCase, Callable, Resource, Param, Unknown, Intersection, Iterable:
 			if _, isIterable := m.(Iterable); isIterable {
 				return Shape{}
 			}
