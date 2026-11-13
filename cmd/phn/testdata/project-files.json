@@ -203,6 +203,16 @@
       ]
     },
     {
+      "name": "white space after the object",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"]}\n\n",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
       "name": "a root spelt twice with two outputs",
       "file": "{\"roots\": {\"src\": \".src\", \"./src\": \".other\"}, \"committed\": [\"src\"]}",
       "refused": true
@@ -233,6 +243,31 @@
       "refused": true
     },
     {
+      "name": "roots in another letter case",
+      "file": "{\"Roots\": {\"src\": \".src\"}}",
+      "refused": true
+    },
+    {
+      "name": "the key in another letter case",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"COMMITTED\": [\"src\"]}",
+      "refused": true
+    },
+    {
+      "name": "the key twice, once in another letter case",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"Committed\": []}",
+      "refused": true
+    },
+    {
+      "name": "text after the object",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"]} and more",
+      "refused": true
+    },
+    {
+      "name": "a second object",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"]} {\"committed\": []}",
+      "refused": true
+    },
+    {
       "name": "a key the compiler does not know: it refuses the file, a reader of the two keys does not",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"later\": true}",
       "roots": {
@@ -253,6 +288,28 @@
         "src"
       ],
       "compiler": "is not one"
+    },
+    {
+      "name": "another key in another letter case",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"Exclude\": [\"src/Fixture\"]}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "compiler": "the key \"Exclude\" is written \"exclude\""
+    },
+    {
+      "name": "a key of another key's object in another letter case",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"ReflectedAttributes\": []}}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "compiler": "the key \"ReflectedAttributes\" is written \"reflectedAttributes\""
     }
   ]
 }

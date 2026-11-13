@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -94,6 +96,17 @@ func readProject(path string) (*project, error) {
 	if err := dec.Decode(&p); err != nil {
 		return nil, fmt.Errorf("%s: %v", path, err)
 	}
+	// encoding/json reads the first value and stops, and matches a key to
+	// a field whatever its letter case. A project file is one object whose
+	// keys are spelt as documented: the Composer plugin's reader of "roots"
+	// and "committed" (composer/src/ProjectFile.php) reads no other, and
+	// the two must give one answer.
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("%s: the project file is one JSON object, and text follows it", path)
+	}
+	if key, want := misspeltKey(data, reflect.TypeFor[project]()); key != "" {
+		return nil, fmt.Errorf("%s: the key %q is written %q", path, key, want)
+	}
 	roots := make(map[string]string, len(p.Roots))
 	for _, key := range slices.Sorted(maps.Keys(p.Roots)) {
 		src, out := filepath.Clean(key), filepath.Clean(p.Roots[key])
@@ -139,6 +152,36 @@ func readProject(path string) (*project, error) {
 		}
 	}
 	return &p, nil
+}
+
+// misspeltKey finds, in the JSON object data read into a struct of type t,
+// a key that names a field in another letter case than the field's tag,
+// and returns it with the tag; the objects of the fields that are structs
+// are looked into as well. It returns "", "" when every key is a tag, or
+// none (which the decoder has refused already).
+func misspeltKey(data []byte, t reflect.Type) (key, want string) {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	var object map[string]json.RawMessage
+	if t.Kind() != reflect.Struct || json.Unmarshal(data, &object) != nil {
+		return "", ""
+	}
+	for _, key := range slices.Sorted(maps.Keys(object)) {
+		for i := range t.NumField() {
+			tag, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+			switch {
+			case tag == "" || !strings.EqualFold(tag, key):
+				continue
+			case tag != key:
+				return key, tag
+			}
+			if key, want := misspeltKey(object[key], t.Field(i).Type); key != "" {
+				return key, want
+			}
+		}
+	}
+	return "", ""
 }
 
 // separateDirectories fails unless the roots and their outputs are separate
