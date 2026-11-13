@@ -153,3 +153,23 @@ func TestInstalledPackageWithAKeyOfALaterCompiler(t *testing.T) {
 		}
 	}
 }
+
+// `phn migrate --php` writes the target into the project file. A file this
+// compiler refuses is refused before it is written to: the command used to
+// write the key and then fail on the file, leaving it changed.
+func TestMigratePHPLeavesAFileItRefuses(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	const file = `{"roots": {"src": ".src"}, "later": true}`
+	writeTree(t, root, map[string]string{"phaenon.json": file})
+
+	_, stderr, err := run(t, root, bin, "migrate", "--php", "8.6")
+
+	var exit *exec.ExitError
+	if !asExit(err, &exit) || !strings.Contains(stderr, `unknown key "later"`) {
+		t.Errorf("phn migrate --php 8.6: %v, stderr %q; want the error of the unknown key", err, stderr)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "phaenon.json")); string(data) != file {
+		t.Errorf("the project file was written to:\n%s", data)
+	}
+}
