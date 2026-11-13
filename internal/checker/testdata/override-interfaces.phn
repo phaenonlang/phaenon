@@ -1,0 +1,71 @@
+// A method is compared with every declaration it overrides: the nearest a
+// parent class has and each interface's. PHP links the class against all
+// of them and refuses one that fits its first interface and not its
+// second; PHPStan reports the same line.
+namespace App\OverrideInterfaces;
+
+interface Counts
+{
+    public function size(): int;
+
+    public function at(int $index): string;
+}
+
+interface Names
+{
+    public function size(): string;
+
+    public function at(string $index): string;
+}
+
+abstract class Both implements Counts, Names
+{
+    public function size(): int // want P2502 "return type int of App\OverrideInterfaces\Both::size() is not covariant with App\OverrideInterfaces\Names::size() (string)"
+    {
+        return 1;
+    }
+
+    public function at(int $index): string // want P2502 "is not contravariant with App\OverrideInterfaces\Names::at() (string)"
+    {
+        return '';
+    }
+}
+
+// What fits both passes.
+abstract class Either implements Counts, Names
+{
+    abstract public function size(): never;
+
+    public function at(int|string $index): string
+    {
+        return '';
+    }
+}
+
+abstract class Counter implements Counts
+{
+    public function size(): int
+    {
+        return 0;
+    }
+}
+
+// The parent class is right; the interface the child adds is another
+// declaration of the method.
+abstract class NamedCounter extends Counter implements Names
+{
+    public function size(): int // want P2502 "Names::size() (string)"
+    {
+        return 1;
+    }
+}
+
+// The parent class's declaration and its interface's say the same: one
+// mistake, one diagnostic, against the nearer of the two.
+abstract class Miscounter extends Counter
+{
+    public function size(): string // want P2502 "Counter::size() (int)"
+    {
+        return '';
+    }
+}

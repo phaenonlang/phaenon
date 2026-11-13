@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -916,22 +917,16 @@ func (c *Checker) parentConstant(cl *program.Class, name string) *program.Consta
 	return nil
 }
 
-// checkOverride compares a method with the one it overrides.
+// checkOverride compares a method with every declaration it overrides: the
+// nearest one a parent class has and each interface's. PHP links a class
+// against all of them, and so do PHPStan's method compatibility rules: a
+// class whose two interfaces disagree on a method fits one of them at best.
+// One mistake is one diagnostic, so the first declaration the method breaks
+// is the one reported.
 func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 	hasOverrideAttr := hasOverride(m.Attrs)
-	var parent *program.Method
-	key := strings.ToLower(m.Name)
-	for _, a := range cl.Ancestors() {
-		a.Signature()
-		if pm := a.FindMethod(key); pm != nil && pm.Class != cl {
-			if pm.Vis == program.Private && pm.Class.Kind != ast.KindInterface {
-				continue
-			}
-			parent = pm
-			break
-		}
-	}
-	if parent == nil {
+	parents := overriddenMethods(cl, m)
+	if len(parents) == 0 {
 		if hasOverrideAttr {
 			c.report(declSpan(m), P2503, "%s::%s() has #[\\Override] but overrides nothing", cl.Name, m.Name)
 		}
@@ -941,19 +936,60 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 		// The override check runs on the target PHP: a method the target's
 		// library lacks overrides nothing there (SessionHandler::validateId()
 		// on 8.5).
-		c.libraryMethod(declSpan(m), parent)
+		c.libraryMethod(declSpan(m), parents[0])
+	}
+	for _, parent := range parents {
+		if c.checkOverrideOf(cl, m, parent) {
+			break
+		}
+	}
+}
+
+// overriddenMethods lists what m overrides, nearest first: the first
+// declaration found through the ancestors, then every other interface's.
+// A parent class's private method is overridden by nothing, and a farther
+// parent class's method is the business of the nearer class that overrides
+// it, for PHP and for PHPStan alike.
+func overriddenMethods(cl *program.Class, m *program.Method) []*program.Method {
+	var out []*program.Method
+	key := strings.ToLower(m.Name)
+	for _, a := range cl.Ancestors() {
+		a.Signature()
+		pm := a.FindMethod(key)
+		if pm == nil || pm.Class == cl || slices.Contains(out, pm) {
+			continue
+		}
+		iface := pm.Class.Kind == ast.KindInterface
+		if pm.Vis == program.Private && !iface {
+			continue
+		}
+		if len(out) > 0 && (!iface || pm.Magic) {
+			continue
+		}
+		out = append(out, pm)
+	}
+	return out
+}
+
+// checkOverrideOf compares a method with one it overrides and tells whether
+// it reported anything.
+func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method) bool {
+	broken := false
+	mismatch := func(span ast.Span, format string, args ...any) {
+		broken = true
+		c.reportRelated(span, P2502, overridden(parent), format, args...)
 	}
 	if parent.Final {
 		c.report(declSpan(m), P2505, "%s::%s() overrides final method %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
 	}
 	if parent.Static != m.Static {
-		c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() and %s::%s() disagree on static", cl.Name, m.Name, parent.Class.Name, parent.Name)
+		mismatch(m.Span, "%s::%s() and %s::%s() disagree on static", cl.Name, m.Name, parent.Class.Name, parent.Name)
 	}
 	if m.Vis > parent.Vis {
-		c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, parent.Vis, parent.Class.Name, parent.Name)
+		mismatch(m.Span, "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, parent.Vis, parent.Class.Name, parent.Name)
 	}
 	if strings.EqualFold(m.Name, "__construct") && !parent.Abstract && parent.Class.Kind != ast.KindInterface {
-		return // constructors are exempt unless the parent's is abstract
+		return broken // constructors are exempt unless the parent's is abstract
 	}
 	// Map the parent's types into this class's generic arguments.
 	ctx := c.newCtx(cl.File, cl.Scope, cl, m.Static)
@@ -969,24 +1005,25 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 			if n := len(m.Params); n > 0 && m.Params[n-1].Variadic {
 				break
 			}
-			c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() has fewer parameters than %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
+			mismatch(m.Span, "%s::%s() has fewer parameters than %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
 			break
 		}
 		cp := m.Params[i]
 		if pp.HasDefault && !cp.HasDefault && !cp.Variadic {
-			c.reportRelated(cp.Span, P2502, overridden(parent), "parameter $%s of %s::%s() must be optional like in %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
+			mismatch(cp.Span, "parameter $%s of %s::%s() must be optional like in %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
 		}
 		pt, ct := bind(pp.Type, parent.Class), bind(cp.Type, cl)
 		if pt != nil && ct != nil && !types.IsSubtype(types.Erase(pt), types.Erase(ct), c.p) && !types.IsSubtype(pt, ct, c.p) {
-			c.reportRelated(cp.Span, P2502, overridden(parent), "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
+			mismatch(cp.Span, "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
 				cp.Name, cl.Name, m.Name, types.Print(ct), parent.Class.Name, parent.Name, types.Print(pt))
 		}
 		if pp.ByRef != cp.ByRef {
-			c.reportRelated(cp.Span, P2502, overridden(parent), "parameter $%s of %s::%s() disagrees on by-reference with %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
+			mismatch(cp.Span, "parameter $%s of %s::%s() disagrees on by-reference with %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
 		}
 	}
 	for i := len(parent.Params); i < len(m.Params); i++ {
 		if !m.Params[i].HasDefault && !m.Params[i].Variadic {
+			broken = true
 			c.report(m.Params[i].Span, P2502, "extra parameter $%s of %s::%s() must be optional", m.Params[i].Name, cl.Name, m.Name)
 		}
 	}
@@ -994,15 +1031,16 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 		pr, cr := bind(parent.Return, parent.Class), bind(m.Return, cl)
 		if cr == nil {
 			if _, isVoid := pr.(types.Void); !isVoid && !types.IsMixed(pr) {
-				c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() must declare a return type compatible with %s::%s() (%s)", cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
+				mismatch(m.Span, "%s::%s() must declare a return type compatible with %s::%s() (%s)", cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
 			}
 		} else if !types.IsSubtype(cr, pr, c.p) && !types.IsSubtype(types.Erase(cr), types.Erase(pr), c.p) {
 			if _, parentVoid := pr.(types.Void); !(parentVoid && isVoidLike(cr)) {
-				c.reportRelated(m.Span, P2502, overridden(parent), "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
+				mismatch(m.Span, "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
 					types.Print(cr), cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
 			}
 		}
 	}
+	return broken
 }
 
 func isVoidLike(t types.Type) bool {
