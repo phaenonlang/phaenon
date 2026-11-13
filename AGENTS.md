@@ -45,7 +45,7 @@ output. `../design/roadmap.md` §3 names the milestones and what each one brings
 | Open questions and deferred work | `../design/roadmap.md` §6, `checker.md` §10, `tooling.md` §13; the repository's issues |
 | Every `PHAENON_*` test variable | [Test variables](#test-variables) |
 | A diagnostic code | `internal/checker/codes.go` |
-| The release a `phaenon.json` key came in | `keyReleases` in `cmd/phn/conflict.go`: a new key is added there too, and `earlierReleases` extended to the last release without it (`TestKeyReleases`) |
+| The release a `phaenon.json` key came in | `keyReleases` in `cmd/phn/conflict.go`: a new key is added there too, `earlierReleases` extended to the last release without it (`TestKeyReleases`) and `composer.json`'s alias of `dev-main` moved to the key's release line (`TestBranchAliasCoversTheKeys`) |
 | What PHP does | `php` itself (the oracle), then `../php-src` |
 | A PHP function's signature | `stdlib/php-src/**/*.stub.php`, refined by `stdlib/overlay/` |
 
@@ -243,6 +243,14 @@ from the package by hand.
   version the next release and write `CHANGELOG.md`: the title is a Conventional Commit header whose
   release impact (`!` or a `BREAKING CHANGE:` footer, then `feat`, then `fix` and `revert`, then the
   rest) equals the highest of the PR's commits, which `pr-semantics.yml` checks.
+- **`composer.json`'s branch alias of `dev-main`** (`extra.branch-alias`) is the version Composer
+  takes the main branch for. The release PR's workflow writes it at each release's minor version
+  (`tools/release`), and `release.yml` checks it there, so it is not edited by hand, with one
+  exception: a change that adds a key to `phaenon.json` is a `feat`, comes in the next minor
+  release, and moves the alias to that line (`0.5.x-dev` for a key of 0.5.0) together with the
+  key's entry in `keyReleases`. A library's `conflict` below that release would otherwise keep
+  out a project on the main branch, whose compiler reads the key; `TestBranchAliasCoversTheKeys`
+  fails for a key whose release is above the alias.
 - `go.mod`'s module line is `github.com/phaenonlang/phaenon`. GoLand has rewritten it to `module
   phaenon` before, which breaks every import of the repository's own packages: put the line back by
   hand and never commit the rewritten one (`go mod init` or `go mod tidy` repairs it the wrong way).

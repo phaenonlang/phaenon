@@ -5,6 +5,7 @@ package main
 // composer.json keeps out every release that cannot read its phaenon.json.
 
 import (
+	"encoding/json"
 	"maps"
 	"os"
 	"os/exec"
@@ -100,6 +101,49 @@ func TestKeyReleases(t *testing.T) {
 	}
 	if !slices.Equal(earlierReleases, earlier) {
 		t.Errorf("earlierReleases is %v; the releases before %s in CHANGELOG.md are %v", earlierReleases, newest, earlier)
+	}
+}
+
+// The main branch reads every key of keyReleases, so the version Composer
+// takes it for, composer.json's alias of dev-main, is not below the newest
+// release the table names: a library's `conflict` below that release would
+// keep out a project on the compiler's main branch, whose compiler reads
+// the key. The release PR's workflow writes the alias at each release's
+// minor version (tools/release); a key that comes in the next minor moves
+// it there in the commit that adds the key.
+func TestBranchAliasCoversTheKeys(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "composer.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Extra struct {
+			BranchAlias map[string]string `json:"branch-alias"`
+		} `json:"extra"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	alias := manifest.Extra.BranchAlias["dev-main"]
+	line := regexp.MustCompile(`^(\d+\.\d+)\.x-dev$`).FindStringSubmatch(alias)
+	if line == nil {
+		t.Fatalf(`composer.json's extra.branch-alias names dev-main %q, want "X.Y.x-dev"`, alias)
+	}
+	// Release lines are compared: X.Y of the alias with X.Y of the release.
+	aliased, err := semver.ParseVersion(line[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range slices.Sorted(maps.Keys(keyReleases)) {
+		minor := regexp.MustCompile(`^\d+\.\d+`).FindString(keyReleases[key])
+		since, err := semver.ParseVersion(minor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if aliased.Compare(since) < 0 {
+			t.Errorf("composer.json aliases dev-main to %s, a line below %s, the release keyReleases gives %q: the main branch reads the key, and a library's conflict below %s would keep a project on it out. Move the alias to %s.x-dev in the commit that adds the key",
+				alias, keyReleases[key], key, keyReleases[key], minor)
+		}
 	}
 }
 

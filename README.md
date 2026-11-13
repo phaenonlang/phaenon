@@ -146,7 +146,9 @@ composer.json: "conflict": {"phaenon/phn": "<0.4"} does not keep this package fr
 - **It asks about the releases that exist**, each tried against the constraint as Composer tries
   it. `<0.5`, `<0.5.0`, `<=0.4.99` and `<0.5 || >=9` keep out the same releases and pass alike;
   `<0.4`, `0.3.*` and no `conflict` on `phaenon/phn` at all do not. The package's name is read in
-  any letter case, as Composer reads it.
+  any letter case, as Composer reads it. A project on the compiler's main branch is not kept out
+  by the line the check asks for: Composer takes `dev-main` for its branch alias, which stands at
+  the newest key's release line (`0.5.x-dev`).
 - **A constraint `phn` cannot read fails the build as well**, as one that "cannot be judged", with
   the reason: it is not known to keep anything out. `phn` reads the comparisons, `~`, `^`,
   wildcards, hyphen ranges, alternatives, stability suffixes and flags, and branches as Composer

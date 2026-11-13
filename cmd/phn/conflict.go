@@ -44,7 +44,10 @@ const compilerPackage = "phaenon/phn"
 // keyReleases gives every key of phaenon.json the first release of
 // phaenon/phn that reads it, a nested key under its path. A key is added to
 // the project struct together with the release it will come in:
-// TestKeyReleases fails for a key without one.
+// TestKeyReleases fails for a key without one. The same commit moves
+// composer.json's alias of dev-main to that release's line, so that the
+// `conflict` the key asks of a library does not keep out a project on the
+// main branch, which reads the key (TestBranchAliasCoversTheKeys).
 var keyReleases = map[string]string{
 	"roots":                      "0.1.0",
 	"exclude":                    "0.1.0",
