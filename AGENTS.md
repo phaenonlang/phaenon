@@ -71,6 +71,7 @@ internal/fix          `phn fix`: a PHP tool's changes of the outputs carried bac
 internal/trace        `phn trace`: positions in compiled files → `.phn` positions, in text, GitHub workflow commands and CI reports (Checkstyle, JUnit, Clover, Cobertura)
 internal/migrate      .php → .phn: tag stripping, generic docblocks lifted into syntax, `function` lifted off methods
 internal/playground   one file checked and compiled in memory, the embedded stdlib alone: what cmd/phn-wasm answers (design/tooling.md §3.6)
+internal/semver       Composer's versions and version constraints, read as composer/semver reads them or refused: whether a release satisfies a `conflict` (design/tooling.md §3.7)
 internal/conformance  suites over the php-src corpus with `php` as the oracle
 stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/debug sources (runtime/**/*.phn);
                       suggested/: the Monolog and Sentry API the Debug integrations are checked against, loaded only by the stdlib's own programs
@@ -98,6 +99,7 @@ PHAENON_UPDATE=1 go test ./internal/emit                               # rewrite
 PHAENON_PHP86=/path/to/php8.6 go test ./internal/emit                  # goldens compiled for 8.6: php -l, loading, behaviour
 go generate ./stdlib                                                   # refresh stubs + version table from the php-src clone
 PHAENON_COMPOSER=$(which composer) go test ./internal/distribution     # the Composer plugin under a real Composer
+PHAENON_COMPOSER=$(which composer) go test ./internal/semver           # the constraint vectors, asked of Composer's own reader
 GOOS=js GOARCH=wasm go build -o bin/phn.wasm ./cmd/phn-wasm            # the playground's compiler (tests: internal/playground)
 ```
 
@@ -115,7 +117,7 @@ a php of the newest release.
 
 CI (`.github/workflows/ci.yml`) runs `gofmt -l`, `go vet` (native and wasm) and `go test ./...` with
 PHP 8.5 and Composer on the runner; the suites gated by a variable skip there, while the plugin's
-suite runs, `PHAENON_COMPOSER` naming the runner's Composer.
+suite and the constraint vectors' run, `PHAENON_COMPOSER` naming the runner's Composer.
 
 ### Test variables
 
@@ -132,9 +134,9 @@ PHPStan parity.
 | `PHAENON_SHOW_DIFFS` | printer round trip, execution suites | How many differences to print (default 25) |
 | `PHAENON_SHOW_FALSE_ACCEPT` | `TestParserAgainstPHP` | Lists (up to 30) files PHP rejects but Phaenon parses |
 | `PHAENON_PHPSTAN` | `TestPHPStanParity` (checker), `TestGenerics` (emit) | Path to a PHPStan binary (`/path/to/phpstan`), run at level max with `treatPhpDocTypesAsCertain: false` (`../design/checker.md` §9) |
-| `PHAENON_UPDATE` | the emit, format, migrate and trace goldens | Rewrites the expected files from the current output |
+| `PHAENON_UPDATE` | the emit, format, migrate and trace goldens; `TestComposerAgrees` (semver) | Rewrites the expected files from the current output; for the constraint vectors, their answers from Composer's |
 | `PHAENON_GOLDEN` | `TestGolden` (checker) | Only the golden files whose name contains this substring |
-| `PHAENON_COMPOSER` | `internal/distribution` | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects that install it alone; one of them builds `phn` and runs what it compiles |
+| `PHAENON_COMPOSER` | `internal/distribution`; `TestComposerAgrees` (semver) | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects that install it alone; one of them builds `phn` and runs what it compiles. The constraint vectors are asked of its composer/semver, in a script of a project that installs nothing |
 | `PHAENON_COMPOSER_PROJECT` | `TestComposer` (program) | A Composer project to exercise the vendor reader on |
 | `PHAENON_FMT_TREE` | `TestTree` (format) | Any Phaenon tree: each `.phn` must format, and to itself a second time (`-v` lists the files it would change) |
 | `PHAENON_LINEMAP_TREE` | `TestLineMapTree` (emit) | Any Phaenon tree: `TestLineMapProperty`'s invariant over every `.phn` in it, and `TestOutputsDependOnPHPOnly`'s promise over every output (nothing under `Phaenon\`) |
@@ -217,6 +219,12 @@ from the package by hand.
   TestTree` formats a dogfood tree in memory.
 - **Printer golden** `internal/printer/testdata/sample.golden`: regenerate with
   `phn print --php testdata/sample.php`.
+- **Constraint vectors** `internal/semver/testdata/constraints.json`: Composer constraints, each
+  with the versions of the file's list that satisfy it, `"refused"` where Composer refuses it and
+  `"unread"` where Composer reads it and `internal/semver` does not. Composer is the oracle: a
+  vector is added as its constraint alone and filled with `PHAENON_UPDATE=1 PHAENON_COMPOSER=…
+  go test ./internal/semver -run TestComposerAgrees`. The reader may read less than Composer,
+  never differently: a spelling it is not sure of becomes `"unread"`, not a guess.
 - A `.phn` fixture is PHP without `<?php`. Docblocks: one tag per line (PHPStan ignores the rest).
 - Golden files and `stdlib/php-src` are byte-sensitive: no formatters, no whitespace clean-up
   (`.editorconfig` exempts them).
