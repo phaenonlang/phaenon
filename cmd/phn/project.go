@@ -418,14 +418,10 @@ func (p *project) mirror(src string, check bool) (copied, removed int) {
 		if rel == stampFile {
 			return nil // the build's own record (vendor.go)
 		}
-		source := filepath.Join(src, rel)
-		if filepath.Ext(rel) == ".php" {
-			if _, err := os.Stat(strings.TrimSuffix(source, ".php") + ".phn"); err == nil {
+		for _, source := range sourcesBehind(rel) {
+			if _, err := os.Stat(filepath.Join(src, source)); err == nil {
 				return nil
 			}
-		}
-		if _, err := os.Stat(source); err == nil {
-			return nil
 		}
 		removed++
 		if check {
@@ -445,6 +441,20 @@ func (p *project) mirror(src string, check bool) (copied, removed int) {
 		}
 	}
 	return copied, removed
+}
+
+// sourcesBehind names, relative to a root, the files that can stand behind
+// the file rel of the root's output directory: the .phn a .php is compiled
+// from, and the file of the same path, which the build copies. An output
+// with neither is one no source stands behind. The build removes it
+// (mirror), and so does `phn build --vendor` where an earlier build left
+// it in a root the package now commits (earlier.go): the two ask this one
+// function.
+func sourcesBehind(rel string) []string {
+	if filepath.Ext(rel) == ".php" {
+		return []string{strings.TrimSuffix(rel, ".php") + ".phn", rel}
+	}
+	return []string{rel}
 }
 
 func writeFile(dst string, data []byte) {
