@@ -414,7 +414,7 @@ func parseTemplate(text string) (TemplateTag, error) {
 	return tt, nil
 }
 
-// parseMethodTag parses `[static] [ReturnType] name(Type $a, Type $b = default)`.
+// parseMethodTag parses `[static] [ReturnType] name(Type $a, Type &...$b = default) [description]`.
 func parseMethodTag(text string) (MethodTag, error) {
 	m := MethodTag{}
 	text = strings.TrimSpace(text)
@@ -439,22 +439,19 @@ func parseMethodTag(text string) (MethodTag, error) {
 	} else {
 		m.Name = head
 	}
-	close := strings.LastIndex(text, ")")
-	if close < paren {
-		return m, errorf("unclosed parameter list")
-	}
-	params := strings.TrimSpace(text[paren+1 : close])
-	if params == "" {
-		return m, nil
-	}
-	p := &typeParser{s: params}
+	// The list ends at its own closing parenthesis: a description may
+	// follow the signature, with parentheses of its own.
+	p := &typeParser{s: text, i: paren + 1}
 	for {
 		p.skipSpace()
 		if p.eof() {
+			return m, errorf("unclosed parameter list")
+		}
+		if p.accept(")") {
 			break
 		}
 		var cp CallableParam
-		if !p.peekVar() {
+		if !p.peekVar() && !p.peek("&") && !p.peek("...") {
 			typ, err := p.parseType()
 			if err != nil {
 				return m, err
@@ -462,11 +459,11 @@ func parseMethodTag(text string) (MethodTag, error) {
 			cp.Type = typ
 		}
 		p.skipSpace()
-		if p.accept("...") {
-			cp.Variadic = true
-		}
 		if p.accept("&") {
 			cp.ByRef = true
+		}
+		if p.accept("...") {
+			cp.Variadic = true
 		}
 		p.skipSpace()
 		if p.accept("$") {
@@ -475,27 +472,55 @@ func parseMethodTag(text string) (MethodTag, error) {
 		p.skipSpace()
 		if p.accept("=") {
 			cp.Optional = true
-			// skip the default value up to the next top-level comma
-			depth := 0
-			for !p.eof() {
-				c := p.s[p.i]
-				if c == '(' || c == '[' || c == '{' {
-					depth++
-				} else if c == ')' || c == ']' || c == '}' {
-					depth--
-				} else if c == ',' && depth == 0 {
-					break
-				}
-				p.i++
-			}
+			p.skipDefault()
 		}
 		m.Params = append(m.Params, cp)
 		p.skipSpace()
-		if !p.accept(",") {
-			break
+		if p.accept(",") || p.peek(")") {
+			continue
 		}
+		if p.eof() {
+			return m, errorf("unclosed parameter list")
+		}
+		break
 	}
 	return m, nil
+}
+
+// skipDefault moves past a parameter's default value, to the comma or the
+// closing parenthesis that ends the parameter. A string is skipped whole,
+// whatever it holds, and so is what brackets enclose: `'a, b)'`, `[1, 2]`,
+// `new Foo(1)`.
+func (p *typeParser) skipDefault() {
+	depth := 0
+	for !p.eof() {
+		switch c := p.s[p.i]; c {
+		case '\'', '"':
+			p.i++
+			for !p.eof() && p.s[p.i] != c {
+				if p.s[p.i] == '\\' {
+					p.i++
+				}
+				p.i++
+			}
+			if p.eof() {
+				p.i = len(p.s) // the string never ends, and neither does the list
+				return
+			}
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			if depth == 0 {
+				return
+			}
+			depth--
+		case ',':
+			if depth == 0 {
+				return
+			}
+		}
+		p.i++
+	}
 }
 
 // identPrefix returns the identifier at the start of s.

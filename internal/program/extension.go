@@ -248,22 +248,9 @@ foreach (get_loaded_extensions() as $name) {
 echo json_encode(['php' => PHP_VERSION, 'ext' => $ext]);
 `
 
-// generateStubScript writes one extension's classes, functions and
-// constants as PHP declarations, every class name fully qualified so the
-// namespace blocks cannot capture it. Defaults reflection cannot read are
-// written as UNKNOWN, php-src's own convention.
-const generateStubScript = `
-$ext = new ReflectionExtension($argv[1]);
-$out = [];
-
-function splitName(string $fqn): array {
-    $i = strrpos($fqn, '\\');
-    return $i === false ? ['', $fqn] : [substr($fqn, 0, $i), substr($fqn, $i + 1)];
-}
-function add(string $ns, string $text): void {
-    global $out;
-    $out[$ns][] = $text;
-}
+// typeOfScript declares typeOf(): a reflected type as a PHP declaration
+// writes it, class names fully qualified.
+const typeOfScript = `
 function typeOf(?ReflectionType $t): string {
     if ($t === null) {
         return '';
@@ -278,12 +265,35 @@ function typeOf(?ReflectionType $t): string {
         return $s;
     }
     if ($t instanceof ReflectionUnionType) {
-        return implode('|', array_map('typeOf', $t->getTypes()));
+        // An intersection in a union is written in parentheses: PHP reads
+        // no (A&B)|null without them.
+        return implode('|', array_map(
+            static fn (ReflectionType $m): string => $m instanceof ReflectionIntersectionType ? '(' . typeOf($m) . ')' : typeOf($m),
+            $t->getTypes(),
+        ));
     }
     if ($t instanceof ReflectionIntersectionType) {
         return implode('&', array_map('typeOf', $t->getTypes()));
     }
     return '';
+}
+`
+
+// generateStubScript writes one extension's classes, functions and
+// constants as PHP declarations, every class name fully qualified so the
+// namespace blocks cannot capture it. Defaults reflection cannot read are
+// written as UNKNOWN, php-src's own convention.
+const generateStubScript = typeOfScript + `
+$ext = new ReflectionExtension($argv[1]);
+$out = [];
+
+function splitName(string $fqn): array {
+    $i = strrpos($fqn, '\\');
+    return $i === false ? ['', $fqn] : [substr($fqn, 0, $i), substr($fqn, $i + 1)];
+}
+function add(string $ns, string $text): void {
+    global $out;
+    $out[$ns][] = $text;
 }
 function value(mixed $v): string {
     if ($v instanceof UnitEnum) {

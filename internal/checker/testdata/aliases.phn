@@ -38,3 +38,20 @@ function aliasUse(Original $o, Legacy $l, list<Legacy> $many): void
         takesOriginal($m);
     }
 }
+
+// An alias of an alias is the class at the end of the chain.
+class_alias(Legacy::class, 'Ali\Older');
+
+function chained(Older $o): string
+{
+    return $o->name();
+}
+
+// Aliases that name each other name no class: PHP finds no original for
+// the first of them, and the names are unknown where they are used.
+class_alias('Ali\Chicken', 'Ali\Egg');
+class_alias('Ali\Egg', 'Ali\Chicken');
+
+function cycle(Chicken $c): void // want P2001 "unknown class Ali\Chicken"
+{
+}

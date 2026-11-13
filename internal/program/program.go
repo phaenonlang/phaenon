@@ -231,19 +231,39 @@ func (p *Program) ClassPolyfilled(name string) bool {
 
 // Class returns the class with the given fully-qualified name (any case,
 // with or without a leading backslash), loading it if a loader knows it.
+//
+// An alias may name another alias, maxAliasHops deep. Aliases that name each
+// other name no class, as in PHP, where the first class_alias() of the
+// cycle fails for want of its original: the lookup ends with nil.
 func (p *Program) Class(name string) *Class {
 	key := strings.ToLower(strings.TrimPrefix(name, "\\"))
-	if target, ok := p.classAliases[key]; ok && !strings.EqualFold(target, key) {
-		return p.Class(target) // the alias wins over a declaration kept for IDEs (`if (false) { class Old … }`)
+	for range maxAliasHops {
+		// An alias wins over a declaration kept for IDEs
+		// (`if (false) { class Old … }`).
+		target, aliased := p.aliasTarget(key)
+		if !aliased {
+			if c, ok := p.classes[key]; ok {
+				return c
+			}
+			p.load(key)
+			if target, aliased = p.aliasTarget(key); !aliased {
+				return p.classes[key]
+			}
+			// The loaded file aliased the name.
+		}
+		key = strings.ToLower(strings.TrimPrefix(target, "\\"))
 	}
-	if c, ok := p.classes[key]; ok {
-		return c
-	}
-	p.load(key)
-	if target, ok := p.classAliases[key]; ok && !strings.EqualFold(target, key) {
-		return p.Class(target) // the loaded file aliased the name
-	}
-	return p.classes[key]
+	return nil
+}
+
+// maxAliasHops is how many class_alias() steps a name is followed through.
+const maxAliasHops = 8
+
+// aliasTarget is the class a class_alias() call points the name at, if one
+// does and it is not the name itself.
+func (p *Program) aliasTarget(lower string) (string, bool) {
+	target, ok := p.classAliases[lower]
+	return target, ok && !strings.EqualFold(target, lower)
 }
 
 // Function returns a function by fully-qualified name.
@@ -342,9 +362,9 @@ func (p *Program) IsSubclassOf(sub, super string) bool {
 // class_alias() points the name at.
 func (p *Program) Canonical(name string) string {
 	key := strings.ToLower(strings.TrimPrefix(name, "\\"))
-	for i := 0; i < 8; i++ {
-		target, ok := p.classAliases[key]
-		if !ok || strings.EqualFold(target, key) {
+	for range maxAliasHops {
+		target, ok := p.aliasTarget(key)
+		if !ok {
 			break
 		}
 		name, key = target, strings.ToLower(target)
