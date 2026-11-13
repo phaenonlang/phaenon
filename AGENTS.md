@@ -76,7 +76,7 @@ stdlib/               embedded: php-src stubs, Phaenon's overlay, the phaenon/de
                       suggested/: the Monolog and Sentry API the Debug integrations are checked against, loaded only by the stdlib's own programs
 stdlib/gen            generator of stdlib/php-src (the newest release branch's stubs), versions_gen.go (the release each symbol came in) and constants.php
 internal/distribution tests of the phaenon/phn Composer plugin under a real Composer (PHAENON_COMPOSER)
-composer/             the phaenon/phn Composer plugin (PHP): the pinned binary, vendor/bin/phn, the builds at the autoload dump; composer.json at the root, .gitattributes keeps the dist to it
+composer/             the phaenon/phn Composer plugin (PHP): the pinned binary, vendor/bin/phn, the builds at the autoload dump, the presence of the outputs an installed package commits (ProjectFile.php, its reader of phaenon.json's roots and committed), the removal of what an earlier build left in a committed root (EarlierBuild.php); composer.json at the root, .gitattributes keeps the dist to it
 tools/release         the release assets: reproducible builds for five platforms and the playground's phn.wasm.gz + wasm_exec.js, their checksums in composer/checksums.json
 .github/workflows     CI; the PR semantics gate (.github/scripts); release-please's release PR, pinned by release-checksums.yml, published when merged (design/tooling.md §3.2)
 ```
@@ -210,6 +210,33 @@ from the package by hand.
 - **Line map vectors** `internal/linemap/testdata/vectors.json` are the reference of the format's
   three readers; the PhpStorm plugin and `phaenon/debug` keep copies, which
   `TestVectorCopiesFresh` compares.
+- **Project file vectors** `cmd/phn/testdata/project-files.json` are the reference of how
+  `phaenon.json` is read, by the compiler (`TestProjectFileVectors`) and by the plugin's PHP
+  (`TestProjectFileReadersAgree` in `internal/distribution`, which needs `php` and no Composer): a
+  change of either reader starts as a vector. Each vector is read two ways, as the project's own
+  file (`readProject`, where a key the compiler does not know is an error) and as an installed
+  package's (`readInstalledProject` and the plugin, where it is passed over: `../design/tooling.md`
+  T19); the two differ in nothing else, and the plugin reads an installed package's file as the
+  compiler does, over every vector. The two decode with different libraries (Go's, PHP's), so the
+  compiler refuses by name what PHP's decoder refuses and Go's would read (bytes that are no
+  UTF-8, half a surrogate pair, a key that begins with U+0000, nesting past 511 values, `null` in
+  a list of strings, the text `null`); no file is known that one reads and the other refuses, and
+  one that turned up would go into the vectors. The list of known keys is in the vectors too,
+  and both readers are held to it. A new key is one an older compiler may pass over; a
+  change that must never be passed over is a new shape of a known key's value, which every
+  reader refuses. `committed-outputs.json` beside
+  it is the same for the check of an installed package's committed roots, trees with the errors
+  they give, whole (`TestCommittedOutputVectors`, `TestCommittedOutputChecksAgree`): the error's
+  text is changed there, and then in `cmd/phn/vendor.go` and `composer/src/ProjectFile.php`.
+  `earlier-builds.json` is the same for what both remove from a committed root that holds the
+  stamp of an earlier build, trees with the lines printed and every path left
+  (`TestEarlierBuildVectors`, `TestEarlierBuildsAgree`): `cmd/phn/earlier.go` and
+  `composer/src/EarlierBuild.php` delete files in an installed package, so a change of either
+  starts as a vector, and a new way to be unsure removes nothing. The plugin may refuse where
+  `phn` removes, and never removes where `phn` refuses: that includes the plugin's walk of the
+  sources (`ProjectFile::sources`), which decides whether a package is whole. Neither removes
+  anything from a package whose project file has a key it does not know (`ProjectFile::$unknown`,
+  `project.ignored`), though both read, check and build it.
 - **Migrate goldens** `internal/migrate/testdata/lift/X.php` → `X.phn` + `X.notes` (the tags left
   in place and why): same `PHAENON_UPDATE=1` rule; the `.phn` must parse and lift to itself.
 - **Format goldens** `internal/format/testdata/X.phn` → `X.golden.phn`: the same `PHAENON_UPDATE=1`

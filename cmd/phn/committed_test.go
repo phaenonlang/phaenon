@@ -4,7 +4,8 @@ package main
 // T18): the roots whose outputs a library's repository tracks. Where the
 // library is installed, `phn build --vendor` leaves them as installed and
 // fails when they came without their outputs; in the library's own project
-// every command treats them as any root.
+// every command treats them as any root, but that a build keeps no stamp
+// there.
 
 import (
 	"bufio"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,21 +25,28 @@ import (
 )
 
 // projectFileVectors is testdata/project-files.json, the reference of how
-// "roots" and "committed" are read.
+// a project file is read: a project's own, and an installed package's.
 type projectFileVectors struct {
-	Vectors []struct {
+	Keys         []string `json:"keys"`
+	KeysOfUnused []string `json:"keys-of-unused"`
+	Vectors      []struct {
 		Name      string            `json:"name"`
 		File      string            `json:"file"`
+		Bytes     []byte            `json:"bytes"`
 		Refused   bool              `json:"refused"`
+		Error     string            `json:"error"`
 		Roots     map[string]string `json:"roots"`
 		Committed []string          `json:"committed"`
-		Compiler  string            `json:"compiler"`
+		Root      string            `json:"root"`
+		Unknown   []string          `json:"unknown"`
 	} `json:"vectors"`
 }
 
-// The key lists source roots, each a key of "roots"; anything else is an
-// error of the project file, and no key or an empty list is a project that
-// commits nothing.
+// Each vector is read both ways. A project's own file is refused for a key
+// the compiler does not know; an installed package's is read without it,
+// the key remembered. Everything else is refused alike or read alike: the
+// key lists source roots, each a key of "roots", and no key or an empty
+// list is a project that commits nothing.
 func TestProjectFileVectors(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "project-files.json"))
 	if err != nil {
@@ -50,36 +59,78 @@ func TestProjectFileVectors(t *testing.T) {
 	if len(vectors.Vectors) == 0 {
 		t.Fatal("no vectors")
 	}
-	for _, v := range vectors.Vectors {
-		path := filepath.Join(t.TempDir(), ProjectFile)
-		writeTree(t, filepath.Dir(path), map[string]string{ProjectFile: v.File})
-		p, err := readProject(path)
-		switch {
-		case v.Compiler != "":
-			if err == nil || !strings.Contains(err.Error(), v.Compiler) {
-				t.Errorf("%s: error %v, want one saying %q", v.Name, err, v.Compiler)
-			}
-		case v.Refused:
-			if err == nil {
-				t.Errorf("%s: read as roots %v, committed %v; want an error", v.Name, p.Roots, p.Committed)
-			} else if !strings.HasPrefix(err.Error(), path+": ") {
-				t.Errorf("%s: the error does not name the file: %v", v.Name, err)
-			}
-		case err != nil:
-			t.Errorf("%s: %v", v.Name, err)
-		default:
-			roots := map[string]string{}
-			for src, out := range v.Roots {
-				roots[filepath.FromSlash(src)] = filepath.FromSlash(out)
-			}
-			committed := []string{}
-			for _, src := range v.Committed {
-				committed = append(committed, filepath.FromSlash(src))
-			}
-			if !maps.Equal(p.Roots, roots) || !slices.Equal(p.Committed, committed) {
-				t.Errorf("%s: roots %v, committed %v; want %v, %v", v.Name, p.Roots, p.Committed, roots, committed)
+	// The keys the vectors list are the ones this reader knows; the
+	// plugin's reader is held to the same lists.
+	tags := func(t reflect.Type) (tags []string) {
+		for i := range t.NumField() {
+			if tag, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ","); tag != "" {
+				tags = append(tags, tag)
 			}
 		}
+		return tags
+	}
+	if got := tags(reflect.TypeFor[project]()); !slices.Equal(got, vectors.Keys) {
+		t.Errorf("the reader knows the keys %v, the vectors list %v", got, vectors.Keys)
+	}
+	if got := tags(reflect.TypeFor[unusedSettings]()); !slices.Equal(got, vectors.KeysOfUnused) {
+		t.Errorf("the reader knows the keys %v under \"unused\", the vectors list %v", got, vectors.KeysOfUnused)
+	}
+	tolerated := 0
+	for _, v := range vectors.Vectors {
+		path := filepath.Join(t.TempDir(), ProjectFile)
+		if v.Bytes != nil {
+			v.File = string(v.Bytes)
+		}
+		writeTree(t, filepath.Dir(path), map[string]string{ProjectFile: v.File})
+		if (v.Root != "") != (len(v.Unknown) > 0) {
+			t.Errorf("%s: a file is refused as a project's own and read as a package's exactly when it has unknown keys", v.Name)
+		}
+		for _, mode := range []struct {
+			name    string
+			read    func(string) (*project, error)
+			refused bool
+			err     string
+			unknown []string
+		}{
+			{"a project's own file", readProject, v.Refused || v.Root != "", v.Error + v.Root, nil},
+			{"an installed package's file", readInstalledProject, v.Refused, v.Error, v.Unknown},
+		} {
+			p, err := mode.read(path)
+			switch {
+			case mode.refused:
+				switch {
+				case err == nil:
+					t.Errorf("%s, as %s: read as roots %v, committed %v; want an error", v.Name, mode.name, p.Roots, p.Committed)
+				case !strings.HasPrefix(err.Error(), path+": "):
+					t.Errorf("%s, as %s: the error does not name the file: %v", v.Name, mode.name, err)
+				case !strings.Contains(err.Error(), mode.err):
+					t.Errorf("%s, as %s: error %v, want one saying %q", v.Name, mode.name, err, mode.err)
+				}
+			case err != nil:
+				t.Errorf("%s, as %s: %v", v.Name, mode.name, err)
+			default:
+				roots := map[string]string{}
+				for src, out := range v.Roots {
+					roots[filepath.FromSlash(src)] = filepath.FromSlash(out)
+				}
+				committed := []string{}
+				for _, src := range v.Committed {
+					committed = append(committed, filepath.FromSlash(src))
+				}
+				if !maps.Equal(p.Roots, roots) || !slices.Equal(p.Committed, committed) {
+					t.Errorf("%s, as %s: roots %v, committed %v; want %v, %v", v.Name, mode.name, p.Roots, p.Committed, roots, committed)
+				}
+				if !slices.Equal(p.ignored, mode.unknown) {
+					t.Errorf("%s, as %s: the keys passed over are %v, want %v", v.Name, mode.name, p.ignored, mode.unknown)
+				}
+				if len(p.ignored) > 0 {
+					tolerated++
+				}
+			}
+		}
+	}
+	if tolerated == 0 {
+		t.Error("no vector has a key that is passed over")
 	}
 }
 
@@ -462,9 +513,11 @@ func ownTrees(t *testing.T) (plain, committed string) {
 	return plain, committed
 }
 
-// In the library's own project nothing changes (T4 stands): build, its
-// --check, check, fmt and fix do in a project that commits its root exactly
-// what they do in the same project without the key, to the same outputs.
+// In the library's own project nothing changes (T4 stands) but what a build
+// does with a stamp (TestBuildRemovesAStampFromItsOwnCommittedRoot): build,
+// its --check, check, fmt and fix do in a project that commits its root
+// exactly what they do in the same project without the key, to the same
+// outputs.
 func TestCommittedRootInItsOwnProject(t *testing.T) {
 	bin := phnBinary(t)
 	plain, committed := ownTrees(t)
@@ -501,6 +554,48 @@ func TestCommittedRootInItsOwnProject(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(committed, ".src/Box.php")); !strings.Contains(string(data), "final class Box") {
 		t.Errorf("the committed root was not built:\n%s", data)
+	}
+}
+
+// In its own project a library's committed root keeps no stamp: one found
+// there is what a build as an installed package left before the root was
+// committed. `phn build --check` reports it as it reports an output with no
+// source, and `phn build` removes it, so that a stamp git tracks shows as
+// a change of the tree and the library's gate fails. A root the project
+// does not commit keeps its stamp, which is the record of such a build.
+func TestBuildRemovesAStampFromItsOwnCommittedRoot(t *testing.T) {
+	bin := phnBinary(t)
+	plain, committed := ownTrees(t)
+	for _, root := range []string{plain, committed} {
+		writeTree(t, root, map[string]string{".src/" + stampFile: "phn 0.4.1\n"})
+		if stdout, stderr, err := run(t, root, bin, "build"); err != nil {
+			t.Fatalf("phn build: %v\n%s%s", err, stdout, stderr)
+		}
+		writeTree(t, root, map[string]string{".src/" + stampFile: "phn 0.4.1\n"})
+	}
+
+	_, stderr, err := run(t, committed, bin, "build", "--check")
+	if want := ".src/" + stampFile + ": no source behind it\n"; err == nil || !strings.Contains(stderr, want) {
+		t.Errorf("phn build --check in the project that commits its root: %v\n%s\nwant a failure saying\n%s", err, stderr, want)
+	}
+	if stdout, stderr, err := run(t, committed, bin, "build"); err != nil || !strings.Contains(stdout, "1 stale outputs removed") {
+		t.Errorf("phn build in the project that commits its root: %v\n%s%s", err, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(committed, ".src", stampFile)); err == nil {
+		t.Error("the stamp is still in the committed root")
+	}
+	if stdout, stderr, err := run(t, committed, bin, "build", "--check"); err != nil {
+		t.Errorf("phn build --check after the build: %v\n%s%s", err, stdout, stderr)
+	}
+
+	if stdout, stderr, err := run(t, plain, bin, "build", "--check"); err != nil {
+		t.Errorf("phn build --check in the project that commits nothing: %v\n%s%s", err, stdout, stderr)
+	}
+	if stdout, stderr, err := run(t, plain, bin, "build"); err != nil || !strings.Contains(stdout, "0 stale outputs removed") {
+		t.Errorf("phn build in the project that commits nothing: %v\n%s%s", err, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(plain, ".src", stampFile)); err != nil {
+		t.Errorf("the stamp of a root the project does not commit: %v", err)
 	}
 }
 
