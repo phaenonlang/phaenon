@@ -33,6 +33,13 @@ import (
 	"strings"
 )
 
+// earlierBuildsCleared names the environment variable the Composer plugin
+// sets, to any value, when it runs `phn build --vendor` after it has itself
+// removed what earlier builds left in committed roots
+// (composer/src/Plugin.php). It is the plugin's word to this command, not
+// a setting.
+const earlierBuildsCleared = "PHN_EARLIER_BUILDS_CLEARED"
+
 // stampFile records, in each output directory of an installed package, what
 // the last build compiled: the compiler, the target, the installed set and
 // the sources. A build that would compile the same is skipped.
@@ -54,6 +61,16 @@ type installedPackage struct {
 func (p installedPackage) isLink() bool {
 	st, err := os.Lstat(p.dir)
 	return err == nil && st.Mode()&fs.ModeSymlink != 0
+}
+
+// mayBeTheProject reports whether the package's directory is the project's
+// own, or cannot be told from it. Composer installs no package there; an
+// installed.json that says so is not followed into removing files of the
+// project itself.
+func (p installedPackage) mayBeTheProject() bool {
+	project, err1 := os.Stat(".")
+	dir, err2 := os.Stat(p.dir)
+	return err1 != nil || err2 != nil || os.SameFile(project, dir)
 }
 
 // keepsItsDirectory reports whether a build made in the package's directory
@@ -241,9 +258,10 @@ func buildVendor() {
 	}
 	// Then, and only when every package came whole, what an earlier build
 	// left in a root its package now commits is removed (earlier.go), in
-	// the packages an earlier build can have survived in.
+	// the packages an earlier build can have survived in, unless the
+	// Composer plugin says it has done so in this dump.
 	for _, p := range pkgs {
-		if !p.keepsItsDirectory() {
+		if os.Getenv(earlierBuildsCleared) != "" || !p.keepsItsDirectory() || p.mayBeTheProject() {
 			continue
 		}
 		for _, e := range p.earlierBuilds() {

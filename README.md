@@ -126,8 +126,13 @@ finds no stamp and says nothing.
   link or lies behind one, a root the install lacks, a directory of the outputs it cannot read,
   or a source whose absence it cannot prove (a link among the sources that leads nowhere, a
   directory behind a link that it cannot read or search), it leaves the whole root as it is and
-  warns, saying what can be done: reinstall the package, or, in a linked checkout, run `phn
-  build` there. A directory of the root itself that cannot be read fails the command, as before.
+  warns, saying what can be done. A package that is no link is removed and installed again. In a
+  linked checkout the library's own `phn build` removes the same files once what stands in the
+  way is put right; where that build does not look at the directory either, for a root the
+  checkout lacks or a directory that is a link, the stamp and what lies beside it are removed by
+  hand. A directory of the root itself that cannot be read fails the command, as before.
+- It never clears the project's own directory, whatever `installed.json` says of a package's
+  path.
 - A symbolic link in the output directory is neither followed nor removed, and only the
   directories a removal empties go with the files.
 - A file that cannot be removed is a warning, and the stamp then stays for the next run.
@@ -369,12 +374,15 @@ before any binary is fetched, with the error `phn build --vendor` gives, under `
 committed root that holds the stamp of a build (`.phn-build`), in a checkout of the package's
 repository or a linked path repository, was built there by an earlier release, before its outputs
 were committed: what that build left is removed, the files no source stands behind and the stamp,
-as `phn build --vendor` does (above), each file named. In a dump that builds no installed package
-the plugin does it itself, in PHP and without a compiler; in a dump that does, `phn build
---vendor` does it before it builds, so that one dump says it once. Where it is not sure, it
-removes nothing and warns at each dump, saying what to do; the plugin is no less careful than
-`phn`, and removes nothing either for a project file `phn` would refuse, or when PHP runs under
-`open_basedir`. Under `--quiet` the removal is made and nothing is printed. `composer
+as `phn build --vendor` does (above), each file named. The plugin does it itself at every dump,
+in PHP and before it looks for a compiler, so it does not depend on which `phn` the project has.
+When it then runs `phn build --vendor` for the packages that are built, it sets
+`PHN_EARLIER_BUILDS_CLEARED`, and a `phn` that sees the variable leaves the committed roots
+alone, so that one dump says a thing once; the variable is the plugin's word to `phn`, not a
+setting. Where it is not sure, it removes nothing and warns at each dump, saying what to do; the
+plugin is no less careful than `phn`, and removes nothing either for a project file `phn` would
+refuse, or when PHP runs under `open_basedir`, where the warning points at `phn build --vendor`,
+which is not bound by it. Under `--quiet` the removal is made and nothing is printed. `composer
 dump-autoload --dry-run` builds and clears as a dump does: Composer sends the plugin the same
 event and does not say that the run is a dry one.
 It requires no other package, since the compiled output needs none, and suggests
@@ -382,7 +390,9 @@ It requires no other package, since the compiled output needs none, and suggests
 It conflicts with `phaenon/runtime` below 0.4, that package's name until then, which declares the
 same classes.
 
-- `PHN_BINARY=/path/to/phn` uses another binary, such as one built from a checkout.
+- `PHN_BINARY=/path/to/phn` uses another binary, such as one built from a checkout. A binary
+  older than the plugin builds as it always did: what the plugin does itself (the check of
+  committed outputs, the removal of an earlier build's leftovers) does not wait for it.
 - `"extra": {"phaenon": {"binary-url": "https://mirror/{version}/{file}"}}` fetches the binary from
   a mirror, with the credentials of `auth.json`.
 - `"extra": {"phaenon": {"build": false}}` leaves the project's own build to its workflow.

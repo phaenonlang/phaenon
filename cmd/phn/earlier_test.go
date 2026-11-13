@@ -27,6 +27,7 @@ type earlierBuildVector struct {
 	Links       map[string]string `json:"links"`
 	Source      *string           `json:"installation-source"`
 	Linked      bool              `json:"linked"`
+	IsProject   bool              `json:"is-the-project"`
 	Unreadable  []string          `json:"unreadable"`
 	Unlisted    []string          `json:"unlisted"`
 	Unsearch    []string          `json:"unsearchable"`
@@ -171,6 +172,12 @@ func TestEarlierBuildVectors(t *testing.T) {
 			ran++
 			root := t.TempDir()
 			installed := map[string]any{"name": "acme/kit", "version": "1.0.0", "install-path": "../acme/kit"}
+			switch {
+			case v.Linked:
+				installed["install-path"] = "../acme/kit/"
+			case v.IsProject:
+				installed["install-path"] = "../.."
+			}
 			if v.Source != nil {
 				installed["installation-source"] = *v.Source
 			}
@@ -185,6 +192,9 @@ func TestEarlierBuildVectors(t *testing.T) {
 			})
 			// The package's directory, and for a linked one the link to it.
 			kit := filepath.Join(root, "vendor/acme/kit")
+			if v.IsProject {
+				kit = root
+			}
 			if v.Linked {
 				kit = filepath.Join(root, "checkout")
 				if err := os.MkdirAll(filepath.Join(root, "vendor/acme"), 0o755); err != nil {
@@ -236,7 +246,12 @@ func TestEarlierBuildVectors(t *testing.T) {
 						t.Errorf("%s: %v\nstdout:\n%s\nstderr:\n%s\nwant on stdout, before the summary,\n%s\nand on stderr\n%s", name, err, stdout, stderr, strings.Join(wantSaid, "\n"), want)
 					}
 				}
-				if got := holds(t, kit); !slices.Equal(got, v.Left) {
+				got := holds(t, kit)
+				if v.IsProject {
+					// Without what makes the directory a project.
+					got = slices.DeleteFunc(got, func(path string) bool { return path == "composer.json" || strings.HasPrefix(path, "vendor/") })
+				}
+				if !slices.Equal(got, v.Left) {
 					t.Errorf("%s leaves\n\t%s\nwant\n\t%s", name, strings.Join(got, "\n\t"), strings.Join(v.Left, "\n\t"))
 				}
 				if v.Again != nil {
@@ -325,5 +340,33 @@ func TestBuildVendorLeavesAStampThatCameWithTheFiles(t *testing.T) {
 			t.Errorf("installed.json%s: phn build --vendor (%v) spoke of acme/kit:\n%s%s", source, err, stdout, stderr)
 		}
 		expectSnapshot(t, "acme/kit", kit, shipped)
+	}
+}
+
+// The Composer plugin clears what earlier builds left before it runs this
+// command, and says so through PHN_EARLIER_BUILDS_CLEARED: with the
+// variable set, `phn build --vendor` removes nothing from a committed root
+// and says nothing of it, where without it the same tree is cleared.
+func TestBuildVendorLeavesEarlierBuildsToThePlugin(t *testing.T) {
+	bin := phnBinary(t)
+	root := committedTree(t)
+	checkedOut(t, root)
+	kit := filepath.Join(root, "vendor/acme/kit")
+	writeTree(t, kit, map[string]string{".src/" + stampFile: "phn 0.4.1\n", ".src/Legacy.php": "<?php\n"})
+	held := snapshot(t, kit)
+
+	cmd := exec.Command(bin, "build", "--vendor")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), earlierBuildsCleared+"=1")
+	out, err := cmd.CombinedOutput()
+
+	if err != nil || strings.Contains(string(out), "acme/kit") {
+		t.Errorf("phn build --vendor with %s set (%v) spoke of acme/kit:\n%s", earlierBuildsCleared, err, out)
+	}
+	expectSnapshot(t, "acme/kit", kit, held)
+
+	stdout, stderr, err := run(t, root, bin, "build", "--vendor")
+	if err != nil || !strings.Contains(stdout, "  - removed .src/Legacy.php\n") {
+		t.Errorf("phn build --vendor without the variable should clear the root (%v):\n%s%s", err, stdout, stderr)
 	}
 }

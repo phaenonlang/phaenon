@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Phaenon\Composer;
 
 use Composer\IO\IOInterface;
+use Composer\Util\Platform;
 use Composer\Util\ProcessExecutor;
 
 /**
@@ -21,12 +22,14 @@ final readonly class Build
     }
 
     /**
-     * @param list<string> $arguments
-     * @param string       $meaning   what a failure means, for the message
+     * @param list<string>                    $arguments
+     * @param string                          $meaning     what a failure means, for the message
+     * @param array<non-empty-string, string> $environment variables phn is run with, and that are
+     *                                                     unset again when it has run
      *
      * @throws BuildFailed when phn exits with a non-zero status, which is its code
      */
-    public function run(array $arguments, string $meaning): void
+    public function run(array $arguments, string $meaning, array $environment = []): void
     {
         $command = implode(' ', ['phn', ...$arguments]);
         // Composer announces a script it runs the same way.
@@ -41,7 +44,17 @@ final readonly class Build
                 $io->writeRaw($buffer, false);
             }
         };
-        $status = $this->executor->execute([$this->binary, ...$arguments], $forward, $this->projectDir);
+        // The process inherits Composer's environment.
+        foreach ($environment as $name => $value) {
+            Platform::putEnv($name, $value);
+        }
+        try {
+            $status = $this->executor->execute([$this->binary, ...$arguments], $forward, $this->projectDir);
+        } finally {
+            foreach (array_keys($environment) as $name) {
+                Platform::clearEnv($name);
+            }
+        }
         if ($status !== 0) {
             throw new BuildFailed(
                 sprintf('`%s` exited with status %d in %s: %s', $command, $status, $this->projectDir, $meaning),

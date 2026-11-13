@@ -56,11 +56,19 @@ package main
 // life, and the files were untracked, so nothing else can say afterwards
 // what went. A warning ends with what can be done about it.
 //
+// It is never the project's own directory that is cleared, whatever
+// installed.json says of a package's path.
+//
 // The Composer plugin does the same without a compiler
-// (composer/src/EarlierBuild.php) in a dump that runs none; in a dump that
-// builds installed packages this command does it, so that one dump says it
-// once. testdata/earlier-builds.json holds the two to each other, the
-// lines they print included.
+// (composer/src/EarlierBuild.php), at every dump and before it resolves a
+// binary, so that what it does never depends on which compiler the project
+// has. When it then runs this command it sets PHN_EARLIER_BUILDS_CLEARED,
+// and the command leaves the committed roots alone: the plugin has cleared
+// what it could and said what it could not, and a second pass would say it
+// again. The variable is the plugin's and no setting for a project. Run by
+// hand, without it, the command clears as described here.
+// testdata/earlier-builds.json holds the two to each other, the lines they
+// print included.
 
 import (
 	"errors"
@@ -83,6 +91,11 @@ type earlierBuild struct {
 	removed  []string // the files removed, sorted
 	failed   []string // the files that could not be removed, sorted
 	obstacle string   // why nothing was removed, when nothing could be
+	// unbuilt says of an obstacle that the project's own build does not
+	// get past it either: `phn build` looks at the output directory of a
+	// root only when the root is a directory, and walks through no link.
+	// What to do in a linked checkout depends on it.
+	unbuilt bool
 }
 
 // earlierBuilds clears what earlier builds left in the committed roots of
@@ -115,16 +128,16 @@ func clearEarlierBuild(dir, src, out string) *earlierBuild {
 	e := &earlierBuild{out: filepath.ToSlash(out)}
 	for _, root := range []string{src, out} {
 		if link := linkOnPath(dir, root); link != "" {
-			e.obstacle = filepath.ToSlash(link) + " is a symbolic link"
+			e.obstacle, e.unbuilt = filepath.ToSlash(link)+" is a symbolic link", true
 			return e
 		}
 	}
 	switch st, err := os.Stat(filepath.Join(dir, src)); {
 	case errors.Is(err, fs.ErrNotExist):
-		e.obstacle = "the package is installed without " + filepath.ToSlash(src)
+		e.obstacle, e.unbuilt = "the package is installed without "+filepath.ToSlash(src), true
 		return e
 	case err != nil || !st.IsDir():
-		e.obstacle = filepath.ToSlash(src) + " cannot be read"
+		e.obstacle, e.unbuilt = filepath.ToSlash(src)+" cannot be read", true
 		return e
 	}
 	var files []string
@@ -208,8 +221,19 @@ const stampBegins = "phn "
 // something is left that the next run will find again. pkg is the
 // package's name and version, dir where it is installed, as shown to the
 // reader, and linked whether that directory is a link to a checkout, which
-// decides what a warning advises.
+// decides what a warning advises. Each advice is one a reader can follow
+// to a run that says nothing (internal/distribution follows each): a
+// package that is no link is installed again; in a linked checkout the
+// library's own build removes what this command would, once what stands
+// in the way is put right, but for a directory that build does not look
+// at, which is cleared by hand.
 func (e *earlierBuild) report(pkg, dir string, linked bool) (lines []string, warning bool) {
+	// A name with a line break in it stays on its line.
+	defer func() {
+		for i, line := range lines {
+			lines[i] = strings.NewReplacer("\n", `\n`, "\r", `\r`).Replace(line)
+		}
+	}()
 	head := fmt.Sprintf("%s: %s/%s is the stamp of a build, in a root the package commits", pkg, e.out, stampFile)
 	count := func(n int, one, many string) string {
 		if n == 1 {
@@ -218,8 +242,11 @@ func (e *earlierBuild) report(pkg, dir string, linked bool) (lines []string, war
 		return fmt.Sprintf("%d %s", n, many)
 	}
 	remedy := fmt.Sprintf("To clear the directory, remove %s and install the package again", dir)
-	if linked {
-		remedy = "The package is a link to a checkout: `phn build` there removes what a build left, the stamp with it"
+	switch {
+	case linked && e.unbuilt:
+		remedy = fmt.Sprintf("The package is a link to a checkout, where no build looks at this directory: remove %s/%s there by hand, and what a build left beside it", e.out, stampFile)
+	case linked:
+		remedy = "The package is a link to a checkout: with that put right there, `phn build` removes what a build left, the stamp with it"
 	}
 	switch removed := count(len(e.removed), "file with no source behind it", "files with no source behind them"); {
 	case e.obstacle != "":

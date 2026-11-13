@@ -32,6 +32,14 @@ use Composer\Util\ProcessExecutor;
  */
 final class Plugin implements PluginInterface, EventSubscriberInterface
 {
+    /**
+     * The environment variable `phn build --vendor` is run with by the plugin, which has by then
+     * removed what earlier builds left in committed roots: phn, seeing it, leaves those roots
+     * alone. It is the plugin's word to phn and no setting of a project; a phn from before it
+     * ignores it, and has no such pass to skip.
+     */
+    public const string EARLIER_BUILDS_CLEARED = 'PHN_EARLIER_BUILDS_CLEARED';
+
     public function activate(Composer $composer, IOInterface $io): void
     {
     }
@@ -100,14 +108,12 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         }
         // Then, and only when every package came whole, what an earlier build left in a root its
         // package now commits is removed, in the packages an earlier build can have survived in
-        // (EarlierBuild). It takes no compiler: where none is about to run, it is done here.
-        // Where installed packages are built, `phn build --vendor` does the same before it
-        // builds, and says it; done here as well, a warning would come twice.
-        if ($packages === []) {
-            foreach ($committing as $package => [$file, $dir, $installationSource]) {
-                foreach (EarlierBuild::clear($file, $dir, $installationSource) as $build) {
-                    self::reportAnEarlierBuild($io, $build, (string) $package, self::shown($dir, $projectDir));
-                }
+        // (EarlierBuild). It is done here, in every dump and before a binary is resolved: it
+        // takes no compiler, and so does not depend on which one the project has. A phn older
+        // than the plugin, PHN_BINARY's or a checkout's own build, has no such pass.
+        foreach ($committing as $package => [$file, $dir, $installationSource]) {
+            foreach (EarlierBuild::clear($file, $dir, $installationSource, $projectDir) as $build) {
+                self::reportAnEarlierBuild($io, $build, (string) $package, self::shown($dir, $projectDir));
             }
         }
         $buildsProject = $settings->buildRoot && is_file($projectDir . '/phaenon.json');
@@ -141,6 +147,9 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
                     ['build', '--vendor'],
                     'an installed package\'s output could not be written, as phn\'s messages above say '
                     . '(the findings of installed packages are only warnings)',
+                    // phn has the same pass, for when it is run by hand: here it would say a
+                    // second time what could not be removed.
+                    [self::EARLIER_BUILDS_CLEARED => '1'],
                 );
             }
             if ($buildsProject) {

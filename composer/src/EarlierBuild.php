@@ -43,10 +43,15 @@ namespace Phaenon\Composer;
  * Every file removed is named: the line is printed once in a package's life, and the files were
  * untracked, so nothing else can say afterwards what went. A warning ends with what can be done.
  *
- * phn does the same (`phn build --vendor`, cmd/phn/earlier.go), and the plugin leaves it to phn
- * in a dump that builds installed packages, so that one dump says it once.
- * cmd/phn/testdata/earlier-builds.json in the compiler's repository holds the two to each other,
- * the lines they print included: wherever phn removes nothing, this class removes nothing.
+ * It is never the project's own directory that is cleared, wherever a package claims to be
+ * installed.
+ *
+ * phn does the same when it is run by hand (`phn build --vendor`, cmd/phn/earlier.go). In a dump
+ * the plugin does it, always and before it resolves a binary, so that it never depends on which
+ * compiler the project has; when it then runs phn it says so (Plugin::EARLIER_BUILDS_CLEARED),
+ * and phn leaves the committed roots alone. cmd/phn/testdata/earlier-builds.json in the
+ * compiler's repository holds the two to each other, the lines they print included: wherever
+ * phn removes nothing, this class removes nothing.
  */
 final readonly class EarlierBuild
 {
@@ -57,6 +62,11 @@ final readonly class EarlierBuild
      * @param list<string> $failed   the files that could not be removed, sorted
      * @param ?string      $obstacle why nothing was removed, when nothing could be
      * @param bool         $linked   whether the package's directory is a link to a checkout
+     * @param bool         $unbuilt  whether the obstacle is one the project's own build does not
+     *                               get past either: `phn build` looks at the output directory of
+     *                               a root only when the root is a directory, and walks through
+     *                               no link
+     * @param bool         $confined whether the obstacle is PHP's own, open_basedir
      */
     private function __construct(
         public string $output,
@@ -64,6 +74,8 @@ final readonly class EarlierBuild
         public array $failed,
         public ?string $obstacle,
         public bool $linked,
+        public bool $unbuilt = false,
+        public bool $confined = false,
     ) {
     }
 
@@ -87,15 +99,27 @@ final readonly class EarlierBuild
      * $packageDir, and returns what was found and done, by root. A root whose output directory
      * holds no stamp is not touched and not returned. Nothing is touched, and nothing returned,
      * for a package no earlier build can have survived in, or whose project file phn would not
-     * read: `phn build --vendor` removes nothing for either.
+     * read: `phn build --vendor` removes nothing for either. Nor for a package whose directory is
+     * the project's own, or cannot be told from it: Composer installs none there, and a record
+     * that says so is not followed into removing the project's files.
      *
      * @param ?string $installationSource `source` or `dist`, as Composer recorded it
+     * @param string  $projectDir         the root project's directory
      *
      * @return list<self>
      */
-    public static function clear(ProjectFile $file, string $packageDir, ?string $installationSource): array
+    public static function clear(ProjectFile $file, string $packageDir, ?string $installationSource, string $projectDir): array
     {
+        // An installer may give its path with a slash at the end, and a link asked for with
+        // one is answered as the directory it leads to.
+        $trimmed = rtrim($packageDir, '/' . \DIRECTORY_SEPARATOR);
+        $packageDir = $trimmed === '' ? $packageDir : $trimmed;
         if (!$file->strict || !self::survives($installationSource, $packageDir)) {
+            return [];
+        }
+        $package = realpath($packageDir);
+        $project = realpath($projectDir);
+        if ($package === false || $project === false || $package === $project) {
             return [];
         }
         clearstatcache(true);
@@ -127,9 +151,24 @@ final readonly class EarlierBuild
      * @param string $package the package's name and version
      * @param string $shown   where it is installed, as shown to the reader
      *
+     * Each advice a warning ends with is one a reader can follow to a dump that says nothing: a
+     * package that is no link is installed again; in a linked checkout the library's own build
+     * removes what this class would, once what stands in the way is put right, but for a
+     * directory that build does not look at, which is cleared by hand; and under open_basedir
+     * phn, which is not PHP, does it.
+     *
      * @return non-empty-list<string>
      */
     public function report(string $package, string $shown): array
+    {
+        // A name with a line break in it stays on its line.
+        return array_map(static fn (string $line): string => strtr($line, ["\n" => '\n', "\r" => '\r']), $this->lines($package, $shown));
+    }
+
+    /**
+     * @return non-empty-list<string>
+     */
+    private function lines(string $package, string $shown): array
     {
         $head = sprintf(
             '%s: %s/%s is the stamp of a build, in a root the package commits',
@@ -137,9 +176,16 @@ final readonly class EarlierBuild
             $this->output,
             ProjectFile::STAMP,
         );
-        $remedy = $this->linked
-            ? 'The package is a link to a checkout: `phn build` there removes what a build left, the stamp with it'
-            : sprintf('To clear the directory, remove %s and install the package again', $shown);
+        $remedy = match (true) {
+            $this->confined => '`phn build --vendor`, run in the project, is not bound by it and clears the directory',
+            $this->linked && $this->unbuilt => sprintf(
+                'The package is a link to a checkout, where no build looks at this directory: remove %s/%s there by hand, and what a build left beside it',
+                $this->output,
+                ProjectFile::STAMP,
+            ),
+            $this->linked => 'The package is a link to a checkout: with that put right there, `phn build` removes what a build left, the stamp with it',
+            default => sprintf('To clear the directory, remove %s and install the package again', $shown),
+        };
         $removed = self::count(\count($this->removed), 'file with no source behind it', 'files with no source behind them');
         $again = sprintf(
             '%s could not be removed, so the stamp stays and the removal is tried again next time. %s',
@@ -180,20 +226,20 @@ final readonly class EarlierBuild
             return null;
         }
         $linked = is_link($packageDir);
-        $kept = static fn (string $obstacle): self => new self($output, [], [], $obstacle, $linked);
+        $kept = static fn (string $obstacle, bool $unbuilt = false, bool $confined = false): self => new self($output, [], [], $obstacle, $linked, $unbuilt, $confined);
         // Under open_basedir a path PHP refuses to look at reads as one that does not exist.
         if ((string) \ini_get('open_basedir') !== '') {
-            return $kept('PHP runs with open_basedir, under which a source it may not read looks like one that is gone');
+            return $kept('PHP runs with open_basedir, under which a source it may not read looks like one that is gone', confined: true);
         }
         foreach ([$source, $output] as $root) {
             $link = self::linkOnPath($packageDir, $root);
             if ($link !== null) {
-                return $kept($link . ' is a symbolic link');
+                return $kept($link . ' is a symbolic link', unbuilt: true);
             }
         }
         $root = $packageDir . '/' . $source;
         if (!is_dir($root)) {
-            return $kept(file_exists($root) ? $source . ' cannot be read' : 'the package is installed without ' . $source);
+            return $kept(file_exists($root) ? $source . ' cannot be read' : 'the package is installed without ' . $source, unbuilt: true);
         }
         $files = [];
         $unread = self::regularFiles($packageDir, $output, $files);

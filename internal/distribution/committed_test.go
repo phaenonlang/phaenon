@@ -402,12 +402,12 @@ func earlierBuildLine(version string) string {
 
 // TestCommittedRootBuiltByAnEarlierRelease: a committed root that holds the
 // stamp of a build, in a checkout the project links, was built there by a
-// release that shipped its sources alone. The library has a root it does
-// not commit, so the plugin runs phn for it, and `phn build --vendor`
-// clears the committed root before it builds the other: it says so once,
-// naming the file, the plugin adds nothing, and git finds `.src/` as
-// committed. The file removed is the one the library's own `phn build`
-// finds without a source. The next dump says nothing of it.
+// release that shipped its sources alone. The plugin clears it before it
+// runs phn for the root the library does not commit: it says so once,
+// naming the file, the real `phn build --vendor` that follows adds
+// nothing, and git finds `.src/` as committed. The file removed is the one
+// the library's own `phn build` finds without a source. The next dump says
+// nothing of it.
 func TestCommittedRootBuiltByAnEarlierRelease(t *testing.T) {
 	w := newWorld(t, "")
 	k := w.newKit("kit", nil)
@@ -424,9 +424,9 @@ func TestCommittedRootBuiltByAnEarlierRelease(t *testing.T) {
 
 	out := p.mustComposer("install")
 
-	want := "> phn build --vendor\n" + strings.TrimPrefix(earlierBuildLine("1.0.0"), "phaenon/phn: ") + "removed it and 1 file with no source behind it\n  - removed .src/Legacy.php\n"
-	if !strings.Contains(out, want) || strings.Count(out, "is the stamp of a build") != 1 {
-		t.Errorf("composer's output:\n%s\nwant, once and from phn,\n%s", out, want)
+	want := earlierBuildLine("1.0.0") + "removed it and 1 file with no source behind it\n  - removed .src/Legacy.php\n"
+	if !strings.Contains(out, want) || strings.Count(out, "is the stamp of a build") != 1 || !strings.Contains(out, "> phn build --vendor\n") {
+		t.Errorf("composer's output:\n%s\nwant, once and from the plugin,\n%s", out, want)
 	}
 	// Nothing changed, added or removed under .src/, the stamp included.
 	k.expectCommitted()

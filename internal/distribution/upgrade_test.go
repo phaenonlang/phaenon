@@ -512,11 +512,12 @@ func TestLinkedCheckoutIsCleared(t *testing.T) {
 }
 
 // TestOneDumpSaysItOnce: a package whose stamp cannot be acted on, here
-// for a committed root the checkout lacks, is warned of once in a dump,
-// with what to do. Where nothing is built the plugin says it. Where an
-// installed package is built, `phn build --vendor` says it and the plugin
-// leaves it to phn: said by both, the same warning came twice in every
-// dump.
+// for a committed root the checkout lacks, is warned of once in a dump, by
+// the plugin, whether or not the dump goes on to build an installed
+// package: the phn it then runs is told that the plugin has been there,
+// and says nothing of it. The library's own build does not look at the
+// output directory of a root it lacks, so the warning advises clearing it
+// by hand; with that done the next dump says nothing.
 func TestOneDumpSaysItOnce(t *testing.T) {
 	w := newWorld(t, "")
 	k := w.newReleasesWith("kit", true, func(dir string) {
@@ -524,13 +525,13 @@ func TestOneDumpSaysItOnce(t *testing.T) {
 	}, nil)
 	writeFile(t, filepath.Join(k.dir, ".gen", ".phn-build"), []byte("phn 0.4.1\n"), 0o644)
 	writeFile(t, filepath.Join(k.dir, ".gen", "Old.php"), []byte("<?php\n"), 0o644)
-	const warning = "acme/kit 2.0.0: .gen/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: " +
+	const warning = "phaenon/phn: acme/kit 2.0.0: .gen/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: " +
 		"the package is installed without gen. What a build left there may still load. " +
-		"The package is a link to a checkout: `phn build` there removes what a build left, the stamp with it\n"
+		"The package is a link to a checkout, where no build looks at this directory: remove .gen/.phn-build there by hand, and what a build left beside it\n"
 
 	alone := w.newProject("alone", project{dependencies: []dependency{k.path(true)}})
 	out := alone.mustComposer("install")
-	if !strings.Contains(out, "phaenon/phn: "+warning) || strings.Count(out, "is the stamp of a build") != 1 {
+	if !strings.Contains(out, warning) || strings.Count(out, "is the stamp of a build") != 1 {
 		t.Errorf("with nothing to build, composer's output:\n%s\nwant the plugin's warning, once:\n%s", out, warning)
 	}
 	w.expectRuns()
@@ -539,8 +540,8 @@ func TestOneDumpSaysItOnce(t *testing.T) {
 	beside := w.newProject("beside", project{dependencies: []dependency{k.path(true)}, libraries: []string{"acme/lib"}, binary: w.buildPhn()})
 	for _, command := range []string{"install", "dump-autoload"} {
 		out = beside.mustComposer(command)
-		if !strings.Contains(out, "warning: "+warning) || strings.Count(out, "is the stamp of a build") != 1 {
-			t.Errorf("with a package to build, composer %s:\n%s\nwant phn's warning, once:\n%s", command, out, warning)
+		if !strings.Contains(out, warning) || strings.Count(out, "is the stamp of a build") != 1 || !strings.Contains(out, "> phn build --vendor\n") {
+			t.Errorf("with a package to build, composer %s:\n%s\nwant the plugin's warning, once, and phn run:\n%s", command, out, warning)
 		}
 	}
 	for _, f := range []string{".phn-build", "Old.php"} {
@@ -548,6 +549,99 @@ func TestOneDumpSaysItOnce(t *testing.T) {
 			t.Errorf("nothing was to be removed: %v", err)
 		}
 	}
+
+	// The library's own build leaves the directory as it is, as the
+	// warning says: what it advises is the way.
+	k.build()
+	if _, err := os.Stat(filepath.Join(k.dir, ".gen", ".phn-build")); err != nil {
+		t.Errorf("phn build in the library looked at .gen after all: %v", err)
+	}
+	for _, f := range []string{".phn-build", "Old.php"} {
+		if err := os.Remove(filepath.Join(k.dir, ".gen", f)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, p := range []*project{alone, beside} {
+		if out := p.mustComposer("dump-autoload"); strings.Contains(out, "is the stamp of a build") {
+			t.Errorf("after the advice was followed, composer dump-autoload in %s:\n%s", filepath.Base(p.dir), out)
+		}
+	}
+}
+
+// TestLinkedWarningSaysWhatToDo: in a linked checkout a link among the
+// sources that leads nowhere proves nothing of the file behind an output,
+// and nothing is removed. The library's own build fails on the same link,
+// so the warning advises putting it right and running `phn build` there:
+// that removes what a build left and the stamp, and the next dump says
+// nothing.
+func TestLinkedWarningSaysWhatToDo(t *testing.T) {
+	w := newWorld(t, "")
+	k := w.newReleases("kit", true)
+	stamped(k.dir)
+	writeFile(t, filepath.Join(k.dir, ".src", "Legacy.php"), []byte("<?php\n"), 0o644)
+	writeFile(t, filepath.Join(k.dir, ".src", "notes.txt"), []byte("copied when the link led somewhere\n"), 0o644)
+	if err := os.Symlink("../nowhere", filepath.Join(k.dir, "src", "notes.txt")); err != nil {
+		t.Fatal(err)
+	}
+	p := w.newProject("app", project{dependencies: []dependency{k.path(true)}})
+
+	out := p.mustComposer("install")
+
+	want := "phaenon/phn: acme/kit 2.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: " +
+		"whether src/notes.txt exists cannot be told. What a build left there may still load. " +
+		"The package is a link to a checkout: with that put right there, `phn build` removes what a build left, the stamp with it\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("composer's output:\n%s\nwant the warning\n%s", out, want)
+	}
+	if _, err := os.Stat(filepath.Join(k.dir, ".src", "Legacy.php")); err != nil {
+		t.Errorf("nothing was to be removed: %v", err)
+	}
+
+	// The advice, followed: the link put right, then the library's build.
+	if err := os.Remove(filepath.Join(k.dir, "src", "notes.txt")); err != nil {
+		t.Fatal(err)
+	}
+	k.build()
+	if status := k.git("status", "--porcelain", "--ignored", "--", ".src"); status != "" {
+		t.Errorf("after phn build in the library, its .src/ is not as committed:\n%s", status)
+	}
+	if out := p.mustComposer("dump-autoload"); strings.Contains(out, "phaenon/phn:") {
+		t.Errorf("after the advice was followed, composer dump-autoload:\n%s", out)
+	}
+}
+
+// TestClearedWhateverTheCompiler: the plugin clears in PHP at every dump,
+// so what an earlier build left goes whichever phn the project has. Here
+// the dump builds another installed package and the project, with a binary
+// standing in that knows nothing of earlier builds, as a compiler older
+// than the plugin does not: the class the library dropped is gone all the
+// same, the plugin said so, and it told the `phn build --vendor` it ran
+// that it had, through PHN_EARLIER_BUILDS_CLEARED, which the project's own
+// build is not given.
+func TestClearedWhateverTheCompiler(t *testing.T) {
+	w := newWorld(t, "")
+	k := w.newReleases("kit", true)
+	stamped(k.dir)
+	writeFile(t, filepath.Join(k.dir, ".src", "Legacy.php"), []byte("<?php\n\nnamespace Acme\\Kit;\n\nfinal class Legacy\n{\n}\n"), 0o644)
+	p := w.newProject("app", project{phaenonJSON: true, dependencies: []dependency{k.path(true)}, libraries: []string{"acme/lib"}, override: true})
+
+	out := p.mustComposer("install")
+
+	want := earlierBuildLine("2.0.0") + "removed it and 1 file with no source behind it\n  - removed .src/Legacy.php\n"
+	if !strings.Contains(out, want) || strings.Count(out, "is the stamp of a build") != 1 {
+		t.Errorf("composer's output:\n%s\nwant, once,\n%s", out, want)
+	}
+	if strings.Index(out, want) > strings.Index(out, "> phn build --vendor") {
+		t.Errorf("the plugin cleared after it ran phn:\n%s", out)
+	}
+	w.expectRuns(run{p.dir, []string{"build", "--vendor"}}, run{p.dir, []string{"build"}})
+	if got := w.cleared(); !slices.Equal(got, []string{"1", "unset"}) {
+		t.Errorf("PHN_EARLIER_BUILDS_CLEARED at the two runs of phn: %v, want it set for build --vendor alone", got)
+	}
+	if status := k.git("status", "--porcelain", "--ignored", "--", ".src"); status != "" {
+		t.Errorf("the library's .src/ is not as committed:\n%s", status)
+	}
+	p.expectKit("2.0.0", false)
 }
 
 // TestReleaseThatTracksAStamp: the limit that is left, as it behaves. A

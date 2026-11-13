@@ -67,8 +67,10 @@ func newWorld(t *testing.T, failOn string) *world {
 
 // fakePhn is a shell script standing in for phn. It records each run as a
 // line of the log, the physical working directory and then the arguments,
-// separated by tabs; it keeps a copy of vendor/composer/autoload_psr4.php as
-// it found it, as log.psr4.N for the Nth run. `version` and `exit N` answer
+// separated by tabs, and as a line of log.cleared what the plugin told it
+// through PHN_EARLIER_BUILDS_CLEARED ("unset" for nothing); it keeps a copy
+// of vendor/composer/autoload_psr4.php as it found it, as log.psr4.N for
+// the Nth run. `version` and `exit N` answer
 // for the launcher's tests; `build` writes an output, as phn would.
 func fakePhn(log, failOn string) []byte {
 	var b strings.Builder
@@ -76,6 +78,7 @@ func fakePhn(log, failOn string) []byte {
 	fmt.Fprintf(&b, "log=%s\n", shellQuote(log))
 	b.WriteString(`n=$(( $(cat "$log" 2>/dev/null | wc -l) + 1 ))
 { pwd -P | tr -d '\n'; for a in "$@"; do printf '\t%s' "$a"; done; echo; } >> "$log"
+echo "${PHN_EARLIER_BUILDS_CLEARED-unset}" >> "$log.cleared"
 if [ -f vendor/composer/autoload_psr4.php ]; then cp vendor/composer/autoload_psr4.php "$log.psr4.$n"; fi
 case "$1" in
 version) echo "phn fake"; exit 0 ;;
@@ -159,6 +162,20 @@ func (w *world) runs() []run {
 		runs = append(runs, run{dir: fields[0], args: fields[1:]})
 	}
 	return runs
+}
+
+// cleared returns, for each run of the fake, what PHN_EARLIER_BUILDS_CLEARED
+// was set to, "unset" when it was not.
+func (w *world) cleared() []string {
+	w.t.Helper()
+	data, err := os.ReadFile(w.log + ".cleared")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	return strings.Fields(string(data))
 }
 
 // mapsAtRun returns vendor/composer/autoload_psr4.php as the Nth run (from
