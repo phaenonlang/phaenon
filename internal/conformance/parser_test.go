@@ -109,6 +109,28 @@ func TestParserAgainstPHP(t *testing.T) {
 	}
 }
 
+// lintOracle asks `php -l` whether each file parses: "" for one that does,
+// php's message for a syntax error. It is runParseOracle for a handful of
+// files where no corpus is: the tokenizer that one asks is a shared
+// extension on some builds of php, which `-n` leaves out, and `php -l`
+// needs none.
+func lintOracle(t *testing.T, files []string) map[string]string {
+	res := map[string]string{}
+	for _, f := range files {
+		out, err := exec.Command(oraclePHP(), "-n", "-d", "display_errors=1", "-d", "log_errors=0", "-l", f).CombinedOutput()
+		text := strings.TrimSpace(string(out))
+		switch {
+		case err == nil && strings.Contains(text, "No syntax errors detected"):
+			res[f] = ""
+		case strings.Contains(text, "Parse error:"):
+			res[f], _, _ = strings.Cut(text, "\n")
+		default:
+			t.Fatalf("%s -l %s: %v\n%s", oraclePHP(), f, err, text)
+		}
+	}
+	return res
+}
+
 // TestTypeArgumentGuessAgainstPHP: PHP code in which `<` follows a name and
 // a `>>` or `>=` comes after it, where Phaenon's parser first tries a
 // call's type arguments. No statement here is such a call, so each is
@@ -150,7 +172,7 @@ func TestTypeArgumentGuessAgainstPHP(t *testing.T) {
 		}
 		paths = append(paths, p)
 	}
-	want := runParseOracle(t, paths)
+	want := lintOracle(t, paths)
 	accepted := 0
 	for i, s := range stmts {
 		phpErr, known := want[paths[i]]
