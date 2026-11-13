@@ -662,45 +662,38 @@ func (x *fnCtx) bindReceiver(t types.Type, recv types.Type, decl *program.Class)
 	return replaceStatic(t, recv)
 }
 
-// replaceStatic maps static/$this in t to the receiver type.
+// replaceStatic maps static/$this in t to the receiver type, wherever t
+// holds one: a tuple's member, a shape's entry, an object shape's
+// property, an intersection's member and a conditional's target as well as
+// a type argument (types.MapDeep reaches every part of a type). A type
+// that holds none is returned as it is.
 func replaceStatic(t types.Type, recv types.Type) types.Type {
-	switch tt := t.(type) {
-	case types.Static:
-		return staticOf(recv)
-	case types.This:
-		return staticOf(recv)
-	case types.Union:
-		return types.Map(tt, func(m types.Type) types.Type { return replaceStatic(m, recv) })
-	case types.Array:
-		return types.Array{Key: replaceStatic(tt.Key, recv), Value: replaceStatic(tt.Value, recv), List: tt.List, NonEmpty: tt.NonEmpty}
-	case types.Iterable:
-		return types.Iterable{Key: replaceStatic(tt.Key, recv), Value: replaceStatic(tt.Value, recv)}
-	case types.ClassString:
-		if tt.Of == nil {
-			return tt
-		}
-		return types.ClassString{Of: replaceStatic(tt.Of, recv)}
-	case types.Class:
-		if len(tt.Args) == 0 {
-			return tt
-		}
-		args := make([]types.Type, len(tt.Args))
-		for i, a := range tt.Args {
-			args[i] = replaceStatic(a, recv)
-		}
-		return types.Class{Name: tt.Name, Args: args}
-	case types.Callable:
-		if !tt.HasSig {
-			return tt
-		}
-		ps := make([]types.CallableParam, len(tt.Params))
-		for i, p := range tt.Params {
-			p.Type = replaceStatic(p.Type, recv)
-			ps[i] = p
-		}
-		return types.Callable{Params: ps, Return: replaceStatic(tt.Return, recv), Closure: tt.Closure, Pure: tt.Pure, HasSig: true}
+	if !mentionsStatic(t) {
+		return t
 	}
-	return t
+	return types.MapDeep(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Static, types.This:
+			return staticOf(recv)
+		case types.Intersection:
+			// static&Countable on a receiver A|B: the members changed, so
+			// the intersection is normalised again.
+			return types.MakeIntersection(m.Types...)
+		}
+		return m
+	})
+}
+
+// mentionsStatic reports a static or a $this anywhere in t.
+func mentionsStatic(t types.Type) bool {
+	found := false
+	types.Walk(t, func(m types.Type) {
+		switch m.(type) {
+		case types.Static, types.This:
+			found = true
+		}
+	})
+	return found
 }
 
 // staticOf is the type `static` denotes for a receiver: the receiver's own
