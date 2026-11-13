@@ -83,7 +83,8 @@ outputs, which are gitignored; the IDE and the repository hold the sources. The 
 at the same depth, not a nested mirror, so that a compiled file's `__DIR__` sits where its source's
 does: `__DIR__.'/../config/services.yaml'` and `\dirname(__DIR__, 3)` keep resolving. Every other
 file under a root (fixtures, YAML) is copied over, so `__DIR__.'/Fixture'` exists there too, and an
-output whose source is gone is removed. `exclude` names the paths the checker leaves alone
+output whose source is gone is removed. Roots and their outputs are separate directories, none of
+them another or inside another, so that every file compiles into one place. `exclude` names the paths the checker leaves alone
 (fixtures another analyser owns); `phn build` compiles them all the same. `unused` narrows which
 attributes spare a private property the dead-code warnings (above).
 

@@ -193,6 +193,46 @@
       "refused": true
     },
     {
+      "name": "a root spelt twice with one output is one root",
+      "file": "{\"roots\": {\"src\": \".src\", \"./src\": \".src/\"}, \"committed\": [\"src\"]}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "a root spelt twice with two outputs",
+      "file": "{\"roots\": {\"src\": \".src\", \"./src\": \".other\"}, \"committed\": [\"src\"]}",
+      "refused": true
+    },
+    {
+      "name": "a root inside a root",
+      "file": "{\"roots\": {\"src\": \".src\", \"src/gen\": \"src/.gen\"}, \"committed\": [\"src\"]}",
+      "refused": true
+    },
+    {
+      "name": "a root inside the output of another",
+      "file": "{\"roots\": {\"src\": \".src\", \".src/gen\": \".src/.gen\"}, \"committed\": [\"src\"]}",
+      "refused": true
+    },
+    {
+      "name": "two roots with one output",
+      "file": "{\"roots\": {\"src\": \".out\", \"lib\": \".out\"}, \"committed\": [\"src\"]}",
+      "refused": true
+    },
+    {
+      "name": "a root that is the output of another",
+      "file": "{\"roots\": {\"src\": \"lib\", \"lib\": \".lib\"}, \"committed\": [\"src\"]}",
+      "refused": true
+    },
+    {
+      "name": "overlapping roots without the key",
+      "file": "{\"roots\": {\"src\": \".src\", \"src/gen\": \"src/.gen\"}}",
+      "refused": true
+    },
+    {
       "name": "a key the compiler does not know: it refuses the file, a reader of the two keys does not",
       "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"later\": true}",
       "roots": {
