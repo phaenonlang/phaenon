@@ -10,6 +10,7 @@ import (
 type mapHierarchy struct {
 	parents map[string][]string
 	final   map[string]bool
+	iface   map[string]bool
 	vars    map[string][]Variance
 }
 
@@ -27,6 +28,7 @@ func (h mapHierarchy) IsSubclassOf(sub, super string) bool {
 func (h mapHierarchy) IsFinal(name string) bool              { return h.final[strings.ToLower(name)] }
 func (h mapHierarchy) IteratorArgs(Class) (Type, Type, bool) { return nil, nil, false }
 func (h mapHierarchy) IsInvokable(string) bool               { return false }
+func (h mapHierarchy) IsInterface(name string) bool          { return h.iface[strings.ToLower(name)] }
 func (h mapHierarchy) Variances(name string) []Variance      { return h.vars[strings.ToLower(name)] }
 func (h mapHierarchy) IsCallableName(name string) bool       { return false }
 func (h mapHierarchy) PropertyType(class, name string) (Type, bool) {

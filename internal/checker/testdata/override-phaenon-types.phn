@@ -1,0 +1,129 @@
+// override-types.phn in Phaenon's own spelling: the types an override is
+// held to are the ones written, though PHP sees `array` for a list, a map,
+// a tuple and a shape alike. And what the rule must leave alone: a child
+// that narrows what a library's parent left open.
+namespace App\OverridePhaenonTypes;
+
+use Acme\Client;
+
+class User
+{
+}
+
+class Order
+{
+}
+
+interface Registry<T of object>
+{
+}
+
+class A
+{
+    foo(list<int> $x): list<int> => $x;
+
+    index(): map<string, int> => [];
+
+    pair(): (int, string) => [1, 'a'];
+
+    /** @return array{id: int} */
+    row(): array => ['id' => 1];
+
+    kind(): class<User> => User::class;
+
+    users(): list<User> => [];
+
+    registry(): Registry<User>
+    {
+        throw new \LogicException();
+    }
+
+    find<T of object>(class<T> $class): ?T => null;
+
+    static names(): list<string> => [];
+}
+
+class B extends A
+{
+    foo(list<string> $x): list<string> => $x; // want P2502 "return type list<string>", P2502 "parameter $x"
+
+    index(): map<string, string> => []; // want P2502
+
+    pair(): (string, int) => ['a', 1]; // want P2502
+
+    /** @return array{id: string} */
+    row(): array => ['id' => 'a']; // want P2502
+
+    kind(): class<Order> => Order::class; // want P2502
+
+    users(): list<Order> => []; // want P2502
+
+    registry(): Registry<Order> // want P2502
+    {
+        throw new \LogicException();
+    }
+
+    // The type parameter under another name is the same `object`.
+    find<TObject of object>(class<TObject> $class): ?TObject => null;
+
+    static names(): list<int> => []; // want P2502
+}
+
+interface I
+{
+    bar(): int;
+}
+
+interface J
+{
+    bar(): string;
+}
+
+abstract class C implements I, J
+{
+    bar(): int => 1; // want P2502 "is not covariant with App\OverridePhaenonTypes\J::bar() (string)"
+}
+
+interface Ids
+{
+    all(): list<int>;
+}
+
+interface Labels
+{
+    all(): list<string>;
+}
+
+abstract class IdsAndLabels implements Ids, Labels
+{
+    all(): list<string> => []; // want P2502 "Ids::all() (list<int>)"
+}
+
+// Acme\Client is vendor code with a bare `array` and `class-string`. The
+// override says what the arrays hold and which classes it takes: narrower
+// than the parent, not apart from it.
+final class ApiClient extends Client
+{
+    request(string $method, map<string, mixed> $options = []): map<string, mixed> => $options;
+
+    /** @param array{base_url: string, retries?: int} $config */
+    configure(array $config): void
+    {
+    }
+
+    describe(class<User> $class): string => $class;
+
+    notice(string|list<string> $message): void
+    {
+    }
+
+    static boot(map<string, mixed> $options = []): static => new static();
+}
+
+// Where the library does say what its array holds, the override is held to
+// it: PHP links a list for a map of strings, and no caller of the parent
+// can use what the child returns.
+final class ListClient extends Client
+{
+    headers(): list<string> => []; // want P2502 "return type list<string> of App\OverridePhaenonTypes\ListClient::headers() is not covariant with Acme\Client::headers() (array<string, string>)"
+}

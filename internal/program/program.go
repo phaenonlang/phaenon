@@ -409,6 +409,12 @@ func (p *Program) IsInvokable(name string) bool {
 	return c.FindMethod("__invoke") != nil
 }
 
+// IsInterface implements types.Hierarchy.
+func (p *Program) IsInterface(name string) bool {
+	c := p.Class(name)
+	return c != nil && c.Kind == ast.KindInterface
+}
+
 // TraitUsers returns the loaded classes that use the trait, sorted by name.
 func (p *Program) TraitUsers(trait string) []*Class {
 	var out []*Class
