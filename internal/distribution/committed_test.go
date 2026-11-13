@@ -356,6 +356,48 @@ func TestCommittedLibraryIsLeftAsInstalled(t *testing.T) {
 	p.expectShipped(shipped)
 }
 
+// TestCommittedRootBuiltByAnEarlierRelease: a committed root that holds the
+// stamp of a build was built here by a release that shipped its sources
+// alone, and an upgrade that kept the directory left that build's outputs
+// beside the committed ones. The plugin deletes nothing in a committed
+// root: it warns at each dump, naming the package and the way to clear the
+// directory, which differs for a copy and for a link to a checkout.
+func TestCommittedRootBuiltByAnEarlierRelease(t *testing.T) {
+	w := newWorld(t, "")
+	k := w.newKit("kit", nil)
+	release, shipped := k.archive()
+	p := w.newProject("app", project{dependencies: []dependency{release}})
+	p.mustComposer("install")
+	left := map[string]string{".src/.phn-build": "phn 0.4.1\n", ".src/Legacy.php": "<?php\n\nnamespace Acme\\Kit;\n\nfinal class Legacy\n{\n}\n"}
+	for path, text := range left {
+		writeFile(t, filepath.Join(p.dir, "vendor", "acme", "kit", path), []byte(text), 0o644)
+		shipped[path] = text
+	}
+
+	out := p.mustComposer("dump-autoload")
+
+	want := "phaenon/phn: acme/kit 1.0.0: .src/.phn-build is the stamp of an earlier build of this package, in a root it now commits. " +
+		"Outputs of that build were left there, and those the release no longer has still load. " +
+		"Reinstalling the package clears them: remove vendor/acme/kit and run `composer install`\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("composer's output lacks the warning:\n%s\nwant\n%s", out, want)
+	}
+	w.expectRuns()
+	expectAbsent(t, p.installed())
+	p.expectShipped(shipped)
+
+	writeFile(t, filepath.Join(k.dir, ".src", ".phn-build"), []byte("phn 0.4.1\n"), 0o644)
+	linked := w.newProject("linked", project{dependencies: []dependency{k.checkout()}, override: true})
+	out = linked.mustComposer("install")
+	if want := "phaenon/phn: acme/kit 1.0.0: .src/.phn-build is the stamp of an earlier build"; !strings.Contains(out, want) ||
+		!strings.Contains(out, "The package is a link to a checkout: run `phn build` in vendor/acme/kit, which removes them, and delete the stamp\n") {
+		t.Errorf("composer's output lacks the warning for a checkout:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(k.dir, ".src", ".phn-build")); err != nil {
+		t.Errorf("the stamp was removed from the committed root: %v", err)
+	}
+}
+
 // TestCommittedLibraryBesideWhatIsBuilt: only a package says its outputs
 // are committed, about itself. The root project is built as before, and so
 // is an installed library that ships its sources alone, while the library

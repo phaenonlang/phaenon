@@ -81,6 +81,9 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
             foreach ($errors as $error) {
                 self::error($io, $error);
             }
+            foreach ($file->builtBefore($dir) as $output) {
+                self::warnOfAnEarlierBuild($io, trim($name . ' ' . $version), $dir, $output, $projectDir);
+            }
             if ($errors !== []) {
                 ++$incomplete;
             } elseif (!$file->leavesNothingToBuild($dir)) {
@@ -155,6 +158,29 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         ksort($packages, \SORT_STRING);
 
         return $packages;
+    }
+
+    /**
+     * A committed root that holds the stamp of a build was built here by an earlier release of
+     * the package, one that shipped its sources alone, and an upgrade that kept the directory (a
+     * source install, which is a git checkout) left that build's outputs in it: a class the new
+     * release dropped still loads. The root is left as installed all the same, and the project
+     * is told how to clear it.
+     */
+    private static function warnOfAnEarlierBuild(IOInterface $io, string $package, string $dir, string $output, string $projectDir): void
+    {
+        $shown = str_starts_with($dir, $projectDir . '/') ? substr($dir, \strlen($projectDir) + 1) : $dir;
+        $message = sprintf(
+            '%s: %s/%s is the stamp of an earlier build of this package, in a root it now commits. '
+            . 'Outputs of that build were left there, and those the release no longer has still load. %s',
+            $package,
+            $output,
+            ProjectFile::STAMP,
+            is_link($dir)
+                ? sprintf('The package is a link to a checkout: run `phn build` in %s, which removes them, and delete the stamp', $shown)
+                : sprintf('Reinstalling the package clears them: remove %s and run `composer install`', $shown),
+        );
+        $io->writeError('<warning>phaenon/phn: ' . str_replace('<', '\\<', $message) . '</warning>');
     }
 
     private static function resolver(Composer $composer, IOInterface $io, Settings $settings): BinaryResolver

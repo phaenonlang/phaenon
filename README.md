@@ -326,7 +326,10 @@ nothing changed: `phn build --vendor`), then the project itself (`phn build`), s
 A root an installed package lists under `committed` (above) is left as installed, and a package
 whose installed roots are all committed is nothing to build: alone, it makes the plugin neither
 fetch the binary nor run it. A package that came without the outputs it commits fails the command
-before any binary is fetched, with the error `phn build --vendor` gives, under `--quiet` too.
+before any binary is fetched, with the error `phn build --vendor` gives, under `--quiet` too. A
+committed root that holds the stamp of a build (`.phn-build`) was built there by an earlier
+release, before its outputs were committed, and may still hold that build's files: the plugin
+deletes nothing in a committed root, and warns at each dump, saying how to clear the directory.
 It requires no other package, since the compiled output needs none, and suggests
 `phaenon/debug`, which points production errors at `.phn` positions (`design/line-map.md` §4.3).
 It conflicts with `phaenon/runtime` below 0.4, that package's name until then, which declares the

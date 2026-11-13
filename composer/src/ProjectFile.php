@@ -20,6 +20,11 @@ namespace Phaenon\Composer;
 final readonly class ProjectFile
 {
     /**
+     * The file phn leaves in each output directory it builds in an installed package.
+     */
+    public const string STAMP = '.phn-build';
+
+    /**
      * @param array<string, string> $roots     each source root with its output directory, as
      *                                         cleaned paths relative to the package
      * @param list<string>          $committed the roots whose outputs the package commits, each a
@@ -200,6 +205,27 @@ final readonly class ProjectFile
             . 'or require a version of the package that has its outputs',
             $packages,
         );
+    }
+
+    /**
+     * The output directories of committed roots that hold the stamp of a build (`.phn-build`),
+     * as paths relative to the package. No build writes one there, and a package's repository
+     * ignores the file: it is what a build of an earlier release left behind, when the root was
+     * built where the package is installed, and the outputs of that build may lie beside it.
+     *
+     * @return list<string>
+     */
+    public function builtBefore(string $packageDir): array
+    {
+        $outputs = [];
+        foreach ($this->committed as $source) {
+            if (is_file($packageDir . '/' . $this->roots[$source] . '/' . self::STAMP)) {
+                $outputs[] = $this->roots[$source];
+            }
+        }
+        sort($outputs, \SORT_STRING);
+
+        return $outputs;
     }
 
     /**
