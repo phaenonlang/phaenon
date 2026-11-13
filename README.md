@@ -102,9 +102,10 @@ is how its outputs are made and kept current. It speaks where the library is an 
 `phn build --vendor` leaves such a root as installed, with no output written, no stamp and nothing
 removed, and builds the package's other roots as before. A committed root that came without its
 outputs (no output directory, or a `.phn` with no `.php` there) fails the command with an error
-naming the package and the root, and nothing is built in its place: the same release is broken for
-every project without `phn`. A project written in Phaenon still reads such a package from its
-`.phn`, as it reads any installed Phaenon package.
+naming the package, its version and the root, and nothing is built in its place: the same release
+is broken for every project without `phn`, and it is the package's to repair. The project that
+installed it can report it, or require a version that has its outputs. A project written in
+Phaenon still reads such a package from its `.phn`, as it reads any installed Phaenon package.
 
 ```sh
 phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function title()` → `title()`, nested calls as |> pipelines, canonical layout
