@@ -52,6 +52,14 @@ final readonly class ProjectFile
         if (!$data instanceof \stdClass) {
             return null;
         }
+        // A key is spelt as documented: phn refuses "Roots" and "COMMITTED".
+        foreach (array_keys(get_object_vars($data)) as $key) {
+            foreach (['roots', 'committed'] as $name) {
+                if ((string) $key !== $name && strcasecmp((string) $key, $name) === 0) {
+                    return null;
+                }
+            }
+        }
         $roots = [];
         $given = $data->roots ?? new \stdClass();
         if (!$given instanceof \stdClass) {
@@ -71,7 +79,14 @@ final readonly class ProjectFile
             ) {
                 return null;
             }
+            // Two spellings of one root ("src", "./src") are one root when they name one output.
+            if (($roots[$source] ?? $output) !== $output) {
+                return null;
+            }
             $roots[$source] = $output;
+        }
+        if (!self::separate($roots)) {
+            return null;
         }
         $committed = [];
         $listed = $data->committed ?? [];
@@ -185,6 +200,27 @@ final readonly class ProjectFile
         }
 
         return $files;
+    }
+
+    /**
+     * Whether the roots and their outputs are separate directories, none of them another or inside
+     * another: with a root inside a root, or two roots compiling into one directory, a source has
+     * two places to compile into, and phn refuses the file.
+     *
+     * @param array<string, string> $roots
+     */
+    private static function separate(array $roots): bool
+    {
+        $dirs = [...array_map(strval(...), array_keys($roots)), ...array_values($roots)];
+        foreach ($dirs as $i => $dir) {
+            foreach ($dirs as $j => $other) {
+                if ($i !== $j && ($dir === $other || str_starts_with($dir, $other . '/'))) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     /**
