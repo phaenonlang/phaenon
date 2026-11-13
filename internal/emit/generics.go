@@ -909,8 +909,18 @@ func (l *lowering) classDecl(d *ast.ClassDecl, outer *scope) error {
 				}
 			}
 		case *ast.ClassConstDecl:
-			if err := l.walk(m, sc.child()); err != nil {
+			// A typed constant's type is native PHP like a property's.
+			csc := sc.child()
+			if l.eraseType(m.Type, csc, "") {
+				l.addDoc(m.S.Start, m.Doc, []string{"@var " + l.docType(m.Type, csc)})
+			}
+			if err := l.declHead(m.Attrs, nil, csc); err != nil {
 				return err
+			}
+			for _, it := range m.Consts {
+				if err := l.walk(it.Value, csc); err != nil {
+					return err
+				}
 			}
 		case *ast.EnumCase:
 			if err := l.walk(m, sc.child()); err != nil {
