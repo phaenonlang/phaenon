@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -187,9 +188,28 @@ const (
 
 // conflictCases are composer.json files of a project that commits a root,
 // each with what the check says of it, "" for nothing.
-var conflictCases = []struct {
+type conflictCase struct {
 	name, manifest, want string
-}{
+}
+
+// unjudged is the case of a constraint the reader does not read, with the
+// reason it gives; the constraint may hold characters that do not show.
+func unjudged(name, constraint, reason string) conflictCase {
+	manifest, err := json.Marshal(map[string]map[string]string{"conflict": {"phaenon/phn": constraint}})
+	if err != nil {
+		panic(err)
+	}
+	return conflictCase{name, string(manifest),
+		fmt.Sprintf(`composer.json: "conflict": {"phaenon/phn": %q} cannot be judged (%s)`, constraint, reason) + conflictMust + conflictUnder}
+}
+
+const (
+	joined   = ` beside another alternative, and Composer joins neighbouring ranges into one`
+	notPlain = `it holds a tab, a line break, a control character or a space that is not the plain one`
+	notRead  = ` is not a version constraint phn reads`
+)
+
+var conflictCases = append([]conflictCase{
 	// The constraint holds every release from before the key.
 	{"below the release, in two numbers", `{"conflict": {"phaenon/phn": "<0.5"}}`, ""},
 	{"below the release", `{"conflict": {"phaenon/phn": "<0.5.0"}}`, ""},
@@ -243,9 +263,21 @@ var conflictCases = []struct {
 	{"a branch", `{"conflict": {"phaenon/phn": "dev-main"}}`,
 		`composer.json: "conflict": {"phaenon/phn": "dev-main"} does not keep this package from being installed beside ` + everyRelease + conflictWhy + conflictUnder},
 	{"the name in another letter case, too low", `{"conflict": {"Phaenon/Phn": "<0.4"}}`,
-		`composer.json: "conflict": {"Phaenon/Phn": "<0.4"} does not keep this package from being installed beside phaenon/phn 0.4.1 or 0.4.0` + conflictWhy + conflictUnder},
-	{"two spellings of the name, one too low", `{"conflict": {"phaenon/phn": "<0.5", "Phaenon/Phn": "<0.4"}}`,
-		`composer.json: "conflict": {"Phaenon/Phn": "<0.4"} does not keep this package from being installed beside phaenon/phn 0.4.1 or 0.4.0` + conflictWhy + conflictUnder},
+		`composer.json: "conflict": {"Phaenon/Phn": "<0.4"} does not keep this package from being installed beside phaenon/phn 0.4.1 or 0.4.0` + conflictWhy + `write "Phaenon/Phn": "<0.5.0" under "conflict"`},
+
+	// Of two spellings of the name Composer takes the last, and of a name
+	// written twice the last value at the place of the first.
+	{"two spellings of the name, the last sufficient", `{"conflict": {"Phaenon/Phn": "<0.4", "phaenon/phn": "<0.5"}}`, ""},
+	{"two spellings of the name, the one passed over not read", `{"conflict": {"Phaenon/Phn": "<0.5.x-dev", "phaenon/phn": "<0.5"}}`, ""},
+	{"the name written twice, the last sufficient", `{"conflict": {"phaenon/phn": "<0.4", "phaenon/phn": "<0.5"}}`, ""},
+	{"two spellings of the name, the last too low", `{"conflict": {"phaenon/phn": "<0.5", "Phaenon/Phn": "<0.4"}}`,
+		`composer.json: "conflict": {"Phaenon/Phn": "<0.4"} does not keep this package from being installed beside phaenon/phn 0.4.1 or 0.4.0` + conflictWhy + `write "Phaenon/Phn": "<0.5.0" under "conflict"`},
+	{"the name written twice, the last too low", `{"conflict": {"phaenon/phn": "<0.5", "phaenon/phn": "<0.4"}}`,
+		`composer.json: "conflict": {"phaenon/phn": "<0.4"} does not keep this package from being installed beside phaenon/phn 0.4.1 or 0.4.0` + conflictWhy + conflictUnder},
+	{"the name written again after another spelling", `{"conflict": {"phaenon/phn": "<0.4", "Phaenon/Phn": "<0.3", "phaenon/phn": "<0.5"}}`,
+		`composer.json: "conflict": {"Phaenon/Phn": "<0.3"} does not keep this package from being installed beside phaenon/phn 0.4.1 or one of 2 earlier releases` + conflictWhy + `write "Phaenon/Phn": "<0.5.0" under "conflict"`},
+	{"the key written twice, the last too low", `{"conflict": {"phaenon/phn": "<0.5"}, "conflict": {"phaenon/phn": "<0.4"}}`,
+		`composer.json: "conflict": {"phaenon/phn": "<0.4"} does not keep this package from being installed beside phaenon/phn 0.4.1 or 0.4.0` + conflictWhy + conflictUnder},
 
 	// It cannot be judged: nothing is known to be kept out.
 	{"an operator Composer does not have", `{"conflict": {"phaenon/phn": "~>0.4"}}`,
@@ -259,12 +291,33 @@ var conflictCases = []struct {
 	{"no constraint", `{"conflict": {"phaenon/phn": ""}}`,
 		`composer.json: "conflict": {"phaenon/phn": ""} cannot be judged (it is empty)` + conflictMust + conflictUnder},
 	{"a constraint that is no string", `{"conflict": {"phaenon/phn": ["<0.5"]}}`,
-		`composer.json: the "conflict" on "phaenon/phn" is not a version constraint, a string` + conflictMust + conflictUnder},
+		`composer.json: the "conflict" on "phaenon/phn" is ["<0.5"], not a version constraint` + conflictMust + conflictUnder},
+	{"null for a constraint", `{"conflict": {"phaenon/phn": null}}`,
+		`composer.json: the "conflict" on "phaenon/phn" is null, not a version constraint` + conflictMust + conflictUnder},
+	{"an object for a constraint, under another spelling", `{"conflict": {"Phaenon/PHN": {"version": "<0.5", "why": "it cannot read the project file as written"}}}`,
+		`composer.json: the "conflict" on "Phaenon/PHN" is no string, not a version constraint` + conflictMust + `write "Phaenon/PHN": "<0.5.0" under "conflict"`},
 	{"a conflict that is no object", `{"conflict": "phaenon/phn <0.5"}`,
 		`composer.json: "conflict" is not an object of package names and constraints` + conflictMust + conflictWhole},
 	{"a file that is no object", `["phaenon/phn"]`,
 		`composer.json: the file is not a JSON object` + conflictMust + conflictWhole},
-}
+},
+	// What Composer makes of these is not what their alternatives say: it
+	// joins the neighbouring ranges, and lets releases in that the
+	// alternatives, read one by one, keep out.
+	unjudged("a range from above its end beside the one that starts there", ">=0.3 <0.1 || >=0.1 <0.5", `">=0.3 <0.1" is a range that ends before it begins,`+joined),
+	unjudged("the same as hyphen ranges", "0.3 - 0.0 || 0.1 - 0.4", `"0.3 - 0.0" is a range that ends before it begins,`+joined),
+	unjudged("the same after the ranges that hold every release", "<0.4 || ^0.4 || >=0.5 <0.3", `">=0.5 <0.3" is a range that ends before it begins,`+joined),
+	unjudged("a range bounded by a branch beside another", "<0.5 || >=0.5 <dev-main", `">=0.5 <dev-main" is a range bounded by a branch,`+joined),
+	// Composer refuses these; so does the reader.
+	unjudged("a space inside an operator", "< =0.4.99", `"< =0.4.99"`+notRead),
+	unjudged("a space inside an operator, before a second constraint", "> =0.1 <0.5", `"> =0.1"`+notRead),
+	unjudged("a no-break space after the constraint", "<0.5"+string(rune(0xa0)), notPlain),
+	unjudged("a no-break space between two constraints", ">=0.1"+string(rune(0xa0))+"<0.5", notPlain),
+	unjudged("a form feed after the constraint", "<0.5\f", notPlain),
+	// Composer reads these, another way than their parts say.
+	unjudged("a comma after an operator's character", "<0.5+b=,>=0.2", `a comma after <, > or = parts nothing`),
+	unjudged("a line break inside", "<0.5\n>=0.1", notPlain),
+)
 
 func TestConflictFloor(t *testing.T) {
 	for _, c := range conflictCases {
@@ -342,22 +395,112 @@ func TestConflictFloorWhereItDoesNotApply(t *testing.T) {
 	}
 }
 
-// The line every message tells the author to write passes the check.
-func TestConflictFloorTakesItsOwnAdvice(t *testing.T) {
-	line := regexp.MustCompile(`write ("conflict": \{.*\})$`)
-	t.Chdir(t.TempDir())
-	writeTree(t, ".", map[string]string{ProjectFile: committedFile, "composer.json": `{}`})
-	p, err := readProject(ProjectFile)
-	if err != nil {
+// pair is a member of a JSON object, in the order the object writes them.
+type pair struct {
+	name  string
+	value json.RawMessage
+}
+
+// pairs reads the members of a JSON object in their order; nil for what is
+// no object.
+func pairs(raw []byte) []pair {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	if open, err := dec.Token(); err != nil || open != json.Delim('{') {
+		return nil
+	}
+	list := []pair{}
+	for dec.More() {
+		token, _ := dec.Token()
+		name, _ := token.(string)
+		var value json.RawMessage
+		if dec.Decode(&value) != nil {
+			return nil
+		}
+		list = append(list, pair{name, value})
+	}
+	return list
+}
+
+// with returns the object with value under name: in the place of every
+// member that has the name, written as it is, else as a last member.
+func with(object []pair, name string, value []byte) []byte {
+	found := false
+	for i := range object {
+		if object[i].name == name {
+			object[i].value, found = value, true
+		}
+	}
+	if !found {
+		object = append(object, pair{name, value})
+	}
+	var b strings.Builder
+	for i, member := range object {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		quoted, _ := json.Marshal(member.name)
+		b.WriteString(string(quoted) + ": " + string(member.value))
+	}
+	return []byte("{" + b.String() + "}")
+}
+
+var (
+	adviceWhole = regexp.MustCompile(`; write "conflict": (\{"[^"]+": "[^"]+"\})$`)
+	adviceUnder = regexp.MustCompile(`; write ("[^"]+"): ("[^"]+") under "conflict"$`)
+)
+
+// follow does to a composer.json what the message says to write, as an
+// author would with no thought: the whole key, or the one entry under the
+// name the message gives, everything else left as it is.
+func follow(t *testing.T, manifest, message string) string {
+	t.Helper()
+	if m := adviceWhole.FindStringSubmatch(message); m != nil {
+		return string(with(pairs([]byte(manifest)), "conflict", []byte(m[1])))
+	}
+	m := adviceUnder.FindStringSubmatch(message)
+	if m == nil {
+		t.Fatalf("the message names no line to write: %s", message)
+	}
+	var name string
+	if err := json.Unmarshal([]byte(m[1]), &name); err != nil {
 		t.Fatal(err)
 	}
-	m := line.FindStringSubmatch(p.conflictFloor())
-	if m == nil {
-		t.Fatalf("no line to write in %q", p.conflictFloor())
+	object := pairs([]byte(manifest))
+	conflict := []byte("{}")
+	for _, member := range object {
+		if member.name == "conflict" {
+			conflict = member.value
+		}
 	}
-	writeTree(t, ".", map[string]string{"composer.json": "{" + m[1] + "}"})
-	if got := p.conflictFloor(); got != "" {
-		t.Errorf("with %s: %s", m[1], got)
+	if pairs(conflict) == nil {
+		t.Fatalf("the message says to write under a \"conflict\" that is no object: %s", message)
+	}
+	return string(with(object, "conflict", with(pairs(conflict), name, []byte(m[2]))))
+}
+
+// The line a message tells the author to write passes the check: for every
+// composer.json of the table that fails, with the line written as said.
+func TestConflictFloorTakesItsOwnAdvice(t *testing.T) {
+	followed := 0
+	for _, c := range conflictCases {
+		if c.want == "" {
+			continue
+		}
+		t.Chdir(t.TempDir())
+		writeTree(t, ".", map[string]string{ProjectFile: committedFile, "composer.json": c.manifest})
+		p, err := readProject(ProjectFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		advised := follow(t, c.manifest, p.conflictFloor())
+		writeTree(t, ".", map[string]string{"composer.json": advised})
+		if got := p.conflictFloor(); got != "" {
+			t.Errorf("%s: %s\nwith the line written: %s\nthe check still says: %s", c.name, c.manifest, advised, got)
+		}
+		followed++
+	}
+	if followed < 20 {
+		t.Errorf("the advice of %d messages was followed; the table has more that fail", followed)
 	}
 }
 

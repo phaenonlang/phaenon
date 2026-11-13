@@ -25,6 +25,7 @@ package main
 // keep anything out.
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -130,9 +131,12 @@ func (p *project) conflictFloor() string {
 	if errors.Is(err, fs.ErrNotExist) {
 		return ""
 	}
-	entry := fmt.Sprintf("%q: %q", compilerPackage, "<"+since.String())
-	whole := fmt.Sprintf(`write "conflict": {%s}`, entry)
-	under := fmt.Sprintf(`write %s under "conflict"`, entry)
+	// The line to write: the whole key where the file has no object for
+	// it, else the entry, under the name as the file writes it.
+	whole := fmt.Sprintf(`write "conflict": {%q: %q}`, compilerPackage, "<"+since.String())
+	under := func(name string) string {
+		return fmt.Sprintf(`write %q: %q under "conflict"`, name, "<"+since.String())
+	}
 	// must is what the file has to do and why, the end of the two messages
 	// about a file or a constraint that says nothing certain.
 	must := fmt.Sprintf("it has to keep this package from being installed beside the releases of %s that cannot read its %s: the key %q is known from %s on",
@@ -149,54 +153,106 @@ func (p *project) conflictFloor() string {
 	case err != nil:
 		return fmt.Sprintf("%s: the file cannot be read (%v), and %s; %s", path, err, must, whole)
 	}
-	var conflicts map[string]json.RawMessage
+	var conflicts []member
 	if raw, stated := manifest["conflict"]; stated {
 		// An empty list is what PHP writes for an object with no members.
 		var none []json.RawMessage
 		if json.Unmarshal(raw, &none) != nil || len(none) > 0 {
-			if err := json.Unmarshal(raw, &conflicts); err != nil {
+			var ok bool
+			if conflicts, ok = members(raw); !ok {
 				return fmt.Sprintf(`%s: "conflict" is not an object of package names and constraints, and %s; %s`, path, must, whole)
 			}
+			// The line to write goes into the object that is there.
+			whole = under(compilerPackage)
 		}
 	}
-	if conflicts != nil {
-		whole = under
-	}
-	// Composer takes one of two spellings of the package's name; each has
-	// to keep the releases out, and the first that does not is reported.
-	var names []string
-	for name := range conflicts {
-		if strings.EqualFold(name, compilerPackage) {
-			names = append(names, name)
+	// Composer reads a package's name in any letter case, and of two
+	// spellings in one object it takes the last (ArrayLoader::parseLinks):
+	// that entry is the one judged, and the one the message says to write.
+	// The entries it passes over are no more this check's than the other
+	// packages': Composer says what it thinks of them.
+	var entry *member
+	for i := range conflicts {
+		if lowerASCII(conflicts[i].name) == compilerPackage {
+			entry = &conflicts[i]
 		}
 	}
-	slices.Sort(names)
-	for _, name := range names {
-		var text string
-		if err := json.Unmarshal(conflicts[name], &text); err != nil {
-			return fmt.Sprintf(`%s: the "conflict" on %q is not a version constraint, a string, and %s; %s`, path, name, must, whole)
-		}
-		says := fmt.Sprintf(`"conflict": {%q: %q}`, name, text)
-		constraint, err := semver.ParseConstraint(text)
-		if err != nil {
-			return fmt.Sprintf("%s: %s cannot be judged (%v), and %s; %s", path, says, err, must, whole)
-		}
-		var admitted []semver.Version
-		for _, release := range earlier {
-			if !constraint.Matches(release) {
-				admitted = append(admitted, release)
-			}
-		}
-		if len(admitted) > 0 {
-			return fmt.Sprintf("%s: %s does not keep this package from being installed beside %s %s, which cannot read its %s: the key %q is known from %s on; %s",
-				path, says, compilerPackage, oneOf(admitted), ProjectFile, key, since, whole)
-		}
-	}
-	if len(names) == 0 {
+	if entry == nil {
 		return fmt.Sprintf("%s: nothing keeps this package from being installed beside %s %s, which cannot read its %s: the key %q is known from %s on; %s",
 			path, compilerPackage, oneOf(earlier), ProjectFile, key, since, whole)
 	}
+	whole = under(entry.name)
+	var text string
+	if value := bytes.TrimSpace(entry.value); !bytes.HasPrefix(value, []byte(`"`)) || json.Unmarshal(value, &text) != nil {
+		// What the file says instead, when it is short enough to quote.
+		var is bytes.Buffer
+		if json.Compact(&is, value) != nil || is.Len() > 40 {
+			is.Reset()
+			is.WriteString("no string")
+		}
+		return fmt.Sprintf(`%s: the "conflict" on %q is %s, not a version constraint, and %s; %s`, path, entry.name, is.String(), must, whole)
+	}
+	says := fmt.Sprintf(`"conflict": {%q: %q}`, entry.name, text)
+	constraint, err := semver.ParseConstraint(text)
+	if err != nil {
+		return fmt.Sprintf("%s: %s cannot be judged (%v), and %s; %s", path, says, err, must, whole)
+	}
+	var admitted []semver.Version
+	for _, release := range earlier {
+		if !constraint.Matches(release) {
+			admitted = append(admitted, release)
+		}
+	}
+	if len(admitted) > 0 {
+		return fmt.Sprintf("%s: %s does not keep this package from being installed beside %s %s, which cannot read its %s: the key %q is known from %s on; %s",
+			path, says, compilerPackage, oneOf(admitted), ProjectFile, key, since, whole)
+	}
 	return ""
+}
+
+// member is one member of a JSON object.
+type member struct {
+	name  string
+	value json.RawMessage
+}
+
+// members reads the members of the JSON object raw as PHP's json_decode
+// keeps them, which is how Composer gets them: in the order their names
+// are first written, a name written twice with its last value. It reports
+// whether raw is an object.
+func members(raw json.RawMessage) ([]member, bool) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if open, err := dec.Token(); err != nil || open != json.Delim('{') {
+		return nil, false
+	}
+	list := []member{}
+	at := map[string]int{}
+	for dec.More() {
+		token, err := dec.Token()
+		name, named := token.(string)
+		var value json.RawMessage
+		if err != nil || !named || dec.Decode(&value) != nil {
+			return nil, false
+		}
+		if i, twice := at[name]; twice {
+			list[i].value = value
+			continue
+		}
+		at[name] = len(list)
+		list = append(list, member{name, value})
+	}
+	return list, true
+}
+
+// lowerASCII is PHP's strtolower, which Composer puts a package's name
+// through: the letters A to Z and no other.
+func lowerASCII(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
 }
 
 // oneOf names the releases, newest first, as the ones a project may hold:
