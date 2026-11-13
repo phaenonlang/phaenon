@@ -130,7 +130,7 @@ func (l *lowering) stmt(s ast.Stmt) error {
 		l.blank(s.S)
 		return nil
 	case *ast.ClassDecl:
-		return l.classDecl(s)
+		return l.classDecl(s, nil)
 	case *ast.FunctionDecl:
 		return l.funcDecl(s)
 	case *ast.Block:
@@ -825,11 +825,22 @@ func (l *lowering) funcDecl(d *ast.FunctionDecl) error {
 
 // ------------------------------------------------------------------ classes
 
-func (l *lowering) classDecl(d *ast.ClassDecl) error {
+// classDecl lowers a class-like declaration. An anonymous class is one as
+// well: its `extends Box<int>` and the Phaenon types of its members are no
+// more PHP than a named class's, and a method of it that overrides a
+// generic one is held to the override-erasure rule. The program keeps no
+// anonymous class by its declaration, so it is declared here as the
+// checker declared it; outer is the scope of the expression it stands in,
+// which its constructor arguments belong to.
+func (l *lowering) classDecl(d *ast.ClassDecl, outer *scope) error {
 	sc := l.topScope(d.S.Start)
 	var cl *program.Class
+	doc := d.Doc
 	if d.Name != nil {
 		cl = l.p.Class(sc.res.Scope().Prefix() + d.Name.Name)
+	} else {
+		cl = l.p.DeclareAnonymous(l.f, sc.res.Scope(), d)
+		doc = l.e.docBefore(d.S.Start)
 	}
 	if cl == nil {
 		return l.errorf(d, "class not found in the program (internal error)")
@@ -861,9 +872,14 @@ func (l *lowering) classDecl(d *ast.ClassDecl) error {
 			l.removeTypeArgs(e)
 		}
 	}
-	l.addDoc(d.S.Start, d.Doc, tags)
+	l.addDoc(d.S.Start, doc, tags)
 	if err := l.declHead(d.Attrs, nil, sc); err != nil {
 		return err
+	}
+	if d.Args != nil && outer != nil {
+		if err := l.walk(d.Args, outer); err != nil {
+			return err
+		}
 	}
 
 	for _, m := range d.Members {
@@ -989,11 +1005,8 @@ func (l *lowering) walk(root ast.Node, sc *scope) error {
 		}
 		switch n := n.(type) {
 		case *ast.ClassDecl:
-			if n.Name != nil {
-				err = l.classDecl(n)
-				return false
-			}
-			return true // anonymous classes are walked as code
+			err = l.classDecl(n, sc)
+			return false
 		case *ast.FunctionDecl:
 			err = l.funcDecl(n)
 			return false
@@ -1139,7 +1152,7 @@ func (l *lowering) callSite(argsAfter int, args *ast.ArgList, typeArgs []ast.Typ
 
 func (l *lowering) newExpr(n *ast.New, sc *scope) error {
 	if n.Anon != nil {
-		return l.walk(n.Anon, sc)
+		return l.classDecl(n.Anon, sc)
 	}
 	if _, ok := n.Class.(*ast.Name); !ok {
 		if err := l.walk(n.Class, sc); err != nil {

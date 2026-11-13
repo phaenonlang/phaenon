@@ -1,0 +1,118 @@
+namespace App\Anonymous;
+
+// An anonymous class is lowered as a class is: its type arguments and
+// Phaenon types leave the native code and stay in docblocks, and a method
+// that overrides a generic one keeps the parameter PHP wants.
+
+interface Source<T>
+{
+    next(): ?T;
+}
+
+interface Sized
+{
+    size(): int;
+}
+
+abstract class Box<T>
+{
+    public function __construct(protected T $value)
+    {
+    }
+
+    abstract put(T $value): void;
+
+    get(): T => $this->value;
+}
+
+class Factory
+{
+    // One type argument: the tag stays on the line of `new`.
+    box(int $n): Box<int> => new class($n) extends Box<int> {
+        put(int $value): void
+        {
+            $this->value = $value;
+        }
+
+        all(): list<int> => [$this->value];
+    };
+
+    // Two: a docblock of its own before `class`.
+    source(list<string> $words): Source<string> => new class($words) implements Source<string>, Sized {
+        private map<string, int> $seen = [];
+
+        public function __construct(private list<string> $words)
+        {
+        }
+
+        next(): ?string
+        {
+            $word = \array_shift($this->words);
+            if ($word !== null) {
+                $this->seen[$word] = ($this->seen[$word] ?? 0) + 1;
+            }
+
+            return $word;
+        }
+
+        size(): int => \count($this->words);
+
+        seen(): map<string, int> => $this->seen;
+
+        each(Closure(string): void $do): void
+        {
+            \array_map($do, $this->words);
+        }
+    };
+}
+
+// Outside a class, with a call's type arguments in the constructor's
+// arguments and in a method.
+function first<T>(list<T> $items): ?T => $items[0] ?? null;
+
+function sized(list<int> $items): Sized
+{
+    return new class(first<int>($items) ?? 0) implements Sized {
+        public function __construct(private int $first)
+        {
+        }
+
+        size(): int => first<int>([$this->first]) ?? 0;
+
+        pairs(): list<(int, int)> => [[$this->first, $this->first]];
+    };
+}
+
+// A class with nothing of Phaenon's types in it stays as written.
+function plain(): Sized
+{
+    return new class implements Sized {
+        public function size(): int
+        {
+            return 0;
+        }
+    };
+}
+
+// An anonymous class inside an anonymous class.
+function nested(): Source<Sized>
+{
+    return new class implements Source<Sized> {
+        private bool $done = false;
+
+        next(): ?Sized
+        {
+            if ($this->done) {
+                return null;
+            }
+            $this->done = true;
+
+            return new class implements Sized {
+                /** How many there are. */
+                size(): int => \count($this->all());
+
+                private all(): list<int> => [];
+            };
+        }
+    };
+}

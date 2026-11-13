@@ -370,6 +370,21 @@ func (e *emitter) tokenAt(off int) int {
 	return sort.Search(len(toks), func(i int) bool { return toks[i].Start >= off })
 }
 
+// docBefore is the text of the doc comment that stands before off with
+// nothing but whitespace between them, or "": the docblock of a declaration
+// the tree keeps none for (an anonymous class).
+func (e *emitter) docBefore(off int) string {
+	toks := e.tokens()
+	i := e.tokenAt(off) - 1
+	for i >= 0 && toks[i].Kind == token.T_WHITESPACE {
+		i--
+	}
+	if i < 0 || toks[i].Kind != token.T_DOC_COMMENT {
+		return ""
+	}
+	return string(e.src[toks[i].Start:toks[i].End])
+}
+
 // nextCode is the index of the first token at or after index i that is no
 // whitespace or comment.
 func (e *emitter) nextCode(i int) int {
