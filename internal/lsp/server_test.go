@@ -627,6 +627,39 @@ func TestSignatureHelp(t *testing.T) {
 	}
 }
 
+// The active parameter counts the argument list's own commas: not the one
+// between explicit type arguments, which the parser reads as such before a
+// `(`, and still the one between two comparisons.
+func TestSignatureHelpPastTypeArguments(t *testing.T) {
+	const head = "namespace App;\n\nfunction pick<T, U>(T $a, U $b): T => $a;\n\nfunction three(int $a, int $b, int $c): int => $a;\n\n" +
+		"function f(int $x, int $y): int {\n    return "
+	cases := []struct {
+		call   string // the cursor at its end
+		active int
+	}{
+		{"three(pick<int, string>(1, 'x'), ", 1},
+		{"three(pick<int, string>(1, 'x'), 2, ", 2},
+		{"three(pick<int, list<int> >(1, [1]), ", 1},
+		{"three(pick<int, string>(1, ", 1}, // pick's own list
+		{"three($x < $y, $y > $x, ", 2},
+		{"three($x < $y, ", 1},
+	}
+	c := start(t, map[string]string{"src/F.phn": head + "1;\n}\n"}, nil)
+	for i, cs := range cases {
+		src := head + cs.call + "\n}\n"
+		c.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": c.uri("src/F.phn"), "languageId": "phaenon", "version": i + 1, "text": src}})
+		line := strings.Count(head, "\n")
+		res, _ := c.at("textDocument/signatureHelp", "src/F.phn", line, len("    return ")+len(cs.call)).(map[string]any)
+		if res == nil {
+			t.Errorf("%s: no signature help", cs.call)
+			continue
+		}
+		if res["activeParameter"] != float64(cs.active) {
+			t.Errorf("%s: active parameter %v, want %d", cs.call, res["activeParameter"], cs.active)
+		}
+	}
+}
+
 func TestFormattingAndTabFix(t *testing.T) {
 	src := "namespace App;\n\nfinal class Box\n{\n\tget(): list < int >\n\t{\n\t\treturn [];\n\t}\n}\n"
 	c := start(t, map[string]string{"src/Box.phn": src}, nil)
