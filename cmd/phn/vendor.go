@@ -214,10 +214,20 @@ func buildVendor() {
 			continue
 		}
 		tgt := projectTarget(p.proj, roots)
+		// The roots that are built are compiled with the committed ones,
+		// whose declarations they read from the sources: a change there
+		// makes their outputs stale too. A package that commits nothing
+		// keeps the stamp it had.
+		with := ""
+		for _, r := range present {
+			if p.proj.commits(r) {
+				with += fmt.Sprintf("with %s\n", treeDigest(r))
+			}
+		}
 		stamps := map[string]string{}
 		fresh := true
 		for _, r := range roots {
-			stamps[r] = fmt.Sprintf("phn %s\ntarget %s\ninstalled %s\nsources %s\n", compiler, tgt.Version, digest(installedData), treeDigest(r))
+			stamps[r] = fmt.Sprintf("phn %s\ntarget %s\ninstalled %s\nsources %s\n%s", compiler, tgt.Version, digest(installedData), treeDigest(r), with)
 			cur, err := os.ReadFile(filepath.Join(p.proj.Roots[r], stampFile))
 			fresh = fresh && err == nil && string(cur) == stamps[r]
 		}

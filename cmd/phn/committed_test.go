@@ -343,6 +343,36 @@ func TestBuildVendorMissingCommittedOutputs(t *testing.T) {
 	}
 }
 
+// The roots a package does not commit are compiled with the ones it does:
+// a change of a committed root's sources makes their outputs stale, and the
+// package is built again.
+func TestBuildVendorRebuildsWhenACommittedRootChanges(t *testing.T) {
+	bin := phnBinary(t)
+	root := committedTree(t)
+	kit := filepath.Join(root, "vendor/acme/kit")
+	writeTree(t, kit, map[string]string{
+		"tests/BoxTest.phn": "namespace Acme\\Kit\\Tests;\n\nuse Acme\\Kit\\Box;\n\nfunction unbox(Box<int> $b): int => $b->get();\n",
+	})
+	if stdout, stderr, err := run(t, root, bin, "build", "--vendor"); err != nil || strings.Contains(stderr, "warning") {
+		t.Fatalf("phn build --vendor: %v\n%s%s", err, stdout, stderr)
+	}
+	if stdout, _, _ := run(t, root, bin, "build", "--vendor"); !strings.HasSuffix(stdout, "0 installed packages built, 2 up to date\n") {
+		t.Fatalf("a second build should skip both packages:\n%s", stdout)
+	}
+	shipped := snapshot(t, filepath.Join(kit, ".src"))
+
+	writeTree(t, kit, map[string]string{"src/Box.phn": strings.Replace(kitBox, "get()", "value()", 1)})
+	stdout, stderr, err := run(t, root, bin, "build", "--vendor")
+
+	if err != nil || !strings.HasSuffix(stdout, "1 installed packages built, 1 up to date\n") {
+		t.Errorf("a change in the committed root should rebuild the package (%v):\n%s%s", err, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "BoxTest.phn:5") || !strings.Contains(stderr, "warning P2") {
+		t.Errorf("the rebuild should report what the change broke in the tests root, as a warning:\n%s", stderr)
+	}
+	expectSnapshot(t, "acme/kit's committed root", filepath.Join(kit, ".src"), shipped)
+}
+
 // A project's checker reads an installed package's committed root from its
 // sources, as it reads any installed Phaenon package: Box<T> is generic
 // there, while the output the package ships declares a class that is not.
