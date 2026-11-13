@@ -64,6 +64,26 @@ function consequences(): void {
     $add(1, a: 2); // want P2010
 }
 
+// An unpacked array whose type says its entries fills what they say: an
+// integer key the next position, a string key a name.
+function unpacking(): void {
+    label(...['a'], prefix: 'b'); // want P2010 "named argument $prefix of NamedArguments\label()"
+    label(...['a', 'b'], text: 'c'); // want P2010
+    label(...['a'], text: 'c');
+    glue(...['prefix' => 'a'], prefix: 'b'); // want P2010
+    glue('a', ...['x' => 'b'], x: 'c'); // want P2010
+    glue('a', ...['x' => 'b'], ...['x' => 'c']); // want P2010
+    label('a', ...['prefix' => 'b']); // want P2010
+    $args = ['text' => 'q'];
+    label('a', ...$args, text: 'b'); // want P2010
+}
+
+/** @param list<string> $xs */
+function unpackingUnknown(array $xs): void {
+    label(...$xs, text: 'b');
+    label('a', ...$xs, prefix: 'b'); // want P2010
+}
+
 // A name no parameter has is P2010 as an unknown name, each time it is
 // written, and never also as an overwrite.
 function unknown(): void {

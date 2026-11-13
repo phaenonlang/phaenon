@@ -1678,8 +1678,8 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	return ret
 }
 
-// overwrite is a named argument or a named placeholder that names a
-// parameter an argument or a placeholder before it already fills.
+// overwrite is a named argument, or a string key of an unpacked array, that
+// names a parameter an argument or a placeholder before it already fills.
 type overwrite struct {
 	arg, prev *ast.Arg
 	name      string
@@ -1696,9 +1696,14 @@ type overwrite struct {
 // under that name, so the same name twice collides. A name no parameter
 // has is P2010 of its own (unknown named argument), and a named
 // placeholder stands only for a declared parameter (partialShape), so
-// neither is counted here. An unpacked list fills positions nobody knows,
-// so no later position is counted; the names before it still are.
-func findOverwrites(sig *signature, args *ast.ArgList) []overwrite {
+// neither is counted here.
+//
+// unpacked gives the entries of an unpacked argument, in order, when its
+// type says them all: an integer key fills the next position and a string
+// key a name, as PHP unpacks them. An unpacked list it cannot say fills
+// positions nobody knows, so no later position is counted; the names
+// before it still are.
+func findOverwrites(sig *signature, args *ast.ArgList, unpacked func(*ast.Arg) ([]types.ShapeEntry, bool)) []overwrite {
 	if args == nil {
 		return nil
 	}
@@ -1740,7 +1745,22 @@ func findOverwrites(sig *signature, args *ast.ArgList) []overwrite {
 		case a.Placeholder != nil && a.Placeholder.Variadic:
 			// `...` comes last and stands for what is left.
 		case a.Unpack:
-			lost = true
+			var entries []types.ShapeEntry
+			ok := false
+			if unpacked != nil {
+				entries, ok = unpacked(a)
+			}
+			if !ok {
+				lost = true
+				continue
+			}
+			for _, e := range entries {
+				if e.IsInt {
+					fillPosition(a)
+				} else {
+					fillName(a, e.Key)
+				}
+			}
 		case a.Name == nil:
 			fillPosition(a)
 		default:
@@ -1748,6 +1768,21 @@ func findOverwrites(sig *signature, args *ast.ArgList) []overwrite {
 		}
 	}
 	return found
+}
+
+// shapeEntries is what unpacking a value of type t passes, when the type
+// says it entry by entry: a sealed array shape with no optional entry.
+func shapeEntries(t types.Type) ([]types.ShapeEntry, bool) {
+	s, ok := t.(types.Shape)
+	if !ok || s.Unsealed {
+		return nil, false
+	}
+	for _, e := range s.Entries {
+		if e.Optional {
+			return nil, false
+		}
+	}
+	return s.Entries, true
 }
 
 // reportOverwrites reports what findOverwrites found as P2010, the code a
@@ -1775,18 +1810,28 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 	// A partial application binds its arguments now and leaves the
 	// placeholders' parameters to the closure it creates.
 	partial := args.Partial()
-	// The names that overwrite an argument before them. PHP throws the
-	// overwrite first, so what follows from it — a parameter it leaves
-	// unbound, the overwriting value against the parameter's type — is not
-	// reported as well, and neither is the overwrite in a closure PHP's
-	// compiler rejects (P1003).
-	found := findOverwrites(sig, args)
-	if !rejectedClosure(sig.node, args) {
-		x.reportOverwrites(sig, found)
+	// The names that overwrite an argument before them, found here when no
+	// argument is unpacked and otherwise once the unpacked values are typed
+	// (below). PHP throws the overwrite first, so what follows from it — a
+	// parameter it leaves unbound, the overwriting value against the
+	// parameter's type — is not reported as well, and neither is the
+	// overwrite in a closure PHP's compiler rejects (P1003).
+	hasUnpack := false
+	if args != nil {
+		for _, a := range args.Args {
+			hasUnpack = hasUnpack || a.Unpack
+		}
 	}
+	rejected := rejectedClosure(sig.node, args)
 	over := map[*ast.Arg]bool{}
-	for _, o := range found {
-		over[o.arg] = true
+	if !hasUnpack {
+		found := findOverwrites(sig, args, nil)
+		if !rejected {
+			x.reportOverwrites(sig, found)
+		}
+		for _, o := range found {
+			over[o.arg] = true
+		}
 	}
 	var shape *pfaShape
 	if partial {
@@ -1890,6 +1935,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 	seenNamed := false
 	unpacked := false
 	placeholder := false
+	unpackTypes := map[*ast.Arg]types.Type{}
 	if args != nil {
 		for i, a := range args.Args {
 			if a.Placeholder != nil {
@@ -1905,6 +1951,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 					continue
 				}
 				t := x.expr(a.Value, env, nil)
+				unpackTypes[a] = t
 				if _, _, ok := types.IterableKV(t, x.p()); (!ok && !types.IsMixed(t)) || mayNotIterate(t) {
 					x.report(a.S, P2303, "cannot unpack %s", x.typeName(t))
 				}
@@ -2149,9 +2196,28 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			x.report(span, P3002, "type argument %s inferred for %s of %s is not a subtype of its bound %s", x.typeName(v), tp.Name, sig.name, x.typeName(bound))
 		}
 	}
+	// With an unpacked argument the overwrites wait for its type: a sealed
+	// shape says what it fills, `label(...['a'], prefix: 'b')` and
+	// `label('a', ...$args, text: 'b')` with `$args` an array{text: …}.
+	if hasUnpack && !rejected {
+		for i, b := range bindings {
+			if b.arg.Unpack {
+				unpackTypes[b.arg] = argTypes[i]
+			}
+		}
+		found := findOverwrites(sig, args, func(a *ast.Arg) ([]types.ShapeEntry, bool) {
+			return shapeEntries(unpackTypes[a])
+		})
+		x.reportOverwrites(sig, found)
+		for _, o := range found {
+			if !o.arg.Unpack {
+				over[o.arg] = true
+			}
+		}
+	}
 	// Check acceptability with the final substitution.
 	for i, b := range bindings {
-		if b.param.ByRef {
+		if b.param.ByRef || over[b.arg] {
 			continue
 		}
 		pt := paramType(b.param)
