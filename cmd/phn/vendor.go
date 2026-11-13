@@ -12,11 +12,11 @@ package main
 // lists under "committed" (design/roadmap.md D28, design/tooling.md §3.7,
 // T18): a library published for PHP projects at large, installed as plain
 // PHP by a project without phn. The build leaves such a root as installed:
-// it writes no output and no stamp there and removes nothing. A committed
-// root that came without its outputs fails the build, which does not
-// compile it instead: the same release is broken for every project without
-// phn. The project's check and build still read such a package from its
-// sources.
+// it writes no output and no stamp there, and removes nothing but what a
+// build of an earlier release left (earlier.go). A committed root that
+// came without its outputs fails the build, which does not compile it
+// instead: the same release is broken for every project without phn. The
+// project's check and build still read such a package from its sources.
 
 import (
 	"crypto/sha256"
@@ -180,9 +180,10 @@ func committedGapsSummary(n int) string {
 
 // buildVendor is `phn build --vendor`: every installed Phaenon package is
 // compiled whose sources, compiler, target or installed set changed since
-// its last build, but for the roots it commits. It fails when an output
-// cannot be written, and before it builds anything when a committed root
-// came without its outputs.
+// its last build, but for the roots it commits, where it removes only what
+// an earlier build left. It fails when an output cannot be written, and
+// before it builds or removes anything when a committed root came without
+// its outputs.
 func buildVendor() {
 	dir := vendorComposerDir()
 	installed := filepath.Join(dir, "installed.json")
@@ -216,6 +217,17 @@ func buildVendor() {
 	}
 	if broken > 0 {
 		fail("%s", committedGapsSummary(broken))
+	}
+	// Then, and only when every package came whole, what an earlier build
+	// left in a root its package now commits is removed (earlier.go).
+	for _, p := range pkgs {
+		for _, e := range p.earlierBuilds() {
+			if line, warning := e.report(strings.TrimSpace(p.Name + " " + p.Version)); warning {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", line)
+			} else {
+				fmt.Println(line)
+			}
+		}
 	}
 	compiler := compilerStamp()
 	built, current, failed, left := 0, 0, 0, 0

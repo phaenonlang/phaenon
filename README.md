@@ -99,13 +99,26 @@ It is for a library published for PHP projects at large, which a project that ha
 installs as the plain PHP it compiles to (`roadmap.md` D28). In the library's own project the key
 changes nothing: `phn build`, `phn watch` and the editor build a committed root as any other, which
 is how its outputs are made and kept current. It speaks where the library is an installed package:
-`phn build --vendor` leaves such a root as installed, with no output written, no stamp and nothing
-removed, and builds the package's other roots as before. A committed root that came without its
+`phn build --vendor` leaves such a root as installed, with no output written and no stamp, and
+builds the package's other roots as before. A committed root that came without its
 outputs (no output directory, or a `.phn` with no `.php` there) fails the command with an error
 naming the package, its version and the root, and nothing is built in its place: the same release
 is broken for every project without `phn`, and it is the package's to repair. The project that
 installed it can report it, or require a version that has its outputs. A project written in
 Phaenon still reads such a package from its `.phn`, as it reads any installed Phaenon package.
+
+One thing is removed from a committed root: what a build of an earlier release left there. A
+library that shipped its sources alone was built where it is installed, and an upgrade that keeps
+the directory (a source install, which is a git checkout) leaves that build's stamp, `.phn-build`,
+and the outputs of the sources the new release dropped beside the committed files, where they
+still load. Where a committed root's output directory holds the stamp, `phn build --vendor`
+removes the files no source stands behind, by the rule of `phn build` itself, then the stamp, and
+says so in one line; the next run finds no stamp and says nothing. It removes nothing it is not
+sure of. With a root or an output directory that is a symbolic link or lies behind one, a source
+directory it cannot read, or a link among the sources that leads nowhere, it leaves the whole root
+as it is and warns; a symbolic link in the output directory is neither followed nor removed; a
+file that cannot be removed is a warning, and the stamp then stays for the next run. A package
+that came without its outputs is not touched at all.
 
 ```sh
 phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function title()` → `title()`, nested calls as |> pipelines, canonical layout
