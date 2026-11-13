@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -259,88 +260,156 @@ func TestBuildVendorBuildsTheRootsNotCommitted(t *testing.T) {
 }
 
 // A committed root installed without its outputs is an error naming the
-// package and the root. The command fails before it builds anything, the
-// broken root and the other packages included: a build would hide a release
-// that is broken for every project without phn.
+// package, its version and the root, and saying what the project can do
+// about another package's release. The command fails before it builds
+// anything, the broken root and the other packages included: a build would
+// hide a release that is broken for every project without phn.
 func TestBuildVendorMissingCommittedOutputs(t *testing.T) {
 	bin := phnBinary(t)
-	const summary = "1 installed packages lack outputs they commit, and nothing was built"
-	for _, c := range []struct {
-		name   string
-		remove []string
-		write  map[string]string
-		want   string // the package's error; empty when the build passes
-	}{
-		{
-			name:   "no output directory",
-			remove: []string{".src"},
-			want:   "acme/kit: its phaenon.json commits the outputs of the root src, but the package is installed without them: .src is missing\n",
-		},
-		{
-			name:   "one output",
-			remove: []string{".src/Box.php"},
-			want:   "acme/kit: its phaenon.json commits the outputs of the root src, but the package is installed without them: .src/Box.php is missing\n",
-		},
-		{
-			name:   "several outputs",
-			remove: []string{".src/Box.php", ".src/Sub"},
-			write:  map[string]string{"src/Sub/More.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class More {}\n"},
-			want:   "acme/kit: its phaenon.json commits the outputs of the root src, but the package is installed without them: .src/Box.php is missing, and 2 more\n",
-		},
-		{
-			name:  "a directory where the output should be",
-			write: map[string]string{"src/Dir.phn": "namespace Acme\\Kit;\n\nfinal class Dir {}\n", ".src/Dir.php/keep": ""},
-			want:  "acme/kit: its phaenon.json commits the outputs of the root src, but the package is installed without them: .src/Dir.php is missing\n",
-		},
-		{
-			// Presence is asked of the compiled files alone.
-			name:   "a copy",
-			remove: []string{".src/data.json"},
-		},
-		{
-			// A committed root the install does not have is not checked.
-			name:   "the root itself",
-			remove: []string{"src", ".src"},
-		},
-		{
-			// Sources under a nested vendor directory are not the root's.
-			name:  "a source under a nested vendor directory",
-			write: map[string]string{"src/vendor/other/Thing.phn": "namespace Other;\n\nfinal class Thing {}\n"},
-		},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			root := committedTree(t)
+	root := committedTree(t)
+	if err := os.Remove(filepath.Join(root, "vendor/acme/kit/.src/Box.php")); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(t, filepath.Join(root, "vendor"))
+
+	stdout, stderr, err := run(t, root, bin, "build", "--vendor")
+
+	var exit *exec.ExitError
+	if !asExit(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("phn build --vendor: %v, want exit status 1\n%s%s", err, stdout, stderr)
+	}
+	want := "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: .src/Box.php is missing\n" +
+		committedGapsSummary(1) + "\n"
+	if stderr != want || stdout != "" {
+		t.Errorf("stdout:\n%s\nstderr:\n%s\nwant on stderr\n%s", stdout, stderr, want)
+	}
+	expectSnapshot(t, "the vendor directory", filepath.Join(root, "vendor"), before)
+}
+
+// committedOutputVectors is testdata/committed-outputs.json, the reference
+// of the check of an installed package's committed roots, which the
+// Composer plugin's is held to as well.
+type committedOutputVectors struct {
+	Summary map[string]string `json:"summary"`
+	Vectors []struct {
+		Name       string            `json:"name"`
+		Project    string            `json:"project"`
+		Files      map[string]string `json:"files"`
+		Links      map[string]string `json:"links"`
+		Unreadable []string          `json:"unreadable"`
+		Errors     []string          `json:"errors"`
+		Builds     bool              `json:"builds"`
+		Undecided  bool              `json:"undecided"`
+	} `json:"vectors"`
+}
+
+// The check's vectors, each as a package installed in a project of its own:
+// `phn build --vendor` prints the errors and the summary, whole, and fails;
+// without errors it builds the roots the package does not commit, or finds
+// nothing to build.
+func TestCommittedOutputVectors(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "committed-outputs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors committedOutputVectors
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	if len(vectors.Vectors) == 0 || len(vectors.Summary) == 0 {
+		t.Fatal("no vectors")
+	}
+	for n, want := range vectors.Summary {
+		count, err := strconv.Atoi(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := committedGapsSummary(count); got != want {
+			t.Errorf("the summary for %d packages:\n%s\nwant\n%s", count, got, want)
+		}
+	}
+	bin := phnBinary(t)
+	for _, v := range vectors.Vectors {
+		t.Run(v.Name, func(t *testing.T) {
+			if v.Undecided && os.Getuid() == 0 {
+				t.Skip("root reads every directory")
+			}
+			root := t.TempDir()
 			kit := filepath.Join(root, "vendor/acme/kit")
-			for _, path := range c.remove {
-				if err := os.RemoveAll(filepath.Join(kit, path)); err != nil {
+			writeTree(t, root, map[string]string{
+				"composer.json":                     `{"name": "acme/root", "require": {"php": ">=8.5", "acme/kit": "*"}}`,
+				"vendor/composer/installed.json":    `{"packages": [{"name": "acme/kit", "version": "1.0.0", "install-path": "../acme/kit"}], "dev": true, "dev-package-names": []}`,
+				"vendor/composer/autoload_psr4.php": "<?php\n\nreturn array();\n",
+				"vendor/acme/kit/composer.json":     `{"name": "acme/kit", "require": {"php": ">=8.5"}}`,
+				"vendor/acme/kit/phaenon.json":      v.Project,
+			})
+			writeTree(t, kit, v.Files)
+			for link, target := range v.Links {
+				if err := os.Symlink(filepath.FromSlash(target), filepath.Join(kit, link)); err != nil {
 					t.Fatal(err)
 				}
 			}
-			writeTree(t, kit, c.write)
-			before, shipped := snapshot(t, filepath.Join(root, "vendor")), snapshot(t, kit)
+			for _, dir := range v.Unreadable {
+				if err := os.Chmod(filepath.Join(kit, dir), 0); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { os.Chmod(filepath.Join(kit, dir), 0o755) })
+			}
 
 			stdout, stderr, err := run(t, root, bin, "build", "--vendor")
 
-			if c.want == "" {
-				if err != nil {
-					t.Fatalf("phn build --vendor: %v\n%s%s", err, stdout, stderr)
-				}
-				expectSnapshot(t, "acme/kit", kit, shipped)
-				return
-			}
 			var exit *exec.ExitError
-			if !asExit(err, &exit) || exit.ExitCode() != 1 {
-				t.Fatalf("phn build --vendor: %v, want exit status 1\n%s%s", err, stdout, stderr)
+			switch {
+			case v.Undecided:
+				if !asExit(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(stderr, "permission denied") {
+					t.Errorf("phn build --vendor: %v, want exit status 1 and the directory's error\n%s%s", err, stdout, stderr)
+				}
+			case len(v.Errors) > 0:
+				want := strings.Join(v.Errors, "\n") + "\n" + vectors.Summary["1"] + "\n"
+				if !asExit(err, &exit) || exit.ExitCode() != 1 || stderr != want || stdout != "" {
+					t.Errorf("phn build --vendor: %v\nstdout:\n%s\nstderr:\n%s\nwant exit status 1 and on stderr\n%s", err, stdout, stderr, want)
+				}
+			case v.Builds:
+				if err != nil || !strings.HasSuffix(stdout, "1 installed packages built, 0 up to date\n") {
+					t.Errorf("phn build --vendor: %v, want the package built\n%s%s", err, stdout, stderr)
+				}
+			default:
+				if want := "0 installed packages built, 0 up to date, 1 left as installed with their committed outputs\n"; err != nil || stdout != want || stderr != "" {
+					t.Errorf("phn build --vendor: %v, want nothing to build\n%s%s", err, stdout, stderr)
+				}
 			}
-			if !strings.HasPrefix(stderr, c.want) || !strings.Contains(stderr, summary) {
-				t.Errorf("stderr:\n%s\nwant\n%s… %s …", stderr, c.want, summary)
-			}
-			if stdout != "" {
-				t.Errorf("stdout:\n%s", stdout)
-			}
-			expectSnapshot(t, "the vendor directory", filepath.Join(root, "vendor"), before)
 		})
 	}
+}
+
+// The roots a package does not commit are compiled with the ones it does:
+// a change of a committed root's sources makes their outputs stale, and the
+// package is built again.
+func TestBuildVendorRebuildsWhenACommittedRootChanges(t *testing.T) {
+	bin := phnBinary(t)
+	root := committedTree(t)
+	kit := filepath.Join(root, "vendor/acme/kit")
+	writeTree(t, kit, map[string]string{
+		"tests/BoxTest.phn": "namespace Acme\\Kit\\Tests;\n\nuse Acme\\Kit\\Box;\n\nfunction unbox(Box<int> $b): int => $b->get();\n",
+	})
+	if stdout, stderr, err := run(t, root, bin, "build", "--vendor"); err != nil || strings.Contains(stderr, "warning") {
+		t.Fatalf("phn build --vendor: %v\n%s%s", err, stdout, stderr)
+	}
+	if stdout, _, _ := run(t, root, bin, "build", "--vendor"); !strings.HasSuffix(stdout, "0 installed packages built, 2 up to date\n") {
+		t.Fatalf("a second build should skip both packages:\n%s", stdout)
+	}
+	shipped := snapshot(t, filepath.Join(kit, ".src"))
+
+	writeTree(t, kit, map[string]string{"src/Box.phn": strings.Replace(kitBox, "get()", "value()", 1)})
+	stdout, stderr, err := run(t, root, bin, "build", "--vendor")
+
+	if err != nil || !strings.HasSuffix(stdout, "1 installed packages built, 1 up to date\n") {
+		t.Errorf("a change in the committed root should rebuild the package (%v):\n%s%s", err, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "BoxTest.phn:5") || !strings.Contains(stderr, "warning P2") {
+		t.Errorf("the rebuild should report what the change broke in the tests root, as a warning:\n%s", stderr)
+	}
+	expectSnapshot(t, "acme/kit's committed root", filepath.Join(kit, ".src"), shipped)
 }
 
 // A project's checker reads an installed package's committed root from its

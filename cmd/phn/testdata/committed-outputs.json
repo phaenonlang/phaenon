@@ -1,0 +1,234 @@
+{
+  "format": "The check `phn build --vendor` and the Composer plugin make of an installed package's committed roots (../design/tooling.md §3.7): the outputs are there, or the release is broken. Each vector is the package acme/kit 1.0.0 as installed: \"project\" is its phaenon.json, \"files\" its other files by path, \"links\" symbolic links with their targets, \"unreadable\" directories nobody may read. \"errors\" are the errors of the check, whole and in order, and \"summary\" is the line that follows them, by the number of packages in error. Without errors, \"builds\" says whether the install has a root for phn to build. \"undecided\" marks a tree the plugin does not judge, leaving the package in the build, where phn fails.",
+  "summary": {
+    "1": "1 installed packages lack outputs they commit, and nothing was built: a build here would hide a release that is broken for every project without phn. This project cannot repair another package's release: report it to that package's maintainers, or require a version of the package that has its outputs",
+    "3": "3 installed packages lack outputs they commit, and nothing was built: a build here would hide a release that is broken for every project without phn. This project cannot repair another package's release: report it to that package's maintainers, or require a version of the package that has its outputs"
+  },
+  "vectors": [
+    {
+      "name": "every output is there, and the install has no root to build",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n"
+      },
+      "errors": [],
+      "builds": false
+    },
+    {
+      "name": "a root the package does not commit is in the install",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        "tests/T.phn": "namespace Acme\\Kit\\Tests;\n\nfinal class T {}\n"
+      },
+      "errors": [],
+      "builds": true
+    },
+    {
+      "name": "no output directory",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n"
+      },
+      "errors": [
+        "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: .src is missing"
+      ]
+    },
+    {
+      "name": "a file where the output directory should be",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src": "not a directory\n"
+      },
+      "errors": [
+        "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: .src is missing"
+      ]
+    },
+    {
+      "name": "one output",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/data.json": "{}\n"
+      },
+      "errors": [
+        "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: .src/Sub/B.php is missing"
+      ]
+    },
+    {
+      "name": "several outputs: the first by its path, and the count of the rest",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/data.json": "{}\n",
+        "src/A/X.phn": "namespace Acme\\Kit\\A;\n\nfinal class X {}\n",
+        "src/Z.phn": "namespace Acme\\Kit;\n\nfinal class Z {}\n"
+      },
+      "errors": [
+        "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: .src/A.php is missing, and 3 more"
+      ]
+    },
+    {
+      "name": "a directory where an output should be",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        "src/Dir.phn": "namespace Acme\\Kit;\n\nfinal class Dir {}\n",
+        ".src/Dir.php/keep": ""
+      },
+      "errors": [
+        "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: .src/Dir.php is missing"
+      ]
+    },
+    {
+      "name": "a copy of a file that is no source is not asked for",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n"
+      },
+      "errors": [],
+      "builds": false
+    },
+    {
+      "name": "a committed root the install does not have is not asked for",
+      "project": "{\"roots\": {\"src\": \".src\", \"lib\": \".lib\"}, \"committed\": [\"lib\", \"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n"
+      },
+      "errors": [],
+      "builds": false
+    },
+    {
+      "name": "sources under a nested vendor directory are not the root's",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        "src/vendor/other/Thing.phn": "namespace Other;\n\nfinal class Thing {}\n"
+      },
+      "errors": [],
+      "builds": false
+    },
+    {
+      "name": "a linked directory in a root is not followed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        "elsewhere/X.phn": "namespace Acme\\Kit;\n\nfinal class X {}\n"
+      },
+      "links": {
+        "src/Linked": "../elsewhere"
+      },
+      "errors": [],
+      "builds": false
+    },
+    {
+      "name": "a linked file is a source",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        "elsewhere/X.phn": "namespace Acme\\Kit;\n\nfinal class X {}\n"
+      },
+      "links": {
+        "src/L.phn": "../elsewhere/X.phn"
+      },
+      "errors": [
+        "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: .src/L.php is missing"
+      ]
+    },
+    {
+      "name": "a root that is a link holds no sources",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "elsewhere/X.phn": "namespace Acme\\Kit;\n\nfinal class X {}\n",
+        ".src/keep": ""
+      },
+      "links": {
+        "src": "elsewhere"
+      },
+      "errors": [],
+      "builds": false
+    },
+    {
+      "name": "two roots, in the order of their names",
+      "project": "{\"roots\": {\"src\": \".src\", \"lib\": \".lib\"}, \"committed\": [\"src\", \"lib\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        "lib/L.phn": "namespace Acme\\Kit;\n\nfinal class L {}\n"
+      },
+      "errors": [
+        "acme/kit 1.0.0: its phaenon.json commits the outputs of the root lib, but this release is installed without them: .lib is missing",
+        "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: .src/A.php is missing"
+      ]
+    },
+    {
+      "name": "a directory that cannot be read: the plugin leaves the package to phn, which fails on it",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n"
+      },
+      "unreadable": [
+        "src/Sub"
+      ],
+      "undecided": true,
+      "errors": []
+    }
+  ]
+}

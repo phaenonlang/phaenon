@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 )
 
 // stampFile records, in each output directory of an installed package, what
@@ -40,6 +41,7 @@ const stampFile = ".phn-build"
 // installedPackage is one package of installed.json.
 type installedPackage struct {
 	Name        string `json:"name"`
+	Version     string `json:"version"`
 	InstallPath string `json:"install-path"`
 	dir         string // where it is installed, relative to the working directory when under it
 }
@@ -148,6 +150,11 @@ func installedSources(composerDir string) map[string]string {
 // committedGap is the error of a package installed without the outputs of
 // the root src, which it commits: missing is what missingOutputs found. The
 // paths are relative to the package, as its project file writes them.
+//
+// This text and committedGapsSummary's are the Composer plugin's too
+// (composer/src/ProjectFile.php), which makes the same check before it
+// fetches a compiler: testdata/committed-outputs.json holds both to them,
+// in full.
 func committedGap(p phaenonPackage, src string, missing []string) string {
 	rel := func(path string) string {
 		if r, err := filepath.Rel(p.dir, path); err == nil {
@@ -159,8 +166,16 @@ func committedGap(p phaenonPackage, src string, missing []string) string {
 	if n := len(missing) - 1; n > 0 {
 		more = fmt.Sprintf(", and %d more", n)
 	}
-	return fmt.Sprintf("%s: its %s commits the outputs of the root %s, but the package is installed without them: %s is missing%s",
-		p.Name, ProjectFile, rel(src), rel(missing[0]), more)
+	return fmt.Sprintf("%s: its %s commits the outputs of the root %s, but this release is installed without them: %s is missing%s",
+		strings.TrimSpace(p.Name+" "+p.Version), ProjectFile, rel(src), rel(missing[0]), more)
+}
+
+// committedGapsSummary ends the errors of n packages: what the failure
+// means for the project that installed them, which cannot repair another
+// package's release, and what it can do.
+func committedGapsSummary(n int) string {
+	return fmt.Sprintf("%d installed packages lack outputs they commit, and nothing was built: a build here would hide a release that is broken for every project without phn. "+
+		"This project cannot repair another package's release: report it to that package's maintainers, or require a version of the package that has its outputs", n)
 }
 
 // buildVendor is `phn build --vendor`: every installed Phaenon package is
@@ -200,7 +215,7 @@ func buildVendor() {
 		}
 	}
 	if broken > 0 {
-		fail("%d installed packages lack outputs they commit, and nothing was built: a build here would hide a release that is broken for every project without phn", broken)
+		fail("%s", committedGapsSummary(broken))
 	}
 	compiler := compilerStamp()
 	built, current, failed, left := 0, 0, 0, 0
@@ -214,10 +229,20 @@ func buildVendor() {
 			continue
 		}
 		tgt := projectTarget(p.proj, roots)
+		// The roots that are built are compiled with the committed ones,
+		// whose declarations they read from the sources: a change there
+		// makes their outputs stale too. A package that commits nothing
+		// keeps the stamp it had.
+		with := ""
+		for _, r := range present {
+			if p.proj.commits(r) {
+				with += fmt.Sprintf("with %s\n", treeDigest(r))
+			}
+		}
 		stamps := map[string]string{}
 		fresh := true
 		for _, r := range roots {
-			stamps[r] = fmt.Sprintf("phn %s\ntarget %s\ninstalled %s\nsources %s\n", compiler, tgt.Version, digest(installedData), treeDigest(r))
+			stamps[r] = fmt.Sprintf("phn %s\ntarget %s\ninstalled %s\nsources %s\n%s", compiler, tgt.Version, digest(installedData), treeDigest(r), with)
 			cur, err := os.ReadFile(filepath.Join(p.proj.Roots[r], stampFile))
 			fresh = fresh && err == nil && string(cur) == stamps[r]
 		}

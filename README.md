@@ -83,7 +83,8 @@ outputs, which are gitignored; the IDE and the repository hold the sources. The 
 at the same depth, not a nested mirror, so that a compiled file's `__DIR__` sits where its source's
 does: `__DIR__.'/../config/services.yaml'` and `\dirname(__DIR__, 3)` keep resolving. Every other
 file under a root (fixtures, YAML) is copied over, so `__DIR__.'/Fixture'` exists there too, and an
-output whose source is gone is removed. `exclude` names the paths the checker leaves alone
+output whose source is gone is removed. Roots and their outputs are separate directories, none of
+them another or inside another, so that every file compiles into one place. `exclude` names the paths the checker leaves alone
 (fixtures another analyser owns); `phn build` compiles them all the same. `unused` narrows which
 attributes spare a private property the dead-code warnings (above).
 
@@ -101,9 +102,10 @@ is how its outputs are made and kept current. It speaks where the library is an 
 `phn build --vendor` leaves such a root as installed, with no output written, no stamp and nothing
 removed, and builds the package's other roots as before. A committed root that came without its
 outputs (no output directory, or a `.phn` with no `.php` there) fails the command with an error
-naming the package and the root, and nothing is built in its place: the same release is broken for
-every project without `phn`. A project written in Phaenon still reads such a package from its
-`.phn`, as it reads any installed Phaenon package.
+naming the package, its version and the root, and nothing is built in its place: the same release
+is broken for every project without `phn`, and it is the package's to repair. The project that
+installed it can report it, or require a version that has its outputs. A project written in
+Phaenon still reads such a package from its `.phn`, as it reads any installed Phaenon package.
 
 ```sh
 phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function title()` → `title()`, nested calls as |> pipelines, canonical layout
