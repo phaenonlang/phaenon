@@ -9,7 +9,8 @@
 //     the open buffers as they are, after a pause in typing;
 //   - a save re-checks the whole project in the background, publishes every
 //     file's diagnostics, and, with build on save, writes the outputs as
-//     phn build does. A newer save cancels a check still running.
+//     phn build does. A newer save cancels a check still running, and
+//     waits for a build that is.
 //
 // The answers to hover, go to definition, completion and signature help
 // come from the latest check of the document: the type the checker gave
@@ -96,8 +97,13 @@ type Server struct {
 	wg         sync.WaitGroup
 	// query serialises the requests that read a check's program: the
 	// model builds signatures and loads vendor classes on demand, writing
-	// into itself.
+	// into itself. A document's check is published under it too, since
+	// current hands requests the check the timer publishes.
 	query sync.Mutex
+	// project serialises the project checks: a check that a newer one
+	// replaced may still be building, and two builds at once would both
+	// write the outputs.
+	project sync.Mutex
 }
 
 // document is an open buffer.
@@ -531,6 +537,10 @@ func (s *Server) scheduleFile(d *document, after time.Duration) {
 	d.timer = time.AfterFunc(after, func() {
 		s.wg.Add(1)
 		defer s.wg.Done()
+		// A request may hold the check this publishes, and load into its
+		// program while the related declarations are read from it.
+		s.query.Lock()
+		defer s.query.Unlock()
 		if r, err := s.current(d.path); err != nil {
 			s.logf("check %s: %v", d.path, err)
 		} else if r != nil {
@@ -704,6 +714,13 @@ func (s *Server) scheduleProject(after time.Duration, build bool) {
 	s.projectT = time.AfterFunc(after, func() {
 		s.wg.Add(1)
 		defer s.wg.Done()
+		// The check this one replaces stops at its next look at the
+		// generation, but not inside its build.
+		s.project.Lock()
+		defer s.project.Unlock()
+		if s.stale(gen) {
+			return
+		}
 		if _, err := s.safely(func() (any, error) { return nil, s.checkProject(gen) }); err != nil {
 			s.logf("project: %v", err)
 		}

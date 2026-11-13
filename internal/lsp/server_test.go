@@ -27,6 +27,9 @@ type fakeHost struct {
 	mu     sync.Mutex
 	builds int
 	built  []string
+	// vendor, when set, is a loader every program shares, as phn's programs
+	// share a project's Composer maps.
+	vendor program.Loader
 }
 
 var stubCache = program.NewParseCache() // the stubs parse once for every test
@@ -64,6 +67,9 @@ func (h *fakeHost) Program(files []string, read func(string) ([]byte, error), ch
 	p.Parses = h.cache
 	if err := p.LoadStubs(); err != nil {
 		return nil, nil, err
+	}
+	if h.vendor != nil {
+		p.AddLoader(h.vendor)
 	}
 	var diags []checker.Diagnostic
 	for _, f := range files {
@@ -134,9 +140,20 @@ func start(t *testing.T, files map[string]string, opts map[string]any) *client {
 // its rootUri.
 func startAt(t *testing.T, files map[string]string, opts map[string]any, rootOf func(string) string) *client {
 	t.Helper()
-	host := newFakeHost(t, files)
-	srv := New(host, io.Discard)
-	srv.Debounce = 10 * time.Millisecond
+	return startHost(t, newFakeHost(t, files), nil, opts, rootOf)
+}
+
+// startHost starts srv on host's project, or, with srv nil, a server of
+// host itself that pauses 10 ms after an edit.
+func startHost(t *testing.T, host *fakeHost, srv *Server, opts map[string]any, rootOf func(string) string) *client {
+	t.Helper()
+	if srv == nil {
+		srv = New(host, io.Discard)
+		srv.Debounce = 10 * time.Millisecond
+	}
+	if rootOf == nil {
+		rootOf = func(root string) string { return root }
+	}
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	c := &client{t: t, in: inW, out: bufio.NewReader(outR), msgs: make(chan map[string]any, 100), host: host, server: srv, done: make(chan error, 1)}
