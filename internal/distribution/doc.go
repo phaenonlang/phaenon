@@ -14,8 +14,12 @@
 // ran, and the tests serve it as the release asset when they exercise the
 // download. One test builds the real phn instead, and runs what it compiles.
 //
-// TestProjectFileReadersAgree holds the plugin's reader of phaenon.json to
-// the compiler's reference, and needs php alone.
+// A library that commits its outputs (design/roadmap.md D28) is a fixture
+// of its own: a git repository the real phn built, installed from the
+// archive git makes of it and as a path repository, by projects with the
+// plugin and without it (committed_test.go). TestProjectFileReadersAgree
+// holds the plugin's reader of phaenon.json to the compiler's reference,
+// and needs php alone.
 //
 // The package holds no Go code; it exists for its tests.
 package distribution

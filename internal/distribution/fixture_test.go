@@ -192,6 +192,8 @@ type project struct {
 	config        map[string]any // added to the root's config
 	libraries     []string       // Phaenon libraries the root requires, such as "acme/lib"
 	packages      []plainPackage // packages of plain PHP the root requires, each at its version
+	dependencies  []dependency   // further packages the root requires, each from its repository
+	withoutPlugin bool           // the root does not require phaenon/phn: a project of plain PHP
 	mirror        *mirror        // binary-url and auth.json for the mirror
 	baseURL       bool           // binary-url as a base URL rather than a template
 	override      bool           // PHN_BINARY names the fake
@@ -216,11 +218,18 @@ func (p *project) write() {
 	t.Helper()
 	// With Packagist switched off, the plugin's own package is all there is
 	// to install: it requires none (design/tooling.md T16).
-	repositories := []any{
-		map[string]any{"packagist.org": false},
-		pathRepository(p.w.plugin, "phaenon/phn", "0.1.x-dev", p.symlinkPlugin),
+	repositories := []any{map[string]any{"packagist.org": false}}
+	require := map[string]string{}
+	config := map[string]any{}
+	if !p.withoutPlugin {
+		repositories = append(repositories, pathRepository(p.w.plugin, "phaenon/phn", "0.1.x-dev", p.symlinkPlugin))
+		require["phaenon/phn"] = "*"
+		config["allow-plugins"] = map[string]bool{"phaenon/phn": true}
 	}
-	require := map[string]string{"phaenon/phn": "*"}
+	for _, d := range p.dependencies {
+		repositories = append(repositories, d.repository)
+		require[d.name] = d.constraint
+	}
 	for _, name := range p.libraries {
 		repositories = append(repositories, pathRepository(p.w.library(name), name, "1.0.0", false))
 		require[name] = "*"
@@ -229,7 +238,6 @@ func (p *project) write() {
 		repositories = append(repositories, pathRepository(p.w.plainPackage(pkg), pkg.name, pkg.version, false))
 		require[pkg.name] = pkg.version
 	}
-	config := map[string]any{"allow-plugins": map[string]bool{"phaenon/phn": true}}
 	for key, value := range p.config {
 		config[key] = value
 	}
@@ -284,6 +292,12 @@ func (w *world) library(name string) string {
 	writeJSON(w.t, filepath.Join(dir, "phaenon.json"), map[string]any{"roots": map[string]string{"src": ".src"}})
 	writeFile(w.t, filepath.Join(dir, "src", "Thing.phn"), []byte("namespace "+strings.TrimSuffix(namespace, `\`)+";\n\nfinal class Thing\n{\n}\n"), 0o644)
 	return dir
+}
+
+// dependency is a package a root requires from a repository of its own.
+type dependency struct {
+	name, constraint string
+	repository       map[string]any
 }
 
 // plainPackage is a package of plain PHP: a composer.json and nothing
