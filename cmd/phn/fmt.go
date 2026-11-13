@@ -14,15 +14,18 @@ import (
 	"github.com/phaenonlang/phaenon/internal/parser"
 )
 
-// fmtCmd is `phn fmt [--check] [<file>...]` (design/tooling.md §5). Its
+// fmtCmd is `phn fmt [--check] [<path>...]` (design/tooling.md §5). Its
 // first layer is Phaenon's own layout (internal/format), on the .phn; its
 // second the project's PHP style: the project's fixer run on the outputs
 // through phn fix, which carries what it changes back to the .phn. The
 // first layer runs again after the second, since the fixer's changes can
 // leave what only it lays out, such as a blank line before the first line.
 //
-// Without files it formats the roots of phaenon.json. With --check nothing
-// is written and the status is 1 when either layer would change a file.
+// Without paths it formats the roots of phaenon.json; a directory given
+// stands for the .phn under it, the output directories left out. With
+// --check nothing is written and the status is 1 when either layer would
+// change a file. A file that does not parse is reported and left as it is,
+// the others are formatted, and the status is 1, with --check too.
 // With --stdin the first layer lays out standard input onto standard
 // output: the PhpStorm plugin's Reformat Code runs it after PhpStorm's own
 // formatter (design/tooling.md §5.1).
@@ -59,26 +62,34 @@ func fmtCmd(args []string) {
 		return
 	}
 	proj := loadProject()
-	files := fs.Args()
-	if len(files) == 0 {
+	paths := fs.Args()
+	if len(paths) == 0 {
 		proj.requireRoots("fmt")
-		files = collect(proj.roots(), proj.isOutput, ".phn")
+		paths = proj.roots()
 	}
-	changed, withdrawn := layoutWith(files, *check, withdrawnTests(proj, files))
+	files := collect(paths, func(path string) bool { return proj != nil && proj.isOutput(path) }, ".phn")
+	changed, withdrawn, parsed := layoutWith(files, *check, withdrawnTests(proj, files))
+	unparsed := ""
+	if n := len(files) - len(parsed); n > 0 {
+		unparsed = fmt.Sprintf(", %d that do not parse", n)
+	}
 	if *check {
-		fmt.Printf("%d files checked, %d not in Phaenon's layout\n", len(files), changed)
+		fmt.Printf("%d files checked, %d not in Phaenon's layout%s\n", len(files), changed, unparsed)
 	} else {
-		fmt.Printf("%d files formatted, %d changed in Phaenon's layout\n", len(files), changed)
+		fmt.Printf("%d files formatted, %d changed in Phaenon's layout%s\n", len(files), changed, unparsed)
 	}
 	status, left := 0, false
-	if fixer := proj.fixer(); fixer != nil {
+	// Given paths with no .phn under them that parses, the fixer is not
+	// run: without files to fix it would fix every file its configuration
+	// names.
+	if fixer := proj.fixer(); fixer != nil && (fs.NArg() == 0 || len(parsed) > 0) {
 		command := fixer
 		if fs.NArg() > 0 {
-			command = append(append([]string(nil), fixer...), outputsOf(proj, files)...)
+			command = append(append([]string(nil), fixer...), outputsOf(proj, parsed)...)
 		}
 		status, left = runFix(proj, command, *check)
 		if !*check {
-			if again := layoutFiles(files, false); len(again) > 0 {
+			if again := layoutFiles(parsed, false); len(again) > 0 {
 				// The fixer carried a change the first layer undoes: the
 				// sources keep Phaenon's layout, the outputs are built from
 				// them again, and the two layers disagree on every run.
@@ -95,16 +106,17 @@ func fmtCmd(args []string) {
 	switch {
 	case status != 0:
 		os.Exit(status)
-	case left || withdrawn || *check && changed > 0:
+	case left || withdrawn || len(parsed) < len(files) || *check && changed > 0:
 		os.Exit(1)
 	}
 }
 
 // layoutWith is layoutFiles with what a checked program knows of each
-// file's withdrawn type tests (withdrawnTests), and the number of files
-// changed and whether a withdrawn test was left as written, which it
-// reports.
-func layoutWith(files []string, check bool, checked map[string]format.Options) (changed int, left bool) {
+// file's withdrawn type tests (withdrawnTests). It returns the number of
+// files changed, whether a withdrawn test was left as written, and the
+// files that parse; it reports the withdrawn tests left, and the files
+// that do not parse, which it leaves as they are.
+func layoutWith(files []string, check bool, checked map[string]format.Options) (changed int, left bool, parsed []string) {
 	for _, path := range files {
 		src, err := os.ReadFile(path)
 		if err != nil {
@@ -117,6 +129,7 @@ func layoutWith(files []string, check bool, checked map[string]format.Options) (
 			fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)
 			continue
 		}
+		parsed = append(parsed, path)
 		for _, l := range lefts {
 			line, col := position(src, l.Span.Start)
 			fmt.Fprintf(os.Stderr, "%s:%d:%d: error P1001: %s\n", path, line, col, l.Msg)
@@ -132,7 +145,7 @@ func layoutWith(files []string, check bool, checked map[string]format.Options) (
 		}
 		writeFile(path, out)
 	}
-	return changed, left
+	return changed, left, parsed
 }
 
 // withdrawnTests is what the checked program knows of the withdrawn type

@@ -29,6 +29,8 @@ func main() {
 		usage()
 	}
 	switch os.Args[1] {
+	case "help", "-h", "--help":
+		fmt.Println(usageText())
 	case "version", "--version":
 		fmt.Println("phn " + version)
 	case "build":
@@ -58,9 +60,18 @@ func main() {
 	}
 }
 
+// usage prints the usage on standard error and ends phn with status 2: no
+// command, or one phn does not know. Asked for, with phn help, -h or
+// --help, it goes to standard output and phn succeeds (main).
 func usage() {
-	fmt.Fprintln(os.Stderr, strings.TrimSpace(`
+	fmt.Fprintln(os.Stderr, usageText())
+	os.Exit(2)
+}
+
+func usageText() string {
+	return strings.TrimSpace(`
 usage:
+  phn help                                                 print this usage (also -h, --help)
   phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [<path>...]
                                                            type-check and compile .phn files to .php
   phn build --vendor                                       compile the installed Composer packages that carry a
@@ -77,21 +88,23 @@ usage:
                                                            rebuild, run the tool again and report what it still
                                                            changes, with the rule behind each change for php-cs-fixer
                                                            and Rector; --check reports and writes no source
-  phn fmt [--check] [<file>...] | --stdin                  lay .phn files out: Phaenon's layout (the withdrawn fun,
+  phn fmt [--check] [<path>...] | --stdin                  lay .phn files out: Phaenon's layout (the withdrawn fun,
                                                            is and as rewritten, function lifted off methods, spaces
                                                            for tabs, braces, {}, one-line docblocks, the spacing of
                                                            type parameters and arguments, throws), then the
                                                            project's fixer through phn fix
                                                            (phaenon.json "fmt", or tools/php-cs-fixer or
-                                                           vendor/bin/php-cs-fixer); no files:
-                                                           the roots; --check writes nothing and fails on a change;
+                                                           vendor/bin/php-cs-fixer); a directory: its .phn, the
+                                                           outputs left out; no paths: the roots; --check writes
+                                                           nothing and fails on a change; a file that does not
+                                                           parse is left as it is and fails either;
                                                            --stdin: the first layer, standard input to output
   phn lsp                                                  the language server of the project around the working
                                                            directory, on stdin and stdout: diagnostics, hover, go to
                                                            definition, symbols, completion, signature help,
                                                            formatting; the outputs built on save
-  phn watch [--no-build] [--interval D]                    check and build the project each time one of its files
-                                                           changes
+  phn watch [--no-build] [--interval D]                    check and build the project around the working directory
+                                                           each time one of its files changes
   phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] <path>...
                                                            rewrite .php files as .phn; lift generic docblocks and bare
                                                            @throws into syntax, function off methods; write chains of
@@ -143,8 +156,8 @@ production deployment) from the local checkout, so a pasted trace maps too. A Gi
 command (::error file=…,line=…::) gets the source's file and lines, without its columns. A report
 on stdin is read whole; in coverage, the compiled lines that come from one source line count as
 that line, covered when any of them is.
---php reads the file as plain PHP (with <?php tags) instead of Phaenon.`))
-	os.Exit(2)
+--php reads the file as plain PHP (with <?php tags) instead of Phaenon.
+phn <command> --help lists the command's options.`)
 }
 
 func fail(format string, args ...any) {
@@ -1012,17 +1025,25 @@ func modelFile(p *program.Program, path string) *program.File {
 
 // ------------------------------------------------------------------ lex / print
 
-// modeAndFile parses the shared [--php] <file> arguments.
-func modeAndFile(args []string) (lexer.Mode, []byte) {
+// modeAndFile parses the [--php] <file> arguments lex and print share, and
+// answers --help as the other commands do.
+func modeAndFile(name string, args []string) (lexer.Mode, []byte) {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	php := fs.Bool("php", false, "read the file as plain PHP, with <?php tags, instead of Phaenon")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "usage: phn %s [--php] <file>\n", name)
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() != 1 {
+		fs.Usage()
+		os.Exit(2)
+	}
 	mode := lexer.ModePhaenon
-	if len(args) > 0 && args[0] == "--php" {
+	if *php {
 		mode = lexer.ModePHP
-		args = args[1:]
 	}
-	if len(args) != 1 {
-		usage()
-	}
-	src, err := os.ReadFile(args[0])
+	src, err := os.ReadFile(fs.Arg(0))
 	if err != nil {
 		fail("%v", err)
 	}
@@ -1031,7 +1052,7 @@ func modeAndFile(args []string) (lexer.Mode, []byte) {
 
 // lex prints the token stream of a file.
 func lex(args []string) {
-	mode, src := modeAndFile(args)
+	mode, src := modeAndFile("lex", args)
 	for _, t := range lexer.Tokenize(src, mode) {
 		fmt.Printf("%d\t%s\t%q\n", t.Line, t.Kind, t.Text(src))
 	}
@@ -1039,7 +1060,7 @@ func lex(args []string) {
 
 // printCmd parses a file and writes the canonical pretty-printed form.
 func printCmd(args []string) {
-	mode, src := modeAndFile(args)
+	mode, src := modeAndFile("print", args)
 	f, err := parser.Parse(src, mode)
 	if err != nil {
 		fail("%v", err)

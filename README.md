@@ -287,8 +287,9 @@ project checks the files that hold one first; `phn fmt --stdin`, with no program
 
 ```sh
 phn fmt                 # the roots: Phaenon's layout, then the fixer (phaenon.json "fmt", or tools/php-cs-fixer)
-phn fmt src/Foo.phn     # given files only
+phn fmt src/Foo.phn     # given files only; a directory stands for the .phn under it
 phn fmt --check         # CI: fail when either layer would change a file; nothing written
+                        # either form fails on a file that does not parse, and formats the others
 ```
 
 In editors, `phn lsp` is the checker as a language server (LSP over stdio, `design/tooling.md`
@@ -297,11 +298,14 @@ are, and the whole project on each save, building the outputs after it as `phn b
 answers hover, go to definition, document symbols, completion (after `|>`, the functions that
 take the left side), signature help and formatting (the first layer). The PhpStorm plugin
 (`../jetbrains`) starts it for diagnostics and build on save only, since PhpStorm's own PHP
-support answers the rest. `phn watch` checks and builds after each change, for a terminal.
+support answers the rest. `phn watch` checks and builds after each change, for a terminal. Both
+read `phaenon.json` and `composer.json` again when either changes; a project file that has become
+invalid is reported, and until it is fixed the project is checked as last read and nothing is
+built.
 
 ```sh
 phn lsp                 # the project around the working directory, on stdin and stdout
-phn watch               # check and build the roots each time a file changes; --no-build checks only
+phn watch               # the same project: check and build its roots each time a file changes; --no-build checks only
 phn fmt --stdin         # the first layer, standard input to standard output (the plugin's Reformat Code)
 ```
 
@@ -438,15 +442,16 @@ every other edit keeps line numbers exact. Design: `design/generics.md`, decisio
 phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [path...] # type-check and compile .phn → .php; no paths: phaenon.json
 phn check [--format=text|json|github|checkstyle] [--no-deprecations] [--exclude PATH]... path... # type-check .phn (and .php) files
 phn fix [--check] -- command [arg...]                 # run php-cs-fixer, Rector… on the outputs; carry their changes back to the .phn
-phn fmt [--check] [file...]                           # Phaenon's layout, then the project's fixer through phn fix; no files: the roots
+phn fmt [--check] [path...]                           # Phaenon's layout, then the project's fixer through phn fix; no paths: the roots
 phn fmt --stdin                                       # Phaenon's layout of standard input, onto standard output
 phn lsp                                               # the language server: diagnostics, hover, definition, completion, build on save
-phn watch [--no-build] [--interval D]                 # check and build the roots each time a file changes
+phn watch [--no-build] [--interval D]                 # check and build the project around the working directory each time a file changes
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Debug/…), as phaenon/debug ships it
 phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them, but for the roots they commit
 phn trace [--root PREFIX=LOCAL]... [text...]  # positions in compiled files → .phn: text, workflow commands, XML reports on stdin
 phn version                               # the version a release sets, dev otherwise
+phn help                                  # the usage, on standard output (also -h, --help); phn <command> --help: its options
 phn lex   [--php] file                    # token stream
 phn print [--php] file                    # parse and pretty-print
 ```

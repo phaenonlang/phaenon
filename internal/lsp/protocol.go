@@ -110,6 +110,13 @@ type FileEvent struct {
 	Type int    `json:"type"`
 }
 
+// ShowMessageParams is window/showMessage, a message the client shows the
+// user.
+type ShowMessageParams struct {
+	Type    int    `json:"type"` // 1 error, 2 warning, 3 info, 4 log
+	Message string `json:"message"`
+}
+
 type PublishDiagnosticsParams struct {
 	URI         string       `json:"uri"`
 	Version     *int         `json:"version,omitempty"`
