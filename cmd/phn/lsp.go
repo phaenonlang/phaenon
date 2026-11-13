@@ -38,11 +38,19 @@ func lspCmd(args []string) {
 	}
 }
 
-// enterProject moves to the project's root: the nearest directory above
-// the working directory with a phaenon.json, else with a composer.json.
-// Either way the process is then long-running: programs share their parsed
-// files, and a fail is a job's error, not the process's end.
+// enterProject moves to the project's root (toProjectRoot) and makes the
+// process a long-running one (longRunning).
 func enterProject() error {
+	if err := toProjectRoot(); err != nil {
+		return err
+	}
+	longRunning()
+	return nil
+}
+
+// toProjectRoot moves to the project's root: the nearest directory above
+// the working directory with a phaenon.json, else with a composer.json.
+func toProjectRoot() error {
 	dir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -65,12 +73,14 @@ func enterProject() error {
 	if root == "" {
 		root = dir
 	}
-	if err := os.Chdir(root); err != nil {
-		return err
-	}
+	return os.Chdir(root)
+}
+
+// longRunning makes the process a long-running one: programs share their
+// parsed files, and a fail is a job's error, not the process's end.
+func longRunning() {
 	share = newProgramShare()
 	failPanics = true
-	return nil
 }
 
 // projectHost is the project in the working directory, as phn check and
@@ -202,8 +212,9 @@ func (h *projectHost) ClassNames() []string {
 
 // watchCmd is `phn watch`: phn check and phn build each time a file of the
 // project changes, for terminals and editors without the server
-// (design/tooling.md §6.4). The standard library has no file events, so it
-// polls the roots' modification times.
+// (design/tooling.md §6.4). The project is the server's, found from the
+// working directory as phn lsp finds it. The standard library has no file
+// events, so it polls the roots' modification times.
 func watchCmd(args []string) {
 	fs := flag.NewFlagSet("watch", flag.ExitOnError)
 	noBuild := fs.Bool("no-build", false, "check only; write no outputs")
@@ -212,11 +223,11 @@ func watchCmd(args []string) {
 	if fs.NArg() > 0 {
 		fail("phn watch takes no paths: it watches the roots of %s", ProjectFile)
 	}
-	proj := loadProject()
-	proj.requireRoots("watch")
-	if err := enterProject(); err != nil {
+	if err := toProjectRoot(); err != nil {
 		fail("phn watch: %v", err)
 	}
+	loadProject().requireRoots("watch")
+	longRunning()
 	host := newProjectHost()
 	last := watchStamps(host)
 	for {

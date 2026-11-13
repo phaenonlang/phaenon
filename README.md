@@ -301,7 +301,7 @@ support answers the rest. `phn watch` checks and builds after each change, for a
 
 ```sh
 phn lsp                 # the project around the working directory, on stdin and stdout
-phn watch               # check and build the roots each time a file changes; --no-build checks only
+phn watch               # the same project: check and build its roots each time a file changes; --no-build checks only
 phn fmt --stdin         # the first layer, standard input to standard output (the plugin's Reformat Code)
 ```
 
@@ -441,7 +441,7 @@ phn fix [--check] -- command [arg...]                 # run php-cs-fixer, Rector
 phn fmt [--check] [file...]                           # Phaenon's layout, then the project's fixer through phn fix; no files: the roots
 phn fmt --stdin                                       # Phaenon's layout of standard input, onto standard output
 phn lsp                                               # the language server: diagnostics, hover, definition, completion, build on save
-phn watch [--no-build] [--interval D]                 # check and build the roots each time a file changes
+phn watch [--no-build] [--interval D]                 # check and build the project around the working directory each time a file changes
 phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] path... # rewrite .php as .phn (and re-lift .phn); --php writes the target
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Debug/…), as phaenon/debug ships it
 phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them, but for the roots they commit

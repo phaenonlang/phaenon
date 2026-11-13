@@ -90,8 +90,8 @@ usage:
                                                            directory, on stdin and stdout: diagnostics, hover, go to
                                                            definition, symbols, completion, signature help,
                                                            formatting; the outputs built on save
-  phn watch [--no-build] [--interval D]                    check and build the project each time one of its files
-                                                           changes
+  phn watch [--no-build] [--interval D]                    check and build the project around the working directory
+                                                           each time one of its files changes
   phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] <path>...
                                                            rewrite .php files as .phn; lift generic docblocks and bare
                                                            @throws into syntax, function off methods; write chains of

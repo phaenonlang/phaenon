@@ -141,19 +141,28 @@ func TestLSP(t *testing.T) {
 	}
 }
 
-// phn watch builds at start and again when a source changes.
-func TestWatch(t *testing.T) {
-	bin := phnBinary(t)
-	root := fixTree(t)
+// startWatch runs `phn watch` in dir until the test ends, and returns a
+// function that waits for a line of its output, standard output and error
+// together, holding want.
+func startWatch(t *testing.T, bin, dir string) (wait func(want string)) {
+	t.Helper()
 	cmd := exec.Command(bin, "watch", "--interval", "50ms")
-	cmd.Dir = root
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "PHN_PHP=/nonexistent-php")
-	out, _ := cmd.StdoutPipe()
-	cmd.Stderr = io.Discard
+	out, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stdout, cmd.Stderr = w, w
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer cmd.Process.Kill()
+	w.Close() // the child's copy keeps it open while phn watch runs
+	t.Cleanup(func() {
+		cmd.Process.Kill()
+		cmd.Wait()
+		out.Close()
+	})
 	lines := make(chan string, 100)
 	go func() {
 		sc := bufio.NewScanner(out)
@@ -162,7 +171,7 @@ func TestWatch(t *testing.T) {
 		}
 		close(lines)
 	}()
-	wait := func(want string) {
+	return func(want string) {
 		t.Helper()
 		timeout := time.After(20 * time.Second)
 		for {
@@ -179,6 +188,13 @@ func TestWatch(t *testing.T) {
 			}
 		}
 	}
+}
+
+// phn watch builds at start and again when a source changes.
+func TestWatch(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	wait := startWatch(t, bin, root)
 	wait("waiting for changes")
 	if _, err := os.Stat(filepath.Join(root, ".src/Box.php")); err != nil {
 		t.Fatalf("the first build: %v", err)
@@ -190,5 +206,18 @@ func TestWatch(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(root, ".src/Box.php"))
 	if !strings.Contains(string(data), "$a-$b") {
 		t.Errorf("the change was not built:\n%s", data)
+	}
+}
+
+// phn watch started in a directory of the project watches the project, as
+// phn lsp serves it: the nearest phaenon.json above (design/tooling.md
+// §6.4, §6.5).
+func TestWatchFromASubdirectory(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	wait := startWatch(t, bin, filepath.Join(root, "src"))
+	wait("waiting for changes")
+	if _, err := os.Stat(filepath.Join(root, ".src/Box.php")); err != nil {
+		t.Errorf("the project was not built: %v", err)
 	}
 }
