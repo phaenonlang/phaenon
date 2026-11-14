@@ -69,3 +69,118 @@ abstract class Miscounter extends Counter
         return '';
     }
 }
+
+// The nearest declaration up the parent classes is compared even where an
+// interface sits nearer: a parent that implements the interface inherits
+// the method from its own parent, and PHP checks the override against
+// that method.
+class Measure
+{
+    public function width(): int
+    {
+        return 1;
+    }
+
+    public function scale(int|string $by): void
+    {
+    }
+}
+
+class Ruler extends Measure
+{
+}
+
+interface Widths
+{
+    public function width(): int|string;
+
+    public function scale(int $by): void;
+}
+
+abstract class WideRuler extends Ruler implements Widths
+{
+}
+
+// The interface on the parent, the declaration two classes up.
+class TextRuler extends WideRuler
+{
+    public function width(): string // want P2502 "return type string of App\OverrideInterfaces\TextRuler::width() is not covariant with App\OverrideInterfaces\Measure::width() (int)"
+    {
+        return '';
+    }
+
+    public function scale(int $by): void // want P2502 "is not contravariant with App\OverrideInterfaces\Measure::scale() (int|string)"
+    {
+    }
+}
+
+// The interface on the grandparent, the declaration farther up still.
+class Tape extends WideRuler
+{
+}
+
+class LaserTape extends Tape
+{
+    public function width(): string // want P2502 "Measure::width() (int)"
+    {
+        return '';
+    }
+}
+
+// What fits both passes.
+class ExactRuler extends WideRuler
+{
+    public function width(): int
+    {
+        return 2;
+    }
+
+    public function scale(int|string $by): void
+    {
+    }
+}
+
+// The class's declaration is abstract.
+abstract class Shape
+{
+    abstract public function area(): int;
+}
+
+abstract class Polygon extends Shape
+{
+}
+
+interface Areas
+{
+    public function area(): int|float;
+}
+
+abstract class RegularPolygon extends Polygon implements Areas
+{
+}
+
+class Square extends RegularPolygon
+{
+    public function area(): float // want P2502 "Shape::area() (int)"
+    {
+        return 1.0;
+    }
+}
+
+// The class's declaration nearer than the interface: the override is held
+// to it, and the wider interface adds nothing.
+class Yard extends WideRuler
+{
+    public function width(): int
+    {
+        return 3;
+    }
+}
+
+class Foot extends Yard
+{
+    public function width(): string // want P2502 "Yard::width() (int)"
+    {
+        return '';
+    }
+}

@@ -2,7 +2,6 @@ package checker
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -945,25 +944,38 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 	}
 }
 
-// overriddenMethods lists what m overrides, nearest first: the first
-// declaration found through the ancestors, then every other interface's.
-// A parent class's private method is overridden by nothing, and a farther
-// parent class's method is the business of the nearer class that overrides
-// it, for PHP and for PHPStan alike.
+// overriddenMethods lists what m overrides: the nearest declaration up the
+// parent classes, then every interface's in the order of the ancestors.
+// The class's comes first even where an interface sits nearer, on a parent
+// that inherits the method it declares: the parent's method under that
+// name is still the class's, and PHP checks the override against it. A
+// parent class's private method is overridden by nothing, and a farther
+// parent class's method is the business of the nearer class that
+// overrides it, for PHP and for PHPStan alike. An interface's @method tag,
+// which PHP never sees, is compared only when nothing comes before it.
 func overriddenMethods(cl *program.Class, m *program.Method) []*program.Method {
-	var out []*program.Method
 	key := strings.ToLower(m.Name)
+	var class *program.Method
+	var ifaces []*program.Method
 	for _, a := range cl.Ancestors() {
 		a.Signature()
 		pm := a.FindMethod(key)
-		if pm == nil || pm.Class == cl || slices.Contains(out, pm) {
-			continue
+		if pm == nil || pm.Class != a {
+			continue // a declares none of its own; its ancestors are visited too
 		}
-		iface := pm.Class.Kind == ast.KindInterface
-		if pm.Vis == program.Private && !iface {
-			continue
+		switch {
+		case a.Kind == ast.KindInterface:
+			ifaces = append(ifaces, pm)
+		case class == nil && pm.Vis != program.Private:
+			class = pm
 		}
-		if len(out) > 0 && (!iface || pm.Magic) {
+	}
+	var out []*program.Method
+	if class != nil {
+		out = append(out, class)
+	}
+	for _, pm := range ifaces {
+		if len(out) > 0 && pm.Magic {
 			continue
 		}
 		out = append(out, pm)
