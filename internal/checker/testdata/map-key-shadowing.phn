@@ -1,0 +1,118 @@
+namespace MapKeyShadowing;
+
+// `map<K, V>` gives an unbounded K the bound of a map's keys, int|string
+// (design/collections.md §2). The K is the one in scope where the map is
+// written: a method, a function or a closure inside a generic class that
+// declares a K of its own takes the bound for its K, a class inside sees
+// no K of the class around it, and that class's K stays unbounded.
+
+final class ViaMethod<K>
+{
+    count<K>(map<K, int> $m): int => count($m);
+
+    other<V>(map<V, int> $m): int => count($m);
+}
+
+final class ViaTemplate<K>
+{
+    /**
+     * @template K
+     */
+    count(map<K, int> $m): int => count($m);
+}
+
+final class ViaClosure<K>
+{
+    counter(): \Closure => function <K>(map<K, int> $m): int {
+        return count($m);
+    };
+}
+
+final class ViaArrow<K>
+{
+    counter(): \Closure => fn<K>(map<K, int> $m): int => count($m);
+}
+
+final class ViaFunction<K>
+{
+    count(): int
+    {
+        function counted<K>(map<K, int> $m): int
+        {
+            return count($m);
+        }
+        return counted(['a' => 1]);
+    }
+}
+
+final class ViaClass<K>
+{
+    inner(): object => new class {
+        public int $n = 0;
+
+        count(map<K, int> $m): void {} // want P2001, P2518
+    };
+}
+
+// The class's own K as a key, in a method that declares none.
+final class Keyed<K>
+{
+    count(map<K, int> $m): int => count($m);
+}
+
+// In a closure inside a method, beside a method that shadows it, and in a
+// method that declares another parameter.
+final class KeyedInside<K, V>
+{
+    shadowed<K>(map<K, int> $m): int => count($m);
+
+    count(): int
+    {
+        $count = fn(map<K, V> $m): int => count($m);
+        return $count([]);
+    }
+}
+
+final class KeyedBeside<K>
+{
+    count<V>(map<K, V> $m): int => count($m);
+}
+
+// In the arguments of an anonymous class, which are written in the scope
+// around it.
+final class KeyedInArguments<K>
+{
+    inner(): object => new class(fn(map<K, int> $m): int => count($m)) {
+        public function __construct(public \Closure $count) {}
+    };
+}
+
+// A method's own K as a key is bounded for that method alone.
+final class Free
+{
+    pick<K>(map<K, int> $m, K $k): int => $m[$k] ?? 0;
+}
+
+function unbounded(): void
+{
+    $method = new ViaMethod<\stdClass>();
+    $method->count(['a' => 1]);
+    $method->count<\stdClass>([]); // want P3002 "K of MapKeyShadowing\ViaMethod::count()"
+    $template = new ViaTemplate<\stdClass>();
+    $closure = new ViaClosure<\stdClass>();
+    $arrow = new ViaArrow<\stdClass>();
+    $function = new ViaFunction<\stdClass>();
+    $class = new ViaClass<\stdClass>();
+    echo $template::class, $closure::class, $arrow::class, $function::class, $class::class;
+}
+
+function bounded(): void
+{
+    $keyed = new Keyed<\stdClass>(); // want P3002 "K of MapKeyShadowing\Keyed is not a subtype of its bound int|string"
+    $inside = new KeyedInside<\stdClass, \stdClass>(); // want P3002 "K of MapKeyShadowing\KeyedInside"
+    $beside = new KeyedBeside<\stdClass>(); // want P3002 "K of MapKeyShadowing\KeyedBeside"
+    $arguments = new KeyedInArguments<\stdClass>(); // want P3002 "K of MapKeyShadowing\KeyedInArguments"
+    $free = new Free();
+    $free->pick<\stdClass>([], new \stdClass()); // want P3002 "K of MapKeyShadowing\Free::pick()"
+    echo $keyed::class, $inside::class, $beside::class, $arguments::class;
+}

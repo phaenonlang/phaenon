@@ -49,6 +49,18 @@ type Hierarchy interface {
 	IteratorArgs(c Class) (key, value Type, ok bool)
 	// IsInvokable reports a class with an __invoke() method: a callable.
 	IsInvokable(name string) bool
+	// IsInterface reports whether the name is an interface's. Two classes
+	// neither of which extends the other share no instance; a class and an
+	// interface it does not implement may, in a subclass.
+	IsInterface(name string) bool
+	// SuperArgs is the type arguments a class passes the named ancestor,
+	// through its @extends and @implements (`ArrayIterator<int, Cat>` gives
+	// `Iterator` int and Cat); ok is false when either class is unknown or
+	// the second is no ancestor of the first. ok can be true with no
+	// arguments, or fewer than the ancestor takes: a class on the way that
+	// names the ancestor without arguments passes it none, and a caller
+	// reads that as nothing decided.
+	SuperArgs(c Class, super string) (args []Type, ok bool)
 }
 
 // Variance of a class type parameter.
@@ -322,7 +334,7 @@ func Equal(a, b Type) bool {
 		return true
 	case Shape:
 		b, ok := b.(Shape)
-		if !ok || a.Unsealed != b.Unsealed || a.List != b.List || len(a.Entries) != len(b.Entries) {
+		if !ok || a.Unsealed != b.Unsealed || a.List != b.List || a.Callable != b.Callable || len(a.Entries) != len(b.Entries) {
 			return false
 		}
 		for i := range a.Entries {
@@ -1258,8 +1270,10 @@ func Map(t Type, f func(Type) Type) Type {
 }
 
 // MapDeep rebuilds t bottom-up, applying f to every node after its parts
-// were mapped: array keys and values, shape entries, type arguments,
-// callable signatures, conditional branches, union and intersection members.
+// were mapped: array keys and values, the entries of array and object
+// shapes, type arguments, callable signatures, a conditional's subject,
+// target and branches, union and intersection members. The parts are those
+// Walk visits.
 func MapDeep(t Type, f func(Type) Type) Type {
 	if t == nil {
 		return nil
@@ -1282,6 +1296,14 @@ func MapDeep(t Type, f func(Type) Type) Type {
 		v.Value = MapDeep(v.Value, f)
 		return f(v)
 	case Shape:
+		entries := make([]ShapeEntry, len(v.Entries))
+		for i, e := range v.Entries {
+			e.Type = MapDeep(e.Type, f)
+			entries[i] = e
+		}
+		v.Entries = entries
+		return f(v)
+	case ObjectShape:
 		entries := make([]ShapeEntry, len(v.Entries))
 		for i, e := range v.Entries {
 			e.Type = MapDeep(e.Type, f)
@@ -1319,6 +1341,11 @@ func MapDeep(t Type, f func(Type) Type) Type {
 		}
 		return f(v)
 	case Conditional:
+		// The subject (nil for a conditional on a parameter's argument)
+		// and the target hold types as the branches do: a type parameter
+		// or a static in them is the one the branches mention.
+		v.Subject = MapDeep(v.Subject, f)
+		v.Target = MapDeep(v.Target, f)
 		v.Then = MapDeep(v.Then, f)
 		v.Else = MapDeep(v.Else, f)
 		return f(v)
@@ -1356,7 +1383,15 @@ func Substitute(t Type, subst map[string]Type) Type {
 			e.Type = Substitute(e.Type, subst)
 			es[i] = e
 		}
-		return Shape{Entries: es, Unsealed: t.Unsealed, List: t.List}
+		t.Entries = es // Unsealed, List and Callable stay
+		return t
+	case ObjectShape:
+		es := make([]ShapeEntry, len(t.Entries))
+		for i, e := range t.Entries {
+			e.Type = Substitute(e.Type, subst)
+			es[i] = e
+		}
+		return ObjectShape{Entries: es}
 	case Iterable:
 		return Iterable{Substitute(t.Key, subst), Substitute(t.Value, subst)}
 	case ClassString:
@@ -1420,6 +1455,10 @@ func Walk(t Type, f func(Type)) {
 		Walk(t.Key, f)
 		Walk(t.Value, f)
 	case Shape:
+		for _, e := range t.Entries {
+			Walk(e.Type, f)
+		}
+	case ObjectShape:
 		for _, e := range t.Entries {
 			Walk(e.Type, f)
 		}

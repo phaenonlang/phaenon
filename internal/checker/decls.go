@@ -917,22 +917,55 @@ func (c *Checker) parentConstant(cl *program.Class, name string) *program.Consta
 	return nil
 }
 
-// checkOverride compares a method with the one it overrides.
-func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
-	hasOverrideAttr := hasOverride(m.Attrs)
-	var parent *program.Method
-	key := strings.ToLower(m.Name)
+// constructorBound is the constructor whose visibility a constructor of cl
+// must keep, and the class whose method table holds it; nil when there is
+// none. PHP lets a constructor narrow the visibility of the one it
+// overrides (a private constructor in a subclass of Exception) unless an
+// abstract declaration fixes it: zend_inheritance.c checks a constructor
+// only against its prototype, which only an abstract one sets. An
+// interface's constructor keeps every constructor below it public.
+// Otherwise the constructor in the parent's method table decides
+// (program's TableEntry): when it is abstract, or implements an abstract
+// one in turn (AbstractConstructor), cl's must be at least as visible as
+// it is. A private one that is not abstract demands no visibility: PHP
+// does go on to check a constructor against a private one, where it
+// passes over any other private method, but for final alone, nothing
+// being narrower than private.
+func (c *Checker) constructorBound(cl *program.Class) (*program.Method, *program.Class) {
+	const key = "__construct"
 	for _, a := range cl.Ancestors() {
+		if a.Kind != ast.KindInterface {
+			continue
+		}
 		a.Signature()
-		if pm := a.FindMethod(key); pm != nil && pm.Class != cl {
-			if pm.Vis == program.Private && pm.Class.Kind != ast.KindInterface {
-				continue
-			}
-			parent = pm
-			break
+		if im := a.FindMethod(key); im != nil && im.Class.Kind == ast.KindInterface {
+			return im, im.Class
 		}
 	}
+	parent := cl.ParentClass()
 	if parent == nil {
+		return nil, nil
+	}
+	entry, at := parent.TableEntry(key)
+	if entry == nil || entry.Vis == program.Private && !entry.Abstract {
+		return nil, nil
+	}
+	if entry.Abstract || cl.AbstractConstructor() != nil {
+		return entry, at
+	}
+	return nil, nil
+}
+
+// checkOverride compares a method with every declaration it overrides: the
+// nearest one a parent class has and each interface's. PHP links a class
+// against all of them, and so do PHPStan's method compatibility rules: a
+// class whose two interfaces disagree on a method fits one of them at best.
+// One mistake is one diagnostic, so the first declaration the method breaks
+// is the one reported.
+func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
+	hasOverrideAttr := hasOverride(m.Attrs)
+	parents := overriddenMethods(cl, m)
+	if len(parents) == 0 {
 		if hasOverrideAttr {
 			c.report(declSpan(m), P2503, "%s::%s() has #[\\Override] but overrides nothing", cl.Name, m.Name)
 		}
@@ -942,19 +975,111 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 		// The override check runs on the target PHP: a method the target's
 		// library lacks overrides nothing there (SessionHandler::validateId()
 		// on 8.5).
-		c.libraryMethod(declSpan(m), parent)
+		c.libraryMethod(declSpan(m), parents[0])
+	}
+	for i, parent := range parents {
+		if c.checkOverrideOf(cl, m, parent, i == 0) {
+			break
+		}
+	}
+}
+
+// overriddenMethods lists what m overrides: the nearest declaration up the
+// parent classes, then every interface's in the order of the ancestors.
+// The class's comes first even where an interface sits nearer, on a parent
+// that inherits the method it declares: the parent's method under that
+// name is still the class's, and PHP checks the override against it. A
+// parent class's private method is overridden by nothing, and a farther
+// parent class's method is the business of the nearer class that
+// overrides it, for PHP and for PHPStan alike. An interface's @method tag,
+// which PHP never sees, is compared only when nothing comes before it.
+func overriddenMethods(cl *program.Class, m *program.Method) []*program.Method {
+	key := strings.ToLower(m.Name)
+	var class *program.Method
+	var ifaces []*program.Method
+	for _, a := range cl.Ancestors() {
+		a.Signature()
+		pm := a.FindMethod(key)
+		if pm == nil || pm.Class != a {
+			continue // a declares none of its own; its ancestors are visited too
+		}
+		switch {
+		case a.Kind == ast.KindInterface:
+			ifaces = append(ifaces, pm)
+		case class == nil && pm.Vis != program.Private:
+			class = pm
+		}
+	}
+	var out []*program.Method
+	if class != nil {
+		out = append(out, class)
+	}
+	for _, pm := range ifaces {
+		if len(out) > 0 && pm.Magic {
+			continue
+		}
+		out = append(out, pm)
+	}
+	return out
+}
+
+// constructorSignature is the constructor whose signature an override of
+// parent, the nearest constructor up the parent classes or an interface's,
+// is held to, or nil when none is. PHP leaves a constructor free of a
+// concrete parent's signature, not of the abstract constructor that one
+// implements: the nearest abstract constructor up the parent classes,
+// however far up it sits. PHP takes the top-most one, which differs only
+// where a nearer abstract constructor widened a farther one; there the
+// override is held to the nearer, as PHPStan holds it to the nearest
+// constructor. An interface's constructor binds its own signature. The
+// final and visibility checks stay the nearest constructor's.
+func constructorSignature(parent *program.Method) *program.Method {
+	if parent.Abstract || parent.Class.Kind == ast.KindInterface {
+		return parent
+	}
+	seen := map[*program.Class]bool{}
+	for c := parent.Class; c != nil && !seen[c]; c = c.ParentClass() {
+		seen[c] = true
+		c.Signature()
+		if pm := c.FindMethod("__construct"); pm != nil && pm.Class == c && pm.Abstract {
+			return pm
+		}
+	}
+	return nil
+}
+
+// checkOverrideOf compares a method with one it overrides and tells whether
+// it reported anything; first marks the first declaration of the list.
+func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, first bool) bool {
+	broken := false
+	mismatch := func(span ast.Span, format string, args ...any) {
+		broken = true
+		c.reportRelated(span, P2502, overridden(parent), format, args...)
 	}
 	if parent.Final {
 		c.report(declSpan(m), P2505, "%s::%s() overrides final method %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
 	}
 	if parent.Static != m.Static {
-		c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() and %s::%s() disagree on static", cl.Name, m.Name, parent.Class.Name, parent.Name)
+		mismatch(m.Span, "%s::%s() and %s::%s() disagree on static", cl.Name, m.Name, parent.Class.Name, parent.Name)
 	}
-	if m.Vis > parent.Vis {
-		c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, parent.Vis, parent.Class.Name, parent.Name)
+	ctor := strings.EqualFold(m.Name, "__construct")
+	switch {
+	case ctor && first:
+		// A constructor's visibility is held once, to the constructor
+		// constructorBound finds, not to each declaration in turn: PHP
+		// lets it narrow a concrete parent's unless an abstract
+		// declaration fixes it.
+		if by, at := c.constructorBound(cl); by != nil && m.Vis > by.Vis {
+			broken = true
+			c.reportRelated(m.Span, P2502, overridden(by), "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, by.Vis, at.Name, by.Name)
+		}
+	case !ctor && m.Vis > parent.Vis:
+		mismatch(m.Span, "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, parent.Vis, parent.Class.Name, parent.Name)
 	}
-	if strings.EqualFold(m.Name, "__construct") && !parent.Abstract && parent.Class.Kind != ast.KindInterface {
-		return // constructors are exempt unless the parent's is abstract
+	if ctor {
+		if parent = constructorSignature(parent); parent == nil {
+			return broken // a concrete constructor binds no signature
+		}
 	}
 	// Map the parent's types into this class's generic arguments.
 	ctx := c.newCtx(cl.File, cl.Scope, cl, m.Static)
@@ -970,24 +1095,25 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 			if n := len(m.Params); n > 0 && m.Params[n-1].Variadic {
 				break
 			}
-			c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() has fewer parameters than %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
+			mismatch(m.Span, "%s::%s() has fewer parameters than %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
 			break
 		}
 		cp := m.Params[i]
 		if pp.HasDefault && !cp.HasDefault && !cp.Variadic {
-			c.reportRelated(cp.Span, P2502, overridden(parent), "parameter $%s of %s::%s() must be optional like in %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
+			mismatch(cp.Span, "parameter $%s of %s::%s() must be optional like in %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
 		}
 		pt, ct := bind(pp.Type, parent.Class), bind(cp.Type, cl)
-		if pt != nil && ct != nil && !types.IsSubtype(types.Erase(pt), types.Erase(ct), c.p) && !types.IsSubtype(pt, ct, c.p) {
-			c.reportRelated(cp.Span, P2502, overridden(parent), "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
+		if pt != nil && ct != nil && !c.overrideFits(pt, ct) {
+			mismatch(cp.Span, "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
 				cp.Name, cl.Name, m.Name, types.Print(ct), parent.Class.Name, parent.Name, types.Print(pt))
 		}
 		if pp.ByRef != cp.ByRef {
-			c.reportRelated(cp.Span, P2502, overridden(parent), "parameter $%s of %s::%s() disagrees on by-reference with %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
+			mismatch(cp.Span, "parameter $%s of %s::%s() disagrees on by-reference with %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
 		}
 	}
 	for i := len(parent.Params); i < len(m.Params); i++ {
 		if !m.Params[i].HasDefault && !m.Params[i].Variadic {
+			broken = true
 			c.report(m.Params[i].Span, P2502, "extra parameter $%s of %s::%s() must be optional", m.Params[i].Name, cl.Name, m.Name)
 		}
 	}
@@ -995,15 +1121,40 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 		pr, cr := bind(parent.Return, parent.Class), bind(m.Return, cl)
 		if cr == nil {
 			if _, isVoid := pr.(types.Void); !isVoid && !types.IsMixed(pr) {
-				c.reportRelated(m.Span, P2502, overridden(parent), "%s::%s() must declare a return type compatible with %s::%s() (%s)", cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
+				mismatch(m.Span, "%s::%s() must declare a return type compatible with %s::%s() (%s)", cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
 			}
-		} else if !types.IsSubtype(cr, pr, c.p) && !types.IsSubtype(types.Erase(cr), types.Erase(pr), c.p) {
+		} else if !c.overrideFits(cr, pr) {
 			if _, parentVoid := pr.(types.Void); !(parentVoid && isVoidLike(cr)) {
-				c.reportRelated(m.Span, P2502, overridden(parent), "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
+				mismatch(m.Span, "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
 					types.Print(cr), cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
 			}
 		}
 	}
+	return broken
+}
+
+// overrideFits reports whether sub may stand where an overridden method
+// declares super: the child's return type for the parent's, the parent's
+// parameter type for the child's. PHP's own rule is on the types it sees,
+// the erased ones, and it is kept whole. Phaenon's types say more
+// (`list<int>` and `list<string>` are both PHP's array), and there the
+// override is wrong when the two are certainly apart: what PHPStan reports
+// as method.childParameterType and method.childReturnType. A type that
+// only may fit passes, as it does there. A child that writes
+// `map<string, mixed>` where a vendor parent has a bare `array`, or
+// `class<User>` for its `class-string`, narrows what the parent left
+// open, and code that works is full of it.
+func (c *Checker) overrideFits(sub, super types.Type) bool {
+	if types.IsSubtype(sub, super, c.p) {
+		// IsSubtype steps up from a class to a generic ancestor without
+		// the arguments the class passes it (`ArrayIterator<int, Cat>` for
+		// `Iterator<int, Dog>`); NeverSubtype compares them.
+		return !types.NeverSubtype(sub, super, c.p)
+	}
+	if !types.IsSubtype(types.Erase(sub), types.Erase(super), c.p) {
+		return false
+	}
+	return !types.NeverSubtype(sub, super, c.p)
 }
 
 func isVoidLike(t types.Type) bool {

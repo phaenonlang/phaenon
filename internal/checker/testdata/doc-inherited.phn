@@ -1,0 +1,69 @@
+namespace DocInherited;
+
+// A method without docblock types takes those of the declarations it
+// overrides, as PHPStan's implicit @inheritDoc does: the parent's method,
+// the nearest declaration up the parent chain however far it is, with what
+// it inherits, then the methods of the interfaces its class implements
+// itself. An interface that a class in between implements is passed over:
+// the parent's method was checked against it.
+
+function takesInt(int $i): void
+{
+}
+
+class Base
+{
+    /** @param array<int, int|string> $x */
+    public function take(array $x): void
+    {
+    }
+}
+
+class Mid extends Base
+{
+}
+
+interface Takes
+{
+    /** @param array<int, int> $x */
+    public function take(array $x): void;
+}
+
+abstract class Impl extends Mid implements Takes
+{
+}
+
+// Base's array<int, int|string>, not the nearer interface's array<int, int>.
+final class Leaf extends Impl
+{
+    public function take(array $x): void
+    {
+        foreach ($x as $v) {
+            takesInt($v); // want P2103 "int|string"
+        }
+    }
+}
+
+// An interface the parent implements already, repeated on the class, is
+// not asked again: the parent's method documents nothing, and PHPStan
+// leaves the parameter an array of mixed.
+class Undocumented
+{
+    public function take(array $x): void // want P2516
+    {
+    }
+}
+
+abstract class UndocumentedTakes extends Undocumented implements Takes
+{
+}
+
+final class RepeatsTakes extends UndocumentedTakes implements Takes
+{
+    public function take(array $x): void // want P2516
+    {
+        foreach ($x as $v) {
+            takesInt($v); // want P2103 "mixed"
+        }
+    }
+}

@@ -27,6 +27,12 @@ type fakeHost struct {
 	mu     sync.Mutex
 	builds int
 	built  []string
+	// vendor, when set, is a loader every program shares, as phn's programs
+	// share a project's Composer maps.
+	vendor program.Loader
+	// reloads counts the calls of Reload, which returns reloadErr.
+	reloads   int
+	reloadErr error
 }
 
 var stubCache = program.NewParseCache() // the stubs parse once for every test
@@ -64,6 +70,9 @@ func (h *fakeHost) Program(files []string, read func(string) ([]byte, error), ch
 	p.Parses = h.cache
 	if err := p.LoadStubs(); err != nil {
 		return nil, nil, err
+	}
+	if h.vendor != nil {
+		p.AddLoader(h.vendor)
 	}
 	var diags []checker.Diagnostic
 	for _, f := range files {
@@ -111,6 +120,13 @@ func (h *fakeHost) Build(p *program.Program, diags []checker.Diagnostic) (BuildP
 
 func (h *fakeHost) ClassNames() []string { return []string{"Vendor\\Lib\\Widget"} }
 
+func (h *fakeHost) Reload() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.reloads++
+	return h.reloadErr
+}
+
 // client drives a server over pipes.
 type client struct {
 	t      *testing.T
@@ -134,9 +150,20 @@ func start(t *testing.T, files map[string]string, opts map[string]any) *client {
 // its rootUri.
 func startAt(t *testing.T, files map[string]string, opts map[string]any, rootOf func(string) string) *client {
 	t.Helper()
-	host := newFakeHost(t, files)
-	srv := New(host, io.Discard)
-	srv.Debounce = 10 * time.Millisecond
+	return startHost(t, newFakeHost(t, files), nil, opts, rootOf)
+}
+
+// startHost starts srv on host's project, or, with srv nil, a server of
+// host itself that pauses 10 ms after an edit.
+func startHost(t *testing.T, host *fakeHost, srv *Server, opts map[string]any, rootOf func(string) string) *client {
+	t.Helper()
+	if srv == nil {
+		srv = New(host, io.Discard)
+		srv.Debounce = 10 * time.Millisecond
+	}
+	if rootOf == nil {
+		rootOf = func(root string) string { return root }
+	}
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	c := &client{t: t, in: inW, out: bufio.NewReader(outR), msgs: make(chan map[string]any, 100), host: host, server: srv, done: make(chan error, 1)}
@@ -401,6 +428,47 @@ func TestRelatedDeclaration(t *testing.T) {
 	}
 }
 
+// A change of the project file or of composer.json has the host read the
+// project again before the next project check; a change of a source does
+// not. A project file that does not read is shown to the user.
+func TestProjectFileChangeReloads(t *testing.T) {
+	broken := strings.Replace(userSrc, "name(): string", "name(): int", 1)
+	c := start(t, map[string]string{"src/User.phn": broken}, nil)
+	c.diagnostics("src/User.phn", 0) // the check at initialized
+	changed := func(path string) {
+		c.notify("workspace/didChangeWatchedFiles", map[string]any{"changes": []any{map[string]any{"uri": c.uri(path), "type": 2}}})
+	}
+	reloads := func() int {
+		c.host.mu.Lock()
+		defer c.host.mu.Unlock()
+		return c.host.reloads
+	}
+	changed("src/User.phn")
+	c.diagnostics("src/User.phn", 0)
+	if n := reloads(); n != 0 {
+		t.Errorf("a source's change read the project %d times", n)
+	}
+	changed("composer.json")
+	c.diagnostics("src/User.phn", 0)
+	if n := reloads(); n != 1 {
+		t.Errorf("composer.json's change read the project %d times", n)
+	}
+	c.host.mu.Lock()
+	c.host.reloadErr = fmt.Errorf(`phaenon.json: the output of "src" must be another directory`)
+	c.host.mu.Unlock()
+	changed("phaenon.json")
+	m := c.wait(func(m map[string]any) bool { return m["method"] == "window/showMessage" })
+	if m == nil {
+		t.Fatal("the project file's error was not shown")
+	}
+	if p := m["params"].(map[string]any); p["type"] != float64(1) || !strings.Contains(p["message"].(string), `the output of "src"`) {
+		t.Errorf("message: %s", jsonOf(p))
+	}
+	if got := codes(c.diagnostics("src/User.phn", 0)); len(got) != 1 {
+		t.Errorf("the project check after the error: %v", got)
+	}
+}
+
 func TestBuildOnSaveOff(t *testing.T) {
 	broken := strings.Replace(userSrc, "name(): string", "name(): int", 1)
 	c := start(t, map[string]string{"src/User.phn": broken}, map[string]any{"buildOnSave": false})
@@ -556,6 +624,39 @@ func TestSignatureHelp(t *testing.T) {
 	}
 	if res["activeParameter"] != float64(1) {
 		t.Errorf("active parameter: %v", res["activeParameter"])
+	}
+}
+
+// The active parameter counts the argument list's own commas: not the one
+// between explicit type arguments, which the parser reads as such before a
+// `(`, and still the one between two comparisons.
+func TestSignatureHelpPastTypeArguments(t *testing.T) {
+	const head = "namespace App;\n\nfunction pick<T, U>(T $a, U $b): T => $a;\n\nfunction three(int $a, int $b, int $c): int => $a;\n\n" +
+		"function f(int $x, int $y): int {\n    return "
+	cases := []struct {
+		call   string // the cursor at its end
+		active int
+	}{
+		{"three(pick<int, string>(1, 'x'), ", 1},
+		{"three(pick<int, string>(1, 'x'), 2, ", 2},
+		{"three(pick<int, list<int> >(1, [1]), ", 1},
+		{"three(pick<int, string>(1, ", 1}, // pick's own list
+		{"three($x < $y, $y > $x, ", 2},
+		{"three($x < $y, ", 1},
+	}
+	c := start(t, map[string]string{"src/F.phn": head + "1;\n}\n"}, nil)
+	for i, cs := range cases {
+		src := head + cs.call + "\n}\n"
+		c.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": c.uri("src/F.phn"), "languageId": "phaenon", "version": i + 1, "text": src}})
+		line := strings.Count(head, "\n")
+		res, _ := c.at("textDocument/signatureHelp", "src/F.phn", line, len("    return ")+len(cs.call)).(map[string]any)
+		if res == nil {
+			t.Errorf("%s: no signature help", cs.call)
+			continue
+		}
+		if res["activeParameter"] != float64(cs.active) {
+			t.Errorf("%s: active parameter %v, want %d", cs.call, res["activeParameter"], cs.active)
+		}
 	}
 }
 

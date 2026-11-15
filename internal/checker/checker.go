@@ -3,6 +3,7 @@
 package checker
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strings"
@@ -152,9 +153,8 @@ func New(p *program.Program, opts Options) *Checker {
 // (or `@phaenon-ignore`) at the end of a line silences that line, on its
 // own line the next one; `@phpstan-ignore-line` always silences its own
 // line and `@phpstan-ignore-next-line` the next.
-func ignoredLines(src []byte, mode lexer.Mode) map[int]bool {
+func ignoredLines(src []byte, toks []token.Token) map[int]bool {
 	out := map[int]bool{}
-	toks := lexer.Tokenize(src, mode)
 	for i, t := range toks {
 		if t.Kind != token.T_COMMENT && t.Kind != token.T_DOC_COMMENT {
 			continue
@@ -300,7 +300,8 @@ func (c *Checker) checkTabs(f *program.File) {
 
 func (c *Checker) checkFile(f *program.File) {
 	phaenon := f.Mode == lexer.ModePhaenon
-	c.ignored[f.Path] = ignoredLines(f.Src, f.Mode)
+	toks := lexer.Tokenize(f.Src, f.Mode)
+	c.ignored[f.Path] = ignoredLines(f.Src, toks)
 	if phaenon {
 		c.checkTabs(f)
 	}
@@ -344,32 +345,134 @@ func (c *Checker) checkFile(f *program.File) {
 	visit(f.AST.Stmts)
 	c.withdrawnSpellings(f)
 	c.partialSyntax(f)
-	for _, u := range uses {
-		c.checkUse(f, u)
-	}
+	c.checkUses(f, uses, toks)
 }
 
-// checkUse reports unused imports (P2013) — only when nothing in the file
-// mentions the alias. Cheap text scan: the alias as a word outside the use
-// statement itself.
-func (c *Checker) checkUse(f *program.File, u *ast.Use) {
-	src := string(f.Src)
-	for _, it := range u.Items {
-		alias := it.Name.Parts[len(it.Name.Parts)-1]
+// checkUses reports the imports nothing in the file uses (P2013). A use is
+// a token that names a class, a function or a constant, or a mention in a
+// docblock, whose types PHPStan and the checker read; usedImports has the
+// rule.
+func (c *Checker) checkUses(f *program.File, uses []*ast.Use, toks []token.Token) {
+	if len(uses) == 0 {
+		return
+	}
+	alias := func(it *ast.UseItem) string {
 		if it.Alias != nil {
-			alias = it.Alias.Name
+			return strings.ToLower(it.Alias.Name)
 		}
-		before := src[:it.S.Start]
-		after := src[it.S.End:]
-		if !mentions(before, alias) && !mentions(after, alias) {
-			c.report(it.S, P2013, "import %s is not used", strings.Join(it.Name.Parts, "\\"))
+		return strings.ToLower(it.Name.Parts[len(it.Name.Parts)-1])
+	}
+	used := map[string]bool{}
+	statements := make([]ast.Span, 0, len(uses))
+	for _, u := range uses {
+		statements = append(statements, u.S)
+		for _, it := range u.Items {
+			used[alias(it)] = false
+		}
+	}
+	// The identifiers of the tree are the names that refer to no class,
+	// function or constant: a declaration's own name, a member's, a named
+	// argument's, a label's.
+	idents := map[int]bool{}
+	ast.Inspect(f.AST, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok {
+			idents[id.S.Start] = true
+		}
+		return true
+	})
+	usedImports(f.Src, toks, statements, idents, used)
+	for _, u := range uses {
+		for _, it := range u.Items {
+			if !used[alias(it)] {
+				c.report(it.S, P2013, "import %s is not used", strings.Join(it.Name.Parts, "\\"))
+			}
 		}
 	}
 }
 
-func mentions(s, word string) bool {
-	lower := strings.ToLower(s)
-	w := strings.ToLower(word)
+// usedImports marks, among the lower-cased aliases that are the keys of
+// used, those the file's tokens use. The use statements themselves,
+// statements in source order, name nothing through an alias, and neither
+// do the tokens that start at idents, the tree's identifiers.
+//
+// A name is a use where it stands alone or begins a qualified name
+// (`ORM\Column`). What merely spells the alias is not: a variable, a member
+// after `->`, `?->` or `::`, the name a declaration gives, a named
+// argument, the text of a string or a heredoc, a `//` or `#` comment, a
+// segment after a backslash, a namespace's own name. A docblock's mention
+// is a use, since its types are read, and so is a block comment's, where
+// an editor reads `/* @var T $x */`; a `$name` there is a variable.
+//
+// The rule errs on the side of a use, so that an import reported here is
+// one that can be deleted: the kinds of import are not told apart (a call
+// of user() uses `use App\User;`), any word of a docblock counts, and a
+// file of several namespaces is searched as one.
+func usedImports(src []byte, toks []token.Token, statements []ast.Span, idents map[int]bool, used map[string]bool) {
+	var buf []byte
+	mark := func(name []byte) {
+		buf = append(buf[:0], name...)
+		for i, b := range buf {
+			if b >= 'A' && b <= 'Z' {
+				buf[i] = b + 'a' - 'A'
+			}
+		}
+		if seen, ok := used[string(buf)]; ok && !seen {
+			used[string(buf)] = true
+		}
+	}
+	prev := token.EOF // the token before, whitespace and comments apart
+	for _, t := range toks {
+		switch t.Kind {
+		case token.T_WHITESPACE:
+			continue
+		case token.T_COMMENT, token.T_DOC_COMMENT:
+			if text := src[t.Start:t.End]; bytes.HasPrefix(text, []byte("/*")) {
+				lower := strings.ToLower(string(text))
+				for name, seen := range used {
+					if !seen && mentions(lower, name) {
+						used[name] = true
+					}
+				}
+			}
+			continue
+		}
+		before := prev
+		prev = t.Kind
+		for len(statements) > 0 && statements[0].End <= t.Start {
+			statements = statements[1:]
+		}
+		if len(statements) > 0 && statements[0].Start <= t.Start {
+			continue // inside a use statement
+		}
+		if idents[t.Start] {
+			continue
+		}
+		switch t.Kind {
+		case token.T_VARIABLE, token.T_STRING_VARNAME, token.T_NUM_STRING,
+			token.T_CONSTANT_ENCAPSED_STRING, token.T_ENCAPSED_AND_WHITESPACE,
+			token.T_START_HEREDOC, token.T_END_HEREDOC, token.T_INLINE_HTML,
+			token.T_NAME_FULLY_QUALIFIED, token.T_NAME_RELATIVE:
+			continue
+		}
+		switch before {
+		case token.T_OBJECT_OPERATOR, token.T_NULLSAFE_OBJECT_OPERATOR, token.T_PAAMAYIM_NEKUDOTAYIM, token.T_NAMESPACE:
+			continue // a member's name, a namespace's
+		}
+		// Any other token is a name, a keyword or punctuation. Only a
+		// name spells an alias, and Phaenon's contextual keywords
+		// (`type`, `of`, `in`, `out`), which are names where the grammar
+		// allows one: the token's text is looked up, whatever its kind.
+		name := src[t.Start:t.End]
+		if i := bytes.IndexByte(name, '\\'); i >= 0 {
+			name = name[:i]
+		}
+		mark(name)
+	}
+}
+
+// mentions reports the lower-cased word in the lower-cased text of a
+// comment, as a name of its own or the first segment of a qualified one.
+func mentions(lower, w string) bool {
 	i := 0
 	for {
 		j := strings.Index(lower[i:], w)
@@ -378,10 +481,10 @@ func mentions(s, word string) bool {
 		}
 		start := i + j
 		end := start + len(w)
-		okStart := start == 0 || !isWordByte(lower[start-1])
-		// A backslash after the word continues a name the alias begins
-		// (`ORM\Column` after `use Doctrine\ORM\Mapping as ORM`); one
-		// before it makes the word another name's segment.
+		// A backslash before the word makes it another name's segment and
+		// a dollar a variable; a backslash after it continues a name the
+		// alias begins (`ORM\Column` after `use Doctrine\ORM\Mapping as ORM`).
+		okStart := start == 0 || !isWordByte(lower[start-1]) && lower[start-1] != '$'
 		okEnd := end == len(lower) || !isWordByte(lower[end]) || lower[end] == '\\'
 		if okStart && okEnd {
 			return true
@@ -662,45 +765,38 @@ func (x *fnCtx) bindReceiver(t types.Type, recv types.Type, decl *program.Class)
 	return replaceStatic(t, recv)
 }
 
-// replaceStatic maps static/$this in t to the receiver type.
+// replaceStatic maps static/$this in t to the receiver type, wherever t
+// holds one: a tuple's member, a shape's entry, an object shape's
+// property, an intersection's member and a conditional's target as well as
+// a type argument (types.MapDeep reaches every part of a type). A type
+// that holds none is returned as it is.
 func replaceStatic(t types.Type, recv types.Type) types.Type {
-	switch tt := t.(type) {
-	case types.Static:
-		return staticOf(recv)
-	case types.This:
-		return staticOf(recv)
-	case types.Union:
-		return types.Map(tt, func(m types.Type) types.Type { return replaceStatic(m, recv) })
-	case types.Array:
-		return types.Array{Key: replaceStatic(tt.Key, recv), Value: replaceStatic(tt.Value, recv), List: tt.List, NonEmpty: tt.NonEmpty}
-	case types.Iterable:
-		return types.Iterable{Key: replaceStatic(tt.Key, recv), Value: replaceStatic(tt.Value, recv)}
-	case types.ClassString:
-		if tt.Of == nil {
-			return tt
-		}
-		return types.ClassString{Of: replaceStatic(tt.Of, recv)}
-	case types.Class:
-		if len(tt.Args) == 0 {
-			return tt
-		}
-		args := make([]types.Type, len(tt.Args))
-		for i, a := range tt.Args {
-			args[i] = replaceStatic(a, recv)
-		}
-		return types.Class{Name: tt.Name, Args: args}
-	case types.Callable:
-		if !tt.HasSig {
-			return tt
-		}
-		ps := make([]types.CallableParam, len(tt.Params))
-		for i, p := range tt.Params {
-			p.Type = replaceStatic(p.Type, recv)
-			ps[i] = p
-		}
-		return types.Callable{Params: ps, Return: replaceStatic(tt.Return, recv), Closure: tt.Closure, Pure: tt.Pure, HasSig: true}
+	if !mentionsStatic(t) {
+		return t
 	}
-	return t
+	return types.MapDeep(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Static, types.This:
+			return staticOf(recv)
+		case types.Intersection:
+			// static&Countable on a receiver A|B: the members changed, so
+			// the intersection is normalised again.
+			return types.MakeIntersection(m.Types...)
+		}
+		return m
+	})
+}
+
+// mentionsStatic reports a static or a $this anywhere in t.
+func mentionsStatic(t types.Type) bool {
+	found := false
+	types.Walk(t, func(m types.Type) {
+		switch m.(type) {
+		case types.Static, types.This:
+			found = true
+		}
+	})
+	return found
 }
 
 // staticOf is the type `static` denotes for a receiver: the receiver's own

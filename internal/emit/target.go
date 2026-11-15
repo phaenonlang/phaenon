@@ -282,11 +282,39 @@ func (l *targetLowering) fillPlaceholders(args *ast.ArgList, rec *program.Partia
 			l.e.replace(a.Placeholder.S, strings.Join(list, ", "))
 			continue
 		}
-		// Nothing left: drop `...` with the comma before it.
-		comma := bytes.LastIndexByte(l.e.src[:a.Placeholder.S.Start], ',')
-		span := ast.Span{Start: comma, End: a.Placeholder.S.End}
-		l.e.replace(span, strings.Repeat("\n", bytes.Count(l.e.src[span.Start:span.End], []byte("\n"))))
+		l.dropVariadic(a.Placeholder.S)
 	}
+}
+
+// dropVariadic removes a `...` that has no parameter left to stand for,
+// with the comma before it. The comma is the token: a comment between the
+// arguments may hold one in its text (`f(1, 2, /* a, b */ ...)`). A
+// comment between the comma and the `...` is the source's and stays, so
+// there the comma goes alone and the `...` with the whitespace before it;
+// line breaks stay where they were either way.
+func (l *targetLowering) dropVariadic(s ast.Span) {
+	toks := l.e.tokens()
+	at := l.e.tokenAt(s.Start)
+	comma := at - 1
+	for comma >= 0 && toks[comma].Kind.IsTrivia() {
+		comma--
+	}
+	lines := func(span ast.Span) string {
+		return strings.Repeat("\n", bytes.Count(l.e.src[span.Start:span.End], []byte("\n")))
+	}
+	if comma >= 0 && toks[comma].Kind == token.Kind(',') && !l.e.hasComment(toks[comma].End, s.Start) {
+		span := ast.Span{Start: toks[comma].Start, End: s.End}
+		l.e.replace(span, lines(span))
+		return
+	}
+	if comma >= 0 && toks[comma].Kind == token.Kind(',') {
+		l.e.replace(ast.Span{Start: toks[comma].Start, End: toks[comma].End}, "")
+	}
+	span := s
+	if at > 0 && toks[at-1].Kind == token.T_WHITESPACE {
+		span.Start = toks[at-1].Start
+	}
+	l.e.replace(span, lines(span))
 }
 
 // partial lowers a partial application outside a pipe:

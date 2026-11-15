@@ -1,0 +1,112 @@
+namespace StaticReceiver;
+
+// `static` in a member's type is the receiver's class wherever the type
+// holds it: in an array shape, an object shape, an intersection, and in
+// what those are nested in.
+
+interface Named
+{
+    public function name(): string;
+}
+
+class Node
+{
+    /**
+     * @return array{static, int}
+     */
+    public function pair(): array
+    {
+        return [$this, 1];
+    }
+
+    /**
+     * @return array{me: static, depth?: int}
+     */
+    public function shape(): array
+    {
+        return ['me' => $this];
+    }
+
+    /**
+     * @return object{me: static}
+     */
+    public function boxed(): object
+    {
+        throw new \LogicException('not called');
+    }
+
+    /**
+     * @return static&Named
+     */
+    public function named(): static
+    {
+        throw new \LogicException('not called');
+    }
+
+    /**
+     * @return list<array{node: static}>
+     */
+    public function nested(): array
+    {
+        return [['node' => $this]];
+    }
+
+    /**
+     * @return \Closure(): array{static}
+     */
+    public function later(): \Closure
+    {
+        return fn (): array => [$this];
+    }
+
+    /**
+     * @return array{static, int}
+     */
+    public static function make(): array
+    {
+        return [new static(), 1];
+    }
+
+    final public function __construct()
+    {
+    }
+}
+
+class Leaf extends Node implements Named
+{
+    public function leafOnly(): int
+    {
+        return 1;
+    }
+
+    public function name(): string
+    {
+        return 'leaf';
+    }
+}
+
+function takesInt(int $x): void
+{
+}
+
+function onLeaf(Leaf $leaf): void
+{
+    takesInt($leaf->pair()[0]->leafOnly());
+    takesInt($leaf->shape()['me']->leafOnly());
+    takesInt($leaf->boxed()->me->leafOnly());
+    takesInt($leaf->named()->leafOnly());
+    takesInt($leaf->nested()[0]['node']->leafOnly());
+    takesInt($leaf->later()()[0]->leafOnly());
+    takesInt(Leaf::make()[0]->leafOnly());
+}
+
+function onNode(Node $node): void
+{
+    $node->pair()[0]->leafOnly(); // want P2006
+    $node->shape()['me']->leafOnly(); // want P2006
+    $node->boxed()->me->leafOnly(); // want P2006
+    $node->named()->name();
+    $node->nested()[0]['node']->leafOnly(); // want P2006
+    $node->later()()[0]->leafOnly(); // want P2006
+    Node::make()[0]->leafOnly(); // want P2006
+}

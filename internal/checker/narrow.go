@@ -340,14 +340,14 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 	}
 	then, els = env.clone(), env.clone()
 	// count($x) === 0 and friends.
-	if c, n, ok := countCompare(e); ok {
-		at := x.pathType(c.Args.Args[0].Value, env)
+	if c, ok := x.countCompare(e); ok {
+		at := x.pathType(c.arg, env)
 		switch {
-		case n == 0:
-			x.narrowPath(then, c.Args.Args[0].Value, emptyArray(at), false)
-			x.narrowPath(els, c.Args.Args[0].Value, nonEmptyArray(at), false)
-		case n > 0:
-			x.narrowPath(then, c.Args.Args[0].Value, nonEmptyArray(at), false)
+		case c.n == 0:
+			x.narrowPath(then, c.arg, emptyArray(at), false)
+			x.narrowPath(els, c.arg, nonEmptyArray(at), false)
+		case c.n > 0:
+			x.narrowPath(then, c.arg, nonEmptyArray(at), false)
 		}
 		if negate {
 			return els, then
@@ -564,26 +564,84 @@ func nonEmptyArray(t types.Type) types.Type {
 	})
 }
 
-// countCompare recognises count($x) <op> N with a literal N (either side).
-func countCompare(e *ast.Binary) (*ast.Call, int64, bool) {
-	call, ok := e.Left.(*ast.Call)
-	lit, ok2 := e.Right.(*ast.IntLit)
+// countComparison is a comparison of count($x) with an integer literal,
+// read as count($x) <op> n whichever side the call is written on.
+type countComparison struct {
+	arg ast.Expr   // what is counted
+	op  token.Kind // the comparison with the call on the left
+	n   int64
+}
+
+// countCompare recognises count($x) <op> N and N <op> count($x) with a
+// literal N, parentheses aside; N < count($x) comes back mirrored, as
+// count($x) > N, so that both spellings narrow alike. The call is PHP's
+// count() or its alias sizeof() as the call resolves them (a namespace's
+// own count() is not it), and what it counts is its first argument,
+// positional or named $value, the one PHPStan narrows: a spread, a
+// placeholder or a first-class callable counts nothing yet.
+func (x *fnCtx) countCompare(e *ast.Binary) (countComparison, bool) {
+	op := e.Op
+	call, ok := unparen(e.Left).(*ast.Call)
+	lit, ok2 := unparen(e.Right).(*ast.IntLit)
 	if !ok || !ok2 {
-		call, ok = e.Right.(*ast.Call)
-		lit, ok2 = e.Left.(*ast.IntLit)
+		call, ok = unparen(e.Right).(*ast.Call)
+		lit, ok2 = unparen(e.Left).(*ast.IntLit)
 		if !ok || !ok2 {
-			return nil, 0, false
+			return countComparison{}, false
 		}
+		op = flipOrdering(op)
 	}
 	n, isName := call.Callee.(*ast.Name)
-	if !isName || len(n.Parts) != 1 || !strings.EqualFold(n.Parts[0], "count") || call.Args == nil || len(call.Args.Args) == 0 {
-		return nil, 0, false
+	if !isName || call.Args == nil || call.Args.Closure() || len(call.Args.Args) == 0 {
+		return countComparison{}, false
+	}
+	first := call.Args.Args[0]
+	if first.Value == nil || first.Unpack || first.Name != nil && first.Name.Name != "value" {
+		return countComparison{}, false
+	}
+	fn := x.lookupFunction(n)
+	if fn == nil || !strings.EqualFold(fn.Name, "count") && !strings.EqualFold(fn.Name, "sizeof") {
+		return countComparison{}, false
 	}
 	v, ok := types.IsIntLit(intLitType(lit.Raw))
 	if !ok {
-		return nil, 0, false
+		return countComparison{}, false
 	}
-	return call, v, true
+	return countComparison{arg: first.Value, op: op, n: v}, true
+}
+
+// countNarrow narrows what count($x) counts in env, where count($x) <op> n
+// holds: to an empty array where the count can only be 0, to a non-empty
+// one where it is at least 1, and not at all where it may be either, or
+// where the comparison never holds (count($x) < 0). Members that are not
+// arrays (a Countable) stay.
+func (x *fnCtx) countNarrow(env *state, c countComparison, op token.Kind, at types.Type) {
+	lo, hi := int64(0), int64(math.MaxInt64) // count()'s own range
+	switch op {
+	case token.Kind('>'):
+		if c.n == math.MaxInt64 {
+			return
+		}
+		lo = max(lo, c.n+1)
+	case token.T_IS_GREATER_OR_EQUAL:
+		lo = max(lo, c.n)
+	case token.Kind('<'):
+		if c.n == math.MinInt64 {
+			return
+		}
+		hi = c.n - 1
+	case token.T_IS_SMALLER_OR_EQUAL:
+		hi = c.n
+	default:
+		return
+	}
+	switch {
+	case lo > hi:
+	case hi == 0:
+		x.narrowPath(env, c.arg, emptyArray(at), false)
+	case lo >= 1:
+		x.narrowPath(env, c.arg, nonEmptyArray(at), false)
+	}
 }
 
 // ordering narrows count($x) > 0 and similar.
@@ -608,7 +666,7 @@ func (x *fnCtx) ordering(e *ast.Binary, env *state) (then, els *state) {
 			}
 		}
 	}
-	c, n, ok := countCompare(e)
+	c, ok := x.countCompare(e)
 	if !ok {
 		x.rangeNarrow(then, e.Left, lt, rt, e.Op)
 		x.rangeNarrow(then, e.Right, rt, lt, flipOrdering(e.Op))
@@ -616,33 +674,9 @@ func (x *fnCtx) ordering(e *ast.Binary, env *state) (then, els *state) {
 		x.rangeNarrow(els, e.Right, rt, lt, negateOrdering(flipOrdering(e.Op)))
 		return then, els
 	}
-	arg := c.Args.Args[0].Value
-	at := x.pathType(arg, env)
-	callOnLeft := e.Left.(*ast.Call) == c
-	op := e.Op
-	if !callOnLeft {
-		// N < count($x) is count($x) > N
-		switch op {
-		case token.Kind('<'):
-			op = token.Kind('>')
-		case token.Kind('>'):
-			op = token.Kind('<')
-		case token.T_IS_SMALLER_OR_EQUAL:
-			op = token.T_IS_GREATER_OR_EQUAL
-		case token.T_IS_GREATER_OR_EQUAL:
-			op = token.T_IS_SMALLER_OR_EQUAL
-		}
-	}
-	switch {
-	case op == token.Kind('>') && n >= 0, op == token.T_IS_GREATER_OR_EQUAL && n >= 1:
-		x.narrowPath(then, arg, nonEmptyArray(at), false)
-		if (op == token.Kind('>') && n == 0) || (op == token.T_IS_GREATER_OR_EQUAL && n == 1) {
-			x.narrowPath(els, arg, emptyArray(at), false)
-		}
-	case op == token.Kind('<') && n <= 1, op == token.T_IS_SMALLER_OR_EQUAL && n <= 0:
-		x.narrowPath(then, arg, emptyArray(at), false)
-		x.narrowPath(els, arg, nonEmptyArray(at), false)
-	}
+	at := x.pathType(c.arg, env)
+	x.countNarrow(then, c, c.op, at)
+	x.countNarrow(els, c, negateOrdering(c.op), at)
 	return then, els
 }
 

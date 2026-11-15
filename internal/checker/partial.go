@@ -44,9 +44,12 @@ type pfaShape struct {
 // parameter left, with its own optionality, the variadic one last. A
 // placeholder makes its parameter required. It reports what PHP throws when
 // the closure is created: too many or too few arguments, a required
-// parameter left out, a named placeholder for no parameter.
-func (x *fnCtx) partialShape(sig *signature, args *ast.ArgList, span ast.Span) *pfaShape {
-	shape := &pfaShape{ok: true}
+// parameter left out, a named placeholder for no parameter. A name that
+// overwrites an argument or a placeholder before it is reported by
+// checkCallArgs, as in any call; overwritten says there is one, and PHP
+// throws it before it counts, so no parameter is reported left out then.
+func (x *fnCtx) partialShape(sig *signature, args *ast.ArgList, span ast.Span, overwritten bool) *pfaShape {
+	shape := &pfaShape{ok: !overwritten}
 	params := sig.params
 	var variadic *program.Param
 	if n := len(params); n > 0 && params[n-1].Variadic {
@@ -91,8 +94,7 @@ func (x *fnCtx) partialShape(sig *signature, args *ast.ArgList, span ast.Span) *
 				continue
 			}
 			if covered[p] {
-				x.report(a.S, P2010, "named placeholder $%s of %s overwrites the argument before it", a.Name.Name, sig.name)
-				shape.ok = false
+				shape.ok = false // an overwrite: checkCallArgs' P2010
 				continue
 			}
 			covered[p] = true
@@ -135,6 +137,8 @@ func (x *fnCtx) partialShape(sig *signature, args *ast.ArgList, span ast.Span) *
 		shape.ok = false
 	case shape.rest:
 		// `...` stands for whatever is left, required or not.
+	case overwritten:
+		// A parameter the overwrite leaves unbound follows from it.
 	case !shape.named && given < required:
 		limit := "at least"
 		if len(params) <= required {
@@ -524,6 +528,31 @@ func (c *Checker) partialSyntax(f *program.File) {
 		}
 		return true
 	})
+}
+
+// rejectedClosure says whether PHP's compiler rejects the closure a call
+// with these arguments creates, as partialSyntax reports it (P1003): from
+// `new` or a `?->` call, with a variadic placeholder that is not the last
+// argument, or beside unpacking. PHP stops there, so a name that would
+// overwrite an argument in it is not reported as well.
+func rejectedClosure(call ast.Expr, args *ast.ArgList) bool {
+	if !args.Partial() {
+		return false
+	}
+	switch n := call.(type) {
+	case *ast.New:
+		return true
+	case *ast.MethodCall:
+		if n.NullSafe {
+			return true
+		}
+	}
+	for i, a := range args.Args {
+		if a.Unpack || (a.Placeholder != nil && a.Placeholder.Variadic && i != len(args.Args)-1) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Checker) argListSyntax(a *ast.ArgList) {
