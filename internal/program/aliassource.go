@@ -145,43 +145,62 @@ func (p *Program) findAlias(lower string) bool {
 	return read
 }
 
-// declaresType reports what may be a `type Name = …;` or `type Name<T> =
-// …;` declaration in a source, without parsing it: the word `type`, a
-// name, then `=` or `<`. A file it reports is parsed, so a match in a
-// comment or a string costs a parse and no more; a declaration it would
-// miss has a comment between those tokens.
+// declaresType reports whether a source may declare a type alias, without
+// parsing it. It errs on one side only: a file it reports is parsed, so a
+// match in a comment or a string costs a parse and no more, and it reports
+// every source the parser reads a declaration in. A declaration is the
+// tokens the parser takes for one, `type`, a name, then `=` or the `<` of
+// its type parameters, the keyword in any letter case as the lexer reads
+// it, with the blanks and the comments the lexer passes over between them.
 func declaresType(src []byte) bool {
-	word := []byte("type")
-	for at := 0; ; {
-		i := bytes.Index(src[at:], word)
-		if i < 0 {
-			return false
-		}
-		start := at + i
-		at = start + len(word)
-		if start > 0 && nameByte(src[start-1]) {
+	for at := 0; at+4 <= len(src); at++ {
+		if src[at]|0x20 != 't' || src[at+1]|0x20 != 'y' || src[at+2]|0x20 != 'p' || src[at+3]|0x20 != 'e' {
 			continue
 		}
-		j := skipBlank(src, at)
-		if j == at || j >= len(src) || !nameByte(src[j]) || src[j] >= '0' && src[j] <= '9' {
+		if at > 0 && nameByte(src[at-1]) {
+			continue // the end of a longer word, or a variable
+		}
+		j := skipTrivia(src, at+4)
+		if j == at+4 || j >= len(src) || !nameByte(src[j]) || src[j] == '$' || src[j] >= '0' && src[j] <= '9' {
 			continue
 		}
-		for j < len(src) && nameByte(src[j]) {
+		for j < len(src) && nameByte(src[j]) && src[j] != '$' {
 			j++
 		}
-		if j = skipBlank(src, j); j < len(src) && (src[j] == '=' || src[j] == '<') {
+		if j = skipTrivia(src, j); j < len(src) && (src[j] == '=' || src[j] == '<') {
 			return true
 		}
 	}
+	return false
 }
 
 func nameByte(c byte) bool {
 	return c == '_' || c == '$' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c >= 0x80
 }
 
-func skipBlank(src []byte, i int) int {
-	for i < len(src) && (src[i] == ' ' || src[i] == '\t' || src[i] == '\r' || src[i] == '\n') {
-		i++
+// skipTrivia is the offset after the blanks and comments at i: what the
+// lexer leaves out between two tokens. A comment that is not closed runs
+// to the end.
+func skipTrivia(src []byte, i int) int {
+	for i < len(src) {
+		switch c := src[i]; {
+		case c == ' ' || c == '\t' || c == '\r' || c == '\n':
+			i++
+		case c == '/' && i+1 < len(src) && src[i+1] == '*':
+			end := bytes.Index(src[i+2:], []byte("*/"))
+			if end < 0 {
+				return len(src)
+			}
+			i += 2 + end + 2
+		case c == '/' && i+1 < len(src) && src[i+1] == '/', c == '#' && !(i+1 < len(src) && src[i+1] == '['):
+			end := bytes.IndexByte(src[i:], '\n')
+			if end < 0 {
+				return len(src)
+			}
+			i += end + 1
+		default:
+			return i
+		}
 	}
 	return i
 }

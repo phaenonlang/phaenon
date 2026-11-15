@@ -3,6 +3,7 @@ package program
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -183,25 +184,102 @@ func TestTypeAliasInTheFileOfItsName(t *testing.T) {
 // does.
 func TestDeclaresType(t *testing.T) {
 	for src, want := range map[string]bool{
-		"type Row = int;":                         true,
-		"namespace A;\n\ntype Page<T> = list<T>;": true,
-		"type\n    Row\n    = int;":               true,
-		"type Row=int;":                           true,
-		"#[A] type Row = int;":                    true,
-		"// the type Row = what a row is":         true, // a parse, and no more
-		"$type = 1;":                              false,
-		"$this->type = $x;":                       false,
-		"public string $type = 'x';":              false,
-		"function type(): int { return 1; }":      false,
-		"const TYPE = 1; $a = TYPE;":              false,
-		"return $subtype == $type;":               false,
-		"type = 3;":                               false,
-		"prototype Foo = 1;":                      false,
-		"":                                        false,
-		"type":                                    false,
+		"type Row = int;":                             true,
+		"namespace A;\n\ntype Page<T> = list<T>;":     true,
+		"type\n    Row\n    = int;":                   true,
+		"type Row=int;":                               true,
+		"type /* the row */ Commented = int;":         true,
+		"type/**/Tight/**/= int;":                     true,
+		"type Commented2 /* why */ = int;":            true,
+		"type // the row\n    Commented3 = int;":      true,
+		"type # the row\n    Commented4 # why\n = 1;": true,
+		"Type Upper = int;":                           true,
+		"TYPE Shout<T> = list<T>;":                    true,
+		"type Page /* of */ <T> = list<T>;":           true,
+		"type type = int;":                            true,
+		"}type After = int;":                          true,
+		"// the type Row = what a row is":             true, // a parse, and no more
+		"$type = 1;":                                  false,
+		"$this->type = $x;":                           false,
+		"public string $type = 'x';":                  false,
+		"function type(): int { return 1; }":          false,
+		"const TYPE = 1; $a = TYPE;":                  false,
+		"return $subtype == $type;":                   false,
+		"type = 3;":                                   false,
+		"prototype Foo = 1;":                          false,
+		"type #[A] Foo = 1;":                          false, // an attribute is no comment, and no declaration has one there
+		"type /* never closed":                        false,
+		"":                                            false,
+		"type":                                        false,
 	} {
 		if got := declaresType([]byte(src)); got != want {
 			t.Errorf("%q: %v, want %v", src, got, want)
 		}
+	}
+}
+
+// The scan is held to the parser: every source of the checker's and the
+// emitter's corpora that the parser reads a `type` declaration in is
+// reported, as written and with each gap between the declaration's first
+// tokens respelled as the lexer allows — a comment of each kind, no blank
+// at all where a comment separates the tokens — and the keyword in another
+// letter case.
+func TestDeclaresTypeAgainstTheParser(t *testing.T) {
+	var files []string
+	for _, pattern := range []string{"../checker/testdata/*.phn", "../checker/testdata/programs/*/*/*.phn", "../emit/testdata/*.phn", "../emit/testdata/programs/*/*/*.phn", "../format/testdata/*.phn"} {
+		m, _ := filepath.Glob(pattern)
+		files = append(files, m...)
+	}
+	declarations := 0
+	for _, path := range files {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tree, err := parser.Parse(src, lexer.ModePhaenon)
+		if err != nil {
+			continue
+		}
+		var aliases []*ast.TypeAlias
+		ast.Inspect(tree, func(n ast.Node) bool {
+			if a, ok := n.(*ast.TypeAlias); ok {
+				aliases = append(aliases, a)
+			}
+			return true
+		})
+		if len(aliases) == 0 {
+			continue
+		}
+		if !declaresType(src) {
+			t.Errorf("%s declares a type the scan does not see", path)
+		}
+		for _, a := range aliases {
+			declarations++
+			// The declaration alone, from its keyword: `type`, the gap,
+			// the name, and the rest.
+			text := string(src[a.S.Start:a.S.End])
+			kw := strings.Index(strings.ToLower(text), "type")
+			name := a.Name.S.Start - a.S.Start
+			if kw < 0 || name <= kw+4 {
+				t.Fatalf("%s: no keyword before the name in %q", path, text)
+			}
+			rest := text[a.Name.S.End-a.S.Start:]
+			for _, word := range []string{"type", "Type", "TYPE", "tYpE"} {
+				for _, gap := range []string{" ", "\n\t", "/**/", " /* c */ ", "// c\n", " # c\r\n  ", "/* a */ // b\n /** c */"} {
+					for _, after := range []string{"", " ", "/* d */", " // e\n"} {
+						variant := text[:kw] + word + gap + a.Name.Name + after + strings.TrimLeft(rest, " \t\r\n")
+						if _, err := parser.Parse([]byte(variant), lexer.ModePhaenon); err != nil {
+							t.Fatalf("%s: the variant does not parse (%v): %q", path, err, variant)
+						}
+						if !declaresType([]byte(variant)) {
+							t.Errorf("%s: the scan misses %q", path, variant)
+						}
+					}
+				}
+			}
+		}
+	}
+	if declarations < 40 {
+		t.Errorf("only %d declarations in the corpora: the comparison needs more", declarations)
 	}
 }
