@@ -363,7 +363,6 @@ func Inspect(n Node, f func(Node) bool) {
 			Inspect(c, f)
 		}
 	case *TypeAlias:
-		attrs(n.Attrs, f)
 		Inspect(n.Name, f)
 		typeParams(n.TypeParams, f)
 		Inspect(n.Type, f)

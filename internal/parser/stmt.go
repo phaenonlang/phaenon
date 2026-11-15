@@ -663,7 +663,12 @@ func (p *Parser) typeAlias(attrs []*ast.AttrGroup) ast.Stmt {
 	start := p.tok().Start
 	doc := p.takeDoc()
 	p.expect(token.T_TYPE)
-	t := &ast.TypeAlias{Doc: doc, Attrs: attrs, Name: p.stringIdent()}
+	if len(attrs) > 0 {
+		// An alias is erased: nothing in the compiled PHP could carry the
+		// attribute, which would land on whatever declaration comes next.
+		p.errorAt(p.toks[p.indexOfOffset(attrs[0].S.Start)], "a `type` declaration takes no attribute: an alias is erased, and nothing in the compiled PHP could carry one")
+	}
+	t := &ast.TypeAlias{Doc: doc, Name: p.stringIdent()}
 	t.TypeParams = p.typeParams()
 	p.expect(token.Kind('='))
 	t.Type = p.aliasedType()

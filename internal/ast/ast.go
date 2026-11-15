@@ -1116,7 +1116,6 @@ type (
 	TypeAlias struct {
 		S          Span
 		Doc        string
-		Attrs      []*AttrGroup
 		Name       *Ident
 		TypeParams []*TypeParam
 		Type       TypeExpr

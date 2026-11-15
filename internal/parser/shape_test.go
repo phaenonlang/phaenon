@@ -216,3 +216,34 @@ func TestBraceAfterArrayIsABody(t *testing.T) {
 		t.Errorf("PHP mode: %v", err)
 	}
 }
+
+// TestTypeDeclarationTakesNoAttribute: an alias is erased, so an attribute
+// on its declaration has nothing to stand on in the compiled PHP, where it
+// would land on the declaration that comes next. It is a syntax error, at
+// the attribute.
+func TestTypeDeclarationTakesNoAttribute(t *testing.T) {
+	for _, src := range []string{
+		"#[\\Deprecated] type Old = int;",
+		"namespace A;\n\n#[Tag]\n#[Other(1)]\ntype Row = array{id: int};\n",
+		"#[A, B] type Page<T> = list<T>;",
+	} {
+		_, err := Parse([]byte(src), lexer.ModePhaenon)
+		pe, ok := err.(*Error)
+		if !ok || !strings.Contains(pe.Msg, "a `type` declaration takes no attribute") {
+			t.Errorf("%q: error %v, want the one that says an alias takes no attribute", src, err)
+			continue
+		}
+		if want := strings.Count(src[:strings.Index(src, "#[")], "\n") + 1; pe.Line != want {
+			t.Errorf("%q: reported on line %d, want the attribute's, %d", src, pe.Line, want)
+		}
+	}
+	// An attribute before a statement that only begins with the word.
+	for _, src := range []string{
+		"#[A] function type(): int { return 1; }",
+		"$f = #[A] fn(int $type): int => $type;",
+	} {
+		if _, err := Parse([]byte(src), lexer.ModePhaenon); err != nil {
+			t.Errorf("%q: %v", src, err)
+		}
+	}
+}
