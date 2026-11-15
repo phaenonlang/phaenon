@@ -256,13 +256,13 @@ func (l *lowering) erase(t ast.TypeExpr, sc *scope) string {
 		return l.text(t.Name.S)
 	case *ast.NullableType:
 		inner := l.erase(t.Type, sc)
-		switch {
-		case inner == "mixed" || inner == "null":
+		if inner == "mixed" || inner == "null" {
 			return "mixed"
-		case strings.Contains(inner, "|"):
-			return inner + "|null"
 		}
-		return "?" + inner
+		// The inner type may be an alias's, of any form: a union gains
+		// null, a nullable type stays what it is, an intersection is
+		// bracketed, as PHP writes each.
+		return joinUnion([]string{inner, "null"})
 	case *ast.UnionType:
 		var parts []string
 		for _, m := range t.Types {
@@ -299,11 +299,14 @@ func joinUnion(parts []string) string {
 			add("null")
 			return
 		}
-		if strings.Contains(p, "|") && !strings.HasPrefix(p, "(") {
-			for _, q := range strings.Split(p, "|") {
+		if members := splitTop(p, '|'); len(members) > 1 {
+			for _, q := range members {
 				add(q)
 			}
 			return
+		}
+		if strings.Contains(p, "&") && !strings.HasPrefix(p, "(") {
+			p = "(" + p + ")" // PHP's DNF: an intersection in a union is bracketed
 		}
 		key := strings.ToLower(p)
 		if !seen[key] {
@@ -325,6 +328,27 @@ func joinUnion(parts []string) string {
 		}
 	}
 	return strings.Join(out, "|")
+}
+
+// splitTop splits a type's text at the separators that stand outside its
+// brackets.
+func splitTop(s string, sep byte) []string {
+	var out []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(', '<', '{', '[':
+			depth++
+		case ')', '>', '}', ']':
+			depth--
+		case sep:
+			if depth == 0 {
+				out = append(out, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(out, s[start:])
 }
 
 // nativeOf is the native spelling of a resolved type (mixed when it has
@@ -377,17 +401,23 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 		}
 		return name + "<" + strings.Join(args, ", ") + ">"
 	case *ast.NullableType:
+		if nt, ok := t.Type.(*ast.NamedType); ok && sc.alias(nt) != nil {
+			// `?` before what the alias stands for would bind to its first
+			// member (`?int|string`), or meet another `?`: the nullable of
+			// the expansion is printed as the type it is.
+			return types.PrintQualifiedNullable(sc.res.Native(t.Type))
+		}
 		return "?" + l.docType(t.Type, sc)
 	case *ast.UnionType:
 		var parts []string
 		for _, m := range t.Types {
-			parts = append(parts, l.docType(m, sc))
+			parts = append(parts, l.docMember(m, sc, false))
 		}
 		return strings.Join(parts, "|")
 	case *ast.IntersectionType:
 		var parts []string
 		for _, m := range t.Types {
-			parts = append(parts, l.docType(m, sc))
+			parts = append(parts, l.docMember(m, sc, true))
 		}
 		s := strings.Join(parts, "&")
 		if t.Parenthesised {
@@ -422,14 +452,27 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 		s := "\\Closure(" + strings.Join(parts, ", ") + ")"
 		if t.Return != nil {
 			ret := l.docType(t.Return, sc)
-			if _, union := t.Return.(*ast.UnionType); union {
-				ret = "(" + ret + ")" // `Closure(U): (A|B)`: without the parentheses PHPStan reads `(Closure(U): A)|B`
+			if len(splitTop(ret, '|')) > 1 || len(splitTop(ret, '&')) > 1 {
+				// `Closure(U): (A|B)`: without the parentheses PHPStan reads
+				// `(Closure(U): A)|B`. The union may be written, or be what
+				// an alias in the return type stands for.
+				ret = "(" + ret + ")"
 			}
 			s += ": " + ret
 		}
 		return s
 	}
 	return "mixed"
+}
+
+// docMember is docType for a member of a union, or of an intersection:
+// what an alias stands for there is bracketed where it would merge with
+// its neighbours (types.PrintQualifiedMember).
+func (l *lowering) docMember(t ast.TypeExpr, sc *scope, intersection bool) string {
+	if nt, ok := t.(*ast.NamedType); ok && sc.alias(nt) != nil {
+		return types.PrintQualifiedMember(sc.res.Native(t), intersection)
+	}
+	return l.docType(t, sc)
 }
 
 // needsDoc reports whether erasing t loses information a docblock must

@@ -66,9 +66,24 @@ func (e *emitter) edited(s ast.Span) bool {
 // content of a one-line docblock, which addDoc copies into a new one).
 func translateDoc(doc string) string { return translateDocWith(doc, nil) }
 
+// aliasExpand gives the text a mention of an alias stands for in a
+// docblock: the alias's name with the type arguments written after it
+// (`Page<Row>`), where in says it stands. ok is false for a name that is
+// no alias.
+type aliasExpand func(mention string, in mentionContext) (text string, ok bool)
+
+// mentionContext is where a docblock's type mentions an alias: after a `?`,
+// which the expansion takes with it, and among the members of a union or
+// of an intersection. What the alias stands for is spelled for that place
+// (types.PrintQualifiedMember): `?Value` over `int|string` is
+// `int|string|null`, and `AB|null` over `A&B` is `(\A&\B)|null`.
+type mentionContext struct {
+	nullable, union, intersection bool
+}
+
 // translateDocWith is translateDoc with the aliases expand knows written
 // out (aliasExpander).
-func translateDocWith(doc string, expand func(mention string) (string, bool)) string {
+func translateDocWith(doc string, expand aliasExpand) string {
 	eds := docTranslations(doc, expand)
 	if len(eds) == 0 {
 		return doc
@@ -94,7 +109,7 @@ type docEdit struct {
 // docTranslations finds the tag types of a docblock that are spelled in
 // Phaenon's vocabulary, as offsets into doc, in order. expand, when set,
 // gives what the name of a type alias stands for.
-func docTranslations(doc string, expand func(mention string) (string, bool)) []docEdit {
+func docTranslations(doc string, expand aliasExpand) []docEdit {
 	blank := blankDecorations(doc)
 	var out []docEdit
 	off := 0
@@ -253,7 +268,7 @@ func tagTypeRegions(blank string, start, end int) []ast.Span {
 // name of a type alias stands for, with its type arguments when it has
 // them (`Page<Row>`), in PHPStan's spelling: PHPStan knows no alias of a
 // namespace (design/collections.md §4, §6.5).
-func translateType(orig, blank string, expand func(mention string) (string, bool)) string {
+func translateType(orig, blank string, expand aliasExpand) string {
 	type repl struct {
 		start, end int
 		text       string
@@ -321,8 +336,19 @@ func translateType(orig, blank string, expand func(mention string) (string, bool
 				if strings.ContainsAny(s[i:end], "\r\n") {
 					break
 				}
-				if text, ok := expand(s[i:end]); ok {
-					rs = append(rs, repl{i, end, text})
+				// `?` binds to the mention, and `|` and `&` join it to its
+				// neighbours: the expansion is spelled for where it stands.
+				start, in := i, mentionContext{}
+				if i > 0 && s[i-1] == '?' {
+					start, in.nullable = i-1, true
+				}
+				before := strings.TrimRight(s[:start], " \t\r\n")
+				for _, c := range []byte{next(end), lastByte(before)} {
+					in.union = in.union || c == '|'
+					in.intersection = in.intersection || c == '&'
+				}
+				if text, ok := expand(s[i:end], in); ok {
+					rs = append(rs, repl{start, end, text})
 					j = end
 				}
 			}
@@ -342,6 +368,13 @@ func translateType(orig, blank string, expand func(mention string) (string, bool
 	}
 	b.WriteString(orig[pos:])
 	return b.String()
+}
+
+func lastByte(s string) byte {
+	if s == "" {
+		return 0
+	}
+	return s[len(s)-1]
 }
 
 // angleEnd is the offset after the `>` that closes the type arguments

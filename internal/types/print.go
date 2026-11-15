@@ -28,7 +28,55 @@ func Print(t Type) string {
 // (design/strings.md §5), as the emitter writes both for a type spelled in
 // a signature.
 func PrintQualified(t Type) string {
-	t = MapDeep(t, func(m Type) Type {
+	var b strings.Builder
+	(&printer{b: &b, qualified: true}).print(forPHPStan(t), false)
+	return b.String()
+}
+
+// PrintQualifiedMember is PrintQualified for a type that is written among
+// the members of a union, or of an intersection: the text an alias expands
+// to where the source wrote `Alias|null` or `A&Alias`. What would merge
+// with its neighbours is bracketed: an intersection in a union
+// (`(\A&\B)|null`), a union in an intersection, a callable's signature in
+// either. A union stays bare among the members of a union, and an
+// intersection among those of an intersection.
+func PrintQualifiedMember(t Type, intersection bool) string {
+	t = forPHPStan(t)
+	nested := true
+	switch t.(type) {
+	case Union:
+		nested = intersection
+	case Intersection:
+		nested = !intersection
+	}
+	var b strings.Builder
+	(&printer{b: &b, qualified: true}).print(t, nested)
+	return b.String()
+}
+
+// PrintQualifiedNullable is PrintQualified for the nullable of t, the text
+// an alias expands to where the source wrote `?Alias`: `?` before a type
+// that takes it (`?array{id: int}`, `?\App\Row`), and the union with null
+// where `?` would bind to less than the type or meet another `?`: a
+// union (`int|string|null`), a nullable type (`int|null`), an
+// intersection (`(\A&\B)|null`), a callable's signature
+// (`(\Closure(int): int)|null`).
+func PrintQualifiedNullable(t Type) string {
+	switch v := t.(type) {
+	case Union, Intersection, Null, Mixed:
+	case Callable:
+		if !v.HasSig {
+			return "?" + PrintQualified(t)
+		}
+	default:
+		return "?" + PrintQualified(t)
+	}
+	return PrintQualified(Nullable(t))
+}
+
+// forPHPStan rewrites what PHPStan has no type for: bytes is string.
+func forPHPStan(t Type) Type {
+	return MapDeep(t, func(m Type) Type {
 		switch v := m.(type) {
 		case Bytes:
 			return TString
@@ -53,9 +101,6 @@ func PrintQualified(t Type) string {
 		}
 		return m
 	})
-	var b strings.Builder
-	(&printer{b: &b, qualified: true}).print(t, false)
-	return b.String()
 }
 
 // PrintPhaenon prints t as a .phn would write it (design/generics.md §11's
@@ -477,6 +522,9 @@ func Native(t Type) (string, bool) {
 			s, ok := Native(m)
 			if !ok {
 				return "", false
+			}
+			if _, intersection := m.(Intersection); intersection {
+				s = "(" + s + ")" // PHP's DNF: an intersection in a union is bracketed
 			}
 			parts = append(parts, s)
 		}

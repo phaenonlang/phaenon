@@ -13,6 +13,8 @@ type Rows = list<Row>;
 type Pair = (int, string);
 type Numbered = array{0: int, -1?: string, '7': map<int, Row>};
 type Nothing = array{};
+type Value = int|string;
+type Maybe = array{id: int}|null;
 type Sorter = Closure(Row, Row): int;
 type Positional = (int, string);
 
@@ -42,6 +44,8 @@ final class Orders
         usort($rows, $sorter);
         return $rows;
     }
+
+    value(?Value $v, ?Maybe $m = null): ?Value => $v ?? $m['id'] ?? null;
 
     price(Json $json): Price => ['amount' => count($json), 'currency' => 'EUR'];
 

@@ -17,6 +17,8 @@ use Acme\Legacy;
  * @phpstan-type Pair array{int, string}
  * @phpstan-type Numbered array{0: int, -1?: string, '7': array<int, Row>}
  * @phpstan-type Nothing array{}
+ * @phpstan-type Value int|string
+ * @phpstan-type Maybe array{id: int}|null
  * @phpstan-type Sorter \Closure(Row, Row): int
  * @phpstan-type Status 'open'|'closed'
  * @phpstan-type Legacy array{id: int}
@@ -67,6 +69,16 @@ final class Orders
         $rows = $this->rows;
         usort($rows, $sorter);
         return $rows;
+    }
+
+    /**
+     * @param Value|null $v
+     * @param Maybe|null $m
+     * @return Value|null
+     */
+    public function value(int|string|null $v, ?array $m = null): int|string|null
+    {
+        return $v ?? $m['id'] ?? null;
     }
 
     /**

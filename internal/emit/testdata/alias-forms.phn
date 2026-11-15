@@ -1,0 +1,96 @@
+// targets: 8.5, 8.6
+namespace App\Forms;
+
+// What an alias stands for is written as a type wherever the alias stood:
+// `?` before a union, a nullable type or an intersection, and such an
+// alias among the members of a union, give valid PHP and a docblock
+// PHPStan reads, in every position a type is written.
+
+interface Named
+{
+    name(): string;
+}
+
+interface Counted
+{
+    count(): int;
+}
+
+final class Item implements Named, Counted
+{
+    name(): string => 'item';
+
+    count(): int => 1;
+}
+
+type Value = int|string;
+type Maybe = ?int;
+type Both = Named&Counted;
+type MaybeBoth = ?Both;
+type Step = Closure(int): int;
+type Row = array{id: Value, next?: ?Value, of: ?Both, step?: ?Step};
+
+final class Forms
+{
+    const ?Value DEFAULT = null;
+
+    const ?Maybe LIMIT = 3;
+
+    public ?Value $value = null;
+
+    public ?Maybe $maybe = null;
+
+    public ?Both $both = null;
+
+    public ?MaybeBoth $maybeBoth = null;
+
+    public int|Both $either = 0;
+
+    public Value|Both|null $any = null;
+
+    /** @var list<?Value> */
+    public array $values = [];
+
+    /** @var map<string, Maybe|Both> */
+    public array $byName = [];
+
+    /** @var ?Both */
+    public ?object $documented = null;
+
+    __construct(public ?Value $promoted = null, private ?Both $kept = null) {}
+
+    parameters(?Value $v, ?Maybe $m = null, ?Both $b = null, ?MaybeBoth $mb = null, int|Both $e = 0, ?Step $s = null): ?Value => $v;
+
+    maybe(): ?Maybe => $this->maybe;
+
+    both(): ?Both => $this->both ?? $this->kept;
+
+    maybeBoth(): ?MaybeBoth => $this->maybeBoth;
+
+    either(): int|Both => $this->either;
+
+    any(): Value|Both|null => $this->any;
+
+    row(Row $row): ?Value => $row['next'] ?? null;
+
+    inside(list<?Value> $values, map<string, ?Both> $byName, (?Maybe, ?Both) $pair): (?Value, ?Step) => [$values[0] ?? null, null];
+
+    closures(Closure(?Value, ?Both): ?Maybe $f, Closure(?Step): Value $g, ?Closure(): Both $h = null): Closure(?MaybeBoth): ?Both => $this->pick(...);
+
+    pick(?MaybeBoth $x): ?Both => $x ?? $this->both;
+
+    /**
+     * A docblock writes the same forms.
+     *
+     * @param ?Value $v
+     * @param list<?Maybe> $ms
+     * @param Both|null $b
+     * @param array{value: ?Value, both?: ?Both, step: ?Step} $shape
+     * @return Value|Both|null
+     */
+    documented(mixed $v, array $ms, ?object $b, array $shape): mixed => $shape['value'] ?? $shape['both'] ?? $v ?? $b ?? $ms[0] ?? null;
+}
+
+function values(?Value ...$values): list<?Value> => array_values($values);
+
+function both(?Both $both = new Item()): ?Both => $both;

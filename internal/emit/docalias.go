@@ -119,12 +119,12 @@ func (e *emitter) codeAfterDoc(off int) int {
 // for, in the docblock at offset off: the alias's name, with the type
 // arguments written after it. nil when the file is compiled without type
 // information.
-func (e *emitter) aliasExpander(off int) func(mention string) (string, bool) {
+func (e *emitter) aliasExpander(off int) aliasExpand {
 	if e.opts.Program == nil || e.opts.File == nil {
 		return nil
 	}
 	var res *program.Resolver
-	return func(mention string) (string, bool) {
+	return func(mention string, in mentionContext) (string, bool) {
 		node, err := docblock.ParseType(mention)
 		if err != nil || node.Kind != docblock.KindNamed {
 			return "", false
@@ -135,6 +135,19 @@ func (e *emitter) aliasExpander(off int) func(mention string) (string, bool) {
 		if res.DocAlias(node.Name) == nil {
 			return "", false
 		}
-		return types.PrintQualified(res.Doc(node)), true
+		t := res.Doc(node)
+		if in.nullable && !in.union && !in.intersection {
+			return types.PrintQualifiedNullable(t), true
+		}
+		if in.nullable {
+			t = types.Nullable(t)
+		}
+		switch {
+		case in.intersection:
+			return types.PrintQualifiedMember(t, true), true
+		case in.union:
+			return types.PrintQualifiedMember(t, false), true
+		}
+		return types.PrintQualified(t), true
 	}
 }
