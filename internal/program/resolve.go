@@ -317,6 +317,18 @@ func OtherCaseTypeName(name string) (string, bool) {
 	return lower, phaenonTypeNames[lower] && name != lower
 }
 
+// NonClassTypeName reports a name that a type position reads as a type
+// which can be no class's, where a `throws` clause wants a class
+// (design/functions.md §8): a name PHP reserves, `string` or `void`, or
+// Phaenon's `map` and `bytes` in lower case (roadmap D30). `Map`, `Bytes`
+// and every other name are class names, `Resource` and `Number` included,
+// which PHP accepts as a class's; so are `map` and `bytes` where a class
+// of that name resolves, which the caller looks up.
+func NonClassTypeName(name string) bool {
+	lower := strings.ToLower(name)
+	return reservedTypeNames[lower] || (lower == "map" || lower == "bytes") && name == lower
+}
+
 // keyword resolves a native or docblock type keyword.
 func (r *resolver) keyword(lower string, args []types.Type, node *docblock.TypeNode) (types.Type, bool) {
 	arg := func(i int, def types.Type) types.Type {
@@ -961,7 +973,9 @@ func (r *resolver) buildReturn(native ast.TypeExpr, doc *docblock.Doc) types.Typ
 // (design/functions.md §4, tooling.md §9.1): the `throws` clause, else the
 // docblock's @throws tags joined into one union. nil when neither is
 // written; `@throws void`, "throws nothing", is types.TVoid, and so is
-// `nothrow`, its clause spelling (§4.5).
+// `nothrow`, its clause spelling (§4.5). A clause's member is read as a
+// `catch` reads its class (throwsMember); one that names no class is
+// left out, and a clause left with none declares nothing.
 func (r *resolver) buildThrows(clause *ast.Throws, doc *docblock.Doc) types.Type {
 	var ms []types.Type
 	switch {
@@ -969,7 +983,12 @@ func (r *resolver) buildThrows(clause *ast.Throws, doc *docblock.Doc) types.Type
 		return types.TVoid
 	case clause != nil:
 		for _, t := range clause.Types {
-			ms = append(ms, r.native(t))
+			if m := r.throwsMember(t); m != nil {
+				ms = append(ms, m)
+			}
+		}
+		if len(ms) == 0 {
+			return nil
 		}
 	case doc != nil && len(doc.Throws) > 0:
 		for _, t := range doc.Throws {
@@ -979,6 +998,32 @@ func (r *resolver) buildThrows(clause *ast.Throws, doc *docblock.Doc) types.Type
 		return nil
 	}
 	return types.MakeUnion(ms...)
+}
+
+// throwsMember reads a member of a `throws` clause as PHP reads the class
+// of a `catch` (design/functions.md §8): a type parameter, or a class name,
+// `self` and `parent` included, resolved through the file's imports and
+// never as a type alias, which is erased and names no class. What names no
+// class is nil: a type keyword, `string` or `void`, which the checker
+// reports (P2319), and `self` or `parent` where there is none (P2012,
+// P2011), so that no finding follows from the declaration they break.
+// `throws void` is not `nothrow`. An alias or an unknown name is the class
+// it would be, which does not exist (P2001).
+func (r *resolver) throwsMember(t *ast.NamedType) types.Type {
+	name := r.scope.ResolveClass(t.Name)
+	if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
+		if tp, ok := r.params[t.Name.Parts[0]]; ok {
+			return types.Param{Name: tp.Name, Bound: tp.Bound, Owner: r.owner()}
+		}
+		if NonClassTypeName(t.Name.Parts[0]) && r.p.Class(name) == nil {
+			return nil
+		}
+	}
+	switch c := r.classType(name, nil).(type) {
+	case types.Class, types.Static:
+		return c
+	}
+	return nil
 }
 
 // ensure builds a function's signature.
