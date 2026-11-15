@@ -3,6 +3,20 @@
 From 0.3.0 on, release-please writes each entry from the Conventional Commits merged since the
 previous release (`release-please-config.json`). The two releases before were cut by hand.
 
+## [0.6.0](https://github.com/phaenonlang/phaenon/compare/v0.5.0...v0.6.0) (2026-11-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* **checker:** a long cast or an `(unset)` cast that compiled before is now P1001, an error. Run `phn fmt` over the tree to write the canonical casts; replace `(unset) $x` by `null`, or by `unset($x);`.
+
+### Bug Fixes
+
+* **checker:** a null for a built-in's omitted argument is P2103 ([#42](https://github.com/phaenonlang/phaenon/issues/42)) ([a31d9f5](https://github.com/phaenonlang/phaenon/commit/a31d9f56cf9cc3e2abcbb209df180495791fd2ec))
+* **checker:** a type keyword in a throws clause is P2319, and only that ([#41](https://github.com/phaenonlang/phaenon/issues/41)) ([ccae585](https://github.com/phaenonlang/phaenon/commit/ccae58512d1f395aa0036cee0ece291b1c534d32))
+* **checker:** bytes compared with text stay checked, and the findings name mb_check_encoding() ([#40](https://github.com/phaenonlang/phaenon/issues/40)) ([9f9721b](https://github.com/phaenonlang/phaenon/commit/9f9721b4e78053f0692a44962b1544e3589974bd))
+* **checker:** the long casts and (unset) are refused ([#39](https://github.com/phaenonlang/phaenon/issues/39)) ([d1d37f4](https://github.com/phaenonlang/phaenon/commit/d1d37f44823e126569e1629ae04d405569819bc2))
+
 ## [0.5.0](https://github.com/phaenonlang/phaenon/compare/v0.4.1...v0.5.0) (2026-11-15)
 
 
