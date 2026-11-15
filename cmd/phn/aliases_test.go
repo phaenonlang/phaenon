@@ -100,3 +100,46 @@ func TestAliasesOfSourcesOutsideTheProgram(t *testing.T) {
 		t.Errorf("phn build --check after a build (%v):\n%s%s", err, out, stderr)
 	}
 }
+
+// phn migrate lifts the aliases PHP code has: a @phpstan-type becomes a
+// `type` declaration before its class and a @phpstan-import-type a `use`,
+// when their files are migrated together, and the migrated tree checks
+// (design/collections.md §6.6).
+func TestMigrateLiftsAliases(t *testing.T) {
+	bin := phnBinary(t)
+	root := formatTree(t)
+	if err := os.Remove(filepath.Join(root, "src", "Bad.phn")); err != nil {
+		t.Fatal(err)
+	}
+	writeTree(t, root, map[string]string{
+		"vendor/composer/autoload_psr4.php": "<?php\n\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\n\nreturn array(\n    'App\\\\' => array($baseDir . '/.src'),\n);\n",
+		"src/Orders/Orders.php": "<?php\n\ndeclare(strict_types=1);\n\nnamespace App\\Orders;\n\n/**\n * @phpstan-type Row array{id: int, name?: string}\n * @phpstan-type Page array{items: list<Row>, total: int}\n */\nfinal class Orders\n{\n" +
+			"    /** @var list<Row> */\n    private array $rows = [];\n\n    /**\n     * @return Page\n     */\n    public function page(): array\n    {\n        return ['items' => $this->rows, 'total' => count($this->rows)];\n    }\n}\n",
+		"src/Http/Show.php": "<?php\n\ndeclare(strict_types=1);\n\nnamespace App\\Http;\n\nuse App\\Orders\\Orders;\n\n/**\n * @phpstan-import-type Row from Orders\n * @phpstan-import-type Page from Orders as Paged\n */\nfinal class Show\n{\n" +
+			"    /**\n     * @param Paged $page\n     * @return Row|null\n     */\n    public function first(array $page): ?array\n    {\n        return $page['items'][0] ?? null;\n    }\n}\n",
+	})
+	stdout, stderr, err := run(t, root, bin, "migrate", "src")
+	if err != nil || !strings.Contains(stdout, "2 files migrated, 0 skipped, 0 .phn files updated, 0 docblock tags kept") {
+		t.Fatalf("phn migrate (%v):\n%s%s", err, stdout, stderr)
+	}
+	orders, _ := os.ReadFile(filepath.Join(root, "src/Orders/Orders.phn"))
+	show, _ := os.ReadFile(filepath.Join(root, "src/Http/Show.phn"))
+	for _, want := range []string{"type Row = array{id: int, name?: string};\ntype Page = array{items: list<Row>, total: int};\n\nfinal class Orders", "private list<Row> $rows = [];", "page(): Page =>"} {
+		if !strings.Contains(string(orders), want) {
+			t.Errorf("Orders.phn lacks %q:\n%s", want, orders)
+		}
+	}
+	for _, want := range []string{"use App\\Orders\\Orders;\nuse App\\Orders\\Row;\nuse App\\Orders\\Page as Paged;\n", "first(Paged $page): ?Row =>"} {
+		if !strings.Contains(string(show), want) {
+			t.Errorf("Show.phn lacks %q:\n%s", want, show)
+		}
+	}
+	if strings.Contains(string(orders)+string(show), "@phpstan-") {
+		t.Errorf("a tag was left:\n%s\n%s", orders, show)
+	}
+	for _, args := range [][]string{{"check"}, {"check", "src/Http"}, {"fmt", "--check"}} {
+		if stdout, stderr, err := run(t, root, bin, args...); err != nil {
+			t.Errorf("phn %s on the migrated tree (%v):\n%s%s", strings.Join(args, " "), err, stdout, stderr)
+		}
+	}
+}

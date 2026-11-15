@@ -57,6 +57,11 @@ type Options struct {
 	// by itself.
 	Program *program.Program
 	File    *program.File
+	// Migrating are the model's other files this run rewrites. An alias a
+	// class of one of them declares is lifted with it, so an import of
+	// that alias is lifted too (aliases.go); a class of any other file
+	// keeps its @phpstan-type, and so does what imports it.
+	Migrating map[*program.File]bool
 }
 
 // File converts PHP source to Phaenon source.

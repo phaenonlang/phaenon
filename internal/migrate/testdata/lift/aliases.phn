@@ -1,0 +1,69 @@
+namespace App\Orders;
+
+use Acme\Item;
+use Acme\Legacy;
+use Acme\Price;
+use App\Orders\Line as OrderLine;
+use Acme\Price as Money;
+
+type Row = array{id: int, name?: string};
+type Line = array{sku: string, qty: int, 'unit-price': float, class: class<Item>, ...};
+type Json = map<string, mixed>;
+type Rows = list<Row>;
+type Pair = (int, string);
+type Numbered = array{0: int, -1?: string, '7': map<int, Row>};
+type Nothing = array{};
+type Positional = (int, string);
+
+/**
+ * Orders of the shop.
+ *
+ * @phpstan-type Status 'open'|'closed'
+ * @phpstan-type Legacy array{id: int}
+ * @phpstan-type Report array{rows: Rows}
+ * @phpstan-type Nested array{of: Status}
+ * @phpstan-type Described array{id: int} a row with a description
+ * @phpstan-import-type Old from Legacy
+ */
+final class Orders
+{
+    private list<Row> $rows = [];
+
+    find(int $id): ?Row => $this->rows[$id] ?? null;
+
+    /** @param $row - the row to add */
+    add(Row $row, Line ...$lines): void => $this->rows[] = $row;
+
+    all(): Rows => $this->rows;
+
+    price(Json $json): Price => ['amount' => count($json), 'currency' => 'EUR'];
+
+    /**
+     * @param Status $status
+     * @param Old $old
+     */
+    status(string $status, array $old): Pair => [$old['x'], $status];
+}
+
+/**
+ * @phpstan-import-type Status from Orders
+ * @phpstan-type Dup array{a: int}
+ */
+final class Report
+{
+    total(Row $row, OrderLine $line): Money => ['amount' => $row['id'] * $line['qty'], 'currency' => 'EUR'];
+
+    /**
+     * @param Dup $dup
+     * @param Status $status
+     */
+    dup(array $dup, string $status): int => $dup['a'];
+}
+
+/**
+ * @phpstan-type Dup array{b: int}
+ * @phpstan-type Boxed array{value: T}
+ * @phpstan-type cased array{a: int}
+ * @phpstan-type Cased array{b: int}
+ */
+final class Other<T> {}

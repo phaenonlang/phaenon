@@ -43,7 +43,7 @@ func Lift(src []byte, opts Options) ([]byte, []Note, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse: %w", err)
 	}
-	l := &lifter{src: src, keepPublic: opts.KeepPublic, prog: opts.Program, pfile: opts.File, stats: opts.Stats}
+	l := &lifter{src: src, keepPublic: opts.KeepPublic, prog: opts.Program, pfile: opts.File, stats: opts.Stats, files: opts.Migrating}
 	if l.prog == nil || l.pfile == nil {
 		l.prog, l.pfile = nil, nil
 	}
@@ -88,6 +88,13 @@ type lifter struct {
 	stats *Stats
 	// headed holds the methods whose head methodDecl respelled.
 	headed map[*ast.MethodDecl]bool
+	// files are the model's files this run rewrites besides pfile; lastUse
+	// and nsEnd are where the namespace's last import and its statement
+	// end, and added the imports the lift wrote (aliases.go).
+	files   map[*program.File]bool
+	lastUse int
+	nsEnd   int
+	added   map[string]bool
 }
 
 // overrideCtx is what the override-erasure rule needs to know about a
@@ -171,11 +178,16 @@ func (l *lifter) stmts(list []ast.Stmt, sc scope) {
 				l.ns = strings.Join(s.Name.Parts, "\\")
 			}
 			l.uses = map[string]string{}
+			l.lastUse, l.nsEnd = 0, s.S.End
+			if s.Braced {
+				l.nsEnd = 0 // its imports go before the first declaration that needs one
+			}
 			l.stmts(s.Body, sc)
 		case *ast.Use:
 			if l.uses == nil {
 				l.uses = map[string]string{}
 			}
+			l.lastUse = s.S.End
 			for _, it := range s.Items {
 				kind := s.Kind
 				if it.Kind != ast.UseClass {
@@ -437,6 +449,7 @@ func (l *lifter) classDecl(c *ast.ClassDecl, outer scope) {
 		d := l.findDoc(c.Doc, c.S.Start)
 		if d != nil {
 			l.templates(d, c.TypeParams, c.Name.S.End, sc)
+			l.liftAliases(c, d, sc)
 			for _, g := range d.groups {
 				switch g.name {
 				case "@extends", "@template-extends":
@@ -1146,7 +1159,15 @@ func anyKey(n *docblock.TypeNode) bool {
 	return false
 }
 
-func render(n *docblock.TypeNode) (string, bool) {
+// render spells a docblock type in Phaenon's syntax, where it has a
+// spelling in a declaration.
+func render(n *docblock.TypeNode) (string, bool) { return renderType(n, false) }
+
+// renderType is render for a type position; alias says the position is the
+// right-hand side of a `type` declaration, the one place a shape with
+// named keys is syntax (design/collections.md §6.1).
+func renderType(n *docblock.TypeNode, alias bool) (string, bool) {
+	render := func(n *docblock.TypeNode) (string, bool) { return renderType(n, alias) }
 	switch n.Kind {
 	case docblock.KindNamed:
 		name := n.Name
@@ -1198,7 +1219,15 @@ func render(n *docblock.TypeNode) (string, bool) {
 	case docblock.KindShape:
 		// A positional, sealed array{A, B} is the tuple (A, B)
 		// (design/collections.md §2.4). One element stays: `(A)` would
-		// read as a cast. Named keys stay docblock vocabulary.
+		// read as a cast. Named keys stay docblock vocabulary, but in a
+		// `type` declaration, where a shape is written (renderShape).
+		keyed := alias
+		for _, en := range n.Entries {
+			keyed = keyed && en.HasKey
+		}
+		if keyed {
+			return renderShape(n)
+		}
 		if n.Unsealed || len(n.Entries) < 2 || !(strings.EqualFold(n.Name, "array") || strings.EqualFold(n.Name, "list")) {
 			return "", false
 		}
