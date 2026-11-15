@@ -298,7 +298,7 @@ func (x *fnCtx) interpolated(e *ast.InterpolatedString, env *state) types.Type {
 			}
 		default:
 			t := x.expr(p, env, nil)
-			x.checkStringable(t, p.Span())
+			x.checkStringable(t, p.Span(), p)
 		}
 	}
 	if e.Kind == ast.StringBacktick {
@@ -310,7 +310,10 @@ func (x *fnCtx) interpolated(e *ast.InterpolatedString, env *state) types.Type {
 	return types.TString
 }
 
-func (x *fnCtx) checkStringable(t types.Type, span ast.Span) {
+// checkStringable reports a value PHP cannot convert to string, or should
+// not: bytes is binary data, not text. operand is the expression the value
+// is, nil when the caller has none to name.
+func (x *fnCtx) checkStringable(t types.Type, span ast.Span, operand ast.Expr) {
 	if mayBeObject(t) {
 		x.implicitThrow() // __toString() runs
 	}
@@ -321,7 +324,11 @@ func (x *fnCtx) checkStringable(t types.Type, span ast.Span) {
 			return
 		case types.Bytes:
 			// design/strings.md §2: text and binary never mix silently.
-			x.report(span, P2530, "bytes is not text: `as string` checks it is UTF-8, bin2hex() or base64_encode() spells it out")
+			if v, ok := bytesVariable(operand); ok {
+				x.report(span, P2530, "bytes is not text: mb_check_encoding(%[1]s, 'UTF-8') checks it is UTF-8, after which it is string&bytes; (string) %[1]s converts it unchecked; bin2hex() or base64_encode() spells it out", v)
+			} else {
+				x.report(span, P2530, "bytes is not text: mb_check_encoding() on the bytes checks they are UTF-8, after which they are string&bytes; a (string) cast converts them unchecked; bin2hex() or base64_encode() spells them out")
+			}
 			return
 		case types.Array, types.Shape:
 			x.report(span, P2312, "array cannot be converted to string")
@@ -340,7 +347,7 @@ func (x *fnCtx) checkStringable(t types.Type, span ast.Span) {
 
 func (x *fnCtx) toString(e ast.Expr, env *state) types.Type {
 	t := x.expr(e, env, nil)
-	x.checkStringable(t, e.Span())
+	x.checkStringable(t, e.Span(), e)
 	return t
 }
 
@@ -1470,7 +1477,7 @@ func (x *fnCtx) cast(e *ast.Cast, env *state) types.Type {
 // returned unjoined for keyExpr, which must see the int part before a
 // union absorbs it.
 func (x *fnCtx) stringCast(e *ast.Cast, t types.Type) []types.Type {
-	x.checkStringable(types.Subtract(t, types.TBytes, x.p()), e.Expr.Span())
+	x.checkStringable(types.Subtract(t, types.TBytes, x.p()), e.Expr.Span(), nil)
 	if types.IsMixed(t) {
 		return []types.Type{types.TString}
 	}
@@ -1550,16 +1557,79 @@ func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Typ
 	r := x.expr(e.Right, env, nil)
 	x.certainOperands = types.Equal(x.nativeOr(e.Left, l, env), l) && types.Equal(x.nativeOr(e.Right, r, env), r)
 	if e.Op == token.T_IS_IDENTICAL || e.Op == token.T_IS_NOT_IDENTICAL {
-		if !types.IsMixed(l) && !types.IsMixed(r) && !types.Overlaps(l, r, x.p()) && (!x.nativeOverlap(e.Left, l, e.Right, r, env) || bytesAgainstText(l, r)) {
-			word := "false"
-			if e.Op == token.T_IS_NOT_IDENTICAL {
-				word = "true"
-			}
-			x.report(e.S, P2305, "strict comparison between %s and %s is always %s", x.typeName(l), x.typeName(r), word)
+		if !types.IsMixed(l) && !types.IsMixed(r) && !types.Overlaps(l, r, x.p()) {
+			x.disjointComparison(e, l, r, env)
 		}
 		return types.TBool
 	}
 	return x.binaryTypes(e.Op, l, r, e)
+}
+
+// disjointComparison reports a strict comparison of operands whose types
+// do not overlap (P2305): a comparison of values PHP's own types keep
+// apart is always false (`!==` always true), while one of binary data with
+// text, both PHP strings, is true when the two hold the same bytes, and
+// the finding is that the two kinds are compared (strings.md §2).
+// Disjoint docblock types alone are not reported, as PHPStan does not with
+// treatPhpDocTypesAsCertain off.
+func (x *fnCtx) disjointComparison(e *ast.Binary, l, r types.Type, env *state) {
+	if !x.nativeOverlap(e.Left, l, e.Right, r, env) {
+		word := "false"
+		if e.Op == token.T_IS_NOT_IDENTICAL {
+			word = "true"
+		}
+		x.report(e.S, P2305, "strict comparison between %s and %s is always %s", x.typeName(l), x.typeName(r), word)
+		return
+	}
+	if bytesAgainstText(l, r) {
+		x.report(e.S, P2305, "strict comparison between %s and %s compares binary data with text, which may still hold the same bytes: %s", x.typeName(l), x.typeName(r), convertBytesHint(e.Left, l, e.Right))
+	}
+}
+
+// convertBytesHint says how to compare binary data with text, naming the
+// bytes operand, the one of left and right whose type is bytes (lt is
+// left's), as written when it is a variable.
+func convertBytesHint(left ast.Expr, lt types.Type, right ast.Expr) string {
+	side := right
+	if hasBytes(lt) {
+		side = left
+	}
+	if v, ok := bytesVariable(side); ok {
+		return "write (bytes) on the text to compare bytes, or test mb_check_encoding(" + v + ", 'UTF-8') first to compare text (the bytes are string&bytes after it)"
+	}
+	return "write (bytes) on the text to compare bytes, or test the bytes with mb_check_encoding() first to compare text (they are string&bytes after it)"
+}
+
+// bytesVariable is a variable as written, `$raw`, for a message to name;
+// false for any other expression, which a message calls "the bytes".
+func bytesVariable(e ast.Expr) (string, bool) {
+	for {
+		switch p := e.(type) {
+		case *ast.Paren:
+			e = p.Expr
+			continue
+		case *ast.EncapsBraced:
+			e = p.Expr
+			continue
+		}
+		break
+	}
+	if v, ok := e.(*ast.Variable); ok {
+		return "$" + v.Name, true
+	}
+	return "", false
+}
+
+// operands are the two sides of a binary operation or a compound
+// assignment; nil for any other node.
+func operands(n ast.Node) (left, right ast.Expr) {
+	switch n := n.(type) {
+	case *ast.Binary:
+		return n.Left, n.Right
+	case *ast.Assign:
+		return n.Target, n.Value
+	}
+	return nil, nil
 }
 
 // binaryTypes computes the result of an operator on typed operands.
@@ -1648,13 +1718,22 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 			return types.TBytes
 		}
 		if hasBytes(l) || hasBytes(r) {
-			x.report(span, P2530, "cannot concatenate bytes and text: `as string` checks bytes are UTF-8 text, (bytes) takes text as its UTF-8 bytes, (bytes) '' starts a binary buffer")
-			x.checkStringable(types.Subtract(l, types.TBytes, x.p()), span)
-			x.checkStringable(types.Subtract(r, types.TBytes, x.p()), span)
+			left, right := operands(e)
+			bytesSide := right
+			if hasBytes(l) {
+				bytesSide = left
+			}
+			if v, ok := bytesVariable(bytesSide); ok {
+				x.report(span, P2530, "cannot concatenate bytes and text: mb_check_encoding(%[1]s, 'UTF-8') checks the bytes are UTF-8 text, after which they are string&bytes and join text; (string) %[1]s converts them unchecked; (bytes) takes text as its UTF-8 bytes, and (bytes) '' starts a binary buffer", v)
+			} else {
+				x.report(span, P2530, "cannot concatenate bytes and text: mb_check_encoding() on the bytes checks they are UTF-8 text, after which they are string&bytes and join text; a (string) cast converts them unchecked; (bytes) takes text as its UTF-8 bytes, and (bytes) '' starts a binary buffer")
+			}
+			x.checkStringable(types.Subtract(l, types.TBytes, x.p()), span, nil)
+			x.checkStringable(types.Subtract(r, types.TBytes, x.p()), span, nil)
 			return types.TError
 		}
-		x.checkStringable(l, span)
-		x.checkStringable(r, span)
+		x.checkStringable(l, span, nil)
+		x.checkStringable(r, span, nil)
 		if ll, ok := l.(types.StringLit); ok {
 			if rl, ok := r.(types.StringLit); ok {
 				return types.StringLit{V: ll.V + rl.V}

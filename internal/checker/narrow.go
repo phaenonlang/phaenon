@@ -328,14 +328,10 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 		x.objectNumberComparison(e.Op, lt, rt, e.S)
 	}
 	if strict && !types.IsMixed(lt) && !types.IsMixed(rt) && !types.Overlaps(lt, rt, x.p()) {
-		word := "false"
+		x.disjointComparison(e, lt, rt, env)
 		x.condValueType = types.TFalse
 		if negate {
-			word = "true"
 			x.condValueType = types.TTrue
-		}
-		if !x.nativeOverlap(e.Left, lt, e.Right, rt, env) || bytesAgainstText(lt, rt) {
-			x.report(e.S, P2305, "strict comparison between %s and %s is always %s", x.typeName(lt), x.typeName(rt), word)
 		}
 	}
 	then, els = env.clone(), env.clone()
