@@ -75,10 +75,12 @@ func TestTypeAliasIsItsNamespaces(t *testing.T) {
 	}
 }
 
-// The aliases of sources outside the program are read on demand: the first
-// name the loader has no class for, under a prefix that holds Phaenon
-// sources, reads the `type` declarations of its directory. A class is not
-// parsed to find that out, and neither is a file that declares no alias.
+// The aliases of sources outside the program are read on demand. A name
+// under a prefix that holds Phaenon sources is loaded as a class is, from
+// the file the loader gives it, which may be where its alias was put; a
+// name that is neither a class nor an alias there reads the `type`
+// declarations of the prefix's directory, parsing only the files that may
+// declare one.
 func TestTypeAliasReadOnDemand(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, src string) string {
@@ -92,7 +94,7 @@ func TestTypeAliasReadOnDemand(t *testing.T) {
 		return path
 	}
 	box := write("Box.phn", "namespace Acme;\n\nfinal class Box {}\n")
-	write("Sub/Crate.phn", "namespace Acme\\Sub;\n\nfinal class Crate\n{\n    public string $type = 'x';\n}\n")
+	crate := write("Sub/Crate.phn", "namespace Acme\\Sub;\n\nfinal class Crate\n{\n    public string $type = 'x';\n}\n")
 	aliases := write("Sub/shapes.phn", "namespace Acme\\Sub;\n\ntype Row = map<string, int>;\n\nfinal class Beside {}\n")
 	broken := write("Sub/broken.phn", "namespace Acme\\Sub;\n\ntype Half = ;\n")
 	write(".hidden/skipped.phn", "namespace Acme\\Hidden;\n\ntype Nope = int;\n")
@@ -106,8 +108,8 @@ func TestTypeAliasReadOnDemand(t *testing.T) {
 	if got := types.Print(typeOf(t, p, f, "Box")); got != `Acme\Box` {
 		t.Errorf("Box: %s", got)
 	}
-	if p.File(box) != nil || p.File(aliases) != nil {
-		t.Error("a name the loader has a class for read the sources")
+	if p.File(box) == nil || p.File(aliases) != nil {
+		t.Error("a name that is a class loads its file, and reads no other")
 	}
 	if got := types.Print(typeOf(t, p, f, "Row")); got != "array<string, int>" {
 		t.Errorf("Row: %s", got)
@@ -115,8 +117,8 @@ func TestTypeAliasReadOnDemand(t *testing.T) {
 	if p.File(aliases) == nil {
 		t.Error("the file that declares the alias was not read")
 	}
-	if len(p.files) != 2 || p.File(broken) != nil {
-		t.Errorf("%d files held: only the one that declares an alias is added, with the program's own", len(p.files))
+	if len(p.files) != 3 || p.File(broken) != nil || p.File(crate) != nil {
+		t.Errorf("%d files held: beside the program's own, the class's and the one that declares an alias", len(p.files))
 	}
 	if p.Class(`Acme\Sub\Beside`) == nil {
 		t.Error("the classes of the file read are declared with its aliases")
@@ -126,6 +128,53 @@ func TestTypeAliasReadOnDemand(t *testing.T) {
 	}
 	if p.TypeAlias(`Other\Row`) != nil {
 		t.Error("a name outside the loader's prefix found an alias")
+	}
+}
+
+// An alias is found whatever its file is called, and whichever name is
+// met first: in the file PSR-4 gives its name, where a class would be, in
+// a file named in another letter case, and in a file named after nothing.
+func TestTypeAliasInTheFileOfItsName(t *testing.T) {
+	sources := map[string]string{
+		"Orders/Row.phn":   "namespace Acme\\Orders;\n\ntype Row = array<int>;\n",
+		"Orders/plain.phn": "namespace Acme\\Orders;\n\ntype Plain = list<int>;\n",
+		"Orders/types.phn": "namespace Acme\\Orders;\n\ntype Page = (Row, int);\n",
+		"Orders/Odd.phn":   "namespace Acme\\Orders;\n\nfinal class Even {}\n\ntype Elsewhere = int;\n",
+		"Orders/Else.phn":  "namespace Acme\\Orders;\n\ntype Odd = string;\n",
+	}
+	want := map[string]string{
+		"Row": "array<int>", "Plain": "list<int>", "Page": "list{array<int>, int}",
+		"Odd":       "string", // its own file declares neither a class nor an alias of the name
+		"Elsewhere": "int",
+	}
+	orders := [][]string{
+		{"Row", "Plain", "Page", "Odd", "Elsewhere"},
+		{"Elsewhere", "Odd", "Page", "Plain", "Row"},
+		{"Page", "Row", "Odd", "Plain", "Elsewhere"},
+		{"Plain", "Odd", "Row", "Elsewhere", "Page"},
+	}
+	for _, order := range orders {
+		dir := t.TempDir()
+		for name, src := range sources {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		p := New()
+		p.AddLoader(DirLoader{Prefix: "Acme\\", Dir: dir})
+		f, err := p.AddFile("use.phn", []byte("namespace Acme\\Orders;\n"), lexer.ModePhaenon, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range order {
+			if got := types.Print(typeOf(t, p, f, name)); got != want[name] {
+				t.Errorf("in the order %v, %s: %s, want %s", order, name, got, want[name])
+			}
+		}
 	}
 }
 

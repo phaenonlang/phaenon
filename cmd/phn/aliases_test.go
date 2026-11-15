@@ -15,10 +15,16 @@ func aliasTree(t *testing.T) string {
 	writeTree(t, root, map[string]string{
 		"vendor/acme/lib/src/Bad.phn":   "namespace Acme\\Lib;\n\nfunction good(): int => 1;\n",
 		"vendor/acme/lib/src/types.phn": "namespace Acme\\Lib;\n\ntype Boxes<T> = map<string, Box<T>>;\n",
+		"vendor/acme/lib/src/Crate.phn": "namespace Acme\\Lib;\n\ntype Crate = list<Box<string>>;\n",
 		"src/Orders/types.phn":          "namespace App\\Orders;\n\ntype Row = map<string, int|string>;\ntype Rows = list<Row>;\n",
+		"src/Orders/Line.phn":           "namespace App\\Orders;\n\ntype Line = (string, int);\n",
 		"src/Orders/Orders.phn":         "namespace App\\Orders;\n\nfinal class Orders\n{\n    all(): Rows => [];\n}\n",
 		"src/Http/Show.phn": "namespace App\\Http;\n\nuse Acme\\Lib\\Boxes;\nuse App\\Orders\\Orders;\nuse App\\Orders\\Row;\n\n" +
 			"final class Show\n{\n    first(Orders $orders): ?Row => $orders->all()[0] ?? null;\n\n    count(Boxes<int> $boxes): int => count($boxes);\n}\n",
+		// The aliases a file named after them holds, the first names this
+		// file meets: a class would be looked for there.
+		"src/Http/Lines.phn": "namespace App\\Http;\n\nuse Acme\\Lib\\Crate;\nuse App\\Orders\\Line;\n\n" +
+			"function quantity(Line $line, Crate $crate): int => $line[1] + count($crate);\n",
 	})
 	return root
 }
@@ -30,7 +36,7 @@ func aliasTree(t *testing.T) string {
 func TestAliasesOfSourcesOutsideTheProgram(t *testing.T) {
 	bin := phnBinary(t)
 	root := aliasTree(t)
-	for _, args := range [][]string{{"check"}, {"check", "src/Http"}, {"check", "src/Http/Show.phn"}, {"check", "src/Orders/Orders.phn"}} {
+	for _, args := range [][]string{{"check"}, {"check", "src/Http"}, {"check", "src/Http/Show.phn"}, {"check", "src/Http/Lines.phn"}, {"check", "src/Orders/Orders.phn"}} {
 		stdout, stderr, err := run(t, root, bin, args...)
 		if err != nil || !strings.Contains(stdout, "0 errors, 0 warnings") {
 			t.Errorf("phn %s (%v):\n%s%s", strings.Join(args, " "), err, stdout, stderr)

@@ -88,8 +88,14 @@ type aliasSources struct {
 
 // findAlias looks for the alias a lower-cased qualified name may stand for
 // in the sources outside the program, and reports whether any were read.
-// It asks once per name, and reads nothing for a name that is a class: one
-// the program has, or one a loader's maps have a file for.
+// It asks once per name, and reads nothing for a name that is a class.
+//
+// A name under a prefix with sources is first loaded as a class is, from
+// the file the maps give it: that file may declare the class, or be where
+// the alias of that name was put, and only its declarations say which. A
+// name that is neither then has the `type` declarations of the prefix's
+// directories read. So what a name stands for does not depend on which
+// names were met before it, nor on how its alias's file is called.
 func (p *Program) findAlias(lower string) bool {
 	s := &p.aliases.sources
 	if len(p.loaders) == 0 || s.asked[lower] {
@@ -105,25 +111,33 @@ func (p *Program) findAlias(lower string) bool {
 	if _, aliased := p.classAliases[lower]; aliased {
 		return false
 	}
-	read := false
+	type source struct {
+		l    Loader
+		dirs []string
+	}
+	var sources []source
 	for _, l := range p.loaders {
-		sl, ok := l.(SourceLoader)
-		if !ok {
-			continue
-		}
-		dirs := sl.SourceDirs(lower)
-		if len(dirs) == 0 {
-			continue
-		}
-		if !p.missing[lower] {
-			if _, found := l.FindClass(lower); found {
-				return read // a class, loaded when something needs it
+		if sl, ok := l.(SourceLoader); ok {
+			if dirs := sl.SourceDirs(lower); len(dirs) > 0 {
+				sources = append(sources, source{l, dirs})
 			}
 		}
-		for _, dir := range dirs {
+	}
+	if len(sources) == 0 {
+		return false
+	}
+	if p.Class(lower) != nil {
+		return false
+	}
+	if p.aliases.byName[lower] != nil {
+		return true // declared in the file the maps give the name
+	}
+	read := false
+	for _, src := range sources {
+		for _, dir := range src.dirs {
 			if !s.read[dir] {
 				s.read[dir] = true
-				p.readTypeDeclarations(l, dir)
+				p.readTypeDeclarations(src.l, dir)
 				read = true
 			}
 		}
