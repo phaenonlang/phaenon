@@ -243,3 +243,178 @@ final class OpenHolder
         $this->row = $open; // want P2201
     }
 }
+
+// A type argument is inferred through a shape, entry by entry and by key,
+// and from a general array's values.
+
+/**
+ * @template T
+ * @param array{items: list<T>, total: int} $page
+ * @return T|null
+ */
+function first(array $page): mixed
+{
+    return $page['items'][0] ?? null;
+}
+
+/**
+ * @template T
+ * @param array{value?: T} $box
+ * @return list<T>
+ */
+function unbox(array $box): array
+{
+    return isset($box['value']) ? [$box['value']] : [];
+}
+
+/**
+ * @template T
+ * @param array{value: T, ...} $box
+ * @return T
+ */
+function valueOf(array $box): mixed
+{
+    return $box['value'];
+}
+
+/**
+ * @template T
+ * @template U
+ * @param array{T, U} $pair
+ * @return array{U, T}
+ */
+function swap(array $pair): array
+{
+    return [$pair[1], $pair[0]];
+}
+
+/**
+ * @template T
+ * @param array{inner: array{value: T}} $outer
+ * @return T
+ */
+function inner(array $outer): mixed
+{
+    return $outer['inner']['value'];
+}
+
+/**
+ * @template T
+ * @param list<array{value: T}> $rows
+ * @return list<T>
+ */
+function column(array $rows): array
+{
+    $values = [];
+    foreach ($rows as $row) {
+        $values[] = $row['value'];
+    }
+    return $values;
+}
+
+/**
+ * @template T of object
+ * @param array{class: class-string<T>, shared?: bool} $spec
+ * @return T
+ */
+function make(array $spec): object
+{
+    return new $spec['class']();
+}
+
+/**
+ * @template T
+ * @param array{a: T, b: T} $both
+ * @return T
+ */
+function either(array $both): mixed
+{
+    return $both['a'];
+}
+
+/**
+ * @template T
+ * @param array{value: T}|null $box
+ * @return T|null
+ */
+function orNull(?array $box): mixed
+{
+    return $box === null ? null : $box['value'];
+}
+
+/**
+ * @param array{items: list<array{id: int, name?: string}>, total: int} $page
+ * @param array{value: int, n: int, extra: string} $wide
+ * @param array{value?: string} $maybe
+ * @param array{value: int}|array{value: string} $oneOf
+ * @param list<array{value: Customer}> $rows
+ * @param array{int, string} $pair
+ * @param array{value: int}|null $nullable
+ * @param array{other: int, ...} $openOther
+ * @param array<string, string> $general
+ * @param array<int, string> $byNumber
+ * @param list<string> $strings
+ */
+function inferred(array $page, array $wide, array $maybe, array $oneOf, array $rows, array $pair, ?array $nullable, array $openOther, array $general, array $byNumber, array $strings): void
+{
+    $row = first($page);
+    if ($row !== null) {
+        takeRow($row);
+        takeInt($row['id']);
+        takeString($row['id']); // want P2103
+    }
+    // An array literal's shape binds as a declared one does.
+    $n = first(['items' => [1, 2], 'total' => 2]);
+    takeInt($n ?? 0);
+    takeString($n ?? ''); // want P2103
+    // An optional entry binds where the argument has it.
+    foreach (unbox($maybe) as $s) {
+        takeString($s);
+        takeInt($s); // want P2103
+    }
+    foreach (unbox(['value' => 1]) as $i) {
+        takeInt($i);
+    }
+    // The keys an argument has beyond the parameter's are passed over.
+    takeInt(valueOf($wide));
+    takeString(valueOf($wide)); // want P2103
+    takeString(valueOf(['value' => new Customer(), 'x' => 1])->name);
+    // A tuple binds by position.
+    $swapped = swap($pair);
+    takeString($swapped[0]);
+    takeInt($swapped[1]);
+    takeInt($swapped[0]); // want P2103
+    takeString(swap([1, 'a'])[0]);
+    // Shapes inside shapes, and inside generics.
+    takeInt(inner(['inner' => ['value' => 1]]));
+    takeString(inner(['inner' => ['value' => 1]])); // want P2103
+    foreach (column($rows) as $customer) {
+        takeString($customer->name);
+        takeInt($customer); // want P2103
+    }
+    takeString(make(['class' => Customer::class])->name);
+    // Every entry that names the parameter binds it.
+    $both = either(['a' => 1, 'b' => 'x']);
+    takeInt($both); // want P2103
+    // A union of shapes binds from each member.
+    $one = valueOf($oneOf);
+    takeInt($one); // want P2103
+    takeString($one); // want P2103
+    $v = orNull($nullable);
+    takeInt($v ?? 0);
+    takeString($v ?? ''); // want P2103
+    // An unsealed argument may hold the entry it does not name, with any
+    // value, and is accepted where that entry is optional.
+    foreach (unbox($openOther) as $m) {
+        takeInt($m); // want P2103
+    }
+    // A general array binds from its values, whatever its keys; it is
+    // still no shape that requires a key.
+    foreach (unbox($general) as $g) {
+        takeString($g);
+    }
+    foreach (unbox($byNumber) as $g) {
+        takeString($g);
+    }
+    takeString(swap($strings)[0]); // want P2103
+}

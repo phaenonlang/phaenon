@@ -363,3 +363,130 @@ final class OpenHolder
         $this->row = $open; // want P2201
     }
 }
+
+// A type argument is inferred through a shape, entry by entry and by key,
+// and from a general array's values.
+type Maybe<T> = array{value?: T};
+type Boxed<T> = array{value: T, ...};
+type Outer<T> = array{inner: array{value: T}};
+type Cell<T> = array{value: T};
+type Spec<T of object> = array{class: class<T>, shared?: bool};
+type Both<T> = array{a: T, b: T};
+type WideValue = array{value: int, n: int, extra: string};
+type OneOf = array{value: int}|array{value: string};
+type OpenOther = array{other: int, ...};
+
+function unbox<T>(Maybe<T> $box): list<T>
+{
+    return isset($box['value']) ? [$box['value']] : [];
+}
+
+function valueOf<T>(Boxed<T> $box): T
+{
+    return $box['value'];
+}
+
+function swap<T, U>((T, U) $pair): (U, T)
+{
+    return [$pair[1], $pair[0]];
+}
+
+function inner<T>(Outer<T> $outer): T
+{
+    return $outer['inner']['value'];
+}
+
+function column<T>(list<Cell<T>> $rows): list<T>
+{
+    return array_map(fn (Cell<T> $row): T => $row['value'], $rows);
+}
+
+function make<T of object>(Spec<T> $spec): T
+{
+    return new $spec['class']();
+}
+
+function either<T>(Both<T> $both): T
+{
+    return $both['a'];
+}
+
+function orNull<T>(?Cell<T> $box): ?T
+{
+    return $box === null ? null : $box['value'];
+}
+
+function inferred(
+    Page<Row> $page,
+    WideValue $wide,
+    Maybe<string> $maybe,
+    OneOf $oneOf,
+    list<Cell<Customer>> $rows,
+    (int, string) $pair,
+    ?Cell<int> $nullable,
+    OpenOther $openOther,
+    map<string, string> $general,
+    map<int, string> $byNumber,
+    list<string> $strings,
+): void {
+    $row = generic($page);
+    if ($row !== null) {
+        takesRow($row);
+        takesInt($row['id']);
+        takesText($row['id']); // want P2103
+    }
+    // An array literal's shape binds as a named one does.
+    $n = generic(['items' => [1, 2], 'total' => 2]);
+    takesInt($n ?? 0);
+    takesText($n ?? ''); // want P2103
+    // An optional entry binds where the argument has it.
+    foreach (unbox($maybe) as $s) {
+        takesText($s);
+        takesInt($s); // want P2103
+    }
+    foreach (unbox(['value' => 1]) as $i) {
+        takesInt($i);
+    }
+    // The keys an argument has beyond the parameter's are passed over.
+    takesInt(valueOf($wide));
+    takesText(valueOf($wide)); // want P2103
+    takesText(valueOf(['value' => new Customer(), 'x' => 1])->name);
+    // A tuple binds by position.
+    $swapped = swap($pair);
+    takesText($swapped[0]);
+    takesInt($swapped[1]);
+    takesInt($swapped[0]); // want P2103
+    takesText(swap([1, 'a'])[0]);
+    // Shapes inside shapes, and inside generics.
+    takesInt(inner(['inner' => ['value' => 1]]));
+    takesText(inner(['inner' => ['value' => 1]])); // want P2103
+    foreach (column($rows) as $customer) {
+        takesText($customer->name);
+        takesInt($customer); // want P2103
+    }
+    takesText(make(['class' => Customer::class])->name);
+    // Every entry that names the parameter binds it.
+    $both = either(['a' => 1, 'b' => 'x']);
+    takesInt($both); // want P2103
+    // A union of shapes binds from each member.
+    $one = valueOf($oneOf);
+    takesInt($one); // want P2103
+    takesText($one); // want P2103
+    $v = orNull($nullable);
+    takesInt($v ?? 0);
+    takesText($v ?? ''); // want P2103
+    // An unsealed argument may hold the entry it does not name, with any
+    // value, and is accepted where that entry is optional.
+    foreach (unbox($openOther) as $m) {
+        takesInt($m); // want P2103
+    }
+    // A general array binds from its values, whatever its keys; it is
+    // still no shape that requires a key.
+    foreach (unbox($general) as $g) {
+        takesText($g);
+    }
+    foreach (unbox($byNumber) as $g) {
+        takesText($g);
+    }
+    takesText(swap($strings)[0]); // want P2103
+}
