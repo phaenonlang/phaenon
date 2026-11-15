@@ -874,7 +874,9 @@ func (c *Class) Subst(args []types.Type) map[string]types.Type {
 		case tp.Default != nil:
 			m[tp.Name] = tp.Default
 		case tp.Bound != nil:
-			m[tp.Name] = tp.Bound
+			// A bound may name the parameters before it: the TIterator of
+			// a LimitIterator<int, Dog> is an Iterator<int, Dog>.
+			m[tp.Name] = types.Substitute(tp.Bound, m)
 		default:
 			m[tp.Name] = types.TMixed
 		}

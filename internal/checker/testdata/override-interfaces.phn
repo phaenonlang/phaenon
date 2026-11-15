@@ -1,0 +1,332 @@
+// A method is compared with every declaration it overrides: the nearest a
+// parent class has and each interface's. PHP links the class against all
+// of them and refuses one that fits its first interface and not its
+// second; PHPStan reports the same line.
+namespace App\OverrideInterfaces;
+
+interface Counts
+{
+    public function size(): int;
+
+    public function at(int $index): string;
+}
+
+interface Names
+{
+    public function size(): string;
+
+    public function at(string $index): string;
+}
+
+abstract class Both implements Counts, Names
+{
+    public function size(): int // want P2502 "return type int of App\OverrideInterfaces\Both::size() is not covariant with App\OverrideInterfaces\Names::size() (string)"
+    {
+        return 1;
+    }
+
+    public function at(int $index): string // want P2502 "is not contravariant with App\OverrideInterfaces\Names::at() (string)"
+    {
+        return '';
+    }
+}
+
+// What fits both passes.
+abstract class Either implements Counts, Names
+{
+    abstract public function size(): never;
+
+    public function at(int|string $index): string
+    {
+        return '';
+    }
+}
+
+abstract class Counter implements Counts
+{
+    public function size(): int
+    {
+        return 0;
+    }
+}
+
+// The parent class is right; the interface the child adds is another
+// declaration of the method.
+abstract class NamedCounter extends Counter implements Names
+{
+    public function size(): int // want P2502 "Names::size() (string)"
+    {
+        return 1;
+    }
+}
+
+// The parent class's declaration and its interface's say the same: one
+// mistake, one diagnostic, against the nearer of the two.
+abstract class Miscounter extends Counter
+{
+    public function size(): string // want P2502 "Counter::size() (int)"
+    {
+        return '';
+    }
+}
+
+// The nearest declaration up the parent classes is compared even where an
+// interface sits nearer: a parent that implements the interface inherits
+// the method from its own parent, and PHP checks the override against
+// that method.
+class Measure
+{
+    public function width(): int
+    {
+        return 1;
+    }
+
+    public function scale(int|string $by): void
+    {
+    }
+}
+
+class Ruler extends Measure
+{
+}
+
+interface Widths
+{
+    public function width(): int|string;
+
+    public function scale(int $by): void;
+}
+
+abstract class WideRuler extends Ruler implements Widths
+{
+}
+
+// The interface on the parent, the declaration two classes up.
+class TextRuler extends WideRuler
+{
+    public function width(): string // want P2502 "return type string of App\OverrideInterfaces\TextRuler::width() is not covariant with App\OverrideInterfaces\Measure::width() (int)"
+    {
+        return '';
+    }
+
+    public function scale(int $by): void // want P2502 "is not contravariant with App\OverrideInterfaces\Measure::scale() (int|string)"
+    {
+    }
+}
+
+// The interface on the grandparent, the declaration farther up still.
+class Tape extends WideRuler
+{
+}
+
+class LaserTape extends Tape
+{
+    public function width(): string // want P2502 "Measure::width() (int)"
+    {
+        return '';
+    }
+}
+
+// What fits both passes.
+class ExactRuler extends WideRuler
+{
+    public function width(): int
+    {
+        return 2;
+    }
+
+    public function scale(int|string $by): void
+    {
+    }
+}
+
+// The class's declaration is abstract.
+abstract class Shape
+{
+    abstract public function area(): int;
+}
+
+abstract class Polygon extends Shape
+{
+}
+
+interface Areas
+{
+    public function area(): int|float;
+}
+
+abstract class RegularPolygon extends Polygon implements Areas
+{
+}
+
+class Square extends RegularPolygon
+{
+    public function area(): float // want P2502 "Shape::area() (int)"
+    {
+        return 1.0;
+    }
+}
+
+// The class's declaration nearer than the interface: the override is held
+// to it, and the wider interface adds nothing.
+class Yard extends WideRuler
+{
+    public function width(): int
+    {
+        return 3;
+    }
+}
+
+class Foot extends Yard
+{
+    public function width(): string // want P2502 "Yard::width() (int)"
+    {
+        return '';
+    }
+}
+
+// A static method is held to the nearest class's declaration as an
+// instance method is, and to every interface's; so is an instance method
+// that overrides a static one. PHP refuses Mill and Kiln at load, naming
+// Factory's method, and PHPStan reports both lines.
+class Factory
+{
+    public static function size(int $n): int
+    {
+        return $n;
+    }
+}
+
+interface Sizes
+{
+    public static function size(int $n): int|string;
+}
+
+abstract class Workshop extends Factory implements Sizes
+{
+}
+
+class Forge extends Workshop
+{
+    public static function size(int|string $n, int $more = 0): int
+    {
+        return $more;
+    }
+}
+
+class Mill extends Workshop
+{
+    public function size(int $n): int // want P2502 "App\OverrideInterfaces\Mill::size() and App\OverrideInterfaces\Factory::size() disagree on static"
+    {
+        return $n;
+    }
+}
+
+class Kiln extends Workshop
+{
+    public static function size(int $n): string // want P2502 "Factory::size() (int)"
+    {
+        return '';
+    }
+}
+
+// A constructor is free of a concrete parent's signature, not of the
+// abstract constructor that one implements, nor of an interface's: PHP
+// holds it to that prototype, however far up it sits.
+abstract class Entity
+{
+    abstract public function __construct(int $id);
+}
+
+class Record extends Entity
+{
+    public function __construct(public int $id)
+    {
+    }
+}
+
+class Row extends Record
+{
+    public function __construct(public string $key) // want P2502 "is not contravariant with App\OverrideInterfaces\Entity::__construct() (int)"
+    {
+        parent::__construct(1);
+    }
+}
+
+interface Builds
+{
+    public function __construct(int $id);
+}
+
+class Built implements Builds
+{
+    public function __construct(public int $id)
+    {
+    }
+}
+
+class Rebuilt extends Built
+{
+    public function __construct(public string $key) // want P2502 "is not contravariant with App\OverrideInterfaces\Builds::__construct() (int)"
+    {
+        parent::__construct(1);
+    }
+}
+
+class Plain
+{
+    public function __construct(public int $id)
+    {
+    }
+}
+
+class Free extends Plain
+{
+    public function __construct(public string $key, int $id = 0)
+    {
+        parent::__construct($id);
+    }
+}
+
+// The final and visibility rules stay the nearest constructor's, whatever
+// abstract constructor binds the signature: Sealed's is final, and
+// SubLedger narrows Ledger's public one.
+abstract class Entry
+{
+    abstract public function __construct(int $id);
+}
+
+class Sealed extends Entry
+{
+    final public function __construct(public int $id)
+    {
+    }
+}
+
+class Unsealed extends Sealed
+{
+    public function __construct(int $id) // want P2505 "overrides final method App\OverrideInterfaces\Sealed::__construct()"
+    {
+        parent::__construct($id);
+    }
+}
+
+abstract class Account
+{
+    abstract protected function __construct(int $id);
+}
+
+class Ledger extends Account
+{
+    public function __construct(public int $id)
+    {
+    }
+}
+
+class SubLedger extends Ledger
+{
+    protected function __construct(int $id) // want P2502 "must be at least public like App\OverrideInterfaces\Ledger::__construct()"
+    {
+        parent::__construct($id);
+    }
+}

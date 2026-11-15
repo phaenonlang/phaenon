@@ -1595,7 +1595,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 				case tp.Default != nil:
 					full[i] = tp.Default
 				case tp.Bound != nil:
-					full[i] = tp.Bound
+					full[i] = types.Substitute(tp.Bound, argsSoFar(cl.TypeParams, full[:i]))
 				default:
 					full[i] = types.TMixed
 				}
@@ -1623,6 +1623,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 		sig.typeParams = append(append([]*program.TypeParam{}, cl.TypeParams...), ctor.TypeParams...)
 		sig.subst = map[string]types.Type{}
 		x.checkCall(sig, e.Args, env, e.S, nil)
+		inferFromBounds(cl.TypeParams, sig.subst, x.p())
 		args := make([]types.Type, len(cl.TypeParams))
 		var want types.Class
 		if exp, ok := expected.(types.Class); ok && strings.EqualFold(exp.Name, c.Name) && len(exp.Args) == len(cl.TypeParams) {
@@ -1638,7 +1639,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 			} else if tp.Default != nil {
 				args[i] = tp.Default
 			} else if tp.Bound != nil {
-				args[i] = tp.Bound
+				args[i] = types.Substitute(tp.Bound, argsSoFar(cl.TypeParams, args[:i]))
 			} else {
 				args[i] = types.TMixed
 			}
@@ -1663,6 +1664,84 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 	}
 	x.checkCall(sig, e.Args, env, e.S, nil)
 	return result
+}
+
+// inferFromBounds gives a class's type parameters that the constructor's
+// arguments left unbound what the bound of a bound one says of them, as
+// PHPStan infers them: `new LimitIterator($rows)`, $rows an
+// ArrayIterator<int, User>, binds TIterator, and its bound
+// Iterator<TKey, TValue> then binds TKey to int and TValue to User.
+func inferFromBounds(tps []*program.TypeParam, subst map[string]types.Type, h types.Hierarchy) {
+	open := map[string]bool{}
+	for _, tp := range tps {
+		if _, ok := subst[tp.Name]; !ok {
+			open[tp.Name] = true
+		}
+	}
+	if len(open) == 0 {
+		return
+	}
+	for _, tp := range tps {
+		if v, ok := subst[tp.Name]; ok && !open[tp.Name] && tp.Bound != nil {
+			unify(tp.Bound, v, subst, open, h)
+		}
+	}
+}
+
+// argsSoFar maps the type parameters before a missing argument to the
+// arguments they took, for a bound that names them.
+func argsSoFar(tps []*program.TypeParam, args []types.Type) map[string]types.Type {
+	m := make(map[string]types.Type, len(args))
+	for i, a := range args {
+		m[tps[i].Name] = a
+	}
+	return m
+}
+
+// mentionsTemplate reports whether a type names the template parameter.
+func mentionsTemplate(t types.Type, name string) bool {
+	found := false
+	types.Walk(t, func(n types.Type) {
+		if p, ok := n.(types.Param); ok && p.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
+// openToBounds replaces in a bound the call's own type parameters that
+// its arguments left unbound by their own bounds, in turn, and by mixed
+// where they have none: `new IteratorIterator($nodes)` binds TIterator
+// before TKey and TValue, which its bound Traversable<TKey, TValue>
+// names, and TIterator is held to what their bounds say of them, no more.
+func openToBounds(bound types.Type, tps []*program.TypeParam, subst map[string]types.Type) types.Type {
+	open := map[string]*program.TypeParam{}
+	for _, tp := range tps {
+		if _, ok := subst[tp.Name]; !ok {
+			open[tp.Name] = tp
+		}
+	}
+	if len(open) == 0 {
+		return bound
+	}
+	var close func(t types.Type, depth int) types.Type
+	close = func(t types.Type, depth int) types.Type {
+		return types.MapDeep(t, func(n types.Type) types.Type {
+			p, ok := n.(types.Param)
+			if !ok {
+				return n
+			}
+			tp, isOpen := open[p.Name]
+			if !isOpen {
+				return n
+			}
+			if tp.Bound == nil || depth > 8 {
+				return types.TMixed
+			}
+			return close(types.Substitute(tp.Bound, subst), depth+1)
+		})
+	}
+	return close(bound, 0)
 }
 
 // namesClass reports a static, $this or class type of the named class.
@@ -2190,6 +2269,27 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			subst[tp.Name] = v
 		}
 	}
+	// An argument that the native type of a parameter written with the
+	// template refuses is the plain mismatch PHP raises, reported before
+	// the type argument it stands for: `new LimitIterator($traversable)`
+	// passes no Iterator, rather than a TIterator outside its bound.
+	nativeMismatch := func(template string) bool {
+		found := false
+		for i, b := range bindings {
+			native := b.param.NativeType
+			if b.param.ByRef || b.arg.Unpack || argTypes[i] == nil || native == nil || mentionsParam(native) || !mentionsTemplate(b.param.Type, template) {
+				continue
+			}
+			at := types.Substitute(argTypes[i], freshOnly(subst))
+			if at == nil || types.IsAcceptable(at, native, x.p()) {
+				continue
+			}
+			found = true
+			x.c.reportRelated(b.arg.S, P2103, related(sig.file, b.param.Span, "parameter $%s of %s declared here", b.param.Name, sig.name),
+				"argument %d ($%s) of %s expects %s, %s given", b.idx+1, b.param.Name, sig.name, x.typeName(native), x.typeName(at))
+		}
+		return found
+	}
 	// An inferred type argument must respect its bound, like a written one
 	// (`repo(Order::class)` against `class<T of User>`): PHPStan reports
 	// the argument, Phaenon the type argument it stands for.
@@ -2201,8 +2301,11 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		if _, unknown := v.(types.Unknown); unknown || types.IsMixed(v) {
 			continue // mixed may still fit; the argument itself is reported where it is passed
 		}
-		bound := types.Substitute(tp.Bound, subst)
+		bound := openToBounds(types.Substitute(tp.Bound, subst), sig.typeParams, subst)
 		if !types.IsSubtype(v, bound, x.p()) {
+			if nativeMismatch(tp.Name) {
+				continue // the argument PHP refuses is the finding
+			}
 			x.report(span, P3002, "type argument %s inferred for %s of %s is not a subtype of its bound %s", x.typeName(v), tp.Name, sig.name, x.typeName(bound))
 		}
 	}

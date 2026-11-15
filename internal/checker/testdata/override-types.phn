@@ -1,0 +1,923 @@
+// An override is held to the types PHP erases. `list<int>` and
+// `list<string>` are both PHP's array, so PHP links the class; the override
+// is wrong all the same when the two types are certainly apart, which is
+// what PHPStan reports as method.childParameterType and
+// method.childReturnType. A type that only may fit passes, there and here:
+// a child may narrow what its parent accepts. Written as PHP with
+// docblocks, so that PHPStan judges the same lines.
+namespace App\OverrideTypes;
+
+interface Thing
+{
+}
+
+interface Unrelated
+{
+}
+
+class Open implements Thing
+{
+}
+
+class Other
+{
+}
+
+final class Leaf implements Thing
+{
+}
+
+/**
+ * @template T of object
+ */
+interface Box
+{
+}
+
+/**
+ * @template K of array-key
+ * @template V
+ */
+interface Coll
+{
+}
+
+/**
+ * @template T
+ */
+interface Slot
+{
+}
+
+/**
+ * @template T
+ * @implements Slot<T>
+ */
+class ListSlot implements Slot
+{
+}
+
+/**
+ * @implements Slot<Open>
+ */
+class OpenSlot implements Slot
+{
+}
+
+class RawSlot implements Slot
+{
+}
+
+/**
+ * @template T
+ * @implements \IteratorAggregate<int, T>
+ */
+class Bag implements \IteratorAggregate
+{
+    /** @return \Iterator<int, T> */
+    public function getIterator(): \Iterator
+    {
+        throw new \LogicException();
+    }
+}
+
+class Pile implements \IteratorAggregate
+{
+    public function getIterator(): \Iterator
+    {
+        throw new \LogicException();
+    }
+}
+
+// PHP declares IteratorAggregate::getIterator() Traversable, and so does
+// PHPStan's stub: any Traversable is an implementation.
+/**
+ * @implements \IteratorAggregate<int, Open>
+ */
+class Stream implements \IteratorAggregate
+{
+    public function getIterator(): \Traversable
+    {
+        yield new Open();
+    }
+}
+
+enum Suit
+{
+    case Hearts;
+    case Spades;
+    case Clubs;
+
+    public const Red = self::Hearts;
+}
+
+abstract class Base
+{
+    /** @param list<int> $x */
+    abstract public function listParam(array $x): void;
+
+    /** @return list<int> */
+    abstract public function listReturn(): array;
+
+    /** @return array<string, int> */
+    abstract public function mapValue(): array;
+
+    /** @return array<int, string> */
+    abstract public function mapKey(): array;
+
+    /** @return list<string> */
+    abstract public function listOrMap(): array;
+
+    /** @param array<string> $x */
+    abstract public function mapOrList(array $x): void;
+
+    /** @return array{a: int} */
+    abstract public function shapeValue(): array;
+
+    /** @return array{a: int, b: int} */
+    abstract public function shapeKey(): array;
+
+    /** @param array{a: int} $x */
+    abstract public function shapeParam(array $x): void;
+
+    /** @return array<string, int> */
+    abstract public function shapeForMap(): array;
+
+    /** @return array{a: int} */
+    abstract public function mapForShape(): array;
+
+    /** @return non-empty-array<string, int> */
+    abstract public function emptyShape(): array;
+
+    /** @return array{int, string} */
+    abstract public function tuple(): array;
+
+    /** @return array<string, list<int>> */
+    abstract public function nested(): array;
+
+    /** @return iterable<int> */
+    abstract public function iterableValue(): iterable;
+
+    /** @return iterable<string, Open> */
+    abstract public function arrayForIterable(): iterable;
+
+    /** @return class-string<Open> */
+    abstract public function classString(): string;
+
+    /** @return Box<Open> */
+    abstract public function typeArgument(): Box;
+
+    /** @param Box<Thing> $x */
+    abstract public function invariantArgument(Box $x): void;
+
+    /** @return Slot<Open|null> */
+    abstract public function unionArgument(): Slot;
+
+    /** @param Slot<Open> $x */
+    abstract public function unionParam(Slot $x): void;
+
+    /** @return Slot<array-key|null> */
+    abstract public function arrayKeyOrNull(): Slot;
+
+    /** @return list<Open> */
+    abstract public function unrelatedClasses(): array;
+
+    /** @return list<Unrelated> */
+    abstract public function finalClass(): array;
+
+    /** @return callable(int): string */
+    abstract public function signature(): callable;
+
+    /** @param \Closure(int): string $x */
+    abstract public function closureParam(\Closure $x): void;
+
+    /** @return 'a'|'b' */
+    abstract public function literal(): string;
+
+    /** @return int<0, 10> */
+    abstract public function range(): int;
+
+    /** @return true */
+    abstract public function boolean(): bool;
+
+    /** @return Suit::Hearts */
+    abstract public function enumCase(): Suit;
+
+    /** @param Suit::Hearts|Suit::Spades $x */
+    abstract public function enumCaseParam(Suit $x): void;
+
+    /** @return Slot<Open> */
+    abstract public function inheritedArgument(): Slot;
+
+    /** @return Slot<Other> */
+    abstract public function fixedArgument(): Slot;
+
+    /** @return \Iterator<int, Open> */
+    abstract public function iteratorArgument(): \Iterator;
+
+    /** @return iterable<int, Open> */
+    abstract public function traversableValue(): iterable;
+
+    /** @return iterable<string, Open> */
+    abstract public function traversableKey(): iterable;
+
+    /** @param Bag<Open> $x */
+    abstract public function traversableParam(Bag $x): void;
+
+    /**
+     * @template T of object
+     * @param class-string<T> $x
+     * @return Box<T>
+     */
+    abstract public function narrowerBound(string $x): Box;
+
+    /** @return list<int> */
+    abstract public static function staticReturn(): array;
+
+    // What may fit.
+
+    /** @param array<string, mixed> $x */
+    abstract public function narrowedValue(array $x): void;
+
+    /** @param class-string $x */
+    abstract public function narrowedClass(string $x): void;
+
+    /** @param 'a'|'b' $x */
+    abstract public function narrowedLiteral(string $x): void;
+
+    /** @param list<Thing> $x */
+    abstract public function narrowedElement(array $x): void;
+
+    /** @return list<int> */
+    abstract public function widened(): array;
+
+    /** @return list<Open> */
+    abstract public function interfaceElement(): array;
+
+    /** @return list<int>|null */
+    abstract public function sharedNull(): ?array;
+
+    /** @return Coll<array-key, Open> */
+    abstract public function arrayKey(): Coll;
+
+    /** @return Slot<array-key|null> */
+    abstract public function sharesWithArrayKey(): Slot;
+
+    /** @return Slot<Open|Other> */
+    abstract public function sameUnion(): Slot;
+
+    /** @return Suit::Hearts|Suit::Spades */
+    abstract public function sharedCase(): Suit;
+
+    /** @return \Traversable<int, Thing> */
+    abstract public function inheritedCovariant(): \Traversable;
+
+    /** @return Slot<Open> */
+    abstract public function passesNothing(): Slot;
+
+    /** @return iterable<Thing> */
+    abstract public function traversableCovariant(): iterable;
+
+    /** @return iterable<int, Open> */
+    abstract public function traversableUntyped(): iterable;
+
+    /** @return string|array<string> */
+    abstract public function sharedMember(): string|array;
+
+    /**
+     * @template T of object
+     * @param class-string<T> $x
+     * @return Box<T>
+     */
+    abstract public function renamedParameter(string $x): Box;
+}
+
+abstract class Child extends Base
+{
+    /** @param list<string> $x */
+    public function listParam(array $x): void // want P2502 "parameter $x of App\OverrideTypes\Child::listParam() (list<string>) is not contravariant with App\OverrideTypes\Base::listParam() (list<int>)"
+    {
+    }
+
+    /** @return list<string> */
+    public function listReturn(): array // want P2502 "return type list<string> of App\OverrideTypes\Child::listReturn() is not covariant with App\OverrideTypes\Base::listReturn() (list<int>)"
+    {
+        return [];
+    }
+
+    /** @return array<string, string> */
+    public function mapValue(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return array<string, string> */
+    public function mapKey(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return array<string, string> */
+    public function listOrMap(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @param list<int> $x */
+    public function mapOrList(array $x): void // want P2502
+    {
+    }
+
+    /** @return array{a: string} */
+    public function shapeValue(): array // want P2502
+    {
+        return ['a' => 'x'];
+    }
+
+    /** @return array{a: int} */
+    public function shapeKey(): array // want P2502
+    {
+        return ['a' => 1];
+    }
+
+    /** @param array{a: int, b: int} $x */
+    public function shapeParam(array $x): void // want P2502
+    {
+    }
+
+    /** @return array{a: string} */
+    public function shapeForMap(): array // want P2502
+    {
+        return ['a' => 'x'];
+    }
+
+    /** @return array<string, string> */
+    public function mapForShape(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return array{} */
+    public function emptyShape(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return array{string, int} */
+    public function tuple(): array // want P2502
+    {
+        return ['a', 1];
+    }
+
+    /** @return array<string, list<string>> */
+    public function nested(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return iterable<string> */
+    public function iterableValue(): iterable // want P2502
+    {
+        return [];
+    }
+
+    /** @return array<int, Open> */
+    public function arrayForIterable(): iterable // want P2502
+    {
+        return [];
+    }
+
+    /** @return class-string<Other> */
+    public function classString(): string // want P2502
+    {
+        return Other::class;
+    }
+
+    /** @return Box<Other> */
+    public function typeArgument(): Box // want P2502
+    {
+        throw new \LogicException();
+    }
+
+    /** @param Box<Open> $x */
+    public function invariantArgument(Box $x): void // want P2502
+    {
+    }
+
+    // A union is an argument like any other: the same type or none.
+    /** @return Slot<Open> */
+    public function unionArgument(): Slot // want P2502 "return type App\OverrideTypes\Slot<App\OverrideTypes\Open> of App\OverrideTypes\Child::unionArgument() is not covariant with App\OverrideTypes\Base::unionArgument() (App\OverrideTypes\Slot<App\OverrideTypes\Open|null>)"
+    {
+        throw new \LogicException();
+    }
+
+    /** @param Slot<Open|null> $x */
+    public function unionParam(Slot $x): void // want P2502
+    {
+    }
+
+    // array-key takes what shares a value with it; array-key|null does not.
+    /** @return Slot<int> */
+    public function arrayKeyOrNull(): Slot // want P2502
+    {
+        throw new \LogicException();
+    }
+
+    /** @return list<Other> */
+    public function unrelatedClasses(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return list<Leaf> */
+    public function finalClass(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @return callable(string): int */
+    public function signature(): callable // want P2502
+    {
+        return 'strlen';
+    }
+
+    /** @param \Closure(string): int $x */
+    public function closureParam(\Closure $x): void // want P2502
+    {
+    }
+
+    /** @return 'c' */
+    public function literal(): string // want P2502
+    {
+        return 'c';
+    }
+
+    /** @return int<20, 30> */
+    public function range(): int // want P2502
+    {
+        return 20;
+    }
+
+    /** @return false */
+    public function boolean(): bool // want P2502
+    {
+        return false;
+    }
+
+    /** @return Suit::Spades */
+    public function enumCase(): Suit // want P2502 "return type App\OverrideTypes\Suit::Spades of App\OverrideTypes\Child::enumCase() is not covariant with App\OverrideTypes\Base::enumCase() (App\OverrideTypes\Suit::Hearts)"
+    {
+        return Suit::Spades;
+    }
+
+    /** @param Suit::Clubs $x */
+    public function enumCaseParam(Suit $x): void // want P2502
+    {
+    }
+
+    // A subclass is compared by the arguments it passes up its @extends
+    // and @implements.
+    /** @return ListSlot<Other> */
+    public function inheritedArgument(): ListSlot // want P2502 "return type App\OverrideTypes\ListSlot<App\OverrideTypes\Other> of App\OverrideTypes\Child::inheritedArgument() is not covariant with App\OverrideTypes\Base::inheritedArgument() (App\OverrideTypes\Slot<App\OverrideTypes\Open>)"
+    {
+        throw new \LogicException();
+    }
+
+    public function fixedArgument(): OpenSlot // want P2502
+    {
+        throw new \LogicException();
+    }
+
+    /** @return \ArrayIterator<int, Other> */
+    public function iteratorArgument(): \ArrayIterator // want P2502
+    {
+        throw new \LogicException();
+    }
+
+    // A Traversable class is the iterable its Traversable ancestor is given.
+    /** @return Bag<Other> */
+    public function traversableValue(): Bag // want P2502 "return type App\OverrideTypes\Bag<App\OverrideTypes\Other> of App\OverrideTypes\Child::traversableValue() is not covariant with App\OverrideTypes\Base::traversableValue() (iterable<int, App\OverrideTypes\Open>)"
+    {
+        throw new \LogicException();
+    }
+
+    /** @return \Generator<int, Open> */
+    public function traversableKey(): \Generator // want P2502
+    {
+        throw new \LogicException();
+    }
+
+    /** @param iterable<int, Other> $x */
+    public function traversableParam(iterable $x): void // want P2502
+    {
+    }
+
+    /**
+     * @template TOpen of Open
+     * @param class-string<TOpen> $x
+     * @return Box<TOpen>
+     */
+    public function narrowerBound(string $x): Box // want P2502
+    {
+        throw new \LogicException();
+    }
+
+    // PHP holds a static method to its parent's signature as it does any
+    // other; PHPStan compares these only with reportStaticMethodSignatures.
+    /** @return list<string> */
+    public static function staticReturn(): array // want P2502
+    {
+        return [];
+    }
+
+    /** @param array<string, string> $x */
+    public function narrowedValue(array $x): void
+    {
+    }
+
+    /** @param class-string<Thing> $x */
+    public function narrowedClass(string $x): void
+    {
+    }
+
+    /** @param 'a' $x */
+    public function narrowedLiteral(string $x): void
+    {
+    }
+
+    /** @param list<Leaf> $x */
+    public function narrowedElement(array $x): void
+    {
+    }
+
+    /** @return array<int> */
+    public function widened(): array
+    {
+        return [];
+    }
+
+    // A subclass of Open may implement Unrelated.
+    /** @return list<Unrelated> */
+    public function interfaceElement(): array
+    {
+        return [];
+    }
+
+    // Both may be null: PHPStan lets it pass, and so does the checker.
+    /** @return list<string>|null */
+    public function sharedNull(): ?array
+    {
+        return null;
+    }
+
+    /** @return Coll<int, Open> */
+    public function arrayKey(): Coll
+    {
+        throw new \LogicException();
+    }
+
+    /** @return Slot<array-key> */
+    public function sharesWithArrayKey(): Slot
+    {
+        throw new \LogicException();
+    }
+
+    /** @return Slot<Other|Open> */
+    public function sameUnion(): Slot
+    {
+        throw new \LogicException();
+    }
+
+    /** @return Suit::Spades|Suit::Clubs */
+    public function sharedCase(): Suit
+    {
+        return Suit::Spades;
+    }
+
+    /** @return \ArrayIterator<int, Open> */
+    public function inheritedCovariant(): \ArrayIterator
+    {
+        throw new \LogicException();
+    }
+
+    public function passesNothing(): RawSlot
+    {
+        throw new \LogicException();
+    }
+
+    /** @return \Generator<int, Open> */
+    public function traversableCovariant(): \Generator
+    {
+        throw new \LogicException();
+    }
+
+    public function traversableUntyped(): Pile
+    {
+        throw new \LogicException();
+    }
+
+    /** @return string|array<int> */
+    public function sharedMember(): string|array
+    {
+        return '';
+    }
+
+    /**
+     * @template TObject of object
+     * @param class-string<TObject> $x
+     * @return Box<TObject>
+     */
+    public function renamedParameter(string $x): Box
+    {
+        throw new \LogicException();
+    }
+}
+
+// Every interface that declares the method counts (override-interfaces.phn),
+// with the types its docblock gives.
+interface Ids
+{
+    /** @return list<int> */
+    public function all(): array;
+}
+
+interface Labels
+{
+    /** @return list<string> */
+    public function all(): array;
+}
+
+abstract class IdsAndLabels implements Ids, Labels
+{
+    /** @return list<int> */
+    public function all(): array // want P2502 "Labels::all() (list<string>)"
+    {
+        return [];
+    }
+}
+
+// A subclass of ArrayIterator or RecursiveArrayIterator that repeats PHP's
+// own signature of key() or current() narrows nothing: the two return
+// Iterator's TKey and TValue, as PHPStan reads them, whatever arguments
+// the subclass passes up.
+class Rows extends \ArrayIterator
+{
+    public function key(): string|int|null
+    {
+        return parent::key();
+    }
+
+    public function current(): mixed
+    {
+        return parent::current();
+    }
+}
+
+/**
+ * @extends \ArrayIterator<string, Open>
+ */
+class OpenRows extends \ArrayIterator
+{
+    public function key(): string|int|null
+    {
+        return parent::key();
+    }
+
+    public function current(): mixed
+    {
+        return parent::current();
+    }
+}
+
+class Tree extends \RecursiveArrayIterator
+{
+    public function key(): string|int|null
+    {
+        return parent::key();
+    }
+
+    public function current(): mixed
+    {
+        return parent::current();
+    }
+}
+
+/**
+ * @extends \RecursiveArrayIterator<int, Open>
+ */
+class OpenTree extends \RecursiveArrayIterator
+{
+    public function key(): string|int|null
+    {
+        return parent::key();
+    }
+
+    public function current(): mixed
+    {
+        return parent::current();
+    }
+}
+
+// PHP's own generic classes take their arguments with the variance
+// PHPStan's stubs give them: what an iterator yields, what a weak
+// reference holds, the node of a node list, a DatePeriod's dates, an
+// attribute's class and a hidden parameter's value are covariant; the
+// iterator a wrapper holds and an SPL structure's element are invariant.
+/**
+ * @implements \RecursiveIterator<int, Open>
+ */
+abstract class OpenBranches implements \RecursiveIterator
+{
+}
+
+abstract class Producer
+{
+    /** @return \RecursiveIterator<int, Thing> */
+    abstract public function tree(): \RecursiveIterator;
+
+    /** @return \OuterIterator<int, Thing> */
+    abstract public function outer(): \OuterIterator;
+
+    /** @return \WeakReference<Thing> */
+    abstract public function weak(): \WeakReference;
+
+    /** @return \WeakReference<Thing> */
+    abstract public function weakUnion(): \WeakReference;
+
+    /** @return \DOMNodeList<\DOMNode> */
+    abstract public function nodes(): \DOMNodeList;
+
+    /** @return \DatePeriod<\DateTimeInterface, ?\DateTimeInterface, ?int> */
+    abstract public function period(): \DatePeriod;
+
+    /** @return \LimitIterator<int, Thing, \Iterator<int, Thing>> */
+    abstract public function limited(): \LimitIterator;
+
+    /** @return \SplQueue<Thing> */
+    abstract public function queue(): \SplQueue;
+
+    /** @return \SplObjectStorage<Thing, int> */
+    abstract public function storage(): \SplObjectStorage;
+
+    /** @return \ReflectionAttribute<Thing> */
+    abstract public function attribute(): \ReflectionAttribute;
+
+    /** @return \ReflectionAttribute<object> */
+    abstract public function attributeUnion(): \ReflectionAttribute;
+
+    /** @return \SensitiveParameterValue<Thing> */
+    abstract public function hidden(): \SensitiveParameterValue;
+}
+
+abstract class Narrower extends Producer
+{
+    abstract public function tree(): OpenBranches;
+
+    /** @return \OuterIterator<int, Open|Leaf> */
+    abstract public function outer(): \OuterIterator;
+
+    /** @return \WeakReference<Open> */
+    abstract public function weak(): \WeakReference;
+
+    /** @return \WeakReference<Open|Leaf> */
+    abstract public function weakUnion(): \WeakReference;
+
+    /** @return \DOMNodeList<\DOMElement> */
+    abstract public function nodes(): \DOMNodeList;
+
+    /** @return \DatePeriod<\DateTimeImmutable, null, int> */
+    abstract public function period(): \DatePeriod;
+
+    /** @return \LimitIterator<int, Open, \Iterator<int, Open>> */
+    abstract public function limited(): \LimitIterator; // want P2502
+
+    /** @return \SplQueue<Open> */
+    abstract public function queue(): \SplQueue; // want P2502
+
+    /** @return \SplObjectStorage<Open, int> */
+    abstract public function storage(): \SplObjectStorage; // want P2502
+
+    /** @return \ReflectionAttribute<Open> */
+    abstract public function attribute(): \ReflectionAttribute;
+
+    /** @return \ReflectionAttribute<Open|Leaf> */
+    abstract public function attributeUnion(): \ReflectionAttribute;
+
+    /** @return \SensitiveParameterValue<Open> */
+    abstract public function hidden(): \SensitiveParameterValue;
+}
+
+// A Traversable class is the iterable its @implements says, as foreach
+// reads it here. PHPStan reads its getIterator()'s declared type instead,
+// a bare Iterator for Pack, and is silent below; the finding is true all
+// the same: Pack declares that it yields Open under int keys, and Db
+// returns it where string keys are promised.
+/**
+ * @implements \IteratorAggregate<int, Open>
+ */
+class Pack implements \IteratorAggregate
+{
+    public function getIterator(): \Iterator
+    {
+        return new \ArrayIterator([new Open()]);
+    }
+}
+
+interface Source
+{
+    /** @return iterable<string, Open> */
+    public function all(): iterable;
+}
+
+class Db implements Source
+{
+    public function all(): Pack // want P2502 "return type App\OverrideTypes\Pack of App\OverrideTypes\Db::all() is not covariant with App\OverrideTypes\Source::all() (iterable<string, App\OverrideTypes\Open>)"
+    {
+        return new Pack();
+    }
+}
+
+// An alias constant of an enum case is that case: Suit::Red is
+// Suit::Hearts under another name, never apart from it, and as apart from
+// Suit::Spades as Hearts is.
+abstract class Cards
+{
+    /** @return Suit::Hearts */
+    abstract public function hearts(): Suit;
+
+    /** @return Suit::Red */
+    abstract public function red(): Suit;
+
+    /** @return Suit::Spades */
+    abstract public function spades(): Suit;
+}
+
+abstract class Deck extends Cards
+{
+    /** @return Suit::Red */
+    abstract public function hearts(): Suit;
+
+    /** @return Suit::Hearts */
+    abstract public function red(): Suit;
+
+    /** @return Suit::Red */
+    abstract public function spades(): Suit; // want P2502 "return type App\OverrideTypes\Suit::Hearts of App\OverrideTypes\Deck::spades() is not covariant with App\OverrideTypes\Cards::spades() (App\OverrideTypes\Suit::Spades)"
+}
+
+// A generic class written without its arguments is the class with its
+// bounds: a raw ThingSlot passes Slot a Thing, which an override promising
+// a Slot<Open> breaks, the argument being invariant. PHPStan reports it
+// too.
+/**
+ * @template T of Thing
+ * @implements Slot<T>
+ */
+abstract class ThingSlot implements Slot
+{
+}
+
+abstract class Slots
+{
+    /** @return Slot<Open> */
+    abstract public function open(): Slot;
+}
+
+abstract class RawSlots extends Slots
+{
+    abstract public function open(): ThingSlot; // want P2502 "return type App\OverrideTypes\ThingSlot of App\OverrideTypes\RawSlots::open() is not covariant with App\OverrideTypes\Slots::open() (App\OverrideTypes\Slot<App\OverrideTypes\Open>)"
+}
+
+// SplObjectStorage<TObject, TData> yields TObject: a subclass that repeats
+// PHP's own `current(): object` narrows nothing, raw or with its
+// arguments.
+class Storage extends \SplObjectStorage
+{
+    public function current(): object
+    {
+        return parent::current();
+    }
+}
+
+/**
+ * @extends \SplObjectStorage<Open, string>
+ */
+class OpenStorage extends \SplObjectStorage
+{
+    public function current(): object
+    {
+        return parent::current();
+    }
+}
+
+// ArrayAccess::offsetGet() returns TValue|null, as PHPStan's stub has it:
+// an implementation that says it may find nothing narrows nothing.
+/**
+ * @implements \ArrayAccess<string, Open>
+ */
+abstract class OpenMap implements \ArrayAccess
+{
+    public function offsetGet(mixed $offset): ?Open
+    {
+        return null;
+    }
+}
