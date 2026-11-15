@@ -79,7 +79,7 @@ class Factory
         };
     }
 
-    // Two: a docblock of its own before `class`.
+    // One generic interface of two: one tag, on the line of `new` too.
     /**
      * @param list<string> $words
      * @return Source<string>

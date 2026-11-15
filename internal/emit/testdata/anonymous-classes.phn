@@ -37,7 +37,7 @@ class Factory
         all(): list<int> => [$this->value];
     };
 
-    // Two: a docblock of its own before `class`.
+    // One generic interface of two: one tag, on the line of `new` too.
     source(list<string> $words): Source<string> => new class($words) implements Source<string>, Sized {
         private map<string, int> $seen = [];
 
