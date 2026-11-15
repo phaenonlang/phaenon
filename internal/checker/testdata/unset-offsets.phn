@@ -1,0 +1,275 @@
+namespace App\Unsets;
+
+// unset($a[$k]) types the array as PHPStan does (design/collections.md
+// §2.2): a list<T> is an array<int<0, max>, T> afterwards, no array is
+// known non-empty, a sealed shape loses the entry a constant key names and
+// makes optional each one another key may name, and a key it lacks is
+// refused, as a read of it is (PHPStan's unset.offset). A property is held
+// to its declared type, as an assignment is. Plain PHP, so that PHPStan
+// reads this file as written.
+
+/**
+ * @param list<int> $xs
+ */
+function takesList(array $xs): void
+{
+}
+
+/**
+ * @param array{id: int, name: string} $row
+ */
+function takesRow(array $row): void
+{
+}
+
+/**
+ * @param array<int, int> $m
+ */
+function takesMap(array $m): void
+{
+}
+
+/**
+ * @param list<int> $xs
+ */
+function lists(array $xs, int $i): void
+{
+    unset($xs[$i]);
+    takesList($xs); // want P2103 "expects list<int>, array<int<0, max>, int> given"
+    takesMap($xs);
+    takesList(array_values($xs));
+}
+
+/**
+ * @param list<int> $xs
+ * @return list<int>
+ */
+function positives(array $xs): array
+{
+    foreach ($xs as $i => $x) {
+        if ($x < 0) {
+            unset($xs[$i]);
+        }
+    }
+    return array_values($xs);
+}
+
+/**
+ * @param list<int> $xs
+ * @return list<int>
+ */
+function withoutFirst(array $xs): array
+{
+    unset($xs[0]);
+    return $xs; // want P2202
+}
+
+/**
+ * @param array<int, int> $m
+ * @return array<int, int>
+ */
+function maps(array $m, int $k): array
+{
+    unset($m[$k]);
+    return $m;
+}
+
+/**
+ * @param array{id: int, name: string, tag?: string} $row
+ */
+function shapes(array $row, string $k): void
+{
+    $a = $row;
+    unset($a['tag']);
+    takesRow($a);
+    $b = $row;
+    unset($b['name']);
+    takesRow($b); // want P2103 "array{id: int, tag?: string} given"
+    echo $b['name']; // want P2313
+    $c = $row;
+    unset($c[$k]);
+    takesRow($c); // want P2103 "array{id?: int, name?: string, tag?: string} given"
+    $d = $row;
+    unset($d['missing']); // want P2313 "offset 'missing' does not exist on array{id: int, name: string, tag?: string}"
+    takesRow($d);
+}
+
+/**
+ * @param array{int, string} $pair
+ * @param array{int} $one
+ */
+function takesPair(array $pair, array $one): void
+{
+}
+
+/**
+ * @param array{int, string} $pair
+ */
+function tuples(array $pair, int $i): void
+{
+    $a = $pair;
+    unset($a[1]);
+    takesPair($pair, $a);
+    $b = $pair;
+    unset($b[0]);
+    takesPair($b, [1]); // want P2103 "array{1: string} given"
+    $c = $pair;
+    unset($c[$i]);
+    takesPair($c, [1]); // want P2103 "array{0?: int, 1?: string} given"
+}
+
+/**
+ * @param array{id: int, ...} $open
+ */
+function unsealed(array $open): void
+{
+    unset($open['id'], $open['other']);
+    takesRow($open); // want P2103
+}
+
+final class Holder
+{
+    /** @var list<int> */
+    public array $items = [];
+
+    /** @var array<string, int> */
+    public array $byName = [];
+
+    /** @var \ArrayObject<string, int> */
+    public \ArrayObject $objects;
+
+    public function __construct()
+    {
+        $this->objects = new \ArrayObject();
+    }
+
+    public function drop(int $i, string $k): void
+    {
+        unset($this->items[$i]); // want P2201 "property App\Unsets\Holder::$items (list<int>) does not accept array<int<0, max>, int>"
+        unset($this->byName[$k]);
+        unset($this->objects[$k]);
+    }
+
+    public function dropAndReindex(int $i): void
+    {
+        $items = $this->items;
+        unset($items[$i]);
+        $this->items = array_values($items);
+    }
+}
+
+// A readonly property refuses the write unset() makes, whatever the type
+// becomes.
+final class Frozen
+{
+    /**
+     * @param array<string, int> $m
+     * @param list<int> $l
+     */
+    public function __construct(public readonly array $m, public readonly array $l)
+    {
+    }
+
+    public function dropKey(string $k): void
+    {
+        unset($this->m[$k]); // want P2206
+    }
+
+    public function dropIndex(int $i): void
+    {
+        unset($this->l[$i]); // want P2201, P2206
+    }
+}
+
+function takesInt(int $i): void
+{
+}
+
+// What is left may be empty: a foreach may not run, array_key_first() may
+// give null.
+/** @param non-empty-list<int> $xs */
+function nonEmpty(array $xs, int $i): int
+{
+    takesInt(array_key_first($xs));
+    foreach ($xs as $x) {
+    }
+    $first = $x;
+    unset($xs[$i]);
+    takesInt(array_key_first($xs)); // want P2103 "int<0, max>|null given"
+    foreach ($xs as $y) {
+    }
+    return $first + $y; // want P2009
+}
+
+// An offset of an array inside another writes the array holding it, and
+// so the variable or property at the root: each array above keeps its keys
+// and the inner one takes the type unset() leaves it.
+/**
+ * @param list<list<int>> $xss
+ */
+function takesListList(array $xss): void
+{
+}
+
+/**
+ * @param array<string, array{id: int, name: string}> $rows
+ */
+function takesRows(array $rows): void
+{
+}
+
+/**
+ * @param list<list<int>> $xss
+ * @param array<string, array{id: int, name: string}> $rows
+ * @param array{a: array{id: int, name?: string}} $r
+ */
+function nested(array $xss, array $rows, array $r, int $i, int $j, string $k): string
+{
+    unset($xss[$i][$j]);
+    takesListList($xss); // want P2103 "expects list<list<int>>"
+    unset($rows[$k]['name']);
+    // Stricter than PHPStan, which writes back only the entries the shape
+    // left still has and so keeps the one removed.
+    takesRows($rows); // want P2103
+    if (isset($r['a']['name'])) {
+        unset($r['a']['name']);
+        return $r['a']['name']; // want P2313 "offset 'name' does not exist on array{id: int}"
+    }
+    return '';
+}
+
+// What was known of the array inside stays known of what is left of it.
+/**
+ * @param array<string, mixed> $doc
+ */
+function unsetsInside(array $doc): void
+{
+    \assert(\is_array($doc['meta']));
+    unset($doc['meta']['a'], $doc['meta']['b']);
+    if ([] === $doc['meta']) {
+        unset($doc['meta']);
+    }
+}
+
+final class Grid
+{
+    /** @var list<list<int>> */
+    public array $rows = [];
+
+    /** @var array<string, array<string, int>> */
+    public array $byName = [];
+
+    /**
+     * @param array<string, array<string, int>> $frozen
+     */
+    public function __construct(public readonly array $frozen)
+    {
+    }
+
+    public function drop(int $i, int $j, string $k): void
+    {
+        unset($this->rows[$i][$j]); // want P2201 "does not accept list<list<int>|array<int<0, max>, int>>"
+        unset($this->byName[$k]['x']);
+        unset($this->frozen[$k]['x']); // want P2206
+    }
+}
