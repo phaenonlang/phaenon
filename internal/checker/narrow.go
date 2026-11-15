@@ -695,6 +695,15 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 			x.condValueType = types.TTrue
 		}
 	}
+	if strict && isNullType(lt) && isNullType(rt) {
+		// Two values that are only null are identical: a ternary on the
+		// test takes one branch, as PHPStan's does (identical.alwaysTrue,
+		// which the checker does not report).
+		x.condValueType = types.TTrue
+		if negate {
+			x.condValueType = types.TFalse
+		}
+	}
 	then, els = env.clone(), env.clone()
 	// count($x) === 0 and friends.
 	if c, ok := x.countCompare(e); ok {

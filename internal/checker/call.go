@@ -975,6 +975,7 @@ func (x *fnCtx) argsOnly(args *ast.ArgList, env *state) {
 
 func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) types.Type {
 	defer x.unresolvedCall(e.S, e.Args)
+	delete(x.skippedChain, e) // a mark of an earlier pass over a loop: this one decides
 	if key, ok := x.pathKey(e); ok {
 		if t, ok := env.getPath(key); ok {
 			return t // narrowed earlier (assertInstanceOf, instanceof, === null)
@@ -987,6 +988,11 @@ func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) t
 	x.bindThis = x.closureCallThis(e, env)
 	obj := x.expr(e.Object, env, nil)
 	x.bindThis = nil
+	if x.skippedChain[e.Object] {
+		// `$n?->a()->b()` with $n null: reported at the ?->.
+		x.argsOnly(e.Args, env)
+		return x.skipChain(e)
+	}
 	if objects := objectMembers(obj); objects != nil && x.benevolentResult(e.Object, env) {
 		obj = objects
 	}
@@ -1167,6 +1173,17 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 		if !types.IsNullable(obj) && !types.IsMixed(obj) {
 			x.report(e.S, P2307, "?-> on %s, which is never null", x.typeName(obj))
 		}
+		if _, isNull := obj.(types.Null); isNull {
+			// `null?->m()` is null, what PHP evaluates it to, and the
+			// rest of the chain is skipped; PHPStan reports the call
+			// (method.nonObject) and types it null. Typed as an error, it
+			// would reach the head of a loop whose variable is null on
+			// its first pass, `$total = $total?->plus($x) ?? $x`, and
+			// read as mixed on the pass whose findings stand (fixpoint).
+			x.report(e.Object.Span(), P2105, "cannot call method %s() on null", name)
+			x.argsOnly(e.Args, env)
+			return x.skipChain(e)
+		}
 	} else if types.IsNullable(obj) && !types.IsMixed(obj) {
 		if _, isNull := obj.(types.Null); isNull {
 			x.report(e.Object.Span(), P2105, "cannot call method %s() on null", name)
@@ -1178,6 +1195,12 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 			// below, as the value it is.
 			x.report(e.Object.Span(), P2105, "cannot call method %s() on %s (possibly null)", name, x.typeName(obj))
 		}
+	}
+	if _, never := base.(types.Never); never {
+		// A receiver that is never anything: the code is not reached
+		// (propertyType).
+		x.argsOnly(e.Args, env)
+		return types.TMixed
 	}
 	if types.IsMixed(base) {
 		x.memberOnMixed(base, e.Object.Span(), "cannot call method %s() on mixed", name)

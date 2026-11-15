@@ -467,6 +467,10 @@ type fnCtx struct {
 	// $a alone: b itself is not nullable, so a member reached through them
 	// is reached on a non-null object or not at all (PHP skips the chain).
 	shortCircuit map[ast.Expr]bool
+	// skippedChain marks the members of a chain PHP skips whole: a ?-> on
+	// a value that is null, `$n?->a()` and what follows it, `->b`, all
+	// null and reported once (skipChain).
+	skippedChain map[ast.Expr]bool
 	// condValueType is the type of the last condition cond() evaluated
 	// (the short ternary `c ?: d` needs it).
 	condValueType types.Type
