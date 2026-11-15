@@ -16,8 +16,8 @@ every line does.
 Status: pre-alpha; the language and the CLI still change between releases. What works today:
 
 - `phn check`, the type checker: PHP plus Phaenon's syntax (generics, `list<T>` and `map<K, V>`,
-  tuples, `bytes`, methods without a keyword, `throws`) and the PHPStan docblock vocabulary;
-  it reports what PHPStan reports at level max, and may be stricter, never more lenient.
+  tuples, `bytes`, methods without a keyword, `throws` and `nothrow`) and the PHPStan docblock
+  vocabulary; it reports what PHPStan reports at level max, and may be stricter, never more lenient.
 - `phn build`, the emitter: the PHP you would have written, with PHPStan docblocks, laid out as PER
   Coding Style 3.0, each file ending with a line map back to its `.phn`.
 - The `phaenon/phn` Composer plugin: the pinned compiler, and the builds at every autoload dump.
@@ -279,8 +279,9 @@ Prose survives without its type: `@param T $x prose` becomes `@param $x - prose`
 JSDoc, tells an IDE that expects a type that none follows) and a property's `@var T prose` becomes
 its docblock `/** prose */`; the emitter puts the types back and drops the dash. A `@throws X`
 without a description becomes `throws X` after the return type, several of them one union
-(`throws A|B`); a `@throws` with prose stays. It also runs on `.phn` files, so a project migrated
-earlier can be lifted later; a declaration already written in Phaenon keeps its type then.
+(`throws A|B`), and a `@throws void` that is the only `@throws` tag becomes `nothrow`; a `@throws`
+with prose stays. It also runs on `.phn` files, so a project migrated earlier can be lifted later;
+a declaration already written in Phaenon keeps its type then.
 
 Next it writes chains of nested calls as pipelines (`design/tooling.md` §8.1): PHP 8.5's `|>`
 with PHP 8.6's partial application, which the compiler lowers for an 8.5 target
@@ -384,7 +385,7 @@ most, and reports what the tool still changes; the exit status is 1 then (`desig
 spaces for tabs (a tab outside a string or a comment's text doesn't compile, `P1005`), a
 function's brace on its declaration's line, a class-like's on its own, `{}` for an empty body,
 one-line docblocks, and the spacing of what only Phaenon has (`class Box<T of Item>`,
-`map<string, list<int>>`, `Closure(int): bool`, `throws A|B`).
+`map<string, list<int>>`, `Closure(int): bool`, `throws A|B`, `nothrow`).
 The second is the project's own PHP style: its php-cs-fixer, run through `phn fix`.
 
 The first layer also rewrites the spellings the language withdrew on 2026-11-09, so that a tree
@@ -488,7 +489,7 @@ final class Account
 {
     private int $balance = 0;
 
-    balance(): int => $this->balance;
+    balance(): int nothrow => $this->balance;
 
     /** Takes money out, never below zero. */
     withdraw(int $amount): void throws InsufficientFunds {
@@ -517,6 +518,12 @@ held to it (no checked exceptions). It compiles to a `@throws` tag on a line of 
 docblock, or of a new one above the declaration. The throw analysis reads it, as it reads
 `@throws`: a catch nothing in its `try` block can reach (`P2403`), a member the body never throws
 (`P2404`, on what no override can replace), and `@throws void` on a body that throws (`P2405`).
+**`nothrow`** in the clause's place says that nothing escapes: the clause spelling of
+`@throws void`, which it compiles to. The body is held to its explicit throw points (`P2405`), a
+call to a function that declares nothing does not break it, and a call to a `nothrow` function is
+no throw point, so a catch around such calls alone is dead (`P2403`); an override that declares
+nothing inherits it. Beside `throws` it is a syntax error, beside a `@throws` tag that names an
+exception `P2320`.
 Design: `design/functions.md`, `design/tooling.md` §9.1.
 
 ## Generics
