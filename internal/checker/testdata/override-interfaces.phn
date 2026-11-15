@@ -184,3 +184,61 @@ class Foot extends Yard
         return '';
     }
 }
+
+// A constructor is free of a concrete parent's signature, not of the
+// abstract constructor that one implements, nor of an interface's: PHP
+// holds it to that prototype, however far up it sits.
+abstract class Entity
+{
+    abstract public function __construct(int $id);
+}
+
+class Record extends Entity
+{
+    public function __construct(public int $id)
+    {
+    }
+}
+
+class Row extends Record
+{
+    public function __construct(public string $key) // want P2502 "is not contravariant with App\OverrideInterfaces\Entity::__construct() (int)"
+    {
+        parent::__construct(1);
+    }
+}
+
+interface Builds
+{
+    public function __construct(int $id);
+}
+
+class Built implements Builds
+{
+    public function __construct(public int $id)
+    {
+    }
+}
+
+class Rebuilt extends Built
+{
+    public function __construct(public string $key) // want P2502 "is not contravariant with App\OverrideInterfaces\Builds::__construct() (int)"
+    {
+        parent::__construct(1);
+    }
+}
+
+class Plain
+{
+    public function __construct(public int $id)
+    {
+    }
+}
+
+class Free extends Plain
+{
+    public function __construct(public string $key, int $id = 0)
+    {
+        parent::__construct($id);
+    }
+}
