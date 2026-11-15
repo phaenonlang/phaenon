@@ -20,22 +20,12 @@ import (
 // clause is documentation the checker verifies, as a @throws tag is, and
 // not a checked-exception rule: callers are not held to it. It compiles
 // to a docblock, so like a `catch` it fails nothing on a target that
-// lacks the class. `nothrow` names nothing; a @throws tag of the
-// declaration's docblock (doc) that says something escapes contradicts
-// it, P2320 for each.
-func (x *fnCtx) throwsClause(t *ast.Throws, doc *docblock.Doc) {
-	if t == nil {
-		return
-	}
-	if t.Nothrow {
-		if doc == nil {
-			return
-		}
-		for _, tag := range doc.Throws {
-			if !tag.IsVoid() {
-				x.report(t.Kw, P2320, "nothrow says that nothing escapes, and the docblock says @throws %s", tag)
-			}
-		}
+// lacks the class. `nothrow` names nothing. With the declaration's
+// docblock (doc) and its name, the clause or its absence is then held
+// against the @throws tags (throwsContradiction).
+func (x *fnCtx) throwsClause(t *ast.Throws, doc *docblock.Doc, name ast.Span) {
+	x.throwsContradiction(t, doc, name)
+	if t == nil || t.Nothrow {
 		return
 	}
 	for _, nt := range t.Types {
@@ -55,6 +45,44 @@ func (x *fnCtx) throwsClause(t *ast.Throws, doc *docblock.Doc) {
 		if !x.p().IsSubclassOf(name, "Throwable") {
 			x.report(nt.S, P2319, "%s is not a Throwable, so throws cannot name it", name)
 		}
+	}
+}
+
+// throwsContradiction reports a declaration that says that nothing
+// escapes, with `nothrow` or a `@throws void` tag, and also that something
+// does, with a `throws` clause or a @throws tag other than `@throws void`
+// (design/functions.md §4.5): P2320, once for the declaration however many
+// tags take part. `nothrow` beside `throws` is the same contradiction in
+// one place, a syntax error; PHPStan joins a declaration's tags into one
+// type, in which `void` is no Throwable (throws.notThrowable). The
+// finding stands at the clause's word when there is a clause, at the name
+// when the docblock alone says both.
+func (x *fnCtx) throwsContradiction(t *ast.Throws, doc *docblock.Doc, name ast.Span) {
+	var void, other []string
+	if doc != nil {
+		for _, tag := range doc.Throws {
+			if tag.IsVoid() {
+				void = append(void, "@throws "+tag.String())
+			} else {
+				other = append(other, "@throws "+tag.String())
+			}
+		}
+	}
+	switch {
+	case t != nil && t.Nothrow:
+		if len(other) > 0 {
+			x.report(t.Kw, P2320, "nothrow says that nothing escapes, and the docblock's %s that something does", strings.Join(other, " and "))
+		}
+	case t != nil:
+		if len(void) > 0 {
+			names := make([]string, len(t.Types))
+			for i, nt := range t.Types {
+				names[i] = string(x.file.Src[nt.S.Start:nt.S.End])
+			}
+			x.report(t.Kw, P2320, "the docblock's %s says that nothing escapes, and throws %s that something does", void[0], strings.Join(names, "|"))
+		}
+	case len(void) > 0 && len(other) > 0:
+		x.report(name, P2320, "%s says that nothing escapes, and %s that something does", void[0], strings.Join(other, " and "))
 	}
 }
 

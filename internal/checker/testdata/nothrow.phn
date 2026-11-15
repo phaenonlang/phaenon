@@ -7,7 +7,9 @@ namespace Nothrow;
 // declares nothing does not break it, and a call to a `nothrow` function
 // is no throw point, which leaves a catch around it dead (P2403). An
 // override that declares nothing inherits it. A @throws tag that says
-// something escapes, beside it, is P2320.
+// something escapes, beside it, is P2320, and so are a `throws` clause and
+// another @throws tag beside `@throws void`: one finding for the
+// declaration, however many tags take part.
 
 final class NotFound extends \RuntimeException {}
 
@@ -32,7 +34,7 @@ class Memory implements Lookup
     calls(): string nothrow => undeclared();
 
     /** @throws NotFound */
-    tagged(): void nothrow {} // want P2320 "@throws NotFound"
+    tagged(): void nothrow {} // want P2320 "nothrow says that nothing escapes, and the docblock's @throws NotFound that something does"
 
     /** @throws void */
     stated(): void nothrow {}
@@ -42,6 +44,21 @@ class Memory implements Lookup
      * @throws \LogicException|NotFound
      */
     mixed(): void nothrow {} // want P2320 "@throws \LogicException|NotFound"
+
+    /**
+     * @throws NotFound
+     * @throws \LogicException
+     */
+    twoTags(): void nothrow {} // want P2320 "the docblock's @throws NotFound and @throws \LogicException that"
+
+    /** @throws void */
+    clause(): int throws NotFound => throw new NotFound(); // want P2320 "the docblock's @throws void says that nothing escapes, and throws NotFound that something does"
+
+    /**
+     * @throws void
+     * @throws NotFound
+     */
+    docOnly(): int => throw new NotFound(); // want P2320 "@throws void says that nothing escapes, and @throws NotFound that something does"
 }
 
 final class Cache extends Memory
@@ -64,6 +81,27 @@ function raises(): void nothrow => throw new NotFound(); // want P2405 "function
 
 /** @throws NotFound */
 function tagged(): void nothrow {} // want P2320
+
+/** @throws void */
+function clause(): int throws NotFound => throw new NotFound(); // want P2320 "throws NotFound that"
+
+/**
+ * @throws void
+ * @throws \LogicException
+ */
+function clauseAndTags(): int throws NotFound => throw new NotFound(); // want P2320 "@throws void says"
+
+/**
+ * @throws NotFound
+ * @throws VOID
+ */
+function docOnly(): int => throw new NotFound(); // want P2320 "@throws VOID says that nothing escapes, and @throws NotFound that"
+
+/**
+ * @throws void
+ * @throws void
+ */
+function twice(): int => 1;
 
 function callsPure(int $a): int {
     try {

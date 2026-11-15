@@ -522,8 +522,9 @@ docblock, or of a new one above the declaration. The throw analysis reads it, as
 `@throws void`, which it compiles to. The body is held to its explicit throw points (`P2405`), a
 call to a function that declares nothing does not break it, and a call to a `nothrow` function is
 no throw point, so a catch around such calls alone is dead (`P2403`); an override that declares
-nothing inherits it. Beside `throws` it is a syntax error, beside a `@throws` tag that names an
-exception `P2320`.
+nothing inherits it. Beside `throws` it is a syntax error; beside a `@throws` tag other than
+`@throws void` it is `P2320`, as is a `throws` clause or another `@throws` tag beside
+`@throws void`.
 Design: `design/functions.md`, `design/tooling.md` §9.1.
 
 ## Generics

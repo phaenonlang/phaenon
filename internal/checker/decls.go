@@ -57,7 +57,7 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 		ctx.inScope[tp.Name] = true
 	}
 	ctx.checkSignatureTypes(fn.Decl.TypeParams, fn.Decl.Params, fn.Decl.ReturnType)
-	ctx.throwsClause(fn.Decl.Throws, fn.Doc)
+	ctx.throwsClause(fn.Decl.Throws, fn.Doc, fn.Decl.Name.S)
 	c.declaredName(fn.Decl.Name.S, "function", fn.Decl.Name.Name)
 	c.checkUntyped(f, fn.Decl.Params, fn.Params, fn.Decl.ReturnType, fn.Return, fn.Decl.Name.Name, fn.Decl.S, fn.Doc, false)
 	ctx.pushThrows()
@@ -717,7 +717,7 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	sctx := c.newCtx(cl.File, cl.Scope, cl, m.Static)
 	sctx.res = sctx.res.WithParams(m.TypeParams)
 	sctx.checkSignatureTypes(d.TypeParams, d.Params, d.ReturnType)
-	sctx.throwsClause(d.Throws, m.Doc)
+	sctx.throwsClause(d.Throws, m.Doc, d.Name.S)
 	if !d.HasBody {
 		return
 	}
