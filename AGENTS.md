@@ -57,7 +57,7 @@ cmd/phn-wasm/         the compiler for WebAssembly (js/wasm only): globalThis.ph
 internal/token        token set: PHP 8.5's plus Phaenon's, named like token_name()
 internal/lexer        hand-written port of zend_language_scanner.l; lossless
 internal/ast          typed node families; Phaenon constructs are additions to the PHP tree
-internal/parser       recursive descent, Pratt expressions (precedence from zend_language_parser.y); methods without a keyword by position, the withdrawn spellings (withdrawn.go)
+internal/parser       recursive descent, Pratt expressions (precedence from zend_language_parser.y); methods without a keyword by position, the withdrawn spellings (withdrawn.go), Phaenon's words written in another case than lower (words.go, D30)
 internal/printer      AST → canonical PHP, token-faithful round trip
 internal/docblock     PHPDoc tags and the PHPStan/Psalm type grammar
 internal/types        the type lattice (PHPStan semantics): subtyping, narrowing, printing
@@ -65,7 +65,7 @@ internal/program      program model: project files, Composer vendor code (lazy),
 internal/checker      the type checker behind `phn check`; a withdrawn is/as reported as P1001 with the PHP test phn fmt writes for it (typetest.go)
 internal/emit         patch-based emitter: PER Coding Style 3.0 layout of what it writes (D22), the line map; generics erasure, the `public function` of a method head
 internal/linemap      the `// phaenon-map v1 …` comment every compiled file ends with: parse, write, lookups
-internal/format       `phn fmt`'s first layer: the withdrawn spellings rewritten (respell.go), Phaenon's layout (spaces for tabs, migrate's braces and docblocks, the spacing of Phaenon's syntax)
+internal/format       `phn fmt`'s first layer: the withdrawn spellings rewritten and Phaenon's words written in lower case (respell.go), Phaenon's layout (spaces for tabs, migrate's braces and docblocks, the spacing of Phaenon's syntax)
 internal/tabs         the tabs Phaenon forbids (D21: outside strings and comments' text), found for P1005 and replaced by migrate and fmt
 internal/lsp          `phn lsp`: JSON-RPC on stdio, a program per check (parsed trees shared), hover, definition, completion, build on save
 internal/fix          `phn fix`: a PHP tool's changes of the outputs carried back to the sources through the emitter's verbatim spans

@@ -396,7 +396,9 @@ need it (the modifiers stay as written), and a leftover `is`, `as` or `as?` beco
 it compiled to — `$x is int` → `is_int($x)`, `$b is string` on `bytes` →
 `mb_check_encoding($b, 'UTF-8')`. Most of those depend on the operand's type, so `phn fmt` in a
 project checks the files that hold one first; `phn fmt --stdin`, with no program, rewrites only
-`fun`, `function` and `$x is Foo` with a class name, and reports the rest (`P1001`).
+`fun`, `function` and `$x is Foo` with a class name, and reports the rest (`P1001`). It writes
+Phaenon's words in lower case where the compiler reports another case (`P1006`: `THROWS`,
+`TYPE`, `(BYTES)`), and leaves `Map` and `Bytes`, which may be a class's.
 
 ```sh
 phn fmt                 # the roots: Phaenon's layout, then the fixer (phaenon.json "fmt", or tools/php-cs-fixer)
@@ -531,6 +533,14 @@ nothing inherits it. Beside `throws` it is a syntax error; beside a `@throws` ta
 `@throws void` it is `P2320`, as is a `throws` clause or another `@throws` tag beside
 `@throws void`.
 Design: `design/functions.md`, `design/tooling.md` §9.1.
+
+The words Phaenon adds to PHP are written in lower case: `throws`, `nothrow`, `type`, `of`, `in`,
+`out`, `class<T>`, `list`, `map`, `bytes` and the cast `(bytes)`. Where only the word can stand,
+`THROWS` or `TYPE Row = …;` is read as the word and is an error, `P1006`, which `phn fmt`
+rewrites; a name of that spelling, a class `Throws` as a return type or a method `type()`, stays
+a name. `Map` and `Bytes` are class names like any other: the class of that name the file sees,
+or `P2001`, whose message says that Phaenon's type is written in lower case. PHP's own words
+keep PHP's rule, `Int` and `FUNCTION` included. Design: `design/roadmap.md` D30.
 
 ## Generics
 
