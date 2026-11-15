@@ -220,3 +220,34 @@ final class Reporter
         takesStrings($this->reported);
     }
 }
+
+/**
+ * The int of a flag indexes a pair: intval() of a bool is 0 or 1, so a
+ * write under it leaves a pair.
+ */
+final class FlagCache
+{
+    /** @var array<string, list{bool, bool}> */
+    private array $seen = [];
+
+    /** @var array<string, list{Status, Status}> */
+    private array $statuses = [];
+
+    public function seen(string $name, bool $strict): bool
+    {
+        $key = intval($strict);
+        if (isset($this->seen[$name][$key])) {
+            return $this->seen[$name][$key];
+        }
+        $this->seen[$name][$key] = true;
+
+        return false;
+    }
+
+    public function status(string $name, bool $strict, Status $status): Status
+    {
+        $key = intval($strict);
+
+        return $this->statuses[$name][$key] ??= $status;
+    }
+}

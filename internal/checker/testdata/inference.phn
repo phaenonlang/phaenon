@@ -326,6 +326,23 @@ function minMax(int $a, int $b, string $s, float $f): void
     takesFloat(max(0.0, $f));
 }
 
+/** @param int<0, 1> $i */
+function takesBit(int $i): void
+{
+}
+
+/**
+ * intval() of a bool is 0 or 1, and of null 0, as PHPStan has it.
+ */
+function intvals(bool $flag, ?bool $maybe, string $s, ?int $n): void
+{
+    takesBit(intval($flag));
+    takesBit(intval(true));
+    takesBit(intval($maybe));
+    takesBit(intval($s)); // want P2103
+    takesBit(intval($n)); // want P2103
+}
+
 function formats(string $s): void
 {
     takesNonEmpty(sprintf('publish %s', $s));
