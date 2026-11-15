@@ -327,8 +327,7 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 	if !strict {
 		x.objectNumberComparison(e.Op, lt, rt, e.S)
 	}
-	if strict && !types.IsMixed(lt) && !types.IsMixed(rt) && !types.Overlaps(lt, rt, x.p()) {
-		x.disjointComparison(e, lt, rt, env)
+	if strict && !types.IsMixed(lt) && !types.IsMixed(rt) && !types.Overlaps(lt, rt, x.p()) && x.disjointComparison(e, lt, rt, env) {
 		x.condValueType = types.TFalse
 		if negate {
 			x.condValueType = types.TTrue
@@ -345,6 +344,18 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 		case c.n > 0:
 			x.narrowPath(then, c.arg, nonEmptyArray(at), false)
 		}
+		if negate {
+			return els, then
+		}
+		return then, els
+	}
+	// Binary data and text compared identical hold the same bytes, and
+	// those are text: where they match both operands are string&bytes, as
+	// after mb_check_encoding() (strings.md §6). A mismatch says nothing.
+	if strict && bytesAgainstText(lt, rt) {
+		equal := x.equalTextBytes(lt, rt)
+		x.narrowPath(then, e.Left, equal, true)
+		x.narrowPath(then, e.Right, equal, true)
 		if negate {
 			return els, then
 		}

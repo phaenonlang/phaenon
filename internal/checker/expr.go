@@ -1566,24 +1566,27 @@ func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Typ
 }
 
 // disjointComparison reports a strict comparison of operands whose types
-// do not overlap (P2305): a comparison of values PHP's own types keep
-// apart is always false (`!==` always true), while one of binary data with
-// text, both PHP strings, is true when the two hold the same bytes, and
-// the finding is that the two kinds are compared (strings.md §2).
-// Disjoint docblock types alone are not reported, as PHPStan does not with
-// treatPhpDocTypesAsCertain off.
-func (x *fnCtx) disjointComparison(e *ast.Binary, l, r types.Type, env *state) {
+// do not overlap (P2305), and says whether its result is known: a
+// comparison of values PHP's own types keep apart is always false (`!==`
+// always true), while one of binary data with text, both PHP strings, is
+// true when the two hold the same bytes, and the finding is that the two
+// kinds are compared (strings.md §2). Disjoint docblock types alone are
+// not reported, as PHPStan does not with treatPhpDocTypesAsCertain off,
+// and still decide the result for the flow.
+func (x *fnCtx) disjointComparison(e *ast.Binary, l, r types.Type, env *state) (known bool) {
 	if !x.nativeOverlap(e.Left, l, e.Right, r, env) {
 		word := "false"
 		if e.Op == token.T_IS_NOT_IDENTICAL {
 			word = "true"
 		}
 		x.report(e.S, P2305, "strict comparison between %s and %s is always %s", x.typeName(l), x.typeName(r), word)
-		return
+		return true
 	}
 	if bytesAgainstText(l, r) {
 		x.report(e.S, P2305, "strict comparison between %s and %s compares binary data with text, which may still hold the same bytes: %s", x.typeName(l), x.typeName(r), convertBytesHint(e.Left, l, e.Right))
+		return false
 	}
+	return true
 }
 
 // convertBytesHint says how to compare binary data with text, naming the
@@ -1651,6 +1654,37 @@ func bytesAgainstText(l, r types.Type) bool {
 	lb, lt := has(l)
 	rb, rt := has(r)
 	return (lb && rt) || (rb && lt)
+}
+
+// equalTextBytes is the value two operands, binary data and text, have
+// where they are identical: text held as bytes, string&bytes (the text's
+// own literal kept, `'GIF8'&bytes`), and whatever else both may be.
+func (x *fnCtx) equalTextBytes(l, r types.Type) types.Type {
+	isText := func(t types.Type) bool {
+		switch t.(type) {
+		case types.String, types.StringLit, types.ClassString:
+			return true
+		}
+		return false
+	}
+	var out []types.Type
+	for _, a := range types.Members(l) {
+		for _, b := range types.Members(r) {
+			_, aBytes := a.(types.Bytes)
+			_, bBytes := b.(types.Bytes)
+			switch {
+			case aBytes && isText(b):
+				out = append(out, types.MakeIntersection(b, types.TBytes))
+			case bBytes && isText(a):
+				out = append(out, types.MakeIntersection(a, types.TBytes))
+			default:
+				if m := types.Intersect(a, b, x.p()); !isNeverType(m) {
+					out = append(out, m)
+				}
+			}
+		}
+	}
+	return types.MakeUnion(out...)
 }
 
 // concatBytes reports an operand of `.` that is binary data: bytes, maybe

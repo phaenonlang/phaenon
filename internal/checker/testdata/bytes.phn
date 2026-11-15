@@ -393,7 +393,7 @@ function untestable(mixed $m, string $s, bytes $b, string|bytes $either, (Blob, 
 
 // Binary data compared with text: both are PHP strings, which may hold
 // the same bytes, so the comparison is not always false; that the two
-// kinds meet is the finding.
+// kinds meet is the finding, and the result stays open for the flow.
 function equality(bytes $a, string $b, bytes $c): int
 {
     if ($a === $b) { // want P2305 "strict comparison between bytes and string compares binary data with text, which may still hold the same bytes"
@@ -410,7 +410,34 @@ function equality(bytes $a, string $b, bytes $c): int
     if (mb_check_encoding($a, 'UTF-8') && $a === $b) {
     }
     takesInt(hash_equals($a, $c)); // want P2103
-    return 1;
+    // Either branch may be taken: 'one' is returned when the two match.
+    return $a === $b ? 'one' : 1; // want P2305, P2202
+}
+
+// Where they match, the two hold the same bytes, which are text: both are
+// string&bytes there, as after mb_check_encoding(), and the code there is
+// checked with that type.
+function equalBranch(bytes $a, string $b): void
+{
+    if ($a === $b) { // want P2305
+        takesInt($a); // want P2103 "expects int, string&bytes given"
+        takesInt($b); // want P2103 "expects int, string&bytes given"
+        takesText($a);
+        takesBytes($b);
+    }
+}
+
+function equalOperand(bytes $a, string $b): int
+{
+    return $a === $b ? $a : 1; // want P2305, P2202 "returns 1|(string&bytes)"
+}
+
+function equalAfterGuard(bytes $a, string $b): void
+{
+    if ($a !== $b) { // want P2305
+        return;
+    }
+    takesInt($a); // want P2103 "expects int, string&bytes given"
 }
 
 // A match compares strictly too.
