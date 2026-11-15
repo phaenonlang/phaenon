@@ -106,6 +106,58 @@ final class OpensForTheInterface extends Protects implements Constructible
     }
 }
 
+// A trait's abstract constructor binds only where it enters the method
+// table. PHP binds it after inheritance, and drops it when the table holds
+// a constructor already: one inherited, private included, or a concrete
+// one of another trait, whichever trait comes first.
+abstract class OpenWithTheTrait extends Open
+{
+    use MustConstruct;
+}
+
+final class BelowOpenWithTheTrait extends OpenWithTheTrait
+{
+    private function __construct()
+    {
+    }
+}
+
+trait MustConstructProtected
+{
+    abstract protected function __construct();
+}
+
+abstract class HiddenWithTheTrait extends Hidden
+{
+    use MustConstructProtected;
+}
+
+final class BelowHiddenWithTheTrait extends HiddenWithTheTrait
+{
+    private function __construct()
+    {
+    }
+}
+
+trait Constructs
+{
+    public function __construct()
+    {
+    }
+}
+
+class TwoTraits
+{
+    use MustConstruct, Constructs;
+}
+
+final class BelowTwoTraits extends TwoTraits
+{
+    private function __construct()
+    {
+    }
+}
+
 // Refused: an interface's constructor is public in every class below it.
 
 final class HidesTheInterface implements Constructible
