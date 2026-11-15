@@ -1,7 +1,8 @@
 <?php
 
 /**
- * Phaenon overlay: generic signatures for the reflection API and enums.
+ * Phaenon overlay: generic signatures for the reflection API, attributes
+ * and enums.
  * A class declared here patches the php-src stub of the same name: the
  * class docblock and the methods listed replace the stub's, everything
  * else stays as the stub declares it.
@@ -9,7 +10,10 @@
 
 /**
  * A ReflectionClass<Foo> is a ReflectionClass<object>: the parameter is
- * covariant, as PHPStan declares it.
+ * covariant, as PHPStan declares it before PHP 8.4. Its stub for 8.4 and
+ * later makes it invariant; here that would refuse a ReflectionClass that
+ * implementsInterface() narrowed, passed on as a ReflectionClass<object>,
+ * which PHPStan accepts of the same code.
  *
  * @template-covariant T of object
  */
@@ -103,7 +107,10 @@ class ReflectionEnum extends ReflectionClass
 }
 
 /**
- * @template T of object
+ * A ReflectionAttribute<Foo> is a ReflectionAttribute<object>: the
+ * parameter is covariant, as PHPStan declares it.
+ *
+ * @template-covariant T of object
  */
 class ReflectionAttribute
 {
@@ -218,4 +225,14 @@ class ReflectionIntersectionType extends ReflectionType
 {
     /** @return list<ReflectionNamedType> */
     public function getTypes(): array {}
+}
+
+/**
+ * The value a #[\SensitiveParameter] hides in a stack trace, as PHPStan
+ * declares it.
+ *
+ * @template-covariant T = mixed
+ */
+final class SensitiveParameterValue
+{
 }

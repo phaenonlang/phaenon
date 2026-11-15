@@ -75,6 +75,12 @@ func TestStubs(t *testing.T) {
 	if p.Class("ArrayIterator") == nil || !p.IsSubclassOf("ArrayIterator", "Traversable") {
 		t.Error("ArrayIterator should be Traversable")
 	}
+	// ArrayIterator passes its arguments up through SeekableIterator, the
+	// interface it implements.
+	if args, ok := p.Class("ArrayIterator").SuperArgs("Iterator", []types.Type{types.TInt, types.TString}); !ok || len(args) != 2 ||
+		types.Print(args[0]) != "int" || types.Print(args[1]) != "string" {
+		t.Errorf("ArrayIterator<int, string> as an Iterator: %v %v", args, ok)
+	}
 	if !p.IsFinal("Closure") {
 		t.Error("Closure is final in php-src")
 	}
@@ -166,6 +172,35 @@ interface HasId
     public function first(): ?object;
 }
 `
+
+// TestSubstBoundNamesEarlierParams: an argument left out takes its bound
+// with the arguments before it, as PHPStan resolves it: the TInner of a
+// Wrap<int, string> is a Traversable<int, string>, not one of the
+// parameters themselves.
+func TestSubstBoundNamesEarlierParams(t *testing.T) {
+	p := New()
+	if err := p.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	src := `namespace App;
+
+/**
+ * @template TKey
+ * @template TValue
+ * @template TInner of \Traversable<TKey, TValue>
+ */
+final class Wrap
+{
+}
+`
+	if _, err := p.AddFile("src/Wrap.phn", []byte(src), lexer.ModePhaenon, true); err != nil {
+		t.Fatal(err)
+	}
+	m := p.Class("App\\Wrap").Subst([]types.Type{types.TInt, types.TString})
+	if got := types.Print(m["TInner"]); got != "Traversable<int, string>" {
+		t.Errorf("TInner of Wrap<int, string>: %s", got)
+	}
+}
 
 func TestProjectModel(t *testing.T) {
 	p := New()

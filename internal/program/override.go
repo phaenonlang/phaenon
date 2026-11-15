@@ -115,6 +115,18 @@ func tableEntry(c *Class, key string, seen map[*Class]bool) (*Method, *Class) {
 	return nil, nil
 }
 
+// TableEntry is the method PHP's method table of c holds under name, and
+// the class whose declaration put it there (tableEntry); nil for none.
+func (c *Class) TableEntry(name string) (*Method, *Class) {
+	return tableEntry(c, strings.ToLower(name), map[*Class]bool{})
+}
+
+// AbstractConstructor is the abstract constructor a constructor of c is
+// held to (abstractConstructor); nil for none.
+func (c *Class) AbstractConstructor() *Method {
+	return abstractConstructor(c)
+}
+
 // abstractConstructor is the abstract constructor a constructor of cl is
 // held to: the one in the parent's table when it is abstract, else the one
 // that table's concrete constructor implements, up the chain. nil for none,
