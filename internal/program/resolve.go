@@ -329,6 +329,34 @@ func NonClassTypeName(name string) bool {
 	return reservedTypeNames[lower] || (lower == "map" || lower == "bytes") && name == lower
 }
 
+// declaredKey is the key an array declared with the key type t holds, as
+// PHP stores it and PHPStan reads it: a string PHP reads as an integer is
+// that int (types.StoredKey), a bool is 0 or 1, a float an int and null
+// the empty string, and a type no key can be, an object or an array, is
+// int|string. A map key outside int|string is the checker's one finding
+// (P2518); what the declaration holds is an array still, so that nothing
+// else follows from it, count() of it or a loop over it.
+func declaredKey(t types.Type) types.Type {
+	return types.StoredKey(types.Map(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Bool:
+			return types.MakeUnion(types.IntLit(0), types.IntLit(1))
+		case types.BoolLit:
+			if m.V {
+				return types.IntLit(1)
+			}
+			return types.IntLit(0)
+		case types.Float, types.FloatLit:
+			return types.TInt
+		case types.Null:
+			return types.StringLit{V: ""}
+		case types.Object, types.Class, types.Static, types.This, types.EnumCase, types.ObjectShape, types.Array, types.Shape:
+			return types.TArrayKey
+		}
+		return m
+	}))
+}
+
 // keyword resolves a native or docblock type keyword.
 func (r *resolver) keyword(lower string, args []types.Type, node *docblock.TypeNode) (types.Type, bool) {
 	arg := func(i int, def types.Type) types.Type {
@@ -397,14 +425,14 @@ func (r *resolver) keyword(lower string, args []types.Type, node *docblock.TypeN
 		case 2:
 			// array<numeric-string, V> holds int|numeric-string keys, as
 			// PHPStan reads it: PHP stores a decimal string as an int.
-			a.Key, a.Value = types.StoredKey(arg(0, types.TArrayKey)), arg(1, types.TMixed)
+			a.Key, a.Value = declaredKey(arg(0, types.TArrayKey)), arg(1, types.TMixed)
 		}
 		return a, true
 	case "list", "non-empty-list":
 		return types.Array{Key: types.TInt, Value: arg(0, types.TMixed), List: true, NonEmpty: lower == "non-empty-list"}, true
 	case "map", "non-empty-map":
 		// Phaenon's name for array<K, V>: a keyed array.
-		return types.Array{Key: types.StoredKey(arg(0, types.TArrayKey)), Value: arg(1, types.TMixed), NonEmpty: lower == "non-empty-map"}, true
+		return types.Array{Key: declaredKey(arg(0, types.TArrayKey)), Value: arg(1, types.TMixed), NonEmpty: lower == "non-empty-map"}, true
 	case "non-empty-string":
 		return types.String{NonEmpty: true}, true
 	case "numeric-string":

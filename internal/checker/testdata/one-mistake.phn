@@ -1,0 +1,59 @@
+namespace OneMistake;
+
+// One mistake, one diagnostic: the finding that names the mistake, and
+// nothing that only follows from it.
+
+// A map key outside int|string: the key is P2518, and the map is an array
+// still, its keys what PHP stores (0 and 1 for bool, as PHPStan reads
+// array<bool, V>), so that count() and a loop take it.
+function counted(map<bool, string> $m): int => \count($m); // want P2518 "not bool"
+
+final class Keyed
+{
+}
+
+function keyedByObject(map<Keyed, int> $m): int { // want P2518
+    foreach ($m as $k => $v) {
+        echo $k, $v;
+    }
+    return \count($m);
+}
+
+function wantsInt(int $n): void {}
+
+// "${name}" is the removed construct, not a value of unknown type.
+function interpolated(string $name): string => "${name}!"; // want P1001 "${name} string interpolation"
+
+final class Scope
+{
+    /** @var array<string, mixed> */
+    public array $vars = [];
+
+    // extract() is the finding, whatever array it is given: that it writes
+    // variables from it is the construct. A mistake of its own, a flag of
+    // the wrong type, a result put where it does not fit, is still one.
+    run(): void {
+        extract(['a' => 1]); // want P1001 "extract()"
+        extract($this->vars); // want P1001
+        extract($this->vars, 'notAnInt'); // want P1001, P2103 "argument 2 ($flags)"
+        wantsInt(compact('run')); // want P1001 "compact()", P2103
+        $defined = get_defined_vars(); // want P1001
+        wantsInt($defined); // want P2103
+    }
+
+    // A closure of a constant expression captures nothing: its use list is
+    // the finding, not the variables it names.
+    public const UNUSED = static function () use ($x): int { return 1; }; // want P2531
+}
+
+// A goto and its label are one construct: the goto is the finding. A label
+// no goto names is reported on its own.
+function jumps(bool $again): void {
+    start:
+    echo 'once';
+    if ($again) {
+        goto start; // want P1001 "goto"
+    }
+    alone: // want P1001 "labels"
+    echo 'done';
+}

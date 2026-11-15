@@ -144,7 +144,9 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 	case *ast.Goto:
 		x.removed(s.S, "goto", "structured control flow")
 	case *ast.Label:
-		x.removed(s.S, "labels", "structured control flow")
+		if !x.c.labelTargeted(x.file, s) {
+			x.removed(s.S, "labels", "structured control flow")
+		}
 	case *ast.Declare:
 		if s.Body != nil {
 			x.stmt(s.Body, env)
@@ -1484,6 +1486,49 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 }
 
 // child creates the context of a closure declared in x.
+// labelTargeted reports whether a goto names the label in its scope (the
+// function, method, closure or hook around it, or the file's top-level
+// code): the goto is the mistake, P1001, and its label is part of it.
+// A label no goto names is reported on its own.
+func (c *Checker) labelTargeted(f *program.File, l *ast.Label) bool {
+	if c.targetedLabels == nil {
+		c.targetedLabels = map[*program.File]map[*ast.Label]bool{}
+	}
+	m, ok := c.targetedLabels[f]
+	if !ok {
+		m = map[*ast.Label]bool{}
+		var scope func(ast.Node)
+		scope = func(n ast.Node) {
+			labels := map[string][]*ast.Label{}
+			gotos := map[string]bool{}
+			ast.Inspect(n, func(sub ast.Node) bool {
+				switch s := sub.(type) {
+				case *ast.FunctionDecl, *ast.MethodDecl, *ast.Closure, *ast.PropertyHook:
+					if sub != n {
+						scope(sub)
+						return false
+					}
+				case *ast.Label:
+					labels[s.Name.Name] = append(labels[s.Name.Name], s)
+				case *ast.Goto:
+					gotos[s.Label.Name] = true
+				}
+				return true
+			})
+			for name, ls := range labels {
+				for _, label := range ls {
+					m[label] = gotos[name]
+				}
+			}
+		}
+		if f.AST != nil {
+			scope(f.AST)
+		}
+		c.targetedLabels[f] = m
+	}
+	return m[l]
+}
+
 func (x *fnCtx) child(static bool) *fnCtx {
 	c := &fnCtx{c: x.c, file: x.file, class: x.class, static: x.static || static, res: x.res, byRef: map[string]bool{}, thisType: x.thisType, inScope: x.inScope}
 	c.name = "closure"
@@ -1654,6 +1699,12 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 			continue
 		}
 		if !ok {
+			if x.inConst {
+				// A constant expression has no variables to capture: the
+				// use list is the one finding (P2531 above).
+				cenv.set(u.Var.Name, types.TError)
+				continue
+			}
 			x.report(u.S, P2008, "undefined variable $%s", u.Var.Name)
 			cenv.set(u.Var.Name, types.TMixed)
 			continue
