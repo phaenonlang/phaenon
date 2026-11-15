@@ -804,3 +804,33 @@ abstract class Narrower extends Producer
     /** @return \SensitiveParameterValue<Open> */
     abstract public function hidden(): \SensitiveParameterValue;
 }
+
+// A Traversable class is the iterable its @implements says, as foreach
+// reads it here. PHPStan reads its getIterator()'s declared type instead,
+// a bare Iterator for Pack, and is silent below; the finding is true all
+// the same: Pack declares that it yields Open under int keys, and Db
+// returns it where string keys are promised.
+/**
+ * @implements \IteratorAggregate<int, Open>
+ */
+class Pack implements \IteratorAggregate
+{
+    public function getIterator(): \Iterator
+    {
+        return new \ArrayIterator([new Open()]);
+    }
+}
+
+interface Source
+{
+    /** @return iterable<string, Open> */
+    public function all(): iterable;
+}
+
+class Db implements Source
+{
+    public function all(): Pack // want P2502 "return type App\OverrideTypes\Pack of App\OverrideTypes\Db::all() is not covariant with App\OverrideTypes\Source::all() (iterable<string, App\OverrideTypes\Open>)"
+    {
+        return new Pack();
+    }
+}
