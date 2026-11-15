@@ -37,6 +37,7 @@ var kitFiles = map[string]string{
   "name": "acme/kit",
   "version": "1.0.0",
   "require": {"php": ">=8.5"},
+  "conflict": {"phaenon/phn": "<0.5.0"},
   "autoload": {"psr-4": {"Acme\\Kit\\": ".src/"}},
   "autoload-dev": {"psr-4": {"Acme\\Kit\\Tests\\": ".tests/"}}
 }

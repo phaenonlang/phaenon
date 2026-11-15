@@ -38,7 +38,7 @@ func (w *world) newReleasesWith(name string, ignored bool, prepare, finish func(
 	}
 	k := &kit{w: w, dir: filepath.Join(w.base, "kits", name)}
 	manifest := func(version string) string {
-		return `{"name": "acme/kit", "version": "` + version + `", "require": {"php": ">=8.5"}, "autoload": {"psr-4": {"Acme\\Kit\\": ".src/"}}}` + "\n"
+		return `{"name": "acme/kit", "version": "` + version + `", "require": {"php": ">=8.5"}, "conflict": {"phaenon/phn": "<0.5.0"}, "autoload": {"psr-4": {"Acme\\Kit\\": ".src/"}}}` + "\n"
 	}
 	greeter := func(version string) string {
 		return "namespace Acme\\Kit;\n\nfinal class Greeter\n{\n    greet(): string => 'Hello from " + version + "';\n}\n"

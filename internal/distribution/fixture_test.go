@@ -240,7 +240,7 @@ func (p *project) write() {
 	require := map[string]string{}
 	config := map[string]any{}
 	if !p.withoutPlugin {
-		repositories = append(repositories, pathRepository(p.w.plugin, "phaenon/phn", "0.1.x-dev", p.symlinkPlugin))
+		repositories = append(repositories, pathRepository(p.w.plugin, "phaenon/phn", mainLine(t), p.symlinkPlugin))
 		require["phaenon/phn"] = "*"
 		config["allow-plugins"] = map[string]bool{"phaenon/phn": true}
 	}
@@ -457,6 +457,33 @@ func repositoryRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+// mainLine is the version Composer gives the plugin's main branch, the
+// alias of dev-main in the repository's composer.json. The plugin the
+// projects install is this checkout, so it has that version: a library
+// whose `conflict` holds the releases from before a key of its
+// phaenon.json (design/tooling.md §3.7) installs beside it, as it does
+// beside the main branch.
+func mainLine(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repositoryRoot(t), "composer.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Extra struct {
+			BranchAlias map[string]string `json:"branch-alias"`
+		} `json:"extra"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	line := manifest.Extra.BranchAlias["dev-main"]
+	if line == "" {
+		t.Fatal("composer.json gives dev-main no branch alias")
+	}
+	return line
 }
 
 func writeJSON(t *testing.T, path string, value any) {
