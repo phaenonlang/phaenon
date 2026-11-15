@@ -1,0 +1,106 @@
+// targets: 8.5, 8.6
+// #[\Override] on a class constant or an enum case is dropped for PHP 8.5,
+// which rejects it there (override-constants.php), and kept for 8.6
+// (override-constants.8.6.php). A constant whose Phaenon type is erased
+// gets its @var docblock where the declaration starts, which is where its
+// attributes start: when the dropped group fills its line, the docblock
+// stays before the constant, in that line's indentation, and the line
+// goes.
+
+namespace App\Overrides;
+
+interface Steps
+{
+    const array ALONE = [1];
+    const array NOTED = [1];
+    const array FIRST = [1];
+    const array APART = [1];
+    const array INLINE = [1];
+    const array SHORT = [1];
+    const array LONG = [1];
+    const array GROUPED = [1];
+    const array SECOND = [1];
+    const int PLAIN = 1;
+}
+
+final class Walk implements Steps
+{
+    #[\Override]
+    const list<int> ALONE = [1, 2];
+
+    // A comment above the attribute stays above the docblock.
+    #[\Override]
+    const list<int> NOTED = [1, 2];
+
+    // The first of two groups: the second stays below the docblock.
+    #[\Override]
+    #[\Deprecated]
+    const list<int> FIRST = [1, 2];
+
+    // A blank line between the attribute and the constant goes with it.
+    #[\Override]
+
+    const list<int> APART = [1, 2];
+
+    // The attribute on the constant's line goes, its line stays.
+    #[\Override] const list<int> INLINE = [1, 2];
+
+    // A docblock of its own takes the tag: one line, then several.
+    /** The short steps. */
+    #[\Override]
+    const list<int> SHORT = [1, 2];
+
+    /**
+     * The long steps.
+     */
+    #[\Override]
+    const list<int> LONG = [1, 2];
+
+    // One of several attributes in a group goes with its comma.
+    #[\Override, \Deprecated]
+    const list<int> GROUPED = [1, 2];
+
+    // Another group first: the docblock goes before it.
+    #[\Deprecated]
+    #[\Override]
+    const list<int> SECOND = [1, 2];
+
+    // A native type needs no docblock: the line goes alone.
+    #[\Override]
+    const int PLAIN = 2;
+}
+
+interface Paces
+{
+    const Slow = 'slow';
+    const array STEPS = [1];
+}
+
+enum Pace: string implements Paces
+{
+    #[\Override]
+    case Slow = 's';
+
+    #[\Override]
+    const list<int> STEPS = [1, 2, 3];
+}
+
+// A property and a method keep #[\Override] for 8.5, which has it there:
+// their docblock goes above the attribute.
+abstract class Route
+{
+    public list<int> $taken = [];
+
+    abstract stops(): list<int>;
+}
+
+final class Tour extends Route
+{
+    #[\Override]
+    public list<int> $taken = [1];
+
+    #[\Override]
+    stops(): list<int> => [...Walk::ALONE, ...Pace::STEPS];
+}
+
+echo json_encode([Walk::ALONE, Walk::NOTED, Walk::APART, Walk::INLINE, Walk::SHORT, Walk::LONG, Walk::PLAIN, Pace::Slow->value, (new Tour())->stops()]), "\n";
