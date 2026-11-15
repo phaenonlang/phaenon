@@ -3,6 +3,37 @@
 From 0.3.0 on, release-please writes each entry from the Conventional Commits merged since the
 previous release (`release-please-config.json`). The two releases before were cut by hand.
 
+## [0.5.0](https://github.com/phaenonlang/phaenon/compare/v0.4.1...v0.5.0) (2026-11-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* a word Phaenon adds written in another letter case than lower case no longer compiles where it did: `THROWS X`, `NoThrow`, `TYPE Row = …;`, `<T OF Item>`, `<OUT T>`, `List<int>`, `CLASS<T>` and `(BYTES)` are P1006. Write the word in lower case, or run `phn fmt`, which does.
+* aliases share one table of names per namespace. Two files of a namespace that each declared a `type Row` for themselves, an alias beside a class of its name, and two aliases whose names differ in case only compiled before and are now P2511: rename one of the two.
+
+### Features
+
+* **build:** a library's build checks its conflict on older compilers ([#26](https://github.com/phaenonlang/phaenon/issues/26)) ([17302aa](https://github.com/phaenonlang/phaenon/commit/17302aa41b017e9c133bde4eac28667f5dd29a32))
+* **build:** a library's committed roots are left as installed ([#20](https://github.com/phaenonlang/phaenon/issues/20)) ([14e215c](https://github.com/phaenonlang/phaenon/commit/14e215cc83efb82839d6def46e1ad460244b772c))
+* **composer:** the plugin leaves committed roots as installed ([#23](https://github.com/phaenonlang/phaenon/issues/23)) ([3775a64](https://github.com/phaenonlang/phaenon/commit/3775a645eb581a8b215f47a6fc1a1bdf24adc7bb))
+* named shapes, and a type alias belongs to its namespace ([#34](https://github.com/phaenonlang/phaenon/issues/34)) ([1df5785](https://github.com/phaenonlang/phaenon/commit/1df5785a685a1330252062775e91a409a18e8c23))
+* nothrow, the clause spelling of [@throws](https://github.com/throws) void ([#33](https://github.com/phaenonlang/phaenon/issues/33)) ([e2c3e26](https://github.com/phaenonlang/phaenon/commit/e2c3e26204ce70e7061b76df96abe13da9fa10b2))
+* the words Phaenon adds to PHP are written in lower case ([#38](https://github.com/phaenonlang/phaenon/issues/38)) ([90f1de7](https://github.com/phaenonlang/phaenon/commit/90f1de72a2cba9285eac2054a7669cea50c05c7f))
+
+
+### Bug Fixes
+
+* **checker:** an override is held to Phaenon's types, against every interface it implements ([#28](https://github.com/phaenonlang/phaenon/issues/28)) ([53007f8](https://github.com/phaenonlang/phaenon/commit/53007f80dbc27ebbcf1166b91011d8a6394bfae2))
+* **checker:** count() on either side of a comparison, a constructor's visibility as PHP checks it ([#35](https://github.com/phaenonlang/phaenon/issues/35)) ([115e29e](https://github.com/phaenonlang/phaenon/commit/115e29e36d190460500a5cc5de5d4104355b5bae))
+* **checker:** report a named argument that overwrites an earlier one ([#25](https://github.com/phaenonlang/phaenon/issues/25)) ([19f7987](https://github.com/phaenonlang/phaenon/commit/19f7987862e30ebe8db63806a975f357e9912939))
+* **checker:** shapes are held as PHPStan holds them ([#37](https://github.com/phaenonlang/phaenon/issues/37)) ([b7c7bc1](https://github.com/phaenonlang/phaenon/commit/b7c7bc197c024a4c0c2784f92315240d1b518bde))
+* **checker:** static inside a shape, a void arrow function and three more misjudgements ([#29](https://github.com/phaenonlang/phaenon/issues/29)) ([13aa9f9](https://github.com/phaenonlang/phaenon/commit/13aa9f93c92eb896eb8ab85df3e5006297a7b644))
+* **cli:** watch from a subdirectory and on project changes, fmt on directories and broken files ([#32](https://github.com/phaenonlang/phaenon/issues/32)) ([b231123](https://github.com/phaenonlang/phaenon/commit/b231123df7910c20cf9c6a369ecc144a865101c8))
+* **emit:** anonymous classes, typed constants, hooks and a dropped `...` compile to valid PHP ([#30](https://github.com/phaenonlang/phaenon/issues/30)) ([2356fd4](https://github.com/phaenonlang/phaenon/commit/2356fd4acf80e260f2a3b4412b087a8cb06c2797))
+* **parser:** a type-argument guess leaves the tokens as it found them ([#27](https://github.com/phaenonlang/phaenon/issues/27)) ([7938815](https://github.com/phaenonlang/phaenon/commit/793881529f61012f9dc3768b916e0ba666895b0f))
+* **program:** an alias cycle, an [@method](https://github.com/method) default and an extension's DNF type are read as PHP reads them ([#31](https://github.com/phaenonlang/phaenon/issues/31)) ([142e3ea](https://github.com/phaenonlang/phaenon/commit/142e3ea29dfc42dbccefcdbf8b6d528db6b7d14b))
+* **program:** an override is erased against the declarations PHP holds it to ([#36](https://github.com/phaenonlang/phaenon/issues/36)) ([7c43fde](https://github.com/phaenonlang/phaenon/commit/7c43fdea8a54a4b46f4ee1990aebb625ad4b49c2))
+
 ## [0.4.1](https://github.com/phaenonlang/phaenon/compare/v0.4.0...v0.4.1) (2026-11-10)
 
 
