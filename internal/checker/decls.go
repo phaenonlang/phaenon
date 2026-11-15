@@ -433,7 +433,7 @@ func (c *Checker) checkAttrs(cl *program.Class, g *ast.AttrGroup) {
 		name := ctx.res.ClassName(a.Name)
 		ac := c.p.Class(name)
 		if ac == nil {
-			c.report(a.Name.S, P2001, "unknown attribute class %s", name)
+			c.report(a.Name.S, P2001, "%s", c.unknownClass("attribute class", name))
 			continue
 		}
 		c.libraryClass(a.Name.S, ac)
@@ -455,7 +455,7 @@ func (c *Checker) checkHeader(cl *program.Class) {
 		name := ctx.res.ClassName(n.Name)
 		super := c.p.Class(name)
 		if super == nil {
-			c.report(n.S, P2001, "unknown class %s", name)
+			c.report(n.S, P2001, "%s", c.unknownClass("class", name))
 			continue
 		}
 		c.libraryClass(n.Name.S, super)
@@ -479,7 +479,7 @@ func (c *Checker) checkHeader(cl *program.Class) {
 		name := ctx.res.ClassName(n.Name)
 		iface := c.p.Class(name)
 		if iface == nil {
-			c.report(n.S, P2001, "unknown interface %s", name)
+			c.report(n.S, P2001, "%s", c.unknownClass("interface", name))
 			continue
 		}
 		c.libraryClass(n.Name.S, iface)
@@ -496,7 +496,7 @@ func (c *Checker) checkHeader(cl *program.Class) {
 			name := ctx.res.ClassName(n)
 			t := c.p.Class(name)
 			if t == nil {
-				c.report(n.S, P2001, "unknown trait %s", name)
+				c.report(n.S, P2001, "%s", c.unknownClass("trait", name))
 				continue
 			}
 			if t.Kind != ast.KindTrait {

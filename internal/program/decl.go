@@ -64,13 +64,19 @@ type TypeParam struct {
 	Span   ast.Span
 }
 
-// FileAlias is a file-level Phaenon type alias: `type Name<T> = Type;`.
-type FileAlias struct {
+// TypeAlias is a Phaenon type alias, `type Name<T> = Type;`: a name of its
+// namespace, as a class is (typealias.go).
+type TypeAlias struct {
+	Name   string // fully qualified, declared case
 	Decl   *ast.TypeAlias
 	File   *File
 	Scope  *Scope
 	Params []*TypeParam
 	Type   types.Type
+	// Cyclic marks an alias that mentions itself, directly or through
+	// another alias: the mention reads as mixed, and the checker reports
+	// the declaration.
+	Cyclic bool
 	state  uint8 // 0 = raw, 1 = resolving, 2 = done
 }
 
@@ -317,12 +323,7 @@ func (p *Program) collect(f *File) {
 			case *ast.FunctionDecl:
 				p.declareFunction(f, scope, s)
 			case *ast.TypeAlias:
-				if scope.aliases == nil {
-					scope.aliases = map[string]*FileAlias{}
-				}
-				if _, dup := scope.aliases[s.Name.Name]; !dup {
-					scope.aliases[s.Name.Name] = &FileAlias{Decl: s, File: f, Scope: scope}
-				}
+				p.declareAlias(f, scope, s)
 			case *ast.ConstDecl:
 				// `/** @var int */ const X = …;` (the stubs declare most
 				// constants this way, with an UNKNOWN value).

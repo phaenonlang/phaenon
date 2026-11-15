@@ -98,15 +98,6 @@ func (r *Resolver) NativeArgs(ts []ast.TypeExpr) []types.Type {
 	return out
 }
 
-// FileAlias returns the file-level alias visible under name, resolved.
-func (r *Resolver) FileAlias(name string) *FileAlias {
-	a := r.scope.Alias(name)
-	if a != nil && a.state != 2 {
-		r.fileAlias(name, nil)
-	}
-	return a
-}
-
 // Class returns the resolver's current class (nil outside a class).
 func (r *Resolver) Class() *Class { return r.class }
 
@@ -164,11 +155,12 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 			if a, ok := r.alias(t.Name.Parts[0]); ok {
 				return a
 			}
-			if a, ok := r.fileAlias(t.Name.Parts[0], args); ok {
-				return a
-			}
 		}
-		return r.classType(r.scope.ResolveClass(t.Name), args)
+		name := r.scope.ResolveClass(t.Name)
+		if a, ok := r.typeAlias(name, args); ok {
+			return a
+		}
+		return r.classType(name, args)
 	case *ast.NullableType:
 		return types.Nullable(r.native(t.Type))
 	case *ast.UnionType:
@@ -778,43 +770,6 @@ func typeParamsOf(native []*ast.TypeParam, doc *docblock.Doc, r *resolver) []*Ty
 		return nativeTypeParams(native, r)
 	}
 	return templatesOf(doc, r)
-}
-
-// fileAlias resolves a file-level `type` alias, instantiating a generic
-// one with args (missing arguments fall back to defaults, then bounds).
-func (r *resolver) fileAlias(name string, args []types.Type) (types.Type, bool) {
-	a := r.scope.Alias(name)
-	if a == nil {
-		return nil, false
-	}
-	switch a.state {
-	case 1:
-		return types.TMixed, true // cyclic alias
-	case 0:
-		a.state = 1
-		ar := r.p.newResolver(a.File, a.Scope, nil, a.Decl.S)
-		a.Params = nativeTypeParams(a.Decl.TypeParams, ar)
-		ImplyMapKeyBounds(a.Params, a.Decl)
-		a.Type = ar.withParams(a.Params).native(a.Decl.Type)
-		a.state = 2
-	}
-	if len(a.Params) == 0 {
-		return a.Type, true
-	}
-	subst := make(map[string]types.Type, len(a.Params))
-	for i, tp := range a.Params {
-		switch {
-		case i < len(args) && args[i] != nil:
-			subst[tp.Name] = args[i]
-		case tp.Default != nil:
-			subst[tp.Name] = tp.Default
-		case tp.Bound != nil:
-			subst[tp.Name] = tp.Bound
-		default:
-			subst[tp.Name] = types.TMixed
-		}
-	}
-	return types.Substitute(a.Type, subst), true
 }
 
 func templatesOf(doc *docblock.Doc, r *resolver) []*TypeParam {

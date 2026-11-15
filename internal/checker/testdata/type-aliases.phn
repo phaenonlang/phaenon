@@ -1,0 +1,106 @@
+namespace Ali\Types;
+
+// A `type` alias is a name of its namespace (design/generics.md §11.6):
+// what one file can say about it. The rules that take two files are in
+// testdata/programs/type-aliases.
+
+final class Item
+{
+    public int $id = 0;
+}
+
+type Ids = list<int>;
+type Table<K of int|string, V = Item> = map<K, V>;
+type Thing = Item;
+
+function ids(Ids $ids, \Ali\Types\Ids $qualified, namespace\Ids $relative): int
+{
+    return $ids[0] + $qualified[0] + $relative[0];
+}
+
+function table(Table<string> $defaulted, Table<int, string> $given): string
+{
+    return $given[0] . $defaulted['a']->id;
+}
+
+function arity(Table<int, string, bool> $many, Ids<int> $one): void // want P3001, P3001
+{
+}
+
+// Names are compared as class names are, without regard to case.
+function folded(IDS $upper, ids $lower): int
+{
+    return $upper[0] + $lower[0];
+}
+
+// One name, one declaration: an alias declared twice, and an alias under
+// the name of a class-like of its namespace, reported at the alias.
+type Twice = int;
+type Twice = string; // want P2511 "is already declared"
+type twice = bool; // want P2511 "is already declared"
+
+interface Shape
+{
+}
+
+type Shape = array<int>; // want P2511 "has the name of the interface"
+
+enum Suit
+{
+    case Hearts;
+}
+
+type Suit = int; // want P2511 "has the name of the enum"
+
+// No alias mentions itself, directly or through another alias: its
+// expansion would never end.
+type Tree = map<string, list<Tree>>; // want P2015 "mentions itself"
+type Ping = list<Pong>; // want P2015
+type Pong = ?Ping; // want P2015
+type Forest = list<Tree>;
+
+function forest(Forest $f): int
+{
+    return count($f);
+}
+
+// A type, not a class: where PHP would look for a class, an alias is none.
+function values(mixed $x): void
+{
+    $a = new Ids(); // want P2001 "Ids is a type alias"
+    $b = Ids::class; // want P2001 "Ids is a type alias"
+    if ($x instanceof Thing) { // want P2001 "Thing is a type alias"
+        return;
+    }
+    try {
+        throw new \RuntimeException('x');
+    } catch (Thing $e) { // want P2001 "Thing is a type alias"
+    }
+}
+
+#[Thing] // want P2001 "Thing is a type alias"
+final class Sub extends Thing // want P2001 "Thing is a type alias"
+{
+}
+
+// A type parameter in scope comes before an alias of the same name.
+function shadowed<Ids>(Ids $x): Ids
+{
+    return $x;
+}
+
+/**
+ * Inside a class its own @phpstan-type comes before the namespace's alias.
+ *
+ * @phpstan-type Ids list<string>
+ */
+final class Own
+{
+    /**
+     * @param Ids $ids
+     */
+    public function first(array $ids): string
+    {
+        return $ids[0];
+    }
+}

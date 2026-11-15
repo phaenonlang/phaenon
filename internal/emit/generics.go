@@ -36,6 +36,18 @@ type scope struct {
 	params map[string]*ast.TypeParam
 }
 
+// alias is the type alias a named type stands for, nil for a class, a
+// keyword or a type parameter. The name may be imported or qualified: an
+// alias is a name of its namespace (design/generics.md §11.6).
+func (s *scope) alias(t *ast.NamedType) *program.TypeAlias {
+	if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
+		if _, ok := s.params[t.Name.Parts[0]]; ok {
+			return nil
+		}
+	}
+	return s.res.TypeAlias(t.Name)
+}
+
 func (s *scope) child() *scope {
 	c := &scope{res: s.res, class: s.class, static: s.static, params: map[string]*ast.TypeParam{}}
 	for k, v := range s.params {
@@ -98,6 +110,7 @@ func (e *emitter) lowerGenerics(f *ast.File) error {
 		return nil
 	}
 	l := &lowering{e: e, p: e.opts.Program, f: e.opts.File}
+	e.dropAliasImports(f.Stmts)
 	return l.stmts(f.Stmts)
 }
 
@@ -232,10 +245,10 @@ func (l *lowering) erase(t ast.TypeExpr, sc *scope) string {
 			case "iterable":
 				return "iterable"
 			}
-			if sc.res.FileAlias(name) != nil {
-				// A file-level alias: the resolved type knows its native spelling.
-				return nativeOf(sc.res.Native(t))
-			}
+		}
+		if sc.alias(t) != nil {
+			// A type alias: the resolved type knows its native spelling.
+			return nativeOf(sc.res.Native(t))
 		}
 		return l.text(t.Name.S)
 	case *ast.NullableType:
@@ -343,12 +356,14 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 					name = "class-string"
 				case "closure":
 					name = "\\Closure"
-				default:
-					if a := sc.res.FileAlias(t.Name.Parts[0]); a != nil {
-						return types.PrintQualified(sc.res.Native(t))
-					}
 				}
 			}
+		}
+		if sc.alias(t) != nil {
+			// PHPStan knows no alias of a namespace: the docblock holds what
+			// the alias stands for, its class names fully qualified, so the
+			// text is right in whichever file names the alias.
+			return types.PrintQualified(sc.res.Native(t))
 		}
 		if len(t.TypeArgs) == 0 {
 			return name
@@ -431,11 +446,11 @@ func (l *lowering) needsDoc(t ast.TypeExpr, sc *scope) bool {
 					}
 				}
 			}
-			if isAliasCandidate(t) || sc.res.FileAlias(name) != nil || strings.Contains(name, "-") {
+			if isAliasCandidate(t) || strings.Contains(name, "-") {
 				return true
 			}
 		}
-		return false
+		return sc.alias(t) != nil
 	case *ast.NullableType:
 		return l.needsDoc(t.Type, sc)
 	case *ast.UnionType:

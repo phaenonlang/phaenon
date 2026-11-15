@@ -1,0 +1,20 @@
+namespace Shop\Orders;
+
+final class Customer
+{
+    __construct(public readonly string $name) {}
+}
+
+// A file of the alias's namespace names it bare.
+final class Orders
+{
+    private list<Row> $rows = [];
+
+    find(int $id): ?Row => $this->rows[$id] ?? null;
+
+    page(int $offset): Page<Row> => [array_slice($this->rows, $offset), count($this->rows)];
+
+    buyer(): Buyer => new Customer('a');
+
+    listing(): Listing => ['a' => [$this->buyer()]];
+}

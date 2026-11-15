@@ -666,7 +666,7 @@ func (x *fnCtx) resolveClassName(n *ast.Name, span ast.Span) (string, bool) {
 	}
 	cl := x.p().Class(name)
 	if cl == nil {
-		x.report(span, P2001, "unknown class %s", name)
+		x.report(span, P2001, "%s", x.c.unknownClass("class", name))
 		return name, false
 	}
 	if !x.nameOnly {
@@ -707,7 +707,7 @@ func (x *fnCtx) classesOf(t types.Type, span ast.Span) []*program.Class {
 	for _, name := range types.ClassNames(t) {
 		cl := x.p().Class(name)
 		if cl == nil {
-			x.report(span, P2001, "unknown class %s", name)
+			x.report(span, P2001, "%s", x.c.unknownClass("class", name))
 			continue
 		}
 		out = append(out, cl)

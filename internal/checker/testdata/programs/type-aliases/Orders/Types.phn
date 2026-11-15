@@ -1,0 +1,9 @@
+namespace Shop\Orders;
+
+// The aliases of a namespace, in a file of their own: nothing here reaches
+// PHP, and every file of the program finds them by their qualified names.
+
+type Row = map<string, int|string>;
+type Page<T> = (list<T>, int);
+type Buyer = Customer;
+type Dup = int; // want P2511 "is already declared"

@@ -1,0 +1,27 @@
+namespace Shop\Http;
+
+use Shop\Orders\Buyer;
+use Shop\Orders\Customer;
+use Shop\Orders\Listing;
+use Shop\Orders\Orders;
+use Shop\Orders\{Page as Paged, Row};
+
+// A file of another namespace imports the aliases. The output keeps the
+// imports of the classes and leaves those of the aliases out: nothing in
+// it names an alias.
+final class Controller
+{
+    __construct(private Orders $orders) {}
+
+    show(int $id): Row => $this->orders->find($id) ?? [];
+
+    index(): Paged<Row> => $this->orders->page(0);
+
+    count(\Shop\Orders\Page<int> $page): int => $page[1];
+
+    buyer(): Buyer => new Customer('b');
+
+    name(Buyer $b): string => $b->name;
+
+    listing(): Listing => $this->orders->listing();
+}

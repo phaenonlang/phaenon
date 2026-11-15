@@ -263,6 +263,9 @@ type emitter struct {
 	// toks is the source's token stream, read when an edit needs a
 	// position the tree does not keep (layout.go).
 	toks []token.Token
+	// aliasUses are the use statements that import type aliases only,
+	// which the output leaves out (aliasuse.go).
+	aliasUses map[*ast.Use]bool
 }
 
 // replace is an in-place edit: text keeps the span's line breaks.
@@ -606,7 +609,7 @@ func (e *emitter) importSites(f *ast.File) []importSite {
 	at := func(off int) ast.Span { return ast.Span{Start: off, End: off} }
 	var classes, others []*ast.Use
 	for _, st := range f.Stmts {
-		if u, ok := st.(*ast.Use); ok {
+		if u, ok := st.(*ast.Use); ok && !e.aliasUses[u] {
 			if u.Kind == ast.UseClass {
 				classes = append(classes, u)
 			} else {
