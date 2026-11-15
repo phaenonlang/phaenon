@@ -175,9 +175,10 @@ function tagged<T of int|string>(T $x): T
  * Generator's send and return types default to mixed: PHPStan's arity for
  * the SPL. WeakMap is WeakMap<TKey of object, TValue>. An ArrayIterator's
  * current() and key() are Iterator's TValue and TKey, past its end too, as
- * PHPStan reads them.
+ * PHPStan reads them. A priority queue gives the value, its priority or
+ * both, as its extract flags say.
  */
-function spl(\Iterator<string> $values, \Traversable<int, string> $pairs, \Generator<string, int> $gen, \IteratorAggregate<string> $agg, \WeakMap<\stdClass, float> $weights, \ArrayIterator<string, int> $rows): void
+function spl(\Iterator<string> $values, \Traversable<int, string> $pairs, \Generator<string, int> $gen, \IteratorAggregate<string> $agg, \WeakMap<\stdClass, float> $weights, \ArrayIterator<string, int> $rows, \SplPriorityQueue<int, string> $queue): void
 {
     foreach ($values as $v) {
         takesString($v);
@@ -202,6 +203,10 @@ function spl(\Iterator<string> $values, \Traversable<int, string> $pairs, \Gener
     $rows->next();
     takesInt($rows->current());
     takesString($rows->key());
+    takesString($queue->extract()); // want P2103 "array{priority: int, data: string} given"
+    foreach ($queue as $item) {
+        takesString($item);
+    }
 }
 
 function splArity(

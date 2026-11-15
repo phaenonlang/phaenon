@@ -419,6 +419,16 @@ class SplQueue extends SplDoublyLinkedList
  */
 class SplPriorityQueue implements Iterator, Countable
 {
+    // The value, its priority or both, as setExtractFlags() chose: PHP
+    // returns array{priority, data} under EXTR_BOTH.
+    /** @return TPriority|TValue|array{priority: TPriority, data: TValue} */
+    public function top(): mixed {}
+
+    /** @return TPriority|TValue|array{priority: TPriority, data: TValue} */
+    public function extract(): mixed {}
+
+    /** @return TPriority|TValue|array{priority: TPriority, data: TValue} */
+    public function current(): mixed {}
 }
 
 /**
