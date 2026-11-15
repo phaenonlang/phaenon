@@ -183,6 +183,12 @@ type state struct {
 	// the way here (readonly.go): unlike a path, nothing a call does takes
 	// one away, and a meet keeps those assigned on every way in.
 	inits map[string]bool
+	// refs are the variables each variable is a reference to, `$alias = &$r`
+	// both ways: a write to one is a write to the others (set), as
+	// PHPStan's IntertwinedVariableByReferenceWithExpr has it, and as it has
+	// it the link outlives an unset() of either and a new reference, which
+	// in PHP would break it; a meet keeps what every way in has.
+	refs map[string]map[string]bool
 }
 
 func newEnv() *state {
@@ -203,15 +209,51 @@ func (e *state) clone() *state {
 			n.inits[k] = true
 		}
 	}
+	for k, others := range e.refs {
+		for o := range others {
+			n.addRef(k, o)
+		}
+	}
 	return n
 }
 
-// set defines or redefines a variable and drops narrowings under it.
+// set defines or redefines a variable and drops narrowings under it, and
+// so of each variable it is a reference to: PHP writes the one value.
 func (e *state) set(name string, t types.Type) {
+	e.setOne(name, t)
+	for o := range e.refs[name] {
+		e.setOne(o, t)
+	}
+}
+
+func (e *state) setOne(name string, t types.Type) {
 	e.vars[name] = varInfo{t: t}
 	e.invalidatePrefix("$" + name)
 	e.invalidateMentions(name)
 	e.dropConds(name)
+}
+
+// link makes a and b references to one value, `$a = &$b`, and a to every
+// variable b already is one to.
+func (e *state) link(a, b string) {
+	for o := range e.refs[b] {
+		if o != a {
+			e.addRef(a, o)
+		}
+	}
+	e.addRef(a, b)
+}
+
+func (e *state) addRef(a, b string) {
+	if e.refs == nil {
+		e.refs = map[string]map[string]bool{}
+	}
+	for _, p := range [][2]string{{a, b}, {b, a}} {
+		if e.refs[p[0]] == nil {
+			e.refs[p[0]] = map[string]bool{}
+		}
+		e.refs[p[0]][p[1]] = true
+	}
 }
 
 // invalidateMentions drops the paths that pass the variable as an argument
@@ -434,6 +476,13 @@ func join(a, b *state) *state {
 	for k := range a.inits {
 		if b.inits[k] {
 			n.initialise(k)
+		}
+	}
+	for k, others := range a.refs {
+		for o := range others {
+			if b.refs[k][o] {
+				n.addRef(k, o)
+			}
 		}
 	}
 	return n
