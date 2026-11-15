@@ -285,3 +285,81 @@ final class GeneralHolder
         $this->a = $ints; // want P2201
     }
 }
+
+// An unsealed shape may hold, under a key it does not name, a value of any
+// type: it is no shape that gives that key a type, and it has no key for
+// certain but the ones it names.
+type OpenNamed = array{id: int, name: string, ...};
+type OpenRow = array{id: int, name?: string, ...};
+type OpenWrongName = array{id: int, name?: int, ...};
+type OpenA = array{a: int, ...};
+type OpenB = array{b: int, ...};
+type AB = array{a: int, b?: int};
+type LooseRow = array{id: int, name?: mixed};
+type Sealed = array{id: int};
+type More = array{id: int, age: int};
+
+function takesAB(AB $ab): void {}
+
+function takesLooseRow(LooseRow $row): void {}
+
+function takesOpenRow(OpenRow $open): void {}
+
+function takesNumbers(iterable<string, int> $numbers): void {}
+
+function takesNumberMap(map<string, int> $numbers): void {}
+
+function opened(
+    Open $open,
+    OpenNamed $named,
+    OpenRow $optional,
+    OpenWrongName $wrongName,
+    OpenA $a,
+    OpenB $b,
+    Sealed $sealed,
+    More $more,
+): Row {
+    takesRow($open); // want P2103
+    // Named, the key has its type; the keys beyond the shape's are passed
+    // over, as a sealed shape's are.
+    takesRow($named);
+    takesRow($optional);
+    takesRow($wrongName); // want P2103
+    takesA($open); // want P2103
+    takesA($a);
+    takesOptionalA($a);
+    takesOptionalA($b); // want P2103
+    takesAB($a); // want P2103
+    takesLooseRow($open);
+    // An unsealed shape takes what it does not name.
+    takesOpen($open);
+    takesOpen($named);
+    takesOpen($sealed);
+    takesOpen($more);
+    takesOpen($a); // want P2103
+    takesOpenOptionalA($a);
+    takesOpenOptionalA($b); // want P2103
+    takesOpenRow($open); // want P2103
+    takesOpenRow($optional);
+    takesOpenRow($sealed);
+    takesOpenRow($more);
+    takesOpenRow($wrongName); // want P2103
+    // Against an iterable what the shape does not name is iterated too;
+    // against an array PHPStan compares the named entries alone.
+    takesNumbers($a); // want P2103
+    takesNumbers(['a' => 1]);
+    takesNumberMap($a);
+
+    return $open; // want P2202
+}
+
+final class OpenHolder
+{
+    public Row $row = ['id' => 0];
+
+    set(Open $open, OpenNamed $named): void
+    {
+        $this->row = $named;
+        $this->row = $open; // want P2201
+    }
+}

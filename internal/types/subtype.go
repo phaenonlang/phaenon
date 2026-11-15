@@ -412,12 +412,21 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 					return false
 				}
 			}
+			// What an unsealed shape does not name is not held to the
+			// array's types: PHPStan compares the named entries alone
+			// (`array{a: int, ...}` passes for `array<string, int>`), and
+			// so does this. Against an iterable it compares the rest too.
 			return true
 		case Shape:
 			for _, be := range b.Entries {
 				ae, found := shapeLookup(a, be)
 				if !found {
-					if be.Optional {
+					// An unsealed shape may hold a key it does not name,
+					// with any value: `array{id: int, ...}` is no
+					// `array{id: int, name?: string}`, whose `name` is a
+					// string. It has no key for certain but the ones it
+					// names.
+					if be.Optional && (!a.Unsealed || subtype(TMixed, be.Type, h, depth+1)) {
 						continue
 					}
 					return false
@@ -448,6 +457,11 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 			}
 			return true
 		case Iterable:
+			// What an unsealed shape does not name may be any key with any
+			// value, and is iterated with the rest.
+			if a.Unsealed && (!subtype(TArrayKey, b.Key, h, depth+1) || !subtype(TMixed, b.Value, h, depth+1)) {
+				return false
+			}
 			for _, e := range a.Entries {
 				if !subtype(shapeKeyType(e), b.Key, h, depth+1) || !subtype(e.Type, b.Value, h, depth+1) {
 					return false

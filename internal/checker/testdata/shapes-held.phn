@@ -161,3 +161,85 @@ final class GeneralHolder
         $this->a = $ints; // want P2201
     }
 }
+
+// An unsealed shape may hold, under a key it does not name, a value of any
+// type: it is no shape that gives that key a type, and it has no key for
+// certain but the ones it names.
+
+/** @param array{a: int, b?: int} $ab */
+function takeAB(array $ab): void {}
+
+/** @param array{id: int, name?: mixed} $row */
+function takeLooseRow(array $row): void {}
+
+/** @param array{id: int, name?: string, ...} $open */
+function takeOpenRow(array $open): void {}
+
+/** @param iterable<string, int> $numbers */
+function takeNumbers(iterable $numbers): void {}
+
+/** @param array<string, int> $numbers */
+function takeNumberMap(array $numbers): void {}
+
+/**
+ * @param array{id: int, ...} $open
+ * @param array{id: int, name: string, ...} $named
+ * @param array{id: int, name?: string, ...} $optional
+ * @param array{id: int, name?: int, ...} $wrongName
+ * @param array{a: int, ...} $a
+ * @param array{b: int, ...} $b
+ * @param array{id: int} $sealed
+ * @param array{id: int, age: int} $more
+ * @return array{id: int, name?: string}
+ */
+function unsealed(array $open, array $named, array $optional, array $wrongName, array $a, array $b, array $sealed, array $more): array
+{
+    takeRow($open); // want P2103
+    // Named, the key has its type; the keys beyond the shape's are passed
+    // over, as a sealed shape's are.
+    takeRow($named);
+    takeRow($optional);
+    takeRow($wrongName); // want P2103
+    takeA($open); // want P2103
+    takeA($a);
+    takeOptionalA($a);
+    takeOptionalA($b); // want P2103
+    takeAB($a); // want P2103
+    takeLooseRow($open);
+    // An unsealed shape takes what it does not name.
+    takeOpen($open);
+    takeOpen($named);
+    takeOpen($sealed);
+    takeOpen($more);
+    takeOpen($a); // want P2103
+    takeOpenOptionalA($a);
+    takeOpenOptionalA($b); // want P2103
+    takeOpenRow($open); // want P2103
+    takeOpenRow($optional);
+    takeOpenRow($sealed);
+    takeOpenRow($more);
+    takeOpenRow($wrongName); // want P2103
+    // Against an iterable what the shape does not name is iterated too;
+    // against an array PHPStan compares the named entries alone.
+    takeNumbers($a); // want P2103
+    takeNumbers(['a' => 1]);
+    takeNumberMap($a);
+
+    return $open; // want P2202
+}
+
+final class OpenHolder
+{
+    /** @var array{id: int, name?: string} */
+    public array $row = ['id' => 0];
+
+    /**
+     * @param array{id: int, ...} $open
+     * @param array{id: int, name: string, ...} $named
+     */
+    public function set(array $open, array $named): void
+    {
+        $this->row = $named;
+        $this->row = $open; // want P2201
+    }
+}
