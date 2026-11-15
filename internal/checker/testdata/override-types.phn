@@ -107,6 +107,8 @@ enum Suit
     case Hearts;
     case Spades;
     case Clubs;
+
+    public const Red = self::Hearts;
 }
 
 abstract class Base
@@ -833,4 +835,54 @@ class Db implements Source
     {
         return new Pack();
     }
+}
+
+// An alias constant of an enum case is that case: Suit::Red is
+// Suit::Hearts under another name, never apart from it, and as apart from
+// Suit::Spades as Hearts is.
+abstract class Cards
+{
+    /** @return Suit::Hearts */
+    abstract public function hearts(): Suit;
+
+    /** @return Suit::Red */
+    abstract public function red(): Suit;
+
+    /** @return Suit::Spades */
+    abstract public function spades(): Suit;
+}
+
+abstract class Deck extends Cards
+{
+    /** @return Suit::Red */
+    abstract public function hearts(): Suit;
+
+    /** @return Suit::Hearts */
+    abstract public function red(): Suit;
+
+    /** @return Suit::Red */
+    abstract public function spades(): Suit; // want P2502 "return type App\OverrideTypes\Suit::Hearts of App\OverrideTypes\Deck::spades() is not covariant with App\OverrideTypes\Cards::spades() (App\OverrideTypes\Suit::Spades)"
+}
+
+// A generic class written without its arguments is the class with its
+// bounds: a raw ThingSlot passes Slot a Thing, which an override promising
+// a Slot<Open> breaks, the argument being invariant. PHPStan reports it
+// too.
+/**
+ * @template T of Thing
+ * @implements Slot<T>
+ */
+abstract class ThingSlot implements Slot
+{
+}
+
+abstract class Slots
+{
+    /** @return Slot<Open> */
+    abstract public function open(): Slot;
+}
+
+abstract class RawSlots extends Slots
+{
+    abstract public function open(): ThingSlot; // want P2502 "return type App\OverrideTypes\ThingSlot of App\OverrideTypes\RawSlots::open() is not covariant with App\OverrideTypes\Slots::open() (App\OverrideTypes\Slot<App\OverrideTypes\Open>)"
 }

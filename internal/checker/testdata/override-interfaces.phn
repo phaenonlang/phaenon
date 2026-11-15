@@ -185,6 +185,51 @@ class Foot extends Yard
     }
 }
 
+// A static method is held to the nearest class's declaration as an
+// instance method is, and to every interface's; so is an instance method
+// that overrides a static one. PHP refuses Mill and Kiln at load, naming
+// Factory's method, and PHPStan reports both lines.
+class Factory
+{
+    public static function size(int $n): int
+    {
+        return $n;
+    }
+}
+
+interface Sizes
+{
+    public static function size(int $n): int|string;
+}
+
+abstract class Workshop extends Factory implements Sizes
+{
+}
+
+class Forge extends Workshop
+{
+    public static function size(int|string $n, int $more = 0): int
+    {
+        return $more;
+    }
+}
+
+class Mill extends Workshop
+{
+    public function size(int $n): int // want P2502 "App\OverrideInterfaces\Mill::size() and App\OverrideInterfaces\Factory::size() disagree on static"
+    {
+        return $n;
+    }
+}
+
+class Kiln extends Workshop
+{
+    public static function size(int $n): string // want P2502 "Factory::size() (int)"
+    {
+        return '';
+    }
+}
+
 // A constructor is free of a concrete parent's signature, not of the
 // abstract constructor that one implements, nor of an interface's: PHP
 // holds it to that prototype, however far up it sits.
