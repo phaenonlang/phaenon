@@ -24,4 +24,4 @@ final class Orders
 type Dup = string;
 
 // A class and an alias of another file collide too.
-type Orders = int; // want P2511 "has the name of the class"
+type Orders = int; // want P2511 "has the name of the class Shop\Orders\Orders (testdata/programs/type-aliases/Orders/Customer.phn:9)"

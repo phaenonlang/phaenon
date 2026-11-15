@@ -35,7 +35,12 @@ func (x *fnCtx) checkTypeAlias(a *ast.TypeAlias) {
 	// One table of names is what makes `use` unambiguous: a namespace's
 	// name is an alias or a class-like, never both.
 	if cl := x.p().Class(name); cl != nil {
-		x.report(a.Name.S, P2511, "type alias %s has the name of the %s %s: a namespace declares a name once", decl.Name, kindWord(cl), cl.Name)
+		at := cl.Span.Start
+		if cl.Decl != nil && cl.Decl.Name != nil {
+			at = cl.Decl.Name.S.Start
+		}
+		line, _ := cl.File.Position(at)
+		x.report(a.Name.S, P2511, "type alias %s has the name of the %s %s (%s:%d): a namespace declares a name once", decl.Name, kindWord(cl), cl.Name, cl.File.Path, line)
 	}
 	if decl.Cyclic {
 		x.report(a.Name.S, P2015, "type alias %s mentions itself: an alias is expanded wherever it is used, so it has no expansion; a recursive structure is a class", decl.Name)

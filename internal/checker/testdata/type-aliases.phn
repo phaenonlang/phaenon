@@ -43,7 +43,7 @@ interface Shape
 {
 }
 
-type Shape = array<int>; // want P2511 "has the name of the interface"
+type Shape = array<int>; // want P2511 "has the name of the interface Ali\Types\Shape (testdata/type-aliases.phn:42)"
 
 enum Suit
 {
