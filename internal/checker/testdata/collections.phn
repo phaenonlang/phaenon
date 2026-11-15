@@ -90,7 +90,11 @@ function longer((string, int) $pair, list<(string, int)> $pairs, list<(string, i
 {
     tuples(['a', 1, true], $pairs); // want P2103
     tuples($pair, $triples); // want P2103
+    // A tuple unpacks into its entries, one position each.
     tuples([...$pair], $pairs);
+    tuples(['b', ...$pair], $pairs); // want P2103
+    takesInt([...$pair, 2][2]);
+    takesInt([...$pair, 2][0]); // want P2103
     takesInt(count($triples));
 
     return ['a', 1, 2]; // want P2202

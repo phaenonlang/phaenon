@@ -166,3 +166,38 @@ function value(): object
 {
     return new Row(); // want P2001 "Row is a type alias"
 }
+
+function takesInt(int $n): void {}
+
+function takesText(string $s): void {}
+
+function takesRow(Row $row): void {}
+
+function takesPair((int, string) $pair): void {}
+
+// A shape unpacked into an array literal keeps its entries: PHP numbers
+// the integer keys anew and keeps the string ones, a later key replacing
+// an earlier one, and an entry that may be absent leaves what was there.
+// shapes-held.phn has the cases of this file that are about what a shape
+// accepts in the docblock spelling, which the parity run holds to PHPStan.
+type Named = array{id: int, name: string};
+type NameAsInt = array{name?: int};
+
+function unpacked((int, string) $pair, Named $named, Row $row, NameAsInt $wrong, list<int> $ints): void
+{
+    takesPair([...$pair]);
+    takesPair([1, ...['a']]);
+    takesPair(['a', ...$pair]); // want P2103
+    takesInt([...$pair, 2][2]);
+    takesText([...$pair, 2][1]);
+    takesText([...$pair, 2][0]); // want P2103
+    takesRow([...$named]);
+    takesRow([...$row]);
+    takesRow([...$row, 'name' => 'a']);
+    takesRow([...$named, 'id' => 'x']); // want P2103
+    takesRow(['id' => 'x', ...$named]);
+    takesRow(['id' => 1, 'name' => 'a', ...$wrong]); // want P2103
+    takesRow(['id' => 1, ...$wrong]); // want P2103
+    // A general array unpacks into a general array.
+    takesPair([...$ints]); // want P2103
+}

@@ -1,0 +1,56 @@
+namespace ShpHeld;
+
+// What is accepted where a shape is declared, in the docblock spelling,
+// which PHPStan reads as it stands: the parity run holds every line here to
+// what PHPStan reports at level max. shapes.phn has the same cases in the
+// syntax of a named shape, a `type` declaration, which keeps that file out
+// of the parity run.
+
+final class Customer
+{
+    public string $name = '';
+}
+
+function takeInt(int $n): void {}
+
+function takeString(string $s): void {}
+
+/** @param array{id: int, name?: string} $row */
+function takeRow(array $row): void {}
+
+/** @param list{int, string} $pair */
+function takePair(array $pair): void {}
+
+/** @param array{0: int, 1: string} $keys */
+function takeIntKeys(array $keys): void {}
+
+// A shape unpacked into an array literal keeps its entries. PHP numbers
+// the integer keys anew and keeps the string ones, a later key replacing
+// an earlier one; an entry that may be absent leaves what was there.
+
+/**
+ * @param list{int, string} $pair
+ * @param array{id: int, name: string} $named
+ * @param array{id: int, name?: string} $row
+ * @param array{name?: int} $wrong
+ * @param list<int> $ints
+ */
+function unpacked(array $pair, array $named, array $row, array $wrong, array $ints): void
+{
+    takePair([...$pair]);
+    takeIntKeys([...$pair]);
+    takePair([1, ...['a']]);
+    takePair(['a', ...$pair]); // want P2103
+    takeInt([...$pair, 2][2]);
+    takeString([...$pair, 2][1]);
+    takeString([...$pair, 2][0]); // want P2103
+    takeRow([...$named]);
+    takeRow([...$row]);
+    takeRow([...$row, 'name' => 'a']);
+    takeRow([...$named, 'id' => 'x']); // want P2103
+    takeRow(['id' => 'x', ...$named]);
+    takeRow(['id' => 1, 'name' => 'a', ...$wrong]); // want P2103
+    takeRow(['id' => 1, ...$wrong]); // want P2103
+    // A general array unpacks into a general array.
+    takePair([...$ints]); // want P2103
+}
