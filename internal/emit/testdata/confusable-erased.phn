@@ -1,0 +1,98 @@
+// integer, double and boolean where the type is written into a docblock: a
+// type argument, a closure signature, a tuple, an alias. There they are read
+// as PHPStan reads a docblock: the class when a `use` imports one of that
+// name, in any letter case, or the namespace declares one, and else int,
+// float and bool, which no class PHP looks up. So are scalar, number,
+// numeric and resource. An alias compiles to its erasure: int, or the
+// class.
+
+namespace App\Words {
+    type Count = integer;
+    type Pair = (integer, double);
+
+    function counted(list<integer> $xs): int => \count($xs);
+
+    function ratios(map<string, double> $xs): int => \count($xs);
+
+    function applied(Closure(integer): boolean $f): bool => $f(1);
+
+    function first((integer, string) $t): int => $t[0];
+
+    function counter(Count $c): int => $c;
+
+    function second(Pair $p): float => $p[1];
+
+    function each(iterable<integer> $xs): int {
+        $n = 0;
+        foreach ($xs as $x) {
+            $n += $x;
+        }
+        return $n;
+    }
+}
+
+namespace App\Types {
+    final class Integer
+    {
+        __construct(public int $v) {}
+    }
+
+    final class Boolean
+    {
+        __construct(public bool $v) {}
+    }
+
+    final class Double
+    {
+        __construct(public float $v) {}
+    }
+
+    final class Scalar
+    {
+        public int $v = 1;
+    }
+
+    // In the class's own namespace the name is the class.
+    final class Same
+    {
+        first(list<Integer> $xs): int => $xs[0]->v;
+
+        test(Closure(Boolean): bool $f): bool => $f(new Boolean(true));
+    }
+}
+
+namespace App\Imports {
+    use App\Types\Boolean;
+    use App\Types\Double;
+    use App\Types\Integer;
+    use App\Types\Scalar;
+
+    type One = Integer;
+    type Ints = list<Integer>;
+
+    final class Uses
+    {
+        first(list<Integer> $xs): int => $xs[0]->v;
+
+        lower(list<integer> $xs): int => $xs[0]->v;
+
+        flag(map<string, Boolean> $m): bool => $m['k']->v;
+
+        apply(Closure(Double): Integer $f): int => $f(new Double(1.0))->v;
+
+        pair((Integer, Boolean) $t): int => $t[0]->v;
+
+        one(One $o): int => $o->v;
+
+        all(Ints $xs): int => $xs[0]->v;
+
+        scalar(list<scalar> $xs): int => $xs[0]->v;
+    }
+}
+
+// Imported under another name, the class leaves the word to the type.
+namespace App\Renamed {
+    use App\Types\Integer as Whole;
+
+    function words(list<integer> $xs, list<Whole> $ws): int => $xs[0] + $ws[0]->v;
+}
