@@ -142,6 +142,21 @@ type Twice = array{id: int, id: string}; // want P2511 "shape key id is written 
 type Quoted = array{id: int, 'id'?: int}; // want P2511
 type Numbered = array{1: int, '1': int}; // want P2511 "'1' is written twice"
 
+// Only a string PHP itself stores as an integer key is one: '7' is the key
+// 7, while '07', '-0' and '+1' stay strings, in the syntax and in a
+// docblock's shape alike, as PHPStan reads them.
+type Padded = array{1: int, '01': string, 0: int, '-0': string, '+1': string};
+
+/**
+ * @param array{'01': string, '7': int} $doc
+ */
+function padded(Padded $p, array $doc): string
+{
+    $n = $p[1] + $p[0] + $doc[7];
+    $s = $p['01'] . $p['-0'] . $p['+1'] . $doc['01'];
+    return $s . $n . $doc[1]; // want P2313
+}
+
 // The types of the entries are judged as any type is.
 type Lost = array{who: Missing}; // want P2001
 type Wide = array{ids: list<int, int>}; // want P3001

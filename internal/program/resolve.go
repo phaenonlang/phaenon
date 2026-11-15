@@ -3,7 +3,6 @@ package program
 import (
 	"math"
 	"path"
-	"strconv"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -194,10 +193,10 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 		sh := types.Shape{Unsealed: t.Unsealed}
 		for _, e := range t.Entries {
 			se := types.ShapeEntry{Type: r.native(e.Type), Optional: e.Optional}
-			if v, err := strconv.ParseInt(e.Name, 10, 64); e.IsInt {
+			if v, ok := types.IntKey(e.Name); e.IsInt {
 				se.IsInt, se.IntKey = true, e.Int
-			} else if err == nil {
-				se.IsInt, se.IntKey = true, v // a quoted decimal integer is that integer's key
+			} else if ok {
+				se.IsInt, se.IntKey = true, v // a quoted key PHP stores as an int is that int's
 			} else {
 				se.Key = e.Name
 			}
@@ -515,7 +514,9 @@ func (r *resolver) docType(n *docblock.TypeNode) types.Type {
 					next = e.IntKey + 1
 				}
 			default:
-				if v, err := strconv.ParseInt(e.Key, 10, 64); err == nil {
+				// Only what PHP itself stores as an int: '7', not '07',
+				// '-0' or '+1', which PHPStan keeps as strings too.
+				if v, ok := types.IntKey(e.Key); ok {
 					se.IsInt, se.IntKey = true, v
 				} else {
 					se.Key = e.Key

@@ -857,6 +857,14 @@ func IsDecimalInt(s string) bool {
 	return err == nil && strconv.FormatInt(n, 10) == s
 }
 
+// IntKey is the int a string array key is stored as, when PHP stores it as
+// one (IsDecimalInt): the key `'7'` of a shape is the key 7, and `'07'`
+// is a string.
+func IntKey(s string) (int64, bool) {
+	n, err := strconv.ParseInt(s, 10, 64)
+	return n, err == nil && strconv.FormatInt(n, 10) == s
+}
+
 // StoredKey is the key PHP stores for a string key of type t: a string it
 // reads as a canonical decimal integer becomes that int. A literal converts
 // exactly, a decimal-int-string becomes int, a numeric-string may be either

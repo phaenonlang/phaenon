@@ -2,10 +2,10 @@ package checker
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/types"
 )
 
 // This file holds the rules of a `type` alias as a name of its namespace
@@ -115,8 +115,9 @@ func (c *Checker) unknownClass(what, name string) string {
 
 // checkShape validates a shape written in a `type` declaration
 // (design/collections.md §6.1): the types of its entries, and that a key
-// is written once. A quoted key that is a decimal integer is that
-// integer's key, so `'1'` after `1` is the same key again.
+// is written once. A quoted key PHP stores as an integer is that integer's
+// key, so `'1'` after `1` is the same key again; `'01'` is another key, a
+// string.
 func (x *fnCtx) checkShape(t *ast.ShapeType) {
 	type key struct {
 		name  string
@@ -126,9 +127,9 @@ func (x *fnCtx) checkShape(t *ast.ShapeType) {
 	seen := map[key]bool{}
 	for _, e := range t.Entries {
 		k := key{name: e.Name}
-		if v, err := strconv.ParseInt(e.Name, 10, 64); e.IsInt {
+		if v, ok := types.IntKey(e.Name); e.IsInt {
 			k = key{n: e.Int, isInt: true}
-		} else if err == nil {
+		} else if ok {
 			k = key{n: v, isInt: true}
 		}
 		if seen[k] {
