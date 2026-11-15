@@ -130,7 +130,7 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 					raw = x.expr(t.Index, env, nil)
 				}
 				x.unsetOffsetCheck(t, base, raw, env)
-				x.unsetIndex(t, env)
+				x.unsetIndex(t, base, env, s.S)
 			default:
 				x.exprLenient(v, env)
 				if key, ok := pathKey(v); ok {
@@ -376,21 +376,195 @@ func (x *fnCtx) unsetOffsetCheck(t *ast.Index, base, raw types.Type, env *state)
 			what = "offset " + x.typeName(raw)
 		}
 		x.report(t.Array.Span(), P2302, "cannot unset %s on %s", what, x.typeName(base))
+		return
+	}
+	if raw != nil && unsetMissing(base, normaliseKey(raw)) {
+		x.report(t.Index.Span(), P2313, "offset %s does not exist on %s, so unset cannot remove it", x.typeName(raw), x.typeName(base))
 	}
 }
 
-func (x *fnCtx) unsetIndex(t *ast.Index, env *state) {
+// unsetIndex types the array `unset($a[$k])` removes an element from, as
+// PHPStan does (design/collections.md §2.2, unsetOffset): a variable takes
+// the array's new type, and so does a property, which is held to its
+// declared type as an assignment is (P2201: a `list<T>` property does not
+// accept the list an element left). An array inside another, `$a[$i][$k]`,
+// is written back into the one holding it (writeExisting), so the variable
+// or property at the root takes its new type and is checked the same way.
+func (x *fnCtx) unsetIndex(t *ast.Index, base types.Type, env *state, span ast.Span) {
 	if key, ok := pathKey(t); ok {
 		env.invalidatePrefix(key)
 	}
-	if v, ok := t.Array.(*ast.Variable); ok && t.Index != nil {
-		info, defined := env.get(v.Name)
-		if !defined {
+	if t.Index == nil {
+		return
+	}
+	keyT := normaliseKey(x.pathType(t.Index, env))
+	switch a := t.Array.(type) {
+	case *ast.Variable:
+		if info, defined := env.get(a.Name); defined {
+			env.set(a.Name, unsetOffset(info.t, keyT))
+		}
+	case *ast.PropertyFetch, *ast.StaticPropertyFetch, *ast.Index:
+		// Removing an element writes the property that holds the array,
+		// whether or not its type changes: a readonly property refuses it
+		// as it refuses an assignment. An object's offsetUnset() changes no
+		// property, so a property holding none but objects is not written.
+		if holdsArray(base) {
+			x.writeExisting(t.Array, unsetOffset(base, keyT), env, span)
+		}
+	}
+}
+
+// writeExisting gives the array at target, which holds the offset unset()
+// removed, its new type vt, as PHPStan's assignment of the unset to the
+// offsets the statement names, which exist (ExistingArrayDimFetch), does:
+// each array up the chain keeps its keys, its list-ness and whether it is
+// non-empty, and the value at the offset is replaced (withExistingOffset).
+// A variable at the root takes its new type; a property is assigned, and
+// held to its declared type and to readonly as an assignment is. An
+// object's offsetGet() hands over a value no property holds: nothing above
+// it is written.
+func (x *fnCtx) writeExisting(target ast.Expr, vt types.Type, env *state, span ast.Span) {
+	switch t := target.(type) {
+	case *ast.Paren:
+		x.writeExisting(t.Expr, vt, env, span)
+	case *ast.Variable:
+		if _, defined := env.get(t.Name); defined && t.Name != "this" {
+			env.set(t.Name, vt)
+		}
+	case *ast.PropertyFetch, *ast.StaticPropertyFetch:
+		x.assignTo(t, vt, env, span)
+	case *ast.Index:
+		if t.Index == nil {
 			return
 		}
-		keyT := normaliseKey(x.pathType(t.Index, env))
-		env.set(v.Name, withKey(info.t, keyT, false))
+		key, keyed := pathKey(t)
+		if keyed {
+			env.invalidatePrefix(key)
+		}
+		base := x.pathType(t.Array, env)
+		if !holdsArray(base) {
+			return
+		}
+		x.writeExisting(t.Array, withExistingOffset(base, normaliseKey(x.pathType(t.Index, env)), vt), env, span)
+		// What was known of this array, an is_array() of `$a['k']` that
+		// a general array's type cannot hold, stays known of what is left
+		// of it, as PHPStan keeps it through the write.
+		if keyed {
+			env.setPath(key, vt)
+		}
 	}
+}
+
+// withExistingOffset is t with the value at an offset it has replaced by
+// vt (PHPStan's setExistingOffsetValueType): an array keeps its keys, its
+// list-ness and whether it is non-empty, its value type widened by vt; a
+// shape's entries the key may name take vt, and are certain.
+func withExistingOffset(t, key, vt types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Array:
+			m.Value = types.MakeUnion(m.Value, vt)
+			return m
+		case types.Shape:
+			entries := append([]types.ShapeEntry{}, m.Entries...)
+			for i, e := range entries {
+				if types.Overlaps(shapeEntryKey(e), key, nil) {
+					entries[i].Type, entries[i].Optional = vt, false
+				}
+			}
+			return types.Shape{Entries: entries, Unsealed: m.Unsealed}
+		}
+		return m
+	})
+}
+
+// holdsArray reports a type with an array among its members.
+func holdsArray(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Array, types.Shape:
+			return true
+		}
+	}
+	return false
+}
+
+// unsetOffset is the type of an array once unset() removed the offset key
+// from it, member by member, as PHPStan 2.3 has it: a list is a list no
+// more, its keys those a list has (`array<int<0, max>, T>`); no array is
+// still known to be non-empty; a shape loses the entry a constant key
+// names and makes optional each entry another key may name, and is no
+// list either way, even without its last entry. An offset a sealed shape
+// lacks leaves it as it was (unsetMissing reports it).
+func unsetOffset(t, key types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Array:
+			if m.List {
+				m.List = false
+				m.Key = types.Int{Lo: 0, Hi: math.MaxInt64}
+			}
+			m.NonEmpty = false
+			return m
+		case types.Shape:
+			return unsetShapeOffset(m, key)
+		}
+		return m
+	})
+}
+
+func unsetShapeOffset(s types.Shape, key types.Type) types.Type {
+	if _, found, certain := shapeOffset(s, key); certain {
+		if !found {
+			return s
+		}
+		var entries []types.ShapeEntry
+		for _, e := range s.Entries {
+			if !shapeEntryIs(e, key) {
+				entries = append(entries, e)
+			}
+		}
+		return types.Shape{Entries: entries, Unsealed: s.Unsealed}
+	}
+	entries := append([]types.ShapeEntry{}, s.Entries...)
+	changed := false
+	for i, e := range entries {
+		if types.Overlaps(shapeEntryKey(e), key, nil) {
+			entries[i].Optional, changed = true, true
+		}
+	}
+	if !changed {
+		return s
+	}
+	return types.Shape{Entries: entries, Unsealed: s.Unsealed}
+}
+
+// shapeEntryIs reports the entry a constant key names.
+func shapeEntryIs(e types.ShapeEntry, key types.Type) bool {
+	switch k := key.(type) {
+	case types.StringLit:
+		return !e.IsInt && e.Key == k.V
+	case types.Int:
+		return e.IsInt && k.Lo == k.Hi && e.IntKey == k.Lo
+	}
+	return false
+}
+
+// unsetMissing reports an offset no member of the array has: each is a
+// sealed shape, and the constant key names none of its entries. PHPStan
+// refuses the unset (unset.offset), as a read of it is refused.
+func unsetMissing(t, key types.Type) bool {
+	members := types.Members(t)
+	for _, m := range members {
+		s, ok := m.(types.Shape)
+		if !ok || s.Unsealed {
+			return false
+		}
+		if _, found, certain := shapeOffset(s, key); found || !certain {
+			return false
+		}
+	}
+	return len(members) > 0
 }
 
 // ------------------------------------------------------------------ control flow
