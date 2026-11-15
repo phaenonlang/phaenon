@@ -2,6 +2,8 @@ package program
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,8 +19,8 @@ import (
 // php-src's stubs describe the extensions that ship with PHP. A project's
 // `php` has more loaded — ext-mongodb, redis, amqp, apcu — and for those
 // `php` itself is the oracle: a stub is generated from its reflection, once
-// per extension version and PHP version, cached under the user's cache
-// directory, and read like any other stub. Reflection knows the PHP
+// per extension version, PHP version and generator, cached under the user's
+// cache directory, and read like any other stub. Reflection knows the PHP
 // signatures but no docblocks, so a generated stub has no generics; the
 // overlay can refine what matters.
 
@@ -159,19 +161,49 @@ func GenerateConstants(php string) ([]byte, error) {
 }
 
 func cachedConstants(php, cacheDir, phpVersion string) ([]byte, error) {
-	if cacheDir == "" {
+	return cached(cacheDir, "constants-php"+fileSafe(phpVersion), constantsGenerator, func() ([]byte, error) {
 		return GenerateConstants(php)
+	})
+}
+
+// stubGenerator and constantsGenerator identify the scripts that write the
+// cached files, by a hash of their text. A file is named after the script
+// that wrote it, so a phn whose script differs reads none of the files an
+// older one cached and writes its own: a fix to a script reaches a machine
+// that cached what the script used to write, with nothing to delete by
+// hand and no revision number to remember.
+var (
+	stubGenerator      = scriptHash(generateStubScript)
+	constantsGenerator = scriptHash(constantsScript)
+)
+
+func scriptHash(script string) string {
+	sum := sha256.Sum256([]byte(script))
+	return hex.EncodeToString(sum[:6])
+}
+
+// cachePath is where cacheDir keeps the file that name (the extension's and
+// PHP's versions) and the generator's hash identify.
+func cachePath(cacheDir, name, generator string) string {
+	return filepath.Join(cacheDir, "phaenon", "ext", name+"-gen"+generator+".php")
+}
+
+// cached reads the file cachePath names, or writes what generate returns
+// there. A cacheDir of "" caches nothing.
+func cached(cacheDir, name, generator string, generate func() ([]byte, error)) ([]byte, error) {
+	if cacheDir == "" {
+		return generate()
 	}
-	path := filepath.Join(cacheDir, "phaenon", "ext", "constants-php"+fileSafe(phpVersion)+".php")
+	path := cachePath(cacheDir, name, generator)
 	if src, err := os.ReadFile(path); err == nil {
 		return src, nil
 	}
-	src, err := GenerateConstants(php)
+	src, err := generate()
 	if err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
-		_ = os.WriteFile(path, src, 0o644)
+		_ = os.WriteFile(path, src, 0o644) // a cache miss next time is the only consequence
 	}
 	return src, nil
 }
@@ -201,6 +233,15 @@ func LoadedExtensions(php string) ([]Extension, string, error) {
 // GenerateExtensionStub renders the declarations of one loaded extension
 // as PHP, from php's reflection.
 func GenerateExtensionStub(php, name string) ([]byte, error) {
+	src, err := reflectExtension(php, name)
+	if err != nil {
+		return nil, err
+	}
+	return patchStub(src), nil
+}
+
+// reflectExtension is what generateStubScript writes for the extension.
+func reflectExtension(php, name string) ([]byte, error) {
 	cmd := exec.Command(php, "-r", generateStubScript, "--", name)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -208,26 +249,20 @@ func GenerateExtensionStub(php, name string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reflecting ext-%s: %v: %s", name, err, strings.TrimSpace(stderr.String()))
 	}
-	return patchStub(out), nil
+	return out, nil
 }
 
+// cachedExtensionStub caches what the script writes, and patches it on
+// every read, so that the file depends on nothing its name does not say.
 func cachedExtensionStub(php, cacheDir string, e Extension, phpVersion string) ([]byte, error) {
-	if cacheDir == "" {
-		return GenerateExtensionStub(php, e.Name)
-	}
-	file := fmt.Sprintf("%s-%s-php%s.php", fileSafe(e.Name), fileSafe(e.Version), fileSafe(phpVersion))
-	path := filepath.Join(cacheDir, "phaenon", "ext", file)
-	if src, err := os.ReadFile(path); err == nil {
-		return src, nil
-	}
-	src, err := GenerateExtensionStub(php, e.Name)
+	name := fmt.Sprintf("%s-%s-php%s", fileSafe(e.Name), fileSafe(e.Version), fileSafe(phpVersion))
+	src, err := cached(cacheDir, name, stubGenerator, func() ([]byte, error) {
+		return reflectExtension(php, e.Name)
+	})
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
-		_ = os.WriteFile(path, src, 0o644) // a cache miss next time is the only consequence
-	}
-	return src, nil
+	return patchStub(src), nil
 }
 
 func fileSafe(s string) string {
