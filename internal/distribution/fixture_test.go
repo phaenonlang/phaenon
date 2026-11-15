@@ -67,8 +67,10 @@ func newWorld(t *testing.T, failOn string) *world {
 
 // fakePhn is a shell script standing in for phn. It records each run as a
 // line of the log, the physical working directory and then the arguments,
-// separated by tabs; it keeps a copy of vendor/composer/autoload_psr4.php as
-// it found it, as log.psr4.N for the Nth run. `version` and `exit N` answer
+// separated by tabs, and as a line of log.cleared what the plugin told it
+// through PHN_EARLIER_BUILDS_CLEARED ("unset" for nothing); it keeps a copy
+// of vendor/composer/autoload_psr4.php as it found it, as log.psr4.N for
+// the Nth run. `version` and `exit N` answer
 // for the launcher's tests; `build` writes an output, as phn would.
 func fakePhn(log, failOn string) []byte {
 	var b strings.Builder
@@ -76,6 +78,7 @@ func fakePhn(log, failOn string) []byte {
 	fmt.Fprintf(&b, "log=%s\n", shellQuote(log))
 	b.WriteString(`n=$(( $(cat "$log" 2>/dev/null | wc -l) + 1 ))
 { pwd -P | tr -d '\n'; for a in "$@"; do printf '\t%s' "$a"; done; echo; } >> "$log"
+echo "${PHN_EARLIER_BUILDS_CLEARED-unset}" >> "$log.cleared"
 if [ -f vendor/composer/autoload_psr4.php ]; then cp vendor/composer/autoload_psr4.php "$log.psr4.$n"; fi
 case "$1" in
 version) echo "phn fake"; exit 0 ;;
@@ -161,6 +164,20 @@ func (w *world) runs() []run {
 	return runs
 }
 
+// cleared returns, for each run of the fake, what PHN_EARLIER_BUILDS_CLEARED
+// was set to, "unset" when it was not.
+func (w *world) cleared() []string {
+	w.t.Helper()
+	data, err := os.ReadFile(w.log + ".cleared")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	return strings.Fields(string(data))
+}
+
 // mapsAtRun returns vendor/composer/autoload_psr4.php as the Nth run (from
 // 1) found it, failing the test when it did not exist.
 func (w *world) mapsAtRun(n int) string {
@@ -192,10 +209,13 @@ type project struct {
 	config        map[string]any // added to the root's config
 	libraries     []string       // Phaenon libraries the root requires, such as "acme/lib"
 	packages      []plainPackage // packages of plain PHP the root requires, each at its version
+	dependencies  []dependency   // further packages the root requires, each from its repository
+	withoutPlugin bool           // the root does not require phaenon/phn: a project of plain PHP
 	mirror        *mirror        // binary-url and auth.json for the mirror
 	baseURL       bool           // binary-url as a base URL rather than a template
 	override      bool           // PHN_BINARY names the fake
 	symlinkPlugin bool           // the package is symlinked into vendor, not copied
+	environment   []string       // more of the environment Composer runs in, as NAME=value
 	binary        string         // PHN_BINARY names this binary, a real phn, instead
 }
 
@@ -216,11 +236,18 @@ func (p *project) write() {
 	t.Helper()
 	// With Packagist switched off, the plugin's own package is all there is
 	// to install: it requires none (design/tooling.md T16).
-	repositories := []any{
-		map[string]any{"packagist.org": false},
-		pathRepository(p.w.plugin, "phaenon/phn", "0.1.x-dev", p.symlinkPlugin),
+	repositories := []any{map[string]any{"packagist.org": false}}
+	require := map[string]string{}
+	config := map[string]any{}
+	if !p.withoutPlugin {
+		repositories = append(repositories, pathRepository(p.w.plugin, "phaenon/phn", "0.1.x-dev", p.symlinkPlugin))
+		require["phaenon/phn"] = "*"
+		config["allow-plugins"] = map[string]bool{"phaenon/phn": true}
 	}
-	require := map[string]string{"phaenon/phn": "*"}
+	for _, d := range p.dependencies {
+		repositories = append(repositories, d.repository)
+		require[d.name] = d.constraint
+	}
 	for _, name := range p.libraries {
 		repositories = append(repositories, pathRepository(p.w.library(name), name, "1.0.0", false))
 		require[name] = "*"
@@ -229,7 +256,6 @@ func (p *project) write() {
 		repositories = append(repositories, pathRepository(p.w.plainPackage(pkg), pkg.name, pkg.version, false))
 		require[pkg.name] = pkg.version
 	}
-	config := map[string]any{"allow-plugins": map[string]bool{"phaenon/phn": true}}
 	for key, value := range p.config {
 		config[key] = value
 	}
@@ -284,6 +310,12 @@ func (w *world) library(name string) string {
 	writeJSON(w.t, filepath.Join(dir, "phaenon.json"), map[string]any{"roots": map[string]string{"src": ".src"}})
 	writeFile(w.t, filepath.Join(dir, "src", "Thing.phn"), []byte("namespace "+strings.TrimSuffix(namespace, `\`)+";\n\nfinal class Thing\n{\n}\n"), 0o644)
 	return dir
+}
+
+// dependency is a package a root requires from a repository of its own.
+type dependency struct {
+	name, constraint string
+	repository       map[string]any
 }
 
 // plainPackage is a package of plain PHP: a composer.json and nothing
@@ -388,6 +420,7 @@ func (p *project) environ() []string {
 		"COMPOSER_NO_AUDIT=1",
 		"COMPOSER_ROOT_VERSION=1.0.0",
 	)
+	env = append(env, p.environment...)
 	switch {
 	case p.binary != "":
 		env = append(env, "PHN_BINARY="+p.binary)
