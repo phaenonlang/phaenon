@@ -1,0 +1,754 @@
+namespace App\Optional;
+
+// Reading a constant offset that a shape may lack is P2321, PHPStan's
+// offsetAccess.notFound ("might not exist"): an optional entry, or a key
+// an unsealed shape does not name. The read is typed as the entry, as
+// PHPStan types it, so that no second finding follows. Nothing is reported
+// where a test stands guard (isset(), array_key_exists(), empty(), ??, a
+// comparison of their result with true or false), in those tests'
+// operands, on writes and references, which create the key, or where a
+// general array is among the types, which PHPStan does not hold to its
+// keys. A destructuring reads its keys too. Plain PHP, so that PHPStan
+// reads this file as written.
+
+final class Box
+{
+    /** @var array{id: int, name?: string} */
+    public array $row = ['id' => 1];
+
+    public function direct(): string
+    {
+        return $this->row['name']; // want P2321 "offset 'name' might not exist on array{id: int, name?: string}"
+    }
+
+    public function guarded(): string
+    {
+        if (isset($this->row['name'])) {
+            return $this->row['name'];
+        }
+        return '';
+    }
+}
+
+/**
+ * @param array{id: int, name?: string} $r
+ * @param array{id: int, name?: string, ...} $open
+ * @param array{id: int, ...} $openOnly
+ * @param array{id: int, name?: string}|array<string, string> $either
+ * @param array{id: int, name?: string}|array{id: int, name: string} $two
+ * @param array{id: int, tags?: list<string>} $t
+ * @param array{0: int, 1?: string} $tuple
+ * @param array{id: int, name?: string|null} $nullable
+ */
+function reads(array $r, array $open, array $openOnly, array $either, array $two, array $t, array $tuple, array $nullable, string $k): void
+{
+    echo $r['name']; // want P2321
+    echo $open['name']; // want P2321
+    echo \is_string($openOnly['other']) ? 'set' : 'not'; // want P2321
+    echo $either['name'];
+    echo $two['name']; // want P2321
+    foreach ($t['tags'] as $tag) { // want P2321
+        echo $tag;
+    }
+    echo $tuple[1]; // want P2321
+    echo $nullable['name'] ?? '';
+    echo $r[$k];
+    echo $r['id'];
+}
+
+/**
+ * @param array{id: int, name?: string} $r
+ */
+function guards(array $r): void
+{
+    echo $r['name'] ?? 'x';
+    if (isset($r['name'])) {
+        echo $r['name'];
+    }
+    if (array_key_exists('name', $r)) {
+        echo $r['name'];
+    }
+    if (!empty($r['name'])) {
+        echo $r['name'];
+    }
+    echo empty($r['name']) ? '' : $r['name'];
+    echo isset($r['name']) ? $r['name'] : '';
+    echo array_key_exists('name', $r) ? $r['name'] : '';
+    echo isset($r['name']) && $r['name'] !== '' ? 'named' : 'anonymous';
+    echo match (true) {
+        isset($r['name']) => $r['name'],
+        default => '',
+    };
+    if (!isset($r['name'])) {
+        return;
+    }
+    echo $r['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function truthyDefault(array $r): string
+{
+    if ($r['name'] ?? false) {
+        return $r['name'];
+    }
+    return '';
+}
+
+/** @param array{id: int, name?: string} $r */
+function inHaystack(array $r): string
+{
+    if (!\in_array($r['name'] ?? '', ['a', 'b'], true)) {
+        return '';
+    }
+    return $r['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function afterThrow(array $r): string
+{
+    $n = $r['name'] ?? throw new \LogicException('no name');
+    return $n . $r['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function remembered(array $r): string
+{
+    $name = $r['name'] ?? null;
+    if ($name === null) {
+        return '';
+    }
+    return $name . $r['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function switchedOnTrue(array $r): string
+{
+    switch (true) {
+        case isset($r['name']):
+            return $r['name'];
+        default:
+            return '';
+    }
+}
+
+/** @param array{id: int, name?: string} $r */
+function elvis(array $r): string
+{
+    return $r['name'] ?: 'x'; // want P2321
+}
+
+/** @param array{id: int, name?: string} $r */
+function comparedWithFalse(array $r): string
+{
+    if (\array_key_exists('name', $r) === false) {
+        return '';
+    }
+    return $r['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function issetComparedWithFalse(array $r): string
+{
+    if (isset($r['name']) === false) {
+        return '';
+    }
+    return $r['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function defaultWritten(array $r): string
+{
+    if (!isset($r['name'])) {
+        $r['name'] = '';
+    }
+    return $r['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function plus(array $r): string
+{
+    $r += ['name' => ''];
+    return $r['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function merged(array $r): string
+{
+    $r = array_merge(['name' => ''], $r);
+    return $r['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function captured(array $r): ?\Closure
+{
+    if (isset($r['name'])) {
+        return function () use ($r): string {
+            return $r['name'];
+        };
+    }
+    return null;
+}
+
+/** @param list<array{id: int, name?: string}> $rows */
+function skipped(array $rows): string
+{
+    $s = '';
+    foreach ($rows as $row) {
+        if (!isset($row['name'])) {
+            continue;
+        }
+        $s .= $row['name'];
+    }
+    return $s;
+}
+
+/** @param array{id: int, name?: string} $r */
+function compound(array $r): string
+{
+    $r['name'] .= 'x'; // want P2321
+    return $r['name'];
+}
+
+// A reference creates the offset, which the type does not learn.
+/** @param array{id: int, name?: string} $r */
+function referenced(array $r): string
+{
+    $ref = &$r['name'];
+    $ref = 'y';
+    return $r['name']; // want P2321
+}
+
+/** @param array{id: int, n?: int} $r */
+function increments(array $r): int
+{
+    $r['n']++; // want P2321
+    return $r['n'];
+}
+
+/**
+ * @param array{id: int, name?: string} $r
+ * @param array{0: int, 1?: string} $pair
+ */
+function destructured(array $r, array $pair): string
+{
+    ['id' => $id, 'name' => $n] = $r; // want P2321
+    [$a, $b] = $pair; // want P2321
+    return $id . $n . $a . $b;
+}
+
+/** @param array{a?: array{b?: int}} $r */
+function nested(array $r): int
+{
+    if (isset($r['a']['b'])) {
+        return $r['a']['b'];
+    }
+    return $r['a']['b'] ?? 0;
+}
+
+// A destructuring has no place for a default: the message leaves ?? out,
+// and stands where the pattern starts, as PHPStan's does.
+/** @param array{id: int, name?: string} $r */
+function destructuredOverLines(array $r): string
+{
+    [ // want P2321 "offset 'name' might not exist on array{id: int, name?: string}: test it with isset() or array_key_exists() before destructuring"
+        'name' => $n,
+    ] = $r;
+    return $n;
+}
+
+// isset() of a nested offset says each array on the way is set, and has
+// the key.
+/** @param array{id: int, db?: array{host?: string}} $c */
+function nestedParents(array $c): string
+{
+    if (isset($c['db']['host'])) {
+        $db = $c['db'];
+        return $db['host'];
+    }
+    return '';
+}
+
+// count() of a shape with an optional entry.
+/** @param array{0: string, 1?: string} $p */
+function counted(array $p): string
+{
+    if (\count($p) === 2) {
+        return $p[0] . $p[1];
+    }
+    return $p[0];
+}
+
+/** @param array{0: string, 1?: string} $p */
+function countedAbove(array $p): string
+{
+    if (\count($p) > 1) {
+        return $p[1];
+    }
+    return $p[0];
+}
+
+// A length over the coalesced offset leaves the default out.
+/** @param array{id: int, name?: string} $r */
+function long(array $r): string
+{
+    if (\strlen($r['name'] ?? '') > 3) {
+        return $r['name'];
+    }
+    return '';
+}
+
+// A closure takes what the scope knows where it is created, by value or
+// by reference.
+/** @param array{id: int, name?: string} $r */
+function byReference(array $r): ?\Closure
+{
+    if (!isset($r['name'])) {
+        return null;
+    }
+    return function () use (&$r): string {
+        return $r['name'];
+    };
+}
+
+/** @param array{id: int, name?: string} $r */
+function byReferenceBeforeTheTest(array $r): ?\Closure
+{
+    $f = function () use (&$r): string {
+        return $r['name']; // want P2321
+    };
+    if (!isset($r['name'])) {
+        return null;
+    }
+    return $f;
+}
+
+// An offset is the key PHP stores, however it is spelled.
+final class Keys
+{
+    public const NAME = 'name';
+
+    /**
+     * @param array{id: int, name?: string} $r
+     */
+    public static function spelled(array $r): string
+    {
+        if (isset($r['name'])) {
+            return "hello $r[name]" . $r[self::NAME];
+        }
+        return '';
+    }
+
+    /**
+     * @param array{id: int, name?: string} $r
+     */
+    public static function byConstant(array $r): string
+    {
+        if (isset($r[self::NAME])) {
+            return $r['name'];
+        }
+        return '';
+    }
+
+    /**
+     * @param array{0: string, 1?: string} $p
+     */
+    public static function intKeys(array $p): string
+    {
+        if (isset($p['1'])) {
+            return $p[1];
+        }
+        return $p["1"]; // want P2321 "offset 1 might not exist"
+    }
+
+    /**
+     * @param array{0: string, 1?: string} $p
+     */
+    public static function otherSpellings(array $p): string
+    {
+        if (isset($p[1])) {
+            return $p[0x1] . $p["1"];
+        }
+        return '';
+    }
+
+    // A filter's test holds of every element it keeps.
+    /**
+     * @param list<array{id: int, name?: string}> $rows
+     */
+    public static function filtered(array $rows): string
+    {
+        $s = '';
+        foreach (\array_filter($rows, static fn (array $r): bool => isset($r['name'])) as $r) {
+            $s .= $r['name'];
+        }
+        return $s;
+    }
+}
+
+// An argument by reference that reads what it is given reads the offset;
+// preg_match()'s $matches only writes it.
+/** @param array{id: int, tags?: list<string>, m?: list<string>} $r */
+function byReferenceArguments(array $r): void
+{
+    sort($r['tags']); // want P2321
+    preg_match('/a/', 'a', $r['m']);
+}
+
+/** @param array{id: int, tags?: list<string>} $r */
+function pushed(array $r): void
+{
+    array_push($r['tags'], 'x'); // want P2321
+}
+
+// A union of shapes of which one lacks the key: the key might not exist.
+function joined(bool $c): int
+{
+    $o = ['a' => 1];
+    if ($c) {
+        $o['b'] = 2;
+    }
+    return $o['b']; // want P2321 "offset 'b' might not exist on array{a: 1, b: 2}|array{a: 1}"
+}
+
+// A test compared with false decides nothing a docblock alone says: a
+// method declared bool and documented `@return true` may still give false.
+final class Saver
+{
+    /**
+     * @return true
+     */
+    public function save(): bool
+    {
+        return true;
+    }
+
+    public function run(): void
+    {
+        if ($this->save() === false) {
+            throw new \RuntimeException('not saved');
+        }
+    }
+
+    public function runTrue(): void
+    {
+        if ($this->save() !== true) {
+            throw new \RuntimeException('not saved');
+        }
+    }
+}
+
+// What a test learnt of an offset is in the type of the array, which
+// carries it through writes to other keys, copies, arguments and returns.
+/** @param array{id: int, name?: string} $r */
+function otherKeyWritten(array $r): string
+{
+    if (!isset($r['name'])) {
+        return '';
+    }
+    $r['id'] = 2;
+    $r['id']++;
+    $r[] = 'x';
+    return $r['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function copiedAfterTheTest(array $r): string
+{
+    $r['name'] ?? throw new \LogicException('no name');
+    $copy = $r;
+    return $copy['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function inALoop(array $r, int $n): string
+{
+    if (($r['name'] ?? null) === null) {
+        return '';
+    }
+    $s = '';
+    for ($i = 0; $i < $n; $i++) {
+        $s .= $r['name'];
+        $r['id'] = $i;
+    }
+    return $s . $r['name'];
+}
+
+/** @param array{a?: array{id: int, name?: string}} $r */
+function nestedThenWritten(array $r): string
+{
+    if (!isset($r['a']['name'])) {
+        return '';
+    }
+    $r['a']['id'] = 2;
+    return $r['a']['name'];
+}
+
+final class Counter
+{
+    /** @var array{count: int, last?: string} */
+    private array $state = ['count' => 0];
+
+    /** @param list<string> $xs */
+    public function run(array $xs): string
+    {
+        if (!isset($this->state['last'])) {
+            return '';
+        }
+        foreach ($xs as $x) {
+            $this->state['count']++;
+        }
+        return $this->state['last'];
+    }
+}
+
+// unset() takes the offset out of what a test learnt, under any spelling.
+final class Unsets
+{
+    public const NAME = 'name';
+
+    /** @param array{a?: array{id: int, name?: string}} $r */
+    public static function nested(array $r): string
+    {
+        if (isset($r['a']['name'])) {
+            unset($r['a']['name']);
+            return $r['a']['name']; // want P2313 "offset 'name' does not exist on array{id: int}"
+        }
+        return '';
+    }
+
+    /** @param array{a?: array{id: int, name?: string}} $r */
+    public static function spelled(array $r): string
+    {
+        if (isset($r['a']['name'])) {
+            unset($r['a'][self::NAME]);
+            return $r['a']['name']; // want P2313
+        }
+        return '';
+    }
+
+    /** @param array{a?: array{id: int, name?: string}} $r */
+    public static function parent(array $r): string
+    {
+        if (isset($r['a']['name'])) {
+            unset($r['a']);
+            return $r['a']['name']; // want P2313 "offset 'a' does not exist on array{}"
+        }
+        return '';
+    }
+}
+
+// isset() and empty() read the whole chain quietly, an object's offset
+// included, and a test of an object's member says the object is there.
+final class Holder
+{
+    public ?string $p = null;
+
+    /** @var array<string, int> */
+    public array $q = [];
+
+    public static ?string $s = null;
+}
+
+/** @param array{id: int, o?: Holder} $r */
+function quietChains(array $r): string
+{
+    echo isset($r['o']->q['x']) ? 1 : 0;
+    echo isset($r['o']::$s) ? 1 : 0;
+    echo empty($r['o']->p) ? 1 : 0;
+    echo $r['o']->p ?? '';
+    if (isset($r['o']->p)) {
+        $o = $r['o'];
+        echo $o->p;
+        return $r['o']->p;
+    }
+    return '';
+}
+
+// An argument by reference reads the offset where the parameter does: a
+// typed one PHP's null for the missing key does not fit, and the ones of
+// php-src that PHPStan's function map has read and written (sort(),
+// reset()). Untyped, mixed or nullable, or php-src's written only
+// (parse_str(), sodium_memzero()), it creates the key.
+/** @param list<int> $x */
+function takesList(array &$x): void
+{
+    $x[] = 1;
+}
+
+function takesAnything(mixed &$x): void
+{
+    $x = 1;
+}
+
+/** @param ?list<int> $x */
+function takesNullable(?array &$x): void
+{
+    $x = [1];
+}
+
+/** @param array{id: int, k?: list<int>} $r */
+function referenceTyped(array $r): void
+{
+    takesList($r['k']); // want P2321
+}
+
+/** @param array{id: int, k?: list<int>} $r */
+function referenceReadByPhp(array $r, bool $c): void
+{
+    if ($c) {
+        reset($r['k']); // want P2321
+    } else {
+        array_multisort($r['k']); // want P2321
+    }
+}
+
+/** @param array{id: int, k?: list<int>} $r */
+function referenceCreates(array $r, string $data, int $n): void
+{
+    match ($n) {
+        0 => takesAnything($r['k']),
+        1 => takesNullable($r['k']),
+        2 => parse_str($data, $r['k']),
+        default => preg_match('/a/', $data, $r['k']),
+    };
+}
+
+/** @param array{id: int, k?: string} $r */
+function referenceWrittenOnly(array $r): void
+{
+    sodium_memzero($r['k']);
+}
+
+// Tests PHPStan reads through a match, a switch, a variable or a count.
+/** @param array{id: int, name?: string} $r */
+function matched(array $r): string
+{
+    $x = match (isset($r['name'])) {
+        true => $r['name'],
+        false => '',
+    };
+    switch (isset($r['name'])) {
+        case true:
+            return $x . $r['name'];
+        default:
+            return $x;
+    }
+}
+
+/** @param array{0: string, 1?: string} $p */
+function matchedCount(array $p): string
+{
+    return match (\count($p)) {
+        2 => $p[1],
+        default => '',
+    };
+}
+
+/** @param array{id: int, name?: string} $r */
+function keyTestRemembered(array $r): string
+{
+    $has = array_key_exists('name', $r);
+    if ($has) {
+        return $r['name'];
+    }
+    return '';
+}
+
+/** @param array{id: int, ...} $r */
+function unsealedKeyTest(array $r): mixed
+{
+    if (array_key_exists('x', $r)) {
+        return $r['x'];
+    }
+    return null;
+}
+
+/** @param array{id: int, name?: string} $r */
+function emptyStringDefault(array $r): string
+{
+    $n = $r['name'] ?? '';
+    if ($n !== '') {
+        return $r['name'];
+    }
+    return '';
+}
+
+// A default the test can still give says nothing of the offset.
+/** @param array{id: int, n?: int} $r */
+function truthyDefault2(array $r): int
+{
+    $n = $r['n'] ?? 'none';
+    if (is_int($n)) {
+        return $r['n']; // want P2321
+    }
+    return 0;
+}
+
+// A non-empty shape whose one entry is optional has it.
+/** @param array{a?: int} $r */
+function nonEmptyShapes(array $r, int $n): int
+{
+    return match ($n) {
+        0 => $r !== [] ? $r['a'] : 0,
+        1 => $r ? $r['a'] : 0,
+        default => !empty($r) ? $r['a'] : 0,
+    };
+}
+
+/** @param non-empty-array<string, int>&array{a?: int} $r */
+function nonEmptyIntersection(array $r): int
+{
+    return $r['a'];
+}
+
+// A count makes optional entries present only in a shape whose keys are
+// 0, 1, … and only when it counts them all, as PHPStan has it.
+/** @param array{a: int, b?: int} $r */
+function countedNamed(array $r): int
+{
+    if (\count($r) === 2) {
+        return $r['b']; // want P2321
+    }
+    return 0;
+}
+
+/** @param array{0: string, 1?: string, 2?: string} $p */
+function countedPart(array $p): string
+{
+    if (\count($p) >= 2) {
+        return $p[1]; // want P2321
+    }
+    return '';
+}
+
+// static:: names one key only where the class is final.
+final class FinalKeys
+{
+    public const NAME = 'name';
+
+    /** @param array{id: int, name?: string} $r */
+    public static function read(array $r): string
+    {
+        if (isset($r[static::NAME])) {
+            return $r['name'];
+        }
+        return '';
+    }
+}
+
+// A catch nothing in the try block reaches never runs.
+function deadCatch(): int
+{
+    $o = ['a' => 0];
+    try {
+        $o['b'] = rand();
+    } catch (\Throwable) { // want P2403
+    }
+    return $o['b'];
+}
+
+/** @param list{int, 1?: string} $p */
+function tupleOptional(array $p): string
+{
+    return $p[1]; // want P2321 "offset 1 might not exist on list{int, 1?: string}"
+}

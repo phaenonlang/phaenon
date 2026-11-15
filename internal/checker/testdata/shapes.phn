@@ -69,7 +69,9 @@ function present(): Nullable
 }
 
 // A sealed shape names its keys: another one does not exist. An unsealed
-// one admits keys it does not name, which read as mixed.
+// one admits keys it does not name, which read as mixed and might not
+// exist, as an optional entry might not (P2321, PHPStan's "might not
+// exist"); ?? or isset() first reads them without a word.
 function sealed(Row $row): mixed
 {
     return $row['age']; // want P2313
@@ -77,7 +79,17 @@ function sealed(Row $row): mixed
 
 function unsealed(Open $open): mixed
 {
-    return $open['age'];
+    return $open['age']; // want P2321 "offset 'age' might not exist on array{id: int, ...}"
+}
+
+function unsealedGuarded(Open $open): mixed
+{
+    return isset($open['age']) ? $open['age'] : $open['age'] ?? null;
+}
+
+function optional(Row $row): string
+{
+    return $row['name']; // want P2321 "offset 'name' might not exist on array{id: int, name?: string}"
 }
 
 function nested(Order $order): int

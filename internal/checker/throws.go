@@ -213,15 +213,19 @@ func (x *fnCtx) subtractCaught(tp throwPoint, c string) (throwPoint, bool) {
 
 // catchClause matches one catch against the points the earlier catches
 // left (PHPStan's NodeScopeResolver, TryCatch): it reports each of its
-// types no point reaches and returns the points it leaves. caught are the
-// classes of the earlier catches; a type they cover was reported as
-// already caught. original are the try block's points before any catch.
-func (x *fnCtx) catchClause(names []string, spans []ast.Span, points, original []throwPoint, caught []string) []throwPoint {
+// types no point reaches and returns the points it leaves, and whether a
+// point reaches the catch at all: one no point reaches never runs, and
+// what it does joins nothing after the try statement, as PHPStan has it.
+// caught are the classes of the earlier catches; a type they cover was
+// reported as already caught. original are the try block's points before
+// any catch.
+func (x *fnCtx) catchClause(names []string, spans []ast.Span, points, original []throwPoint, caught []string) ([]throwPoint, bool) {
 	matched := make([]bool, len(names))
 	any := false
 	for i, n := range names {
 		if n == "" {
 			matched[i] = true // unknown or not a Throwable: reported already
+			any = true        // and not known never to run
 			continue
 		}
 		if x.subOfAny(n, caught) {
@@ -254,7 +258,7 @@ func (x *fnCtx) catchClause(names []string, spans []ast.Span, points, original [
 		}
 	}
 	if !any {
-		return points
+		return points, false
 	}
 	var left []throwPoint
 	for _, tp := range points {
@@ -271,7 +275,7 @@ func (x *fnCtx) catchClause(names []string, spans []ast.Span, points, original [
 			left = append(left, tp)
 		}
 	}
-	return left
+	return left, true
 }
 
 // recordCall records the throw point of a call whose callee is known

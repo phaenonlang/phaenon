@@ -125,6 +125,7 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 				env.unset(t.Name)
 			case *ast.Index:
 				base := x.exprLenient(t.Array, env)
+				x.forgetOffset(t, env)
 				var raw types.Type
 				if t.Index != nil {
 					raw = x.expr(t.Index, env, nil)
@@ -133,7 +134,7 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 				x.unsetIndex(t, env)
 			default:
 				x.exprLenient(v, env)
-				if key, ok := pathKey(v); ok {
+				if key, ok := x.pathKey(v); ok {
 					env.invalidatePrefix(key)
 				}
 			}
@@ -675,7 +676,7 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 			// `$xs[$k]` is an offset the iteration found: a write to it
 			// replaces a value, so a list stays a list (PHPStan's
 			// setExistingOffsetValueType).
-			if key, ok := pathKey(&ast.Index{Array: s.Expr, Index: s.Key}); ok {
+			if key, ok := x.pathKey(&ast.Index{Array: s.Expr, Index: s.Key}); ok {
 				head.setPath(key, v)
 			}
 		}
@@ -729,11 +730,20 @@ func (x *fnCtx) switchStmt(s *ast.Switch, env *state) {
 	remaining := subject
 	var fall *state
 	hasDefault := false
-	for _, c := range s.Cases {
+	// `switch (true)` is a chain of conditions, as PHPStan reads it: a case
+	// runs where its condition holds and every one before it failed.
+	switchTrue := isTrueLit(s.Subject)
+	failed := env.clone()
+	for i, c := range s.Cases {
 		caseEnv := env.clone()
 		if c.Cond == nil {
 			hasDefault = true
 			x.narrowPath(caseEnv, s.Subject, remaining, false)
+			if switchTrue && i == len(s.Cases)-1 {
+				caseEnv = failed
+			}
+		} else if switchTrue {
+			caseEnv, failed = x.cond(c.Cond, failed)
 		} else {
 			ct := x.expr(c.Cond, caseEnv, nil)
 			// switch compares loosely ('1' == 1), so only enum cases and
@@ -741,6 +751,9 @@ func (x *fnCtx) switchStmt(s *ast.Switch, env *state) {
 			if isLiteralLike(ct) && isIdentityLiteral(ct) {
 				x.narrowPath(caseEnv, s.Subject, types.Intersect(remaining, ct, x.p()), false)
 				remaining = x.subtract(remaining, ct, x.p())
+			}
+			if t := x.testedArm(caseEnv, s.Subject, c.Cond); t != nil {
+				caseEnv = t
 			}
 		}
 		if fall != nil {
@@ -892,7 +905,8 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 			}
 			ts = append(ts, t)
 		}
-		points = x.catchClause(names, spans, points, original, caughtNames)
+		var reached bool
+		points, reached = x.catchClause(names, spans, points, original, caughtNames)
 		for _, n := range names {
 			if n != "" {
 				caughtNames = append(caughtNames, n)
@@ -903,7 +917,9 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 			cEnv.set(c.Var.Name, types.MakeUnion(ts...))
 		}
 		x.stmts(c.Body, cEnv)
-		ends = append(ends, cEnv)
+		if reached {
+			ends = append(ends, cEnv) // a catch nothing reaches never runs
+		}
 	}
 	x.addThrows(points...) // what no catch takes leaves the try statement
 	if s.HasFinally {
@@ -1438,6 +1454,18 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		}
 		cenv.set(p.Name, t)
 	}
+	// An array is captured with what the scope knows of its constant
+	// offsets where the closure is created, `isset($r['k'])` before it
+	// included, by value or by reference alike, as PHPStan has it; an
+	// offset named by another variable is not the closure's.
+	capturePaths := func(name string) {
+		prefix := "$" + name + "["
+		for k, t := range env.paths {
+			if rest, found := strings.CutPrefix(k, prefix); found && !strings.ContainsAny(rest, "$:") && !strings.Contains(rest, "->") {
+				cenv.setPath(k, t)
+			}
+		}
+	}
 	for _, u := range e.Uses {
 		info, ok := env.get(u.Var.Name)
 		if u.ByRef {
@@ -1448,6 +1476,7 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 				info = varInfo{t: types.TNull}
 			}
 			cenv.set(u.Var.Name, info.t)
+			capturePaths(u.Var.Name)
 			continue
 		}
 		if !ok {
@@ -1456,6 +1485,7 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 			continue
 		}
 		cenv.set(u.Var.Name, info.t)
+		capturePaths(u.Var.Name)
 	}
 	c.generator = bodyHasYield(e.Body)
 	exits := cenv
@@ -1649,6 +1679,37 @@ func (x *fnCtx) classNameConst(e ast.Expr) (string, bool) {
 	return x.res.ClassName(n), true
 }
 
+// testedArm is env where the subject of a match equals the value of an
+// arm, or the subject of a switch the value of a case, read as PHPStan
+// reads it, `subject === value`: `match (isset($r['k'])) { true => … }`
+// narrows as the test does, and `match (count($p)) { 2 => … }` as the
+// count compared. Only a subject that is such a test (isset(), empty(), a
+// call typed bool) or count() qualifies, against a bool or an int literal,
+// where a switch's loose comparison is the same; nil otherwise.
+func (x *fnCtx) testedArm(env *state, subject, value ast.Expr) *state {
+	cmp := &ast.Binary{S: value.Span(), Op: token.T_IS_IDENTICAL, Left: subject, Right: value}
+	_, isBool := boolConst(value)
+	switch s := unparen(subject).(type) {
+	case *ast.Isset, *ast.Empty:
+		if !isBool {
+			return nil
+		}
+	case *ast.Call, *ast.StaticCall, *ast.MethodCall:
+		if _, isCount := x.countCompare(cmp); isCount {
+			break
+		}
+		if !isBool || !types.Equal(x.pathType(s, env), types.TBool) {
+			return nil
+		}
+	default:
+		return nil
+	}
+	saved := x.c.mark()
+	then, _ := x.cond(cmp, env)
+	x.c.rollback(saved)
+	return then
+}
+
 func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type {
 	subject := x.expr(e.Subject, env, nil)
 	switch s := subject.(type) {
@@ -1736,6 +1797,15 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 			// An arm that cannot match is reported, not narrowed to never.
 			if !impossible {
 				x.narrowPath(armEnv, e.Subject, types.Intersect(remaining, ct, x.p()), false)
+				var thens []*state
+				for _, cond := range arm.Conds {
+					if t := x.testedArm(armEnv, e.Subject, cond); t != nil {
+						thens = append(thens, t)
+					}
+				}
+				if len(thens) == len(arm.Conds) {
+					armEnv = joinAll(thens...)
+				}
 			}
 			if isLiteralLike(ct) {
 				remaining = x.subtract(remaining, ct, x.p())

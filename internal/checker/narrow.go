@@ -54,6 +54,9 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 			x.condValueType = types.TBool
 			return join(t2, f2), join(t2, f2)
 		case token.T_IS_IDENTICAL, token.T_IS_NOT_IDENTICAL, token.T_IS_EQUAL, token.T_IS_NOT_EQUAL:
+			if then, els, ok := x.predicateCompared(e, env); ok {
+				return then, els
+			}
 			return x.comparison(e, env)
 		case token.Kind('>'), token.Kind('<'), token.T_IS_GREATER_OR_EQUAL, token.T_IS_SMALLER_OR_EQUAL:
 			return x.ordering(e, env)
@@ -67,6 +70,7 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		for _, v := range e.Vars {
 			t := x.exprLenient(v, env)
 			x.narrowPath(then, v, types.StripNull(t), true)
+			x.issetChain(then, v)
 		}
 		x.condValueType = types.TBool
 		els = env.clone()
@@ -82,6 +86,7 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		then, els = env.clone(), env.clone()
 		x.narrowPath(then, e.Expr, types.Falsy(t), false)
 		x.narrowPath(els, e.Expr, types.Truthy(t), true)
+		x.issetChain(els, e.Expr)
 		x.condValueType = types.TBool
 		return then, els
 	case *ast.Call:
@@ -201,7 +206,7 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 		// `is_string($data[$field])` with $field one of a few literals (a
 		// foreach over them) narrows each of those offsets, as PHPStan does.
 		if v, ok := p.Index.(*ast.Variable); ok {
-			if base, ok := pathKey(p.Array); ok {
+			if base, ok := x.pathKey(p.Array); ok {
 				if keys := literalOffsetKeys(x.pathType(v, env)); keys != nil {
 					for _, k := range keys {
 						env.setPath(base+k, t)
@@ -210,11 +215,21 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 				}
 			}
 		}
+		x.narrowHolder(env, p, t)
 	case *ast.Binary:
-		// `is_string($a['k'] ?? null)`: a type without null says the offset
-		// is set and of that type.
+		// `is_string($a['k'] ?? null)`, `if ($a['k'] ?? false)`,
+		// `in_array($a['k'] ?? '', ['x', 'y'], true)`: a type without null
+		// and without any value of the default says the offset is set, and
+		// of that type, as PHPStan has it.
 		if p.Op == token.T_COALESCE && !types.IsNullable(t) && !types.IsMixed(t) {
-			if n, ok := constName(p.Right); ok && n == "null" {
+			var def types.Type = types.TNever // `?? throw`: no value at all
+			if _, throws := p.Right.(*ast.Throw); !throws {
+				def = x.pathType(p.Right, env)
+				if v, ok := x.decidedIdentity(p.Right, env); ok {
+					def = types.BoolLit{V: v} // `?? null !== null` is `?? false`
+				}
+			}
+			if !types.IsMixed(def) && !types.Overlaps(t, def, x.p()) {
 				x.narrowPath(env, p.Left, t, define)
 			}
 		}
@@ -241,7 +256,7 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 		}
 		return
 	}
-	if key, ok := pathKey(e); ok {
+	if key, ok := x.pathKey(e); ok {
 		env.setPath(key, t)
 	}
 }
@@ -309,12 +324,359 @@ func variableOf(e ast.Expr) (*ast.Variable, bool) {
 	return nil, false
 }
 
+// pathKey is the package's pathKey with an offset a class constant names
+// keyed by the constant's value, as PHP stores it: `$r[self::NAME]` is
+// `$r['name']` where NAME is 'name'. A constant `static::` reads, or one
+// whose value is not a literal, keeps its spelling.
+func (x *fnCtx) pathKey(e ast.Expr) (string, bool) {
+	return pathKeyWith(e, x.constOffsetKey)
+}
+
+func (x *fnCtx) constOffsetKey(c *ast.ClassConstFetch) (string, bool) {
+	if n, ok := c.Class.(*ast.Name); !ok || strings.EqualFold(strings.Join(n.Parts, "\\"), "static") {
+		return "", false
+	}
+	if k, ok := x.constKeys[c]; ok {
+		return k, k != ""
+	}
+	saved := x.c.mark()
+	t := normaliseKey(x.exprLenient(c, newEnv()))
+	x.c.rollback(saved)
+	k := ""
+	switch t := t.(type) {
+	case types.StringLit:
+		k = "'" + t.V + "'"
+	case types.Int:
+		if t.Lo == t.Hi {
+			k = strconv.FormatInt(t.Lo, 10)
+		}
+	}
+	if x.constKeys == nil {
+		x.constKeys = map[*ast.ClassConstFetch]string{}
+	}
+	x.constKeys[c] = k
+	return k, k != ""
+}
+
 // pathType returns the current type of a path without side effects.
 func (x *fnCtx) pathType(e ast.Expr, env *state) types.Type {
 	saved := x.c.mark()
 	t := x.exprLenient(e, env.clone())
 	x.c.rollback(saved)
 	return t
+}
+
+// narrowHolder narrows the array a constant offset is in, where the offset
+// was narrowed to t: the array has the key, its value of type t, as
+// PHPStan's specifyExpressionType has it (HasOffsetValueType). The array is
+// narrowed in turn, `$a['k']` for `$a['k']['l']`, up to the variable or
+// property that holds it, so that what a test of the offset learnt,
+// isset() or `?? throw` or `!== null`, is in the type: it holds through a
+// write to another key, a copy, an argument or a return as any type does,
+// and goes with the array where it is assigned again. A mixed array is
+// left as it is, as PHPStan leaves it.
+func (x *fnCtx) narrowHolder(env *state, e *ast.Index, t types.Type) {
+	key := x.literalOffset(e, env)
+	if key == nil {
+		return
+	}
+	if nt, ok := withOffsetValue(x.pathType(e.Array, env), key, t, x.p()); ok {
+		x.narrowPath(env, e.Array, nt, false)
+	}
+}
+
+// issetChain narrows, where isset() or !empty() of e holds, each object e
+// reads a member of as not null, and so set: `$r['o']` of
+// `isset($r['o']->p)`, as PHPStan has it. The array an offset is in is
+// narrowed already (narrowHolder).
+func (x *fnCtx) issetChain(env *state, e ast.Expr) {
+	for {
+		switch n := unparen(e).(type) {
+		case *ast.Index:
+			e = n.Array
+		case *ast.PropertyFetch:
+			e = n.Object
+			if t := x.pathType(e, env); !types.IsMixed(t) {
+				x.narrowPath(env, e, types.StripNull(t), false)
+			}
+		default:
+			return
+		}
+	}
+}
+
+// decidedIdentity is the value of `a === b` or `a !== b` whose sides are
+// each one literal value, as PHPStan folds it: `null !== null` is false.
+func (x *fnCtx) decidedIdentity(e ast.Expr, env *state) (value, ok bool) {
+	b, isBinary := unparen(e).(*ast.Binary)
+	if !isBinary || b.Op != token.T_IS_IDENTICAL && b.Op != token.T_IS_NOT_IDENTICAL {
+		return false, false
+	}
+	l, r := x.pathType(b.Left, env), x.pathType(b.Right, env)
+	if !singleValue(l) || !singleValue(r) {
+		return false, false
+	}
+	return types.Equal(l, r) == (b.Op == token.T_IS_IDENTICAL), true
+}
+
+// singleValue reports a type of one value: null, a bool, int or string
+// literal.
+func singleValue(t types.Type) bool {
+	switch t := t.(type) {
+	case types.Null, types.BoolLit, types.StringLit:
+		return true
+	case types.Int:
+		return t.Lo == t.Hi
+	}
+	return false
+}
+
+// literalOffset is the key of a constant offset as PHP stores it, nil for
+// any other. A constant read through static:: is one only where the class
+// or the constant is final: elsewhere a subclass may give it another
+// value, and PHPStan does not take it as the value it has here.
+func (x *fnCtx) literalOffset(e *ast.Index, env *state) types.Type {
+	if e.Index == nil {
+		return nil
+	}
+	if c, ok := unparen(e.Index).(*ast.ClassConstFetch); ok {
+		if n, ok := c.Class.(*ast.Name); ok && strings.EqualFold(strings.Join(n.Parts, "\\"), "static") {
+			name, isIdent := c.Name.(*ast.Ident)
+			if x.class == nil || !isIdent {
+				return nil
+			}
+			if k := x.class.FindConst(name.Name); !x.class.Final && (k == nil || !k.Final) {
+				return nil
+			}
+		}
+	}
+	if key := normaliseKey(x.pathType(e.Index, env)); isLiteralKey(key) {
+		return key
+	}
+	return nil
+}
+
+// forgetOffset takes the offset unset() removes out of what the flow knows
+// of the arrays it is in: its narrowed path, under the key PHP stores
+// (`$r[self::NAME]` is `$r['name']`), and the entry a test made certain in
+// the type of the array holding it, `isset($r['a']['name'])` before
+// `unset($r['a']['name'])`: that array takes its type without the entry,
+// and each array above it takes the one it holds (replaceOffset), up to
+// the variable or property.
+func (x *fnCtx) forgetOffset(t *ast.Index, env *state) {
+	if key, ok := x.pathKey(t); ok {
+		env.invalidatePrefix(key)
+	}
+	key := x.literalOffset(t, env)
+	if key == nil {
+		return
+	}
+	at := x.pathType(t.Array, env)
+	if nt := withoutEntry(at, key); !types.Equal(nt, at) {
+		x.replaceOffset(env, t.Array, nt)
+	}
+}
+
+// replaceOffset gives the expression e the type vt, a value that replaced
+// the one it held: an offset's own path, and the entry the array holding it
+// has under a constant key, up to the variable or property, which takes
+// its new type keeping what is known of its other members. Unlike
+// narrowPath, nothing is intersected with what was known.
+func (x *fnCtx) replaceOffset(env *state, e ast.Expr, vt types.Type) {
+	idx, ok := unparen(e).(*ast.Index)
+	if !ok {
+		x.narrowPath(env, e, vt, false)
+		return
+	}
+	if key, ok := x.pathKey(idx); ok {
+		env.setPath(key, vt)
+	}
+	key := x.literalOffset(idx, env)
+	if key == nil {
+		return
+	}
+	if pt := x.pathType(idx.Array, env); !types.IsMixed(pt) {
+		x.replaceOffset(env, idx.Array, types.Map(pt, func(m types.Type) types.Type {
+			s, ok := m.(types.Shape)
+			if !ok {
+				return m
+			}
+			entries := append([]types.ShapeEntry{}, s.Entries...)
+			for i, e := range entries {
+				if keyedBy(e, key) {
+					entries[i].Type = vt
+				}
+			}
+			s.Entries = entries
+			return s
+		}))
+	}
+}
+
+// withoutEntry is t without the entry a constant key names in its shapes,
+// which are lists no more where they lose one.
+func withoutEntry(t, key types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		s, ok := m.(types.Shape)
+		if !ok {
+			return m
+		}
+		var entries []types.ShapeEntry
+		for _, e := range s.Entries {
+			if !keyedBy(e, key) {
+				entries = append(entries, e)
+			}
+		}
+		if len(entries) == len(s.Entries) {
+			return s
+		}
+		return types.Shape{Entries: entries, Unsealed: s.Unsealed}
+	})
+}
+
+// withOffsetValue is the array t where the offset key holds a value of type
+// vt: a shape's entry is there, not optional, its type narrowed by vt; an
+// unsealed shape without the key gains it; a sealed shape without it, or
+// whose entry cannot be vt, is no value of the array, and nor is null
+// where vt is not null. A general array, an object and anything else stay
+// as they are. False where nothing would be left, or t is mixed.
+func withOffsetValue(t, key, vt types.Type, p *program.Program) (types.Type, bool) {
+	if types.IsMixed(t) {
+		return nil, false
+	}
+	var out []types.Type
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.Null:
+			if types.IsNullable(vt) {
+				out = append(out, m)
+			}
+		case types.Shape:
+			entries := append([]types.ShapeEntry{}, m.Entries...)
+			found := false
+			for i, e := range entries {
+				if keyedBy(e, key) {
+					found = true
+					entries[i].Optional = false
+					entries[i].Type = types.Intersect(e.Type, vt, p)
+				}
+			}
+			if !found {
+				if !m.Unsealed {
+					continue
+				}
+				entry := types.ShapeEntry{Type: vt}
+				switch k := key.(type) {
+				case types.StringLit:
+					entry.Key = k.V
+				case types.Int:
+					entry.IsInt, entry.IntKey = true, k.Lo
+				}
+				entries = append(entries, entry)
+				m.List = false
+			}
+			if hasNeverEntry(entries) {
+				continue
+			}
+			m.Entries = entries
+			out = append(out, m)
+		default:
+			out = append(out, m)
+		}
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return types.MakeUnion(out...), true
+}
+
+// keyedBy reports the entry a constant key names, as PHP stores the key.
+func keyedBy(e types.ShapeEntry, key types.Type) bool {
+	switch k := normaliseKey(key).(type) {
+	case types.StringLit:
+		return !e.IsInt && e.Key == k.V
+	case types.Int:
+		return e.IsInt && k.Lo == k.Hi && e.IntKey == k.Lo
+	}
+	return false
+}
+
+// hasNeverEntry reports an entry no value can have.
+func hasNeverEntry(entries []types.ShapeEntry) bool {
+	for _, e := range entries {
+		if isNeverType(e.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+// isLiteralKey reports a constant offset: one string or int literal.
+func isLiteralKey(t types.Type) bool {
+	switch k := t.(type) {
+	case types.StringLit:
+		return true
+	case types.Int:
+		return k.Lo == k.Hi
+	}
+	return false
+}
+
+// predicateCompared narrows on a test compared strictly with true or
+// false, `isset($a['k']) === false`, `array_key_exists('k', $a) !== true`:
+// the test's own narrowing, the branches swapped for false, as PHPStan
+// has it. Only isset(), empty() and a call typed bool, both values open,
+// qualify, whose truth is their identity with true: a call typed `true` or
+// `false` by a docblock alone decides nothing PHP guarantees, and a value
+// of another type is compared as it is (comparison).
+func (x *fnCtx) predicateCompared(e *ast.Binary, env *state) (then, els *state, ok bool) {
+	if e.Op != token.T_IS_IDENTICAL && e.Op != token.T_IS_NOT_IDENTICAL {
+		return nil, nil, false
+	}
+	test, lit := e.Left, e.Right
+	want, isBool := boolConst(lit)
+	if !isBool {
+		test, lit = e.Right, e.Left
+		if want, isBool = boolConst(lit); !isBool {
+			return nil, nil, false
+		}
+	}
+	for {
+		p, isParen := test.(*ast.Paren)
+		if !isParen {
+			break
+		}
+		test = p.Expr
+	}
+	switch test.(type) {
+	case *ast.Isset, *ast.Empty:
+	case *ast.Call, *ast.StaticCall, *ast.MethodCall:
+		if !types.Equal(x.pathType(test, env), types.TBool) {
+			return nil, nil, false
+		}
+	default:
+		return nil, nil, false
+	}
+	then, els = x.cond(test, env)
+	x.condValueType = types.TBool
+	if want == (e.Op == token.T_IS_NOT_IDENTICAL) {
+		then, els = els, then
+	}
+	return then, els, true
+}
+
+// boolConst reads the constant true or false.
+func boolConst(e ast.Expr) (value, ok bool) {
+	n, isName := constName(e)
+	switch {
+	case !isName:
+		return false, false
+	case n == "true":
+		return true, true
+	case n == "false":
+		return false, true
+	}
+	return false, false
 }
 
 // comparison narrows on ===, !==, ==, !=.
@@ -347,7 +709,7 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 			x.narrowPath(then, c.arg, emptyArray(at), false)
 			x.narrowPath(els, c.arg, nonEmptyArray(at), false)
 		case c.n > 0:
-			x.narrowPath(then, c.arg, nonEmptyArray(at), false)
+			x.narrowPath(then, c.arg, countAtLeast(nonEmptyArray(at), c.n), false)
 		}
 		if negate {
 			return els, then
@@ -556,11 +918,34 @@ func nonEmptyArray(t types.Type) types.Type {
 			m.NonEmpty = true
 			return m
 		case types.Shape:
-			if len(m.Entries) == 0 && !m.Unsealed {
-				return types.TNever
-			}
+			return types.NonEmptyShape(m)
 		}
 		return m
+	})
+}
+
+// countAtLeast is t where count() gives at least n: a sealed shape whose
+// keys are 0, 1, … in order and has no more than n entries holds them all,
+// its optional ones included, as PHPStan has it (`count($p) === 2` on
+// `array{0: string, 1?: string}`). PHPStan narrows no other shape by a
+// count, neither a shape with other keys nor a longer one by its first n.
+func countAtLeast(t types.Type, n int64) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		s, ok := m.(types.Shape)
+		if !ok || s.Unsealed || n < int64(len(s.Entries)) {
+			return m
+		}
+		for i, e := range s.Entries {
+			if !e.IsInt || e.IntKey != int64(i) {
+				return m
+			}
+		}
+		entries := append([]types.ShapeEntry{}, s.Entries...)
+		for i := range entries {
+			entries[i].Optional = false
+		}
+		s.Entries = entries
+		return s
 	})
 }
 
@@ -640,7 +1025,7 @@ func (x *fnCtx) countNarrow(env *state, c countComparison, op token.Kind, at typ
 	case hi == 0:
 		x.narrowPath(env, c.arg, emptyArray(at), false)
 	case lo >= 1:
-		x.narrowPath(env, c.arg, nonEmptyArray(at), false)
+		x.narrowPath(env, c.arg, countAtLeast(nonEmptyArray(at), lo), false)
 	}
 }
 
@@ -668,6 +1053,8 @@ func (x *fnCtx) ordering(e *ast.Binary, env *state) (then, els *state) {
 	}
 	c, ok := x.countCompare(e)
 	if !ok {
+		x.lengthNarrow(then, e, e.Op, env)
+		x.lengthNarrow(els, e, negateOrdering(e.Op), env)
 		x.rangeNarrow(then, e.Left, lt, rt, e.Op)
 		x.rangeNarrow(then, e.Right, rt, lt, flipOrdering(e.Op))
 		x.rangeNarrow(els, e.Left, lt, rt, negateOrdering(e.Op))
@@ -678,6 +1065,44 @@ func (x *fnCtx) ordering(e *ast.Binary, env *state) (then, els *state) {
 	x.countNarrow(then, c, c.op, at)
 	x.countNarrow(els, c, negateOrdering(c.op), at)
 	return then, els
+}
+
+// lengthNarrow narrows what strlen() or mb_strlen() measures where its
+// result compared with an int literal (`strlen($s) > 3`, `0 < strlen($s)`)
+// holds by op and leaves at least one character: the string is non-empty,
+// as PHPStan has it, so a strlen() above zero of `$a['k']` with the empty
+// string for a default finds the offset set.
+func (x *fnCtx) lengthNarrow(env *state, e *ast.Binary, op token.Kind, at *state) {
+	call, ok := unparen(e.Left).(*ast.Call)
+	lit, ok2 := unparen(e.Right).(*ast.IntLit)
+	if !ok || !ok2 {
+		call, ok = unparen(e.Right).(*ast.Call)
+		lit, ok2 = unparen(e.Left).(*ast.IntLit)
+		if !ok || !ok2 {
+			return
+		}
+		op = flipOrdering(op)
+	}
+	n, isName := call.Callee.(*ast.Name)
+	if !isName || call.Args == nil || call.Args.Closure() || len(call.Args.Args) == 0 {
+		return
+	}
+	arg := call.Args.Args[0]
+	if arg.Value == nil || arg.Unpack || arg.Name != nil {
+		return
+	}
+	fn := x.lookupFunction(n)
+	if fn == nil || !strings.EqualFold(fn.Name, "strlen") && !strings.EqualFold(fn.Name, "mb_strlen") {
+		return
+	}
+	v, ok := types.IsIntLit(intLitType(lit.Raw))
+	if !ok {
+		return
+	}
+	if op == token.Kind('>') && v >= 0 || op == token.T_IS_GREATER_OR_EQUAL && v >= 1 {
+		t := x.pathType(arg.Value, at)
+		x.narrowPath(env, arg.Value, types.Intersect(t, types.String{NonEmpty: true}, x.p()), false)
+	}
 }
 
 // rangeNarrow narrows an int compared with an int by `<`, `>`, `<=` or `>=`
@@ -1012,7 +1437,7 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 			// `method_exists($o, 'toArray')`: on an `object` the member is
 			// known from here on, as PHPStan's hasMethod / hasProperty.
 			if len(e.Args.Args) >= 2 {
-				if base, ok := pathKey(arg); ok {
+				if base, ok := x.pathKey(arg); ok {
 					if lit, ok := e.Args.Args[1].Value.(*ast.StringLit); ok {
 						then.setPath(memberProof(base, name == "method_exists", program.StringValue(lit)), types.TMixed)
 					}
@@ -1143,6 +1568,22 @@ func withKey(t types.Type, key types.Type, present bool) types.Type {
 		}
 		if present && !s.Unsealed {
 			return types.TNever
+		}
+		if present {
+			// An unsealed shape that has the key has it as any value.
+			e := types.ShapeEntry{Type: types.TMixed}
+			switch k := key.(type) {
+			case types.StringLit:
+				e.Key = k.V
+			case types.Int:
+				if k.Lo != k.Hi {
+					return s
+				}
+				e.IsInt, e.IntKey = true, k.Lo
+			default:
+				return s
+			}
+			return types.Shape{Entries: append(append([]types.ShapeEntry{}, s.Entries...), e), Unsealed: true}
 		}
 		return s
 	})
@@ -1351,7 +1792,7 @@ func (x *fnCtx) applyAsserts(ce callee, env *state) (then, els *state) {
 		if b, ok := t.(types.BoolLit); ok && a.Var != "this" && !a.IfTrue && !a.IfFalse && !a.Negated {
 			// `@phpstan-assert true $condition` (PHPUnit's assertTrue): the
 			// argument is a condition that holds from here on.
-			if key, ok := pathKey(target); ok && isCall(target) {
+			if key, ok := x.pathKey(target); ok && isCall(target) {
 				// A call's result an earlier assertion fixed is a docblock
 				// fact, which PHPStan takes as uncertain: the object may
 				// have changed since (another object holding it was

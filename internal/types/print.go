@@ -272,7 +272,7 @@ func (pr *printer) print(t Type, nested bool) {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			if !t.List {
+			if !t.List || e.Optional { // list{int, 1?: string}
 				if e.IsInt {
 					b.WriteString(strconv.FormatInt(e.IntKey, 10))
 				} else if isIdent(e.Key) {

@@ -137,6 +137,13 @@ var (
 	// contradiction of `nothrow` beside `throws`, a syntax error, written
 	// in two places.
 	P2320 = Code{"P2320", Error, "nothrow or @throws void beside a thrown type"}
+	// P2321: a constant offset read from a shape that may lack it, an
+	// optional entry or a key an unsealed shape does not name, where no
+	// isset(), array_key_exists() or ?? stands guard (PHPStan's
+	// offsetAccess.notFound, "might not exist"). P2313 is the offset no
+	// value of the type has, as P2008 is the variable never defined and
+	// P2009 the one that might not be.
+	P2321 = Code{"P2321", Error, "offset might not exist"}
 
 	// P2 — flow
 	P2401 = Code{"P2401", Warning, "unreachable code"}

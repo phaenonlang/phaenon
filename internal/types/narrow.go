@@ -45,14 +45,30 @@ func Truthy(t Type) Type {
 			m.NonEmpty = true
 			return m
 		case Shape:
-			if !shapeNonEmpty(m) && len(m.Entries) == 0 && !m.Unsealed {
-				return TNever
-			}
+			return NonEmptyShape(m)
 		case Mixed:
 			return m
 		}
 		return m
 	})
+}
+
+// NonEmptyShape is s where it holds an entry at least: never for a sealed
+// shape with none, and a sealed shape whose one entry is optional has it,
+// as PHPStan's non-empty `array{a?: int}` is `array{a: int}`.
+func NonEmptyShape(s Shape) Type {
+	if shapeNonEmpty(s) || s.Unsealed {
+		return s
+	}
+	switch len(s.Entries) {
+	case 0:
+		return TNever
+	case 1:
+		e := s.Entries[0]
+		e.Optional = false
+		s.Entries = []ShapeEntry{e}
+	}
+	return s
 }
 
 // Falsy keeps the falsy values of t.
