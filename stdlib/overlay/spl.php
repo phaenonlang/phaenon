@@ -124,10 +124,13 @@ class ArrayIterator implements SeekableIterator, ArrayAccess, Serializable, Coun
     /** @param array<TKey, TValue>|object $array */
     public function __construct(object|array $array = [], int $flags = 0) {}
 
-    /** @return TValue|null */
+    // Iterator's TValue and TKey, past the end too: PHPStan's stub declares
+    // neither method here, so they are Iterator's there, and a subclass that
+    // repeats PHP's signature is compared with Iterator's.
+    /** @return TValue */
     public function current(): mixed {}
 
-    /** @return TKey|null */
+    /** @return TKey */
     public function key(): string|int|null {}
 
     /**

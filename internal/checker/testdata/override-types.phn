@@ -653,3 +653,65 @@ abstract class IdsAndLabels implements Ids, Labels
         return [];
     }
 }
+
+// A subclass of ArrayIterator or RecursiveArrayIterator that repeats PHP's
+// own signature of key() or current() narrows nothing: the two return
+// Iterator's TKey and TValue, as PHPStan reads them, whatever arguments
+// the subclass passes up.
+class Rows extends \ArrayIterator
+{
+    public function key(): string|int|null
+    {
+        return parent::key();
+    }
+
+    public function current(): mixed
+    {
+        return parent::current();
+    }
+}
+
+/**
+ * @extends \ArrayIterator<string, Open>
+ */
+class OpenRows extends \ArrayIterator
+{
+    public function key(): string|int|null
+    {
+        return parent::key();
+    }
+
+    public function current(): mixed
+    {
+        return parent::current();
+    }
+}
+
+class Tree extends \RecursiveArrayIterator
+{
+    public function key(): string|int|null
+    {
+        return parent::key();
+    }
+
+    public function current(): mixed
+    {
+        return parent::current();
+    }
+}
+
+/**
+ * @extends \RecursiveArrayIterator<int, Open>
+ */
+class OpenTree extends \RecursiveArrayIterator
+{
+    public function key(): string|int|null
+    {
+        return parent::key();
+    }
+
+    public function current(): mixed
+    {
+        return parent::current();
+    }
+}
