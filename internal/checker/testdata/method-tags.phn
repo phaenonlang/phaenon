@@ -1,0 +1,39 @@
+// @method tags: the parameter list ends at its own closing parenthesis and
+// a default value is read as PHP reads it, so a comma or a parenthesis
+// inside a string starts no parameter and ends no list.
+namespace App\MethodTags;
+
+/**
+ * @method void label(string $text = 'a, b)', int $width = 1)
+ * @method int count() the number of items (cached)
+ * @method void collect(int &...$into)
+ */
+final class Magic
+{
+    /** @param array<mixed> $arguments */
+    public function __call(string $name, array $arguments): mixed
+    {
+        return null;
+    }
+}
+
+function takesInt(int $i): void
+{
+}
+
+function takesString(string $s): void
+{
+}
+
+function magic(Magic $m): void
+{
+    $m->label('x');
+    $m->label('x', 2);
+    $m->label('x', 'y'); // want P2103 "argument 2 ($width) of App\MethodTags\Magic::label() expects int, 'y' given"
+    takesInt($m->count());
+    takesString($m->count()); // want P2103
+    $a = 1;
+    $b = 2;
+    $m->collect($a, $b);
+    $m->collect($a, 'b'); // want P2112 "is by reference and needs a variable"
+}
