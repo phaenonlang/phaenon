@@ -1,0 +1,66 @@
+// A class template whose bound names others: the iterator a wrapper takes
+// says what the wrapper yields. The constructor binds TInner alone; TKey
+// and TValue take what TInner's bound says of them, as PHPStan infers
+// them, and the bound holds TInner to nothing they have not said yet.
+// Written as PHP with docblocks, so that PHPStan judges the same lines.
+namespace App\TemplateBounds;
+
+final class Dog
+{
+}
+
+/**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @template TInner of \Traversable<TKey, TValue>
+ * @implements \IteratorAggregate<TKey, TValue>
+ */
+final class Wrap implements \IteratorAggregate
+{
+    /** @var TInner */
+    private \Traversable $inner;
+
+    /** @param TInner $inner */
+    public function __construct(\Traversable $inner)
+    {
+        $this->inner = $inner;
+    }
+
+    /** @return \Traversable<TKey, TValue> */
+    public function getIterator(): \Traversable
+    {
+        return $this->inner;
+    }
+}
+
+/** @param Wrap<int, Dog, \ArrayIterator<int, Dog>> $w */
+function dogs(Wrap $w): void
+{
+}
+
+/** @param Wrap<int, string, \ArrayIterator<int, string>> $w */
+function names(Wrap $w): void
+{
+}
+
+function takesDog(Dog $d): void
+{
+}
+
+/**
+ * @param \ArrayIterator<int, Dog> $rows
+ * @param \Traversable<int, Dog> $any
+ */
+function wrapped(\ArrayIterator $rows, \Traversable $any): void
+{
+    $w = new Wrap($rows);
+    dogs($w);
+    names($w); // want P2103 "Wrap<int, App\TemplateBounds\Dog, ArrayIterator<int, App\TemplateBounds\Dog>> given"
+    foreach ($w as $dog) {
+        takesDog($dog);
+    }
+    foreach (new Wrap($any) as $key => $dog) {
+        takesDog($dog);
+        takesDog($key); // want P2103
+    }
+}
