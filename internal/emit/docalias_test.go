@@ -1,13 +1,16 @@
 package emit
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestTranslateDocAliases: the name of a type alias in a docblock's type
 // becomes what the alias stands for, with the type arguments written
 // after it; every other byte stays (design/collections.md §6.5).
 func TestTranslateDocAliases(t *testing.T) {
 	expand := func(mention string, _ mentionContext) (string, bool) {
-		switch mention {
+		switch strings.Join(strings.Fields(mention), "") {
 		case "Row":
 			return "array{id: int}", true
 		case "Page<Row>":
@@ -29,10 +32,14 @@ func TestTranslateDocAliases(t *testing.T) {
 		{"/** @return Row::KIND */", "/** @return Row::KIND */"},
 		{"/** @param Rows $Row the Row */", "/** @param Rows $Row the Row */"},
 		{"/** @return Other\\Row */", "/** @return Other\\Row */"},
-		// A generic mention that runs over lines keeps its name: an edit
-		// in place keeps its line breaks, and an expansion has none of
-		// its own. The arguments are names on one line, and expand.
-		{"/**\n * @return Page<\n *     Row\n * >\n */", "/**\n * @return Page<\n *     array{id: int}\n * >\n */"},
+		// A mention that runs over lines is expanded on one, and the
+		// lines it gave up stand bare before the tag: the docblock keeps
+		// its line count, and what follows the type stays beside it.
+		{"/**\n * @return Page<\n *     Row\n * >\n */", "/**\n *\n *\n * @return array{items: list<array{id: int}>}\n */"},
+		{"    /**\n     * Pages.\n     *\n     * @param Page<\n     *     Row\n     * >|null $p the page\n     * @return int\n     */",
+			"    /**\n     * Pages.\n     *\n     *\n     *\n     * @param array{items: list<array{id: int}>}|null $p the page\n     * @return int\n     */"},
+		{"/** @param Page<\n *     Row> $p */", "/**\n * @param array{items: list<array{id: int}>} $p */"},
+		{"/**\n * @return list<Page<\n *   Row\n * >> the pages\n */", "/**\n *\n *\n * @return list<array{items: list<array{id: int}>}> the pages\n */"},
 	}
 	for _, c := range cases {
 		if got := translateDocWith(c.in, expand); got != c.want {

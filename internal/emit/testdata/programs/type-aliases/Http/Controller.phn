@@ -34,6 +34,21 @@ final class Controller
      */
     summary(array $rows): array => ['rows' => $rows, 'page' => [$rows, count($rows)]];
 
+    /**
+     * A mention written over several lines is expanded on one, and the
+     * docblock keeps its lines.
+     *
+     * @param Paged<
+     *     Row
+     * > $page what follows the type stays beside it
+     * @return int
+     */
+    spread(array $page): int => $page[1];
+
+    /** @param Paged<
+     *     Row>|null $page */
+    tight(?array $page): bool => $page === null;
+
     /** @param list<Row> $rows a docblock on one line, which gains the tag of the return type */
     paged(array $rows): Paged<Row> => [$rows, count($rows)];
 }

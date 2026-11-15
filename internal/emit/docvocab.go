@@ -114,14 +114,62 @@ func docTranslations(doc string, expand aliasExpand) []docEdit {
 	var out []docEdit
 	off := 0
 	for _, line := range strings.SplitAfter(blank, "\n") {
+		moved := false // one mention's lines per tag line: a second would need the same place
 		for _, r := range tagTypeRegions(blank, off, off+len(line)) {
-			if text := translateType(doc[r.Start:r.End], blank[r.Start:r.End], expand); text != doc[r.Start:r.End] {
+			text, lines := translateType(doc[r.Start:r.End], blank[r.Start:r.End], expand)
+			if len(lines) > 0 {
+				if moved {
+					text, _ = translateType(doc[r.Start:r.End], blank[r.Start:r.End], nil)
+				} else {
+					moved = true
+					out = append(out, movedLines(doc, blank, off, r, text, lines))
+					continue
+				}
+			}
+			if text != doc[r.Start:r.End] {
 				out = append(out, docEdit{r, text})
 			}
 		}
 		off += len(line)
 	}
 	return out
+}
+
+// movedLines is the edit of a tag's type, the region r of the line that
+// begins at off, whose translation text lost line breaks: an alias written
+// with its type arguments over several lines is expanded on one, and an
+// edit in place keeps the docblock's lines. The lines the mention gave up,
+// lines being their decorations, go before the tag as bare ` *` lines:
+//
+//   - @param Page<            *
+//   - Customer            *
+//   - > $p                    * @param array{items: list<\Customer>, total: int} $p
+//
+// Nothing PHPStan reads changes by a bare line above a tag, and what
+// follows the type on its last line, the parameter's name, stays beside
+// the type.
+func movedLines(doc, blank string, off int, r ast.Span, text string, lines []string) docEdit {
+	// p is where the tag line's own decoration, `/**` or ` *`, ends.
+	p := off
+	for i := off; i < r.Start; i++ {
+		if doc[i] != blank[i] {
+			p = i + 1
+		}
+	}
+	var b strings.Builder
+	if p == off {
+		// A line without a decoration: the bare lines stand before it.
+		for _, deco := range lines {
+			b.WriteString(deco + "\n")
+		}
+	} else {
+		for _, deco := range lines {
+			b.WriteString("\n" + deco)
+		}
+	}
+	b.WriteString(doc[p:r.Start])
+	b.WriteString(text)
+	return docEdit{ast.Span{Start: p, End: r.End}, b.String()}
 }
 
 // blankDecorations is doc with the comment's own marks — `/**`, `*/` and
@@ -267,8 +315,10 @@ func tagTypeRegions(blank string, start, end int) []ast.Span {
 // replaced in orig, so every other byte stays. expand gives the type the
 // name of a type alias stands for, with its type arguments when it has
 // them (`Page<Row>`), in PHPStan's spelling: PHPStan knows no alias of a
-// namespace (design/collections.md §4, §6.5).
-func translateType(orig, blank string, expand aliasExpand) string {
+// namespace (design/collections.md §4, §6.5). A mention that runs over
+// several lines is expanded on its first: lines are the decorations of the
+// lines it gave up, which the caller owes the docblock (movedLines).
+func translateType(orig, blank string, expand aliasExpand) (text string, lines []string) {
 	type repl struct {
 		start, end int
 		text       string
@@ -324,17 +374,12 @@ func translateType(orig, blank string, expand aliasExpand) string {
 				rs = append(rs, repl{i, i, "\\"})
 			case expand != nil && s[i] != '$' && !strings.HasPrefix(s[j:], "::"):
 				// The mention is the name and the type arguments that
-				// follow it. One that runs over lines stays as written: an
-				// edit in place keeps its line breaks, and an expansion has
-				// none of its own.
+				// follow it.
 				end := j
 				if next(j) == '<' {
 					if close, ok := angleEnd(s, j); ok {
 						end = close
 					}
-				}
-				if strings.ContainsAny(s[i:end], "\r\n") {
-					break
 				}
 				// `?` binds to the mention, and `|` and `&` join it to its
 				// neighbours: the expansion is spelled for where it stands.
@@ -349,6 +394,21 @@ func translateType(orig, blank string, expand aliasExpand) string {
 				}
 				if text, ok := expand(s[i:end], in); ok {
 					rs = append(rs, repl{start, end, text})
+					// The expansion has no line break: the lines the
+					// mention ran over are given up, their decorations kept.
+					for q := i; q < end; q++ {
+						if orig[q] != '\n' {
+							continue
+						}
+						deco := q + 1
+						for deco < end && (orig[deco] == ' ' || orig[deco] == '\t') {
+							deco++
+						}
+						if deco < end && orig[deco] == '*' {
+							deco++
+						}
+						lines = append(lines, strings.TrimRight(orig[q+1:deco], " \t"))
+					}
 					j = end
 				}
 			}
@@ -356,7 +416,7 @@ func translateType(orig, blank string, expand aliasExpand) string {
 		i = j
 	}
 	if len(rs) == 0 {
-		return orig
+		return orig, nil
 	}
 	sort.Slice(rs, func(a, b int) bool { return rs[a].start < rs[b].start })
 	var b strings.Builder
@@ -367,7 +427,7 @@ func translateType(orig, blank string, expand aliasExpand) string {
 		pos = r.end
 	}
 	b.WriteString(orig[pos:])
-	return b.String()
+	return b.String(), lines
 }
 
 func lastByte(s string) byte {

@@ -77,6 +77,27 @@ final class Controller
     }
 
     /**
+     * A mention written over several lines is expanded on one, and the
+     * docblock keeps its lines.
+     *
+     *
+     *
+     * @param list{list<array<string, int|string>>, int} $page what follows the type stays beside it
+     * @return int
+     */
+    public function spread(array $page): int
+    {
+        return $page[1];
+    }
+
+    /**
+     * @param list{list<array<string, int|string>>, int}|null $page */
+    public function tight(?array $page): bool
+    {
+        return $page === null;
+    }
+
+    /**
      * @param list<array<string, int|string>> $rows a docblock on one line, which gains the tag of the return type
      * @return list{list<array<string, int|string>>, int}
      */
@@ -85,4 +106,4 @@ final class Controller
         return [$rows, count($rows)];
     }
 }
-// phaenon-map v1 Controller.phn 1-6=1 7:1 9:4 10:6 12:9 19-21=16 22:16 23-25=16 26:17 27-29=18 30:18 31-33=18 34:19 35-37=20 38:20 39-41=20 42:21 43-45=22 46:22 47-49=22 50:23 51-53=24 54:24 55-57=24 58:25 59-61=26 62:26 63-65=26 66:27 75-77=35 78:36 79-82=37 83:38 84-86=38 87:39
+// phaenon-map v1 Controller.phn 1-6=1 7:1 9:4 10:6 12:9 19-21=16 22:16 23-25=16 26:17 27-29=18 30:18 31-33=18 34:19 35-37=20 38:20 39-41=20 42:21 43-45=22 46:22 47-49=22 50:23 51-53=24 54:24 55-57=24 58:25 59-61=26 62:26 63-65=26 66:27 75-77=35 78:36 89-91=46 92:47 96-98=50 99:51 100-103=52 104:53 105-107=53 108:54
