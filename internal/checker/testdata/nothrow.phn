@@ -174,3 +174,53 @@ final class QuietFirst implements Quiet, Plain
 {
     name(): string => throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\Quiet::name()"
 }
+
+// A constructor inherits nothrow from the parent's constructor, concrete
+// as it is, as PHPStan inherits its docblock, though PHP compares no
+// signature with it; not from a private one.
+class QuietBase
+{
+    __construct() nothrow
+    {
+    }
+}
+
+final class LoudChild extends QuietBase
+{
+    __construct()
+    {
+        throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\QuietBase::__construct()"
+    }
+}
+
+class MidQuiet extends QuietBase
+{
+}
+
+final class BelowMidQuiet extends MidQuiet
+{
+    __construct()
+    {
+        throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\QuietBase::__construct()"
+    }
+}
+
+class QuietHidden
+{
+    private __construct() nothrow
+    {
+    }
+
+    public static function make(): self
+    {
+        return new self();
+    }
+}
+
+final class BelowQuietHidden extends QuietHidden
+{
+    __construct()
+    {
+        throw new NotFound();
+    }
+}
