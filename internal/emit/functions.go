@@ -13,9 +13,9 @@ import (
 // parameter with an asymmetric visibility and no main one gets its implied
 // `public`, a closure in a constant expression becomes the `static
 // function` PHP 8.5 accepts there, an expression body becomes a PER
-// block and a `throws` clause a @throws tag. The opening braces of named
-// functions, methods and class-likes go where PER Coding Style puts them
-// (layout.go).
+// block and a `throws` clause a @throws tag (`nothrow`, `@throws void`).
+// The opening braces of named functions, methods and class-likes go where
+// PER Coding Style puts them (layout.go).
 // It runs after the generics lowering, so that a docblock that pass inserts
 // at a declaration's start precedes the rewritten head, and so that the
 // @throws tag joins that docblock when there is one.
@@ -92,10 +92,14 @@ func (e *emitter) lineIndent(off int) string {
 
 // throwsTag is the docblock tag a `throws A|B` clause compiles to, the
 // names as written (a docblock resolves them through the file's imports,
-// as the signature does); "" without a clause.
+// as the signature does), or `@throws void` for `nothrow`
+// (design/functions.md §4.5); "" without a clause.
 func (e *emitter) throwsTag(t *ast.Throws) string {
 	if t == nil {
 		return ""
+	}
+	if t.Nothrow {
+		return "@throws void"
 	}
 	parts := make([]string, len(t.Types))
 	for i, ty := range t.Types {

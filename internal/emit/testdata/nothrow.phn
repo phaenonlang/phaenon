@@ -1,0 +1,58 @@
+namespace App;
+
+// `nothrow` compiles to `@throws void` (design/functions.md §4.5), the
+// way a `throws` clause compiles to its tag: on a line of its own, in a
+// new docblock above the declaration and its attributes or in the
+// docblock the declaration has. A docblock that holds the tag already is
+// left as it is.
+
+interface Lookup
+{
+    find(int $id): ?string nothrow;
+
+    /** Whether the id is known. */
+    has(int $id): bool nothrow;
+}
+
+final class Memory implements Lookup {
+    /** @var array<int, string> */
+    private array $items = [];
+
+    find(int $id): ?string nothrow => $this->items[$id] ?? null;
+
+    /** Whether the id is known. */
+    has(int $id): bool nothrow {
+        return isset($this->items[$id]);
+    }
+
+    /**
+     * The number of entries.
+     */
+    size(): int NoThrow
+        => \count($this->items);
+
+    /** @throws void */
+    stated(): bool nothrow => $this->items === [];
+
+    clear(): void
+        nothrow {
+        $this->items = [];
+    }
+
+    #[\Deprecated]
+    old(int $id): bool nothrow => $this->has($id);
+
+    /** Beside its declaration. */ beside(): int nothrow => 0;
+
+    /** @param $items - the candidates */
+    first<T of object>(list<T> $items): ?T nothrow => $items[0] ?? null;
+
+    reset(): void nothrow {}
+}
+
+function lookup(Lookup $store, int $id): string nothrow
+{
+    return $store->find($id) ?? '';
+}
+
+function size(Memory $store): int nothrow => $store->size();
