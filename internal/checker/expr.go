@@ -116,6 +116,7 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 	case *ast.Isset:
 		return x.isset(e, env)
 	case *ast.Empty:
+		x.idleNullsafe(e.Expr, env, "empty()", "in empty()")
 		x.exprLenient(e.Expr, env)
 		return types.TBool
 	case *ast.Exit:
@@ -2191,6 +2192,7 @@ func (x *fnCtx) arithResult(l, r types.Type, span ast.Span, op string) types.Typ
 }
 
 func (x *fnCtx) coalesce(e *ast.Binary, env *state, expected types.Type) types.Type {
+	x.idleNullsafe(e.Left, env, "??", "on the left side of ??")
 	left := x.exprLenient(e.Left, env)
 	switch e.Left.(type) {
 	case *ast.Variable:
@@ -2281,8 +2283,44 @@ func (x *fnCtx) ternary(e *ast.Ternary, env *state, expected types.Type) types.T
 	return types.MakeUnion(thenT, elseT)
 }
 
+// idleNullsafe reports a ?-> property fetch that `??`, isset() or empty()
+// (op, where it stands) reads: they read a property of null without an
+// error, so `$u?->email ?? 'none'` is `$u->email ?? 'none'`, as PHPStan
+// reports it (nullsafe.neverNull). The fetch itself is what they read,
+// not a call: a method of null throws there too. A receiver that is never
+// null is P2307 already.
+func (x *fnCtx) idleNullsafe(e ast.Expr, env *state, op, where string) {
+	for {
+		p, ok := e.(*ast.Paren)
+		if !ok {
+			break
+		}
+		e = p.Expr
+	}
+	f, ok := e.(*ast.PropertyFetch)
+	if !ok || !f.NullSafe {
+		return
+	}
+	obj := x.pathType(f.Object, env)
+	if !types.IsNullable(obj) && !types.IsMixed(obj) {
+		return
+	}
+	if _, onlyNull := obj.(types.Null); onlyNull {
+		// A receiver that is only null makes the operand always null, which
+		// PHPStan reports first (nullCoalesce.expr, isset.expr) and in
+		// place of this; what reads a member of null says so.
+		return
+	}
+	name := "?->"
+	if id, ok := identName(f.Name); ok {
+		name += id
+	}
+	x.report(f.S, P2307, "%s %s is unnecessary: %s reads a property of null without an error; use ->", name, where, op)
+}
+
 func (x *fnCtx) isset(e *ast.Isset, env *state) types.Type {
 	for _, v := range e.Vars {
+		x.idleNullsafe(v, env, "isset()", "in isset()")
 		t := x.exprLenient(v, env)
 		if !types.IsNullable(t) && !types.IsMixed(t) {
 			switch v.(type) {
