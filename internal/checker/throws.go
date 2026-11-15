@@ -429,12 +429,33 @@ func mayBeZero(t types.Type) bool {
 	return false
 }
 
-// bodyThrows checks a body's escaping throw points against its own
+// heldThrows is the declaration a method's body is held to, and how the
+// P2405 message names it: the method's own, or, when it declares nothing,
+// a `@throws void` it inherits from the method it overrides, which PHPStan
+// holds the body to as well (throws.void). An inherited list of classes is
+// not the body's: P2404 counts only the members a declaration writes.
+func heldThrows(m *program.Method) (types.Type, string) {
+	if m.Throws != nil {
+		return m.Throws, "declares @throws void"
+	}
+	d := m.ThrowsDeclarer()
+	if d == nil || !isVoidThrows(d.Throws) {
+		return nil, ""
+	}
+	from := d.Name
+	if d.Class != nil {
+		from = d.Class.Name + "::" + d.Name
+	}
+	return d.Throws, "inherits @throws void from " + from + "()"
+}
+
+// bodyThrows checks a body's escaping throw points against its
 // declaration: P2405 at each explicit point under `@throws void`, where
-// PHPStan reports it, and P2404 at the declaration for a member nothing
-// throws. overridable methods keep their members: their
+// PHPStan reports it, its message saying how the body came by the
+// declaration (voidSays), and P2404 at the declaration for a member
+// nothing throws. overridable methods keep their members: their
 // declaration is the contract their overrides are held to.
-func (x *fnCtx) bodyThrows(declared types.Type, overridable bool, what string, at ast.Span, points []throwPoint) {
+func (x *fnCtx) bodyThrows(declared types.Type, voidSays string, overridable bool, what string, at ast.Span, points []throwPoint) {
 	if declared == nil {
 		return
 	}
@@ -444,7 +465,7 @@ func (x *fnCtx) bodyThrows(declared types.Type, overridable bool, what string, a
 				continue
 			}
 			for _, e := range tp.excs {
-				x.report(tp.at, P2405, "%s declares @throws void but throws %s here", what, e.name)
+				x.report(tp.at, P2405, "%s %s but throws %s here", what, voidSays, e.name)
 			}
 		}
 		return

@@ -66,7 +66,7 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 	if c.opts.Thrown != nil {
 		c.opts.Thrown(f, fn.Decl, exported(points))
 	}
-	ctx.bodyThrows(fn.Throws, false, ctx.name, fn.Decl.Name.S, points)
+	ctx.bodyThrows(fn.Throws, "declares @throws void", false, ctx.name, fn.Decl.Name.S, points)
 }
 
 // declSpan is where method-level diagnostics point: the method name.
@@ -748,7 +748,8 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	if ctx.c.opts.Thrown != nil {
 		ctx.c.opts.Thrown(ctx.file, d, exported(points))
 	}
-	ctx.bodyThrows(m.Throws, overridable, ctx.name, d.Name.S, points)
+	held, voidSays := heldThrows(m)
+	ctx.bodyThrows(held, voidSays, overridable, ctx.name, d.Name.S, points)
 }
 
 // hasOverride reports an #[\Override] attribute among a declaration's.

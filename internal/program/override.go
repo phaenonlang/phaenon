@@ -172,9 +172,19 @@ func orMixed(t types.Type) types.Type {
 // PHPStan inherits @throws with the rest of a docblock. nil when nothing
 // declares it (design/tooling.md §9.1).
 func (m *Method) DeclaredThrows() types.Type {
+	if d := m.ThrowsDeclarer(); d != nil {
+		return d.Throws
+	}
+	return nil
+}
+
+// ThrowsDeclarer is the method whose declaration DeclaredThrows reads: m
+// when it declares what it throws, else the nearest method up its chain
+// of overrides that does. nil when none does.
+func (m *Method) ThrowsDeclarer() *Method {
 	for seen := 0; m != nil && seen < 64; seen++ {
 		if m.Throws != nil {
-			return m.Throws
+			return m
 		}
 		m = m.Overridden()
 	}

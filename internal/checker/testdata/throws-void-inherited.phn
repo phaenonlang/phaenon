@@ -1,0 +1,106 @@
+namespace ThrowsVoidInherited;
+
+// An override that declares nothing takes the declaration of the method it
+// overrides (design/tooling.md §9.1), `@throws void` included: a call to it
+// is no throw point, and its body is held to the explicit throw points,
+// P2405 at each, as PHPStan holds it (throws.void). A docblock without a
+// @throws tag declares nothing either. An override that declares its own
+// @throws is held to that alone, and implicit points break nothing.
+
+final class NotFound extends \RuntimeException
+{
+}
+
+interface Lookup
+{
+    /** @throws void */
+    public function find(int $id): string;
+}
+
+class Base
+{
+    /** @throws void */
+    public function name(): string
+    {
+        return 'base';
+    }
+
+    /** @throws void */
+    public function size(): int
+    {
+        return 0;
+    }
+
+    /** @throws void */
+    public function ratio(int $n): int
+    {
+        return $n;
+    }
+}
+
+final class Memory implements Lookup
+{
+    public function find(int $id): string
+    {
+        if ($id < 0) {
+            throw new NotFound(); // want P2405 "inherits @throws void from ThrowsVoidInherited\Lookup::find()"
+        }
+        return 'x';
+    }
+}
+
+class Child extends Base
+{
+    /** The child's name. */
+    public function name(): string
+    {
+        return $this->lookup(1); // want P2405 "NotFound"
+    }
+
+    /** @throws NotFound */
+    public function size(): int
+    {
+        throw new NotFound();
+    }
+
+    public function ratio(int $n): int
+    {
+        return 10 % $n; // want P2405 "DivisionByZeroError"
+    }
+
+    /** @throws NotFound */
+    public function lookup(int $id): string
+    {
+        return $id > 0 ? 'x' : throw new NotFound();
+    }
+}
+
+final class GrandChild extends Child
+{
+    public function name(): string
+    {
+        return undeclared();
+    }
+
+    public function ratio(int $n): int
+    {
+        if ($n === 0) {
+            throw new \DomainException(); // want P2405 "from ThrowsVoidInherited\Base::ratio()"
+        }
+        return $n;
+    }
+}
+
+function undeclared(): string
+{
+    return 'y';
+}
+
+function caller(Memory $m, Child $c): string
+{
+    try {
+        return $m->find(1) . $c->name();
+    } catch (NotFound $e) { // want P2403
+        return '';
+    }
+}
