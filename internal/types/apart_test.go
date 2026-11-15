@@ -3,8 +3,10 @@ package types
 import "testing"
 
 // apartH has classes on two branches (User with its final Admin, Order),
-// an interface neither Order nor Foo implements, and a generic class of
-// each variance.
+// an interface neither Order nor Foo implements, a generic class of each
+// variance, and subclasses that pass their generic parent arguments: their
+// own (SubBox<T> extends Box<T>), fixed ones (AdminBox extends Box<Admin>,
+// UserSource extends Source<User>) or none (RawBox extends Box).
 var apartH = mapHierarchy{
 	parents: map[string][]string{
 		"user":             {"JsonSerializable"},
@@ -15,10 +17,20 @@ var apartH = mapHierarchy{
 		"box":              {},
 		"source":           {},
 		"sink":             {},
+		"subbox":           {"Box"},
+		"adminbox":         {"Box"},
+		"rawbox":           {"Box"},
+		"usersource":       {"Source"},
 	},
 	final: map[string]bool{"admin": true, "foo": true},
 	iface: map[string]bool{"jsonserializable": true},
 	vars:  map[string][]Variance{"source": {Covariant}, "sink": {Contravariant}},
+	supers: map[string]func([]Type) Class{
+		"subbox":     func(args []Type) Class { return Class{Name: "Box", Args: args} },
+		"adminbox":   func([]Type) Class { return Class{Name: "Box", Args: []Type{NewClass("Admin")}} },
+		"rawbox":     func([]Type) Class { return Class{Name: "Box"} },
+		"usersource": func([]Type) Class { return Class{Name: "Source", Args: []Type{NewClass("User")}} },
+	},
 }
 
 func TestNeverSubtype(t *testing.T) {
@@ -83,6 +95,11 @@ func TestNeverSubtype(t *testing.T) {
 		{of("Box", order), of("Box", TArrayKey)},
 		{of("Source", order), of("Source", user)},
 		{of("Sink", order), of("Sink", user)},
+		{of("SubBox", order), of("Box", user)}, // the arguments a subclass passes up
+		{of("SubBox", admin), of("Box", user)},
+		{NewClass("AdminBox"), of("Box", user)},
+		{NewClass("UserSource"), of("Source", order)},
+		{list(of("SubBox", order)), list(of("Box", user))},
 		{sig(TInt, TString), sig(TString, TInt)},
 		{sig(TString, TInt, TInt), sig(TString, TInt)}, // requires an argument its callers do not pass
 		{sig(TString, list(TInt)), sig(TString, list(TString))},
@@ -135,6 +152,11 @@ func TestNeverSubtype(t *testing.T) {
 		{of("Box", TMixed), of("Box", user)},
 		{of("Source", user), of("Source", admin)},
 		{of("Sink", admin), of("Sink", user)},
+		{of("SubBox", user), of("Box", user)},
+		{NewClass("AdminBox"), of("Box", admin)},
+		{NewClass("UserSource"), of("Source", json)},
+		{NewClass("RawBox"), of("Box", user)},  // no arguments passed up
+		{of("Box", user), of("SubBox", order)}, // the class given may be the subclass expected
 		{NewClass("Unknown"), user},
 		{Static{}, user},
 		{TCallable, sig(TString, TInt)},

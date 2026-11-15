@@ -1068,7 +1068,10 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method) 
 // open, and code that works is full of it.
 func (c *Checker) overrideFits(sub, super types.Type) bool {
 	if types.IsSubtype(sub, super, c.p) {
-		return true
+		// IsSubtype steps up from a class to a generic ancestor without
+		// the arguments the class passes it (`ArrayIterator<int, Cat>` for
+		// `Iterator<int, Dog>`); NeverSubtype compares them.
+		return !types.NeverSubtype(sub, super, c.p)
 	}
 	if !types.IsSubtype(types.Erase(sub), types.Erase(super), c.p) {
 		return false

@@ -11,7 +11,9 @@ package types
 //   - an `array` may be a `map<string, mixed>`, a `class-string` a
 //     `class-string<User>` and an `'a'|'b'` an `'a'`: the wider type is not
 //     apart from the narrower one;
-//   - a union is apart from a type when each of its members is.
+//   - a union is apart from a type when each of its members is;
+//   - a class meets a generic ancestor with the arguments it passes up:
+//     `ArrayIterator<int, Cat>` is never an `Iterator<int, Dog>`.
 //
 // Type parameters stand for their bounds, as they do in PHPStan's rules: a
 // method's `T` and the `TDoc` its override names are the same `object`.
@@ -49,7 +51,7 @@ func apart(a, b Type, h Hierarchy, depth int) bool {
 	if c, ok := b.(Conditional); ok {
 		b = MakeUnion(c.Then, c.Else)
 	}
-	if subtype(a, b, h, 0) {
+	if subtype(a, b, h, 0) && !inheritsArgs(a, b, h) {
 		return false
 	}
 	as, bs := Members(a), Members(b)
@@ -186,8 +188,9 @@ func arraysApart(a, b Type, h Hierarchy, depth int) bool {
 }
 
 // classesApart tells two object types that share no instance, or name one
-// generic class with arguments that do not go together. Unrelated classes
-// share none; an interface and a class that does not implement it do in a
+// generic class with arguments that do not go together, directly or
+// through the arguments a subclass passes up. Unrelated classes share
+// none; an interface and a class that does not implement it do in a
 // subclass, unless the class is final. A class given where its subclass is
 // expected may be one.
 func classesApart(a, b Type, h Hierarchy, depth int) bool {
@@ -202,13 +205,69 @@ func classesApart(a, b Type, h Hierarchy, depth int) bool {
 	if SameClass(ca.Name, cb.Name) {
 		return argsApart(ca, cb, h, depth)
 	}
-	if h.IsSubclassOf(ca.Name, cb.Name) || h.IsSubclassOf(cb.Name, ca.Name) {
+	if h.IsSubclassOf(ca.Name, cb.Name) {
+		return inheritedArgsApart(ca, cb, h, depth)
+	}
+	if h.IsSubclassOf(cb.Name, ca.Name) {
 		return false
 	}
 	if h.IsFinal(ca.Name) || h.IsFinal(cb.Name) {
 		return true
 	}
 	return !h.IsInterface(ca.Name) && !h.IsInterface(cb.Name)
+}
+
+// inheritedArgsApart compares a class with a generic ancestor of it by the
+// arguments the class passes up its @extends and @implements:
+// `ArrayIterator<int, Cat>` is an `Iterator<int, Cat>`, apart from
+// `Iterator<int, Dog>`. Arguments it does not pass, and an ancestor
+// written without its arguments, decide nothing.
+func inheritedArgsApart(a, b Class, h Hierarchy, depth int) bool {
+	if len(b.Args) == 0 {
+		return false
+	}
+	passed, ok := h.SuperArgs(a, b.Name)
+	if !ok || len(passed) != len(b.Args) {
+		return false
+	}
+	args := make([]Type, len(passed))
+	for i, t := range passed {
+		args[i] = toBounds(t)
+	}
+	return argsApart(Class{Name: b.Name, Args: args}, b, h, depth)
+}
+
+// inheritsArgs reports whether a mentions a class of which b mentions a
+// generic ancestor with arguments. subtype steps up from the one to the
+// other without comparing the arguments, so its yes for such a pair is no
+// answer: apart maps them instead.
+func inheritsArgs(a, b Type, h Hierarchy) bool {
+	if h == nil {
+		return false
+	}
+	var ancestors []string
+	Walk(b, func(t Type) {
+		if c, ok := t.(Class); ok && len(c.Args) > 0 {
+			ancestors = append(ancestors, c.Name)
+		}
+	})
+	if len(ancestors) == 0 {
+		return false
+	}
+	found := false
+	Walk(a, func(t Type) {
+		c, ok := t.(Class)
+		if !ok || found {
+			return
+		}
+		for _, name := range ancestors {
+			if !SameClass(c.Name, name) && h.IsSubclassOf(c.Name, name) {
+				found = true
+				return
+			}
+		}
+	})
+	return found
 }
 
 // argsApart compares the type arguments of one class by their variance. An

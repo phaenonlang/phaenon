@@ -12,6 +12,9 @@ type mapHierarchy struct {
 	final   map[string]bool
 	iface   map[string]bool
 	vars    map[string][]Variance
+	// supers gives the generic supertype a class passes arguments to, as a
+	// function of its own arguments.
+	supers map[string]func(args []Type) Class
 }
 
 func (h mapHierarchy) IsSubclassOf(sub, super string) bool {
@@ -32,6 +35,19 @@ func (h mapHierarchy) IsInterface(name string) bool          { return h.iface[st
 func (h mapHierarchy) Variances(name string) []Variance      { return h.vars[strings.ToLower(name)] }
 func (h mapHierarchy) IsCallableName(name string) bool       { return false }
 func (h mapHierarchy) PropertyType(class, name string) (Type, bool) {
+	return nil, false
+}
+func (h mapHierarchy) SuperArgs(c Class, super string) ([]Type, bool) {
+	for range 16 {
+		if strings.EqualFold(c.Name, super) {
+			return c.Args, true
+		}
+		up := h.supers[strings.ToLower(c.Name)]
+		if up == nil {
+			return nil, false
+		}
+		c = up(c.Args)
+	}
 	return nil, false
 }
 func (h mapHierarchy) Exists(name string) bool {

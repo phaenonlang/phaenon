@@ -49,6 +49,25 @@ interface Slot
 {
 }
 
+/**
+ * @template T
+ * @implements Slot<T>
+ */
+class ListSlot implements Slot
+{
+}
+
+/**
+ * @implements Slot<Open>
+ */
+class OpenSlot implements Slot
+{
+}
+
+class RawSlot implements Slot
+{
+}
+
 enum Suit
 {
     case Hearts;
@@ -151,6 +170,15 @@ abstract class Base
     /** @param Suit::Hearts|Suit::Spades $x */
     abstract public function enumCaseParam(Suit $x): void;
 
+    /** @return Slot<Open> */
+    abstract public function inheritedArgument(): Slot;
+
+    /** @return Slot<Other> */
+    abstract public function fixedArgument(): Slot;
+
+    /** @return \Iterator<int, Open> */
+    abstract public function iteratorArgument(): \Iterator;
+
     /**
      * @template T of object
      * @param class-string<T> $x
@@ -195,6 +223,12 @@ abstract class Base
 
     /** @return Suit::Hearts|Suit::Spades */
     abstract public function sharedCase(): Suit;
+
+    /** @return \Traversable<int, Thing> */
+    abstract public function inheritedCovariant(): \Traversable;
+
+    /** @return Slot<Open> */
+    abstract public function passesNothing(): Slot;
 
     /** @return string|array<string> */
     abstract public function sharedMember(): string|array;
@@ -390,6 +424,25 @@ abstract class Child extends Base
     {
     }
 
+    // A subclass is compared by the arguments it passes up its @extends
+    // and @implements.
+    /** @return ListSlot<Other> */
+    public function inheritedArgument(): ListSlot // want P2502 "return type App\OverrideTypes\ListSlot<App\OverrideTypes\Other> of App\OverrideTypes\Child::inheritedArgument() is not covariant with App\OverrideTypes\Base::inheritedArgument() (App\OverrideTypes\Slot<App\OverrideTypes\Open>)"
+    {
+        throw new \LogicException();
+    }
+
+    public function fixedArgument(): OpenSlot // want P2502
+    {
+        throw new \LogicException();
+    }
+
+    /** @return \ArrayIterator<int, Other> */
+    public function iteratorArgument(): \ArrayIterator // want P2502
+    {
+        throw new \LogicException();
+    }
+
     /**
      * @template TOpen of Open
      * @param class-string<TOpen> $x
@@ -470,6 +523,17 @@ abstract class Child extends Base
     public function sharedCase(): Suit
     {
         return Suit::Spades;
+    }
+
+    /** @return \ArrayIterator<int, Open> */
+    public function inheritedCovariant(): \ArrayIterator
+    {
+        throw new \LogicException();
+    }
+
+    public function passesNothing(): RawSlot
+    {
+        throw new \LogicException();
     }
 
     /** @return string|array<int> */

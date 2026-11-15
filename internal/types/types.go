@@ -53,6 +53,11 @@ type Hierarchy interface {
 	// neither of which extends the other share no instance; a class and an
 	// interface it does not implement may, in a subclass.
 	IsInterface(name string) bool
+	// SuperArgs is the type arguments a class passes the named ancestor,
+	// through its @extends and @implements (`ArrayIterator<int, Cat>` gives
+	// `Iterator` int and Cat); ok is false when either class is unknown or
+	// the second is no ancestor of the first.
+	SuperArgs(c Class, super string) (args []Type, ok bool)
 }
 
 // Variance of a class type parameter.
