@@ -430,6 +430,10 @@ class SplPriorityQueue implements Iterator, Countable
  */
 class SplObjectStorage implements Countable, SeekableIterator, Serializable, ArrayAccess
 {
+    // Iterator's TValue, which is TObject here, as PHPStan reads it: a
+    // subclass that repeats PHP's `current(): object` is compared with it.
+    /** @return TObject */
+    public function current(): object {}
 }
 
 /**

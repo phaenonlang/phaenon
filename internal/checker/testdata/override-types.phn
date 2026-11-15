@@ -886,3 +886,25 @@ abstract class RawSlots extends Slots
 {
     abstract public function open(): ThingSlot; // want P2502 "return type App\OverrideTypes\ThingSlot of App\OverrideTypes\RawSlots::open() is not covariant with App\OverrideTypes\Slots::open() (App\OverrideTypes\Slot<App\OverrideTypes\Open>)"
 }
+
+// SplObjectStorage<TObject, TData> yields TObject: a subclass that repeats
+// PHP's own `current(): object` narrows nothing, raw or with its
+// arguments.
+class Storage extends \SplObjectStorage
+{
+    public function current(): object
+    {
+        return parent::current();
+    }
+}
+
+/**
+ * @extends \SplObjectStorage<Open, string>
+ */
+class OpenStorage extends \SplObjectStorage
+{
+    public function current(): object
+    {
+        return parent::current();
+    }
+}
