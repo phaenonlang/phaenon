@@ -33,14 +33,25 @@ func IsAcceptable(arg, param Type, h Hierarchy) bool {
 	if !Equal(widened, arg) && subtype(widened, param, h, 0) {
 		return true
 	}
-	return acceptsMaybe(arg, param, h, 0)
+	return acceptsArray(arg, param, h, 0)
 }
 
-// acceptsMaybe is the acceptance PHPStan grants a general array against an
-// array shape: `array<string, string>` for `array{spec: string}` passes when
-// the keys and values can be the shape's, since the array may well be one.
+// acceptsArray is the acceptance PHPStan grants a general array beyond
+// subtyping, at level max, where what only might fit is reported:
+//
+//   - `array<string, int>` passes for `array{a?: int}`: every entry the
+//     array's keys can reach is optional, and takes the array's values. A
+//     required entry is refused, since the array might not have the key
+//     (offset 0 of a list that is not empty is the one it has for
+//     certain), and so is a value that only might fit
+//     (`array<string, mixed>` or `array<string, int|string>` for an int
+//     entry). The keys the shape does not name are no matter, as for a
+//     shape with more keys than the parameter's;
+//   - `array<string, V>` passes for `array<string, W>` when V passes for W
+//     in this same sense, key by key and value by value.
+//
 // Everything else is decided by subtyping; mixed values are not accepted.
-func acceptsMaybe(arg, param Type, h Hierarchy, depth int) bool {
+func acceptsArray(arg, param Type, h Hierarchy, depth int) bool {
 	if depth > 8 {
 		return false
 	}
@@ -50,7 +61,7 @@ func acceptsMaybe(arg, param Type, h Hierarchy, depth int) bool {
 	for _, a := range Members(arg) {
 		ok := false
 		for _, p := range Members(param) {
-			if subtype(a, p, h, depth) || arrayMaybe(a, p, h, depth) {
+			if subtype(a, p, h, depth) || arrayAccepted(a, p, h, depth) {
 				ok = true
 				break
 			}
@@ -62,7 +73,7 @@ func acceptsMaybe(arg, param Type, h Hierarchy, depth int) bool {
 	return true
 }
 
-func arrayMaybe(a, p Type, h Hierarchy, depth int) bool {
+func arrayAccepted(a, p Type, h Hierarchy, depth int) bool {
 	arr, ok := a.(Array)
 	if !ok {
 		return false
@@ -72,8 +83,13 @@ func arrayMaybe(a, p Type, h Hierarchy, depth int) bool {
 		if p.List && !arr.List {
 			return false
 		}
-		return acceptsMaybe(arr.Key, p.Key, h, depth+1) && !IsMixed(arr.Value) && acceptsMaybe(arr.Value, p.Value, h, depth+1)
+		return acceptsArray(arr.Key, p.Key, h, depth+1) && !IsMixed(arr.Value) && acceptsArray(arr.Value, p.Value, h, depth+1)
 	case Shape:
+		// A list shape takes a list, as list<V> does: stricter than
+		// PHPStan, which holds a general array to the entries alone.
+		if p.List && !arr.List {
+			return false
+		}
 		for _, e := range p.Entries {
 			if !Overlaps(arr.Key, shapeKeyType(e), h) {
 				if e.Optional {
@@ -81,7 +97,10 @@ func arrayMaybe(a, p Type, h Hierarchy, depth int) bool {
 				}
 				return false
 			}
-			if !acceptsMaybe(arr.Value, e.Type, h, depth+1) && !Overlaps(arr.Value, e.Type, h) {
+			// A list that is not empty has its offset 0, and no other
+			// offset is known of a general array.
+			certain := arr.List && arr.NonEmpty && e.IsInt && e.IntKey == 0
+			if !e.Optional && !certain || !acceptsArray(arr.Value, e.Type, h, depth+1) {
 				return false
 			}
 		}
@@ -363,12 +382,14 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 			}
 			return subtype(a.Key, b.Key, h, depth+1) && subtype(a.Value, b.Value, h, depth+1)
 		case Shape:
-			// A general array fits only an unsealed shape with all-optional entries.
-			if !b.Unsealed {
+			// A general array is a shape only when the shape admits all the
+			// array may hold: it is unsealed, and every entry is optional
+			// and takes the array's values where its keys can reach it.
+			if !b.Unsealed || b.List && !a.List {
 				return false
 			}
 			for _, e := range b.Entries {
-				if !e.Optional {
+				if !e.Optional || Overlaps(a.Key, shapeKeyType(e), h) && !subtype(a.Value, e.Type, h, depth+1) {
 					return false
 				}
 			}

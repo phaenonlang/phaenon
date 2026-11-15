@@ -250,4 +250,9 @@ final class FlagCache
 
         return $this->statuses[$name][$key] ??= $status;
     }
+
+    public function any(string $name, int $key): void
+    {
+        $this->seen[$name][$key] = true; // want P2201
+    }
 }

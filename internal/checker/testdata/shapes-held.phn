@@ -54,3 +54,110 @@ function unpacked(array $pair, array $named, array $row, array $wrong, array $in
     // A general array unpacks into a general array.
     takePair([...$ints]); // want P2103
 }
+
+// A general array is no shape that requires a key: the array might not
+// have it. It passes where every entry its keys can reach is optional and
+// takes its values, the one case where it may well be the shape.
+
+/** @param array{a: int} $a */
+function takeA(array $a): void {}
+
+/** @param array{a?: int} $a */
+function takeOptionalA(array $a): void {}
+
+/** @param array{a?: int, b?: string} $ab */
+function takeOptionalAB(array $ab): void {}
+
+/** @param array{a?: int, ...} $open */
+function takeOpenOptionalA(array $open): void {}
+
+/** @param array{id: int, ...} $open */
+function takeOpen(array $open): void {}
+
+/** @param array{} $none */
+function takeNone(array $none): void {}
+
+/** @param array{0: int} $first */
+function takeFirst(array $first): void {}
+
+/** @param list{int} $single */
+function takeSingle(array $single): void {}
+
+/** @param list{0?: int} $first */
+function takeOptionalFirst(array $first): void {}
+
+/** @param list<array{a: int}> $rows */
+function takeRows(array $rows): void {}
+
+/**
+ * @param array<string, mixed> $bag
+ * @param array<string, int> $ints
+ * @param array<string, string> $strings
+ * @param array<int, int> $byNumber
+ * @param array<string, int|string> $mixed
+ * @param non-empty-array<string, int> $some
+ * @param list<int> $list
+ * @param non-empty-list<int> $someList
+ * @param list<int|string> $pairs
+ * @param mixed[] $anything
+ * @param list<array<string, int>> $rows
+ * @param array{a: int}|array<string, int> $either
+ * @return array{a: int}
+ */
+function general(array $bag, array $ints, array $strings, array $byNumber, array $mixed, array $some, array $list, array $someList, array $pairs, array $anything, array $rows, array $either): array
+{
+    takeRow($bag); // want P2103
+    takeA($ints); // want P2103
+    takeA($strings); // want P2103
+    takeA($byNumber); // want P2103
+    takeA($some); // want P2103
+    takeA($anything); // want P2103
+    takeA($either); // want P2103
+    takeOpen($ints); // want P2103
+    // Every entry optional: the array may be the shape, and its values fit.
+    takeOptionalA($ints);
+    takeOpenOptionalA($ints);
+    takeOptionalA($byNumber);
+    takeOptionalA($strings); // want P2103
+    takeOptionalA($mixed); // want P2103
+    takeOptionalA($bag); // want P2103
+    takeOpenOptionalA($bag); // want P2103
+    takeOptionalAB($ints); // want P2103
+    takeNone($ints);
+    takeOptionalA([]);
+    takeRow([]); // want P2103
+    // A list that is not empty has its first offset, and no other.
+    takeFirst($list); // want P2103
+    takeFirst($someList);
+    takeSingle($someList);
+    takeSingle($list); // want P2103
+    // A list shape takes a list, and only a list: stricter than PHPStan,
+    // which holds a general array to the entries alone.
+    takeOptionalFirst($list);
+    takeOptionalFirst($byNumber); // want P2103
+    takePair($pairs); // want P2103
+    takeRows($rows); // want P2103
+    takeRows([['a' => 1]]);
+
+    return $ints; // want P2202
+}
+
+function bareArray(array $bare): void // want P2516
+{
+    takeA($bare); // want P2103
+    takeOptionalA($bare); // want P2103
+    takeNone($bare);
+}
+
+final class GeneralHolder
+{
+    /** @var array{a: int} */
+    public array $a = ['a' => 0];
+
+    /** @param array<string, int> $ints */
+    public function set(array $ints): void
+    {
+        $this->a = ['a' => 1];
+        $this->a = $ints; // want P2201
+    }
+}
