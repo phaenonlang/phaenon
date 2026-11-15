@@ -26,6 +26,16 @@ type Any = array{...};
  * @deprecated sort by Row
  */
 type Rank = array{by: string, down?: bool};
+
+/**
+ * A docblock is the declaration's across the comments between them, as PHP
+ * attaches it: this one goes with its `type` too, and the notes with it.
+ *
+ * @internal
+ */
+// a note on the alias
+# and another
+type Mark = array{at: int};
 final class Customer
 {
     __construct(public readonly string $name) {}
@@ -65,6 +75,8 @@ final class Orders
     any(Any $any): int => count($any);
 
     rank(Rank $rank): string => $rank['by'];
+
+    mark(Mark $mark): int => $mark['at'];
 
     /**
      * A docblock's shape may hold a named one.

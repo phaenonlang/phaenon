@@ -5,7 +5,9 @@ import (
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
 )
 
 // An import the compiled file would not use is left out of it. An import
@@ -274,15 +276,25 @@ func (e *emitter) erasedOnly(f *ast.File, statements []ast.Span, named map[strin
 }
 
 // aliasDeclaration is the span a `type` declaration is removed with: the
-// statement, and the docblock that documents it.
+// statement, and the docblock that documents it with whatever comments
+// stand between the two. PHP attaches a doc comment to the declaration
+// after it across other comments, so a docblock left behind a `// note`
+// would be the next class's.
 func (e *emitter) aliasDeclaration(a *ast.TypeAlias) ast.Span {
 	s := a.S
 	if a.Doc == "" {
 		return s
 	}
-	if at := bytes.LastIndex(e.src[:s.Start], []byte(a.Doc)); at >= 0 && len(bytes.TrimSpace(e.src[at+len(a.Doc):s.Start])) == 0 {
-		s.Start = at
+	at := bytes.LastIndex(e.src[:s.Start], []byte(a.Doc))
+	if at < 0 {
+		return s
 	}
+	for _, t := range lexer.Tokenize(e.src[at+len(a.Doc):s.Start], lexer.ModePhaenon) {
+		if t.Kind != token.EOF && !t.Kind.IsTrivia() {
+			return s // the same text, above an earlier declaration
+		}
+	}
+	s.Start = at
 	return s
 }
 
