@@ -1,0 +1,129 @@
+namespace ThrowsInherited;
+
+// A method without a throws clause is known to throw what the method it
+// overrides declares, as PHPStan inherits @throws: the parent's method
+// first, the nearest declaration up the parent chain with what it
+// inherits, then the methods of the interfaces the class implements
+// itself.
+
+final class FromBase extends \RuntimeException
+{
+}
+
+final class FromInterface extends \RuntimeException
+{
+}
+
+class Base
+{
+    take(int $x): void throws FromBase
+    {
+        throw new FromBase();
+    }
+}
+
+class Mid extends Base
+{
+}
+
+interface Takes
+{
+    take(int $x): void throws FromInterface;
+}
+
+abstract class Impl extends Mid implements Takes
+{
+}
+
+// The parent's method is Base::take(), however far up: FromBase.
+final class Leaf extends Impl
+{
+    take(int $x): void
+    {
+    }
+}
+
+class Quiet
+{
+    take(int $x): void
+    {
+    }
+}
+
+// The parent's method declares nothing; the interface on the class does.
+// Were the interface an ancestor's, the parent's method would be the only
+// one to inherit from, as PHPStan reads it.
+final class QuietLeaf extends Quiet implements Takes
+{
+    take(int $x): void
+    {
+    }
+}
+
+function viaLeaf(Leaf $l): void throws FromBase
+{
+    $l->take(1);
+}
+
+function viaLeafNotTheInterface(Leaf $l): void throws FromInterface // want P2404
+{
+    $l->take(1);
+}
+
+function viaQuietLeaf(QuietLeaf $l): void throws FromInterface|FromBase // want P2404 "FromBase"
+{
+    $l->take(1);
+}
+
+// The class's own interfaces are asked in the order declared, each for
+// the method it has, its own or inherited: InheritsFromBase's pass() is
+// ThrowsFromBase's.
+interface ThrowsFromBase
+{
+    pass(): void throws FromBase;
+}
+
+interface InheritsFromBase extends ThrowsFromBase
+{
+}
+
+interface ThrowsFromInterface
+{
+    pass(): void throws FromInterface;
+}
+
+final class BothInterfaces implements InheritsFromBase, ThrowsFromInterface
+{
+    pass(): void
+    {
+    }
+}
+
+function viaBoth(BothInterfaces $b): void throws FromBase
+{
+    $b->pass();
+}
+
+function viaBothNotTheSecond(BothInterfaces $b): void throws FromInterface // want P2404
+{
+    $b->pass();
+}
+
+// An interface the parent implements already, repeated on the class, is
+// not asked again: the parent's method declares nothing, and a call of
+// the method may throw anything.
+class QuietTakes extends Quiet implements Takes
+{
+}
+
+final class RepeatsTakes extends QuietTakes implements Takes
+{
+    take(int $x): void
+    {
+    }
+}
+
+function viaRepeats(RepeatsTakes $r): void throws FromBase
+{
+    $r->take(1);
+}

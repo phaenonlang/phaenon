@@ -923,12 +923,13 @@ func (c *Checker) parentConstant(cl *program.Class, name string) *program.Consta
 // abstract declaration fixes it: zend_inheritance.c checks a constructor
 // only against its prototype, which only an abstract one sets. An
 // interface's constructor keeps every constructor below it public.
-// Otherwise the constructor in the parent's method table decides: when it
-// is abstract, or implements an abstract one in turn, cl's must be at
-// least as visible as it is. A private one that is not abstract demands no
-// visibility: PHP does go on to check a constructor against a private one,
-// where it passes over any other private method, but for final alone,
-// nothing being narrower than private.
+// Otherwise the constructor in the parent's method table decides
+// (program's TableEntry): when it is abstract, or implements an abstract
+// one in turn (AbstractConstructor), cl's must be at least as visible as
+// it is. A private one that is not abstract demands no visibility: PHP
+// does go on to check a constructor against a private one, where it
+// passes over any other private method, but for final alone, nothing
+// being narrower than private.
 func (c *Checker) constructorBound(cl *program.Class) (*program.Method, *program.Class) {
 	const key = "__construct"
 	for _, a := range cl.Ancestors() {
@@ -940,71 +941,16 @@ func (c *Checker) constructorBound(cl *program.Class) (*program.Method, *program
 			return im, im.Class
 		}
 	}
-	entry, at := c.constructorEntry(cl.ParentClass(), map[*program.Class]bool{cl: true})
+	parent := cl.ParentClass()
+	if parent == nil {
+		return nil, nil
+	}
+	entry, at := parent.TableEntry(key)
 	if entry == nil || entry.Vis == program.Private && !entry.Abstract {
 		return nil, nil
 	}
-	if entry.Abstract || c.abstractPrototype(at) {
+	if entry.Abstract || cl.AbstractConstructor() != nil {
 		return entry, at
-	}
-	return nil, nil
-}
-
-// abstractPrototype reports whether the concrete constructor in the table
-// of class at implements an abstract one: whether the constructor at
-// inherits is abstract, or implements one in turn.
-func (c *Checker) abstractPrototype(at *program.Class) bool {
-	seen := map[*program.Class]bool{}
-	for at != nil && !seen[at] {
-		seen[at] = true
-		above, from := c.constructorEntry(at.ParentClass(), map[*program.Class]bool{at: true})
-		if above == nil || above.Vis == program.Private && !above.Abstract {
-			return false
-		}
-		if above.Abstract {
-			return true
-		}
-		at = from
-	}
-	return false
-}
-
-// constructorEntry is the constructor in the method table of pc, as PHP
-// fills it, and the class up the chain that holds it: pc's own, else one
-// a trait brings in, else the one pc inherits, private included, else a
-// trait's abstract one. PHP binds a trait's abstract method after
-// inheritance, and only into a table that holds nothing of that name yet
-// (zend_add_trait_method); a concrete trait method is bound before
-// inheritance, whatever the order of the traits.
-func (c *Checker) constructorEntry(pc *program.Class, seen map[*program.Class]bool) (*program.Method, *program.Class) {
-	const key = "__construct"
-	if pc == nil || seen[pc] {
-		return nil, nil
-	}
-	seen[pc] = true
-	pc.Signature()
-	var own *program.Method
-	for _, pm := range pc.Methods {
-		if strings.EqualFold(pm.Name, key) && pm.Class == pc && !pm.Magic {
-			own = pm
-		}
-	}
-	if own != nil && (own.FromTrait == nil || !own.Abstract) {
-		return own, pc
-	}
-	for _, name := range pc.Traits {
-		if t := c.p.Class(name); t != nil {
-			t.Signature()
-			if tm := t.FindMethod(key); tm != nil && !tm.Abstract && !tm.Magic {
-				return tm, pc
-			}
-		}
-	}
-	if inherited, from := c.constructorEntry(pc.ParentClass(), seen); inherited != nil {
-		return inherited, from
-	}
-	if own != nil {
-		return own, pc
 	}
 	return nil, nil
 }

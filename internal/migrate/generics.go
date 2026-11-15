@@ -92,11 +92,9 @@ type lifter struct {
 
 // overrideCtx is what the override-erasure rule needs to know about a
 // method that overrides another: the method as the program model read it
-// before the lift, and the types PHP sees in the method it overrides.
+// before the lift, which knows the declarations it overrides.
 type overrideCtx struct {
 	method *program.Method
-	params []types.Type // nil entries: untyped
-	ret    types.Type
 }
 
 var phpTypeKeywords = map[string]bool{
@@ -492,12 +490,10 @@ func (l *lifter) overrides(m *ast.MethodDecl) *overrideCtx {
 	if pm == nil || pm.Class != l.class || pm.FromTrait != nil || pm.Magic || len(pm.Params) != len(m.Params) {
 		return nil
 	}
-	parent := pm.Overridden()
-	if parent == nil {
+	if len(pm.Overridden()) == 0 {
 		return nil
 	}
-	params, ret := parent.PHPSignature()
-	return &overrideCtx{method: pm, params: params, ret: ret}
+	return &overrideCtx{method: pm}
 }
 
 func (l *lifter) funcDecl(fn *ast.FunctionDecl, outer scope) {
@@ -1021,30 +1017,23 @@ func (l *lifter) overridden(ov *overrideCtx, slot int, docT *docblock.TypeNode) 
 	}
 	own := types.Erase(t)
 	if slot < 0 {
-		// A return narrows to the overridden method's when its own erasure
+		// A return narrows to the overridden methods' when its own erasure
 		// is wider; an undeclared return is never refined.
-		if ov.ret == nil || ov.method.NativeReturn == nil {
+		if ov.method.NativeReturn == nil {
 			return nil, nil, false
 		}
-		parent := types.Erase(ov.ret)
-		if types.IsSubtype(own, parent, l.prog) {
-			return nil, nil, false
-		}
-		compiled, declared = parent, ov.method.NativeReturn
+		declared = ov.method.NativeReturn
 	} else {
-		// A parameter widens to the overridden method's when its own
-		// erasure would not accept everything that one does.
-		if slot >= len(ov.params) || slot >= len(ov.method.Params) {
+		// A parameter widens to the overridden methods' when its own
+		// erasure would not accept everything those do.
+		if slot >= len(ov.method.Params) {
 			return nil, nil, false
 		}
-		parent := erasedOrMixed(ov.params[slot])
-		if types.IsSubtype(parent, own, l.prog) {
-			return nil, nil, false
-		}
-		compiled, declared = parent, ov.method.Params[slot].NativeType
+		declared = ov.method.Params[slot].NativeType
 	}
-	if _, printable := types.Native(compiled); !printable {
-		return nil, nil, false // the emitter keeps the type's own erasure then
+	compiled, ok = ov.method.ErasureAt(slot, own)
+	if !ok {
+		return nil, nil, false // the rule leaves the type's own erasure in place
 	}
 	return compiled, declared, true
 }
