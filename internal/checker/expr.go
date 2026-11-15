@@ -546,12 +546,24 @@ func normaliseKey(t types.Type) types.Type {
 		return types.TArrayKey // PHP casts or refuses; the array gets int|string keys
 	}
 	return types.Map(t, func(m types.Type) types.Type {
-		switch m.(type) {
-		case types.BoolLit, types.Bool:
+		switch m := m.(type) {
+		case types.BoolLit:
+			// PHP stores true under 1 and false under 0.
+			if m.V {
+				return types.IntLit(1)
+			}
+			return types.IntLit(0)
+		case types.FloatLit:
+			// PHP stores a float under its integer part (1.7 under 1).
+			if v := math.Trunc(m.V); v >= math.MinInt64 && v < math.MaxInt64 {
+				return types.IntLit(int64(v))
+			}
+			return types.TInt
+		case types.Bool:
 			return types.TInt
 		case types.Null:
 			return types.StringLit{V: ""}
-		case types.Float, types.FloatLit:
+		case types.Float:
 			return types.TInt
 		}
 		return types.StoredKey(m)
@@ -1150,6 +1162,14 @@ func (x *fnCtx) index(e *ast.Index, env *state) types.Type {
 		x.report(e.S, P2302, "[] can only be used for writing")
 		return types.TMixed
 	}
+	if x.keyOfSameArray(e, env) {
+		// A key taken from the array itself is there (writeOffsets).
+		if x.writeOffsets == nil {
+			x.writeOffsets = map[*ast.Index]bool{}
+		}
+		x.writeOffsets[e] = true
+		defer delete(x.writeOffsets, e)
+	}
 	return x.indexType(base, e, env, false)
 }
 
@@ -1176,6 +1196,12 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 	if mayLack {
 		x.reportMayLack(e.Index.Span(), raw, base, false)
 	}
+	lits := keyLiterals(idx)
+	if len(lits) < 2 {
+		lits = nil
+	} else if !lenient && x.quietOffsets == 0 && !x.writeOffsets[e] && keyMissingEverywhere(base, idx) {
+		x.report(e.Index.Span(), P2313, "offset %s does not exist on %s", x.typeName(raw), x.typeName(base))
+	}
 	var out []types.Type
 	for _, m := range types.Members(base) {
 		if types.IsTextBytes(m) {
@@ -1186,6 +1212,33 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 		}
 		switch m := m.(type) {
 		case types.Shape:
+			if lits != nil {
+				// A key that is one of a few literals reads the entries
+				// they name; under isset() and ?? also the null of one
+				// that may be missing.
+				var ts []types.Type
+				missing := m.Unsealed
+				for _, k := range lits {
+					entry, ok := constantEntry(m, k)
+					if !ok {
+						missing = true
+						continue
+					}
+					ts = append(ts, entry.Type)
+					missing = missing || entry.Optional
+				}
+				if m.Unsealed {
+					ts = append(ts, types.TMixed)
+				}
+				if lenient && missing {
+					ts = append(ts, types.TNull)
+				}
+				if len(ts) == 0 && !lenient {
+					ts = append(ts, types.TError) // reported above
+				}
+				out = append(out, types.MakeUnion(ts...))
+				continue
+			}
 			if mayLack {
 				if entry, ok := constantEntry(m, idx); ok {
 					out = append(out, entry.Type)
@@ -1362,18 +1415,14 @@ func (x *fnCtx) markWritten(e ast.Expr) func() {
 // as PHPStan's offsetAccess.notFound has it at level max ("might not
 // exist"): every value of the type is a shape, and one of them has the key
 // as an optional entry, or does not name it, unsealed or beside another
-// shape that has it. Where no value can have the key it does not exist,
-// P2313's; null is P2302's, and a general array PHPStan does not hold to
-// its keys, so a member of either leaves it to them.
+// shape that has it. A key that is one of a few literals, `'a'|'c'`, may
+// be missing where one of them may be, and another is there or the shape
+// is unsealed. Where no value can have the key it does not exist, P2313's;
+// null is P2302's, and a general array PHPStan does not hold to its keys,
+// so a member of either leaves it to them.
 func offsetMayBeMissing(base, idx types.Type) bool {
-	idx = normaliseKey(idx)
-	switch k := idx.(type) {
-	case types.StringLit:
-	case types.Int:
-		if k.Lo != k.Hi {
-			return false
-		}
-	default:
+	lits := keyLiterals(normaliseKey(idx))
+	if lits == nil {
 		return false
 	}
 	maybe, has, open := false, false, false
@@ -1382,18 +1431,64 @@ func offsetMayBeMissing(base, idx types.Type) bool {
 		if !ok {
 			return false
 		}
-		entry, found := constantEntry(s, idx)
-		switch {
-		case found:
-			has = true
-			maybe = maybe || entry.Optional
-		case s.Unsealed:
-			maybe, open = true, true
-		default:
-			maybe = true // a shape without the key, beside others
+		for _, k := range lits {
+			entry, found := constantEntry(s, k)
+			switch {
+			case found:
+				has = true
+				maybe = maybe || entry.Optional
+			case s.Unsealed:
+				maybe, open = true, true
+			default:
+				maybe = true // a shape without the key, beside others
+			}
 		}
 	}
 	return maybe && (has || open)
+}
+
+// keyMissingEverywhere reports a key that is one of a few literals none of
+// which any value of the type has: every value a sealed shape without
+// them, PHPStan's "Offset 'y'|'z' does not exist".
+func keyMissingEverywhere(base, idx types.Type) bool {
+	lits := keyLiterals(normaliseKey(idx))
+	if len(lits) < 2 {
+		return false
+	}
+	members := types.Members(base)
+	for _, m := range members {
+		s, ok := m.(types.Shape)
+		if !ok || s.Unsealed {
+			return false
+		}
+		for _, k := range lits {
+			if _, found := constantEntry(s, k); found {
+				return false
+			}
+		}
+	}
+	return len(members) > 0
+}
+
+// keyLiterals lists the literals a key stands for: itself where it is one
+// string or int literal, its members where it is a union of them; nil for
+// any other key.
+func keyLiterals(key types.Type) []types.Type {
+	var out []types.Type
+	for _, m := range types.Members(key) {
+		switch k := m.(type) {
+		case types.StringLit:
+			out = append(out, k)
+		case types.Int:
+			if k.Lo != k.Hi {
+				return nil
+			}
+			out = append(out, k)
+		default:
+			return nil
+		}
+	}
+	return out
 }
 
 // offsetMayLack reports P2321 for an offset an argument by reference reads
@@ -2335,6 +2430,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		if v, ok := e.Target.(*ast.Variable); ok {
 			env.setNative(v.Name, x.guaranteedOf(e.Value, env))
 			x.rememberCondition(v.Name, e.Value, env)
+			x.rememberKeyOf(e, v.Name, e.Value, env)
 		}
 		return vt
 	}
