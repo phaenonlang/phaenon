@@ -241,6 +241,9 @@ type emitter struct {
 	edits []edit
 	// indents are the continuation lines expanded expression bodies move in.
 	indents []indentReq
+	// exprLines are the first lines of expression bodies' expressions,
+	// which become the statements of blocks (outIndent).
+	exprLines []exprLine
 	// drop are the spans of statements and attribute groups the compiler
 	// removes (dropLines).
 	drop []ast.Span

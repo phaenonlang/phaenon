@@ -220,13 +220,20 @@ func (e *emitter) planIndents(f *ast.File) {
 			return true
 		}
 		exprStart, semi := toks[first].Start, fn.arrow.Semi.Start
-		if e.lineOf(exprStart) == e.lineOf(semi) || e.multiLineToken(exprStart, semi) {
-			return true
-		}
 		declIndent := e.lineIndent(fn.kwAt)
 		level := "    "
 		if strings.Contains(declIndent, "\t") {
 			level = "\t"
+		}
+		// The expression's first line becomes the block's statement, one
+		// level in from the declaration, wherever it stood.
+		lineEnd := semi
+		if nl := bytes.IndexByte(e.src[exprStart:semi], '\n'); nl >= 0 {
+			lineEnd = exprStart + nl
+		}
+		e.exprLines = append(e.exprLines, exprLine{Span: ast.Span{Start: exprStart, End: lineEnd}, kwAt: fn.kwAt, level: level})
+		if e.lineOf(exprStart) == e.lineOf(semi) || e.multiLineToken(exprStart, semi) {
+			return true
 		}
 		bodyIndent := declIndent + level
 		if exprIndent := e.lineIndent(exprStart); len(bodyIndent) > len(exprIndent) && strings.HasPrefix(bodyIndent, exprIndent) {
@@ -236,9 +243,32 @@ func (e *emitter) planIndents(f *ast.File) {
 	})
 }
 
+// exprLine is the first line of an expression body's expression, from
+// its first token, which the body's statement starts on in the output.
+type exprLine struct {
+	ast.Span
+	kwAt  int    // the declaration's keyword, or where it would stand
+	level string // one indentation level
+}
+
 // outIndent is the indentation the line holding off has in the output: its
-// own, and what the expression bodies around it move it in by.
+// own, and what the expression bodies around it move it in by. On the
+// first line of an expression body's expression, which starts the block's
+// statement, it is that statement's: the declaration's, one level in.
+// An expression body declared on another's first line, as a method of an
+// anonymous class written on one line is, holds the innermost statement
+// there: the one that starts last.
 func (e *emitter) outIndent(off int) string {
+	inner := -1
+	for i, l := range e.exprLines {
+		if l.Start <= off && off <= l.End && (inner < 0 || l.Start > e.exprLines[inner].Start) {
+			inner = i
+		}
+	}
+	if inner >= 0 {
+		l := e.exprLines[inner]
+		return e.outIndent(l.kwAt) + l.level
+	}
 	indent := e.lineIndent(off)
 	start := bytes.LastIndexByte(e.src[:off], '\n')
 	if start < 0 {
