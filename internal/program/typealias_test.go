@@ -1,6 +1,8 @@
 package program
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -70,5 +72,87 @@ func TestTypeAliasIsItsNamespaces(t *testing.T) {
 	}
 	if got := types.Print(p.TypeAlias(`App\Orders\Wood`).Type); got != "list<list>" {
 		t.Errorf("an alias's own mention reads as mixed: %s", got)
+	}
+}
+
+// The aliases of sources outside the program are read on demand: the first
+// name the loader has no class for, under a prefix that holds Phaenon
+// sources, reads the `type` declarations of its directory. A class is not
+// parsed to find that out, and neither is a file that declares no alias.
+func TestTypeAliasReadOnDemand(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, src string) string {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	box := write("Box.phn", "namespace Acme;\n\nfinal class Box {}\n")
+	write("Sub/Crate.phn", "namespace Acme\\Sub;\n\nfinal class Crate\n{\n    public string $type = 'x';\n}\n")
+	aliases := write("Sub/shapes.phn", "namespace Acme\\Sub;\n\ntype Row = map<string, int>;\n\nfinal class Beside {}\n")
+	broken := write("Sub/broken.phn", "namespace Acme\\Sub;\n\ntype Half = ;\n")
+	write(".hidden/skipped.phn", "namespace Acme\\Hidden;\n\ntype Nope = int;\n")
+
+	p := New()
+	p.AddLoader(DirLoader{Prefix: "Acme\\", Dir: dir})
+	f, err := p.AddFile("use.phn", []byte("namespace App;\n\nuse Acme\\Box;\nuse Acme\\Sub\\Row;\n"), lexer.ModePhaenon, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := types.Print(typeOf(t, p, f, "Box")); got != `Acme\Box` {
+		t.Errorf("Box: %s", got)
+	}
+	if p.File(box) != nil || p.File(aliases) != nil {
+		t.Error("a name the loader has a class for read the sources")
+	}
+	if got := types.Print(typeOf(t, p, f, "Row")); got != "array<string, int>" {
+		t.Errorf("Row: %s", got)
+	}
+	if p.File(aliases) == nil {
+		t.Error("the file that declares the alias was not read")
+	}
+	if len(p.files) != 2 || p.File(broken) != nil {
+		t.Errorf("%d files held: only the one that declares an alias is added, with the program's own", len(p.files))
+	}
+	if p.Class(`Acme\Sub\Beside`) == nil {
+		t.Error("the classes of the file read are declared with its aliases")
+	}
+	if p.TypeAlias(`Acme\Hidden\Nope`) != nil {
+		t.Error("a directory Composer's maps would not serve was read")
+	}
+	if p.TypeAlias(`Other\Row`) != nil {
+		t.Error("a name outside the loader's prefix found an alias")
+	}
+}
+
+// declaresType is the scan that decides which sources are parsed for their
+// aliases: it may report a file that declares none, never miss one that
+// does.
+func TestDeclaresType(t *testing.T) {
+	for src, want := range map[string]bool{
+		"type Row = int;":                         true,
+		"namespace A;\n\ntype Page<T> = list<T>;": true,
+		"type\n    Row\n    = int;":               true,
+		"type Row=int;":                           true,
+		"#[A] type Row = int;":                    true,
+		"// the type Row = what a row is":         true, // a parse, and no more
+		"$type = 1;":                              false,
+		"$this->type = $x;":                       false,
+		"public string $type = 'x';":              false,
+		"function type(): int { return 1; }":      false,
+		"const TYPE = 1; $a = TYPE;":              false,
+		"return $subtype == $type;":               false,
+		"type = 3;":                               false,
+		"prototype Foo = 1;":                      false,
+		"":                                        false,
+		"type":                                    false,
+	} {
+		if got := declaresType([]byte(src)); got != want {
+			t.Errorf("%q: %v, want %v", src, got, want)
+		}
 	}
 }

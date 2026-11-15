@@ -32,6 +32,9 @@ type aliasTable struct {
 	// the outermost first: an alias met again while it is here mentions
 	// itself.
 	resolving []*TypeAlias
+	// sources are the sources outside the program its aliases were read
+	// from (aliassource.go).
+	sources aliasSources
 }
 
 // declareAlias records a `type` declaration under its qualified name. The
@@ -59,8 +62,17 @@ func (p *Program) TypeAlias(name string) *TypeAlias {
 	return a
 }
 
-// alias is the declaration of a lower-cased qualified name.
-func (p *Program) alias(lower string) *TypeAlias { return p.aliases.byName[lower] }
+// alias is the declaration of a lower-cased qualified name: one of the
+// program's files, else one the sources outside it turn out to hold.
+func (p *Program) alias(lower string) *TypeAlias {
+	if a := p.aliases.byName[lower]; a != nil {
+		return a
+	}
+	if p.findAlias(lower) {
+		return p.aliases.byName[lower]
+	}
+	return nil
+}
 
 // TypeAliases returns every declared alias, sorted by name (for tools).
 func (p *Program) TypeAliases() []*TypeAlias {
