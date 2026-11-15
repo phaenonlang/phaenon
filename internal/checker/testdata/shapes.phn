@@ -490,3 +490,97 @@ function inferred(
     }
     takesText(swap($strings)[0]); // want P2103
 }
+
+// What a shape accepts, beyond the returns above: shapes-held.phn holds
+// each case to PHPStan in the docblock spelling.
+type MaybeId = array{id?: int};
+type WideId = array{id: int|string};
+type NullableName = array{id: int, name: ?string};
+type IntKeys = array{0: int, 1: string};
+type ShortPair = array{0: int, 1?: string};
+
+function takesNullable(Nullable $n): void {}
+
+function takesOrder(Order $order): void {}
+
+function takesIntKeys(IntKeys $keys): void {}
+
+function takesShortPair(ShortPair $pair): void {}
+
+function literals(Customer $c): void
+{
+    takesRow(['id' => 1]);
+    takesRow(['id' => 1, 'name' => 'a']);
+    takesRow(['name' => 'a']); // want P2103
+    takesRow(['id' => 'one']); // want P2103
+    takesRow(['id' => 1, 'name' => 2]); // want P2103
+    takesRow(['id' => 1, 'age' => 30]);
+    takesA(['a' => 1, 'b' => 2]);
+    takesNullable(['name' => null]);
+    takesNullable([]); // want P2103
+    takesOptionalA(['a' => null]); // want P2103
+    takesNone([]);
+    takesNone(['a' => 1]); // want P2103
+    takesOrder(['id' => 1, 'lines' => [['sku' => 'a', 'qty' => 2]], 'buyer' => $c]);
+    takesOrder(['id' => 1, 'lines' => [], 'buyer' => null]);
+    takesOrder(['id' => 1, 'lines' => [['sku' => 'a']], 'buyer' => null]); // want P2103
+    takesOrder(['id' => 1, 'lines' => [['sku' => 'a', 'qty' => '2']], 'buyer' => null]); // want P2103
+    takesOrder(['id' => 1, 'lines' => [], 'buyer' => 'nobody']); // want P2103
+}
+
+function shapes(
+    Row $row,
+    Sealed $bare,
+    Named $named,
+    MaybeId $maybe,
+    WideId $wide,
+    NullableName $nullable,
+    More $more,
+    OptionalA $optionalA,
+): void {
+    takesRow($row);
+    takesRow($bare);
+    takesRow($named);
+    takesRow($more);
+    // An optional key where the shape requires it.
+    takesRow($maybe); // want P2103
+    takesRow($wide); // want P2103
+    // A key that may hold null where the shape has it optional.
+    takesRow($nullable); // want P2103
+    takesNullable($named);
+    takesNullable($row); // want P2103
+    takesNone($optionalA); // want P2103
+    takesOptionalA($optionalA);
+    takesA($optionalA); // want P2103
+}
+
+function positions(IntKeys $keys, (int, string) $pair, (int, string, bool) $triple, (string, int) $swapped): void
+{
+    takesIntKeys($keys);
+    takesIntKeys($pair);
+    // A tuple is exact (design/collections.md §2.4), and the shape of
+    // positions 0 and 1 is the tuple's: stricter than PHPStan, which
+    // accepts the longer list.
+    takesIntKeys($triple); // want P2103
+    takesIntKeys([1, 'a']);
+    takesIntKeys($swapped); // want P2103
+    takesPair($pair);
+    takesPair([1, 'a']);
+    takesPair($triple); // want P2103
+    takesPair($swapped); // want P2103
+    takesPair(['a', 1]); // want P2103
+    takesShortPair($pair);
+    takesShortPair([1]);
+    takesShortPair($swapped); // want P2103
+}
+
+final class Holder
+{
+    public Row $row = ['id' => 0];
+
+    set(MaybeId $maybe): void
+    {
+        $this->row = ['id' => 1, 'name' => 'a'];
+        $this->row = $maybe; // want P2201
+    }
+}

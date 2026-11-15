@@ -418,3 +418,121 @@ function inferred(array $page, array $wide, array $maybe, array $oneOf, array $r
     }
     takeString(swap($strings)[0]); // want P2103
 }
+
+// A key the shape requires is there, with a value of its type; a key
+// more than the shape names is accepted, as PHPStan has it.
+
+/** @param array{name: ?string} $n */
+function takeNullable(array $n): void {}
+
+/** @param array{id: int, lines: list<array{sku: string, qty: int}>, buyer: ?Customer} $order */
+function takeOrder(array $order): void {}
+
+/** @param list{int, 1?: string} $pair */
+function takeShortPair(array $pair): void {}
+
+function literals(Customer $c): void
+{
+    takeRow(['id' => 1]);
+    takeRow(['id' => 1, 'name' => 'a']);
+    takeRow(['name' => 'a']); // want P2103
+    takeRow(['id' => 'one']); // want P2103
+    takeRow(['id' => 1, 'name' => 2]); // want P2103
+    takeRow(['id' => 1, 'age' => 30]);
+    takeA(['a' => 1, 'b' => 2]);
+    // An absent key against a present null.
+    takeNullable(['name' => null]);
+    takeNullable([]); // want P2103
+    takeOptionalA(['a' => null]); // want P2103
+    // Only the empty array is array{}.
+    takeNone([]);
+    takeNone(['a' => 1]); // want P2103
+    takeOrder(['id' => 1, 'lines' => [['sku' => 'a', 'qty' => 2]], 'buyer' => $c]);
+    takeOrder(['id' => 1, 'lines' => [], 'buyer' => null]);
+    takeOrder(['id' => 1, 'lines' => [['sku' => 'a']], 'buyer' => null]); // want P2103
+    takeOrder(['id' => 1, 'lines' => [['sku' => 'a', 'qty' => '2']], 'buyer' => null]); // want P2103
+    takeOrder(['id' => 1, 'lines' => [], 'buyer' => 'nobody']); // want P2103
+}
+
+/**
+ * @param array{id: int, name?: string} $row
+ * @param array{id: int} $bare
+ * @param array{id: int, name: string} $named
+ * @param array{id?: int} $maybe
+ * @param array{id: int|string} $wide
+ * @param array{id: int, name: ?string} $nullable
+ * @param array{id: int, name: string, age: int} $more
+ * @param array{a?: int} $optionalA
+ */
+function shapes(array $row, array $bare, array $named, array $maybe, array $wide, array $nullable, array $more, array $optionalA): void
+{
+    takeRow($row);
+    takeRow($bare);
+    takeRow($named);
+    takeRow($more);
+    // An optional key where the shape requires it.
+    takeRow($maybe); // want P2103
+    takeRow($wide); // want P2103
+    // A key that may hold null where the shape has it optional.
+    takeRow($nullable); // want P2103
+    takeNullable($named);
+    takeNullable($row); // want P2103
+    takeNone($optionalA); // want P2103
+    takeOptionalA($optionalA);
+    takeA($optionalA); // want P2103
+}
+
+/**
+ * @param array{0: int, 1: string} $keys
+ * @param list{int, string} $pair
+ * @param list{int, string, bool} $triple
+ * @param list{int} $single
+ * @param list{string, int} $swapped
+ */
+function positions(array $keys, array $pair, array $triple, array $single, array $swapped): void
+{
+    takeIntKeys($keys);
+    takeIntKeys($pair);
+    // A tuple is exact (design/collections.md §2.4), and the shape of
+    // positions 0 and 1 is the tuple's: stricter than PHPStan, which
+    // accepts the longer list.
+    takeIntKeys($triple); // want P2103
+    takeIntKeys([1, 'a']);
+    takeIntKeys($swapped); // want P2103
+    takeIntKeys($single); // want P2103
+    takePair($pair);
+    takePair([1, 'a']);
+    takePair($triple); // want P2103
+    takePair($swapped); // want P2103
+    takePair($single); // want P2103
+    takePair(['a', 1]); // want P2103
+    takeShortPair($pair);
+    takeShortPair($single);
+    takeShortPair([1]);
+    takeShortPair($swapped); // want P2103
+}
+
+/**
+ * @param array{id: int, name?: string} $row
+ * @return array{id: int, name?: string}
+ */
+function returned(array $row, bool $flag): array
+{
+    if ($flag) {
+        return ['name' => 'a']; // want P2202
+    }
+    return $row;
+}
+
+final class Holder
+{
+    /** @var array{id: int, name?: string} */
+    public array $row = ['id' => 0];
+
+    /** @param array{id?: int} $maybe */
+    public function set(array $maybe): void
+    {
+        $this->row = ['id' => 1, 'name' => 'a'];
+        $this->row = $maybe; // want P2201
+    }
+}
