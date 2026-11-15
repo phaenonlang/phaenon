@@ -21,7 +21,7 @@ interface Stops
 {
     stop() nothrow;
 
-    size(): int NoThrow => 0;
+    size(): int nothrow => 0;
 }
 
 function find(int $id): ?int nothrow {

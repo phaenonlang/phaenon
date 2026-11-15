@@ -1,0 +1,40 @@
+namespace App\LowerCase;
+
+// The words Phaenon adds are written in lower case (design/tooling.md §5.7):
+// where the parser takes the word, another case is rewritten. A name of
+// that spelling stays as written, and so do `Map` and `Bytes`, which may be
+// a class's.
+type Row = list<int>;
+type Pair<K of int|string, V> = map<K, V>;
+
+final class Throws extends \RuntimeException {}
+const NOTHROW = 1;
+
+interface Source<out T, in U>
+{
+    get(U $u): T throws Throws;
+
+    size(): int nothrow;
+
+    Type(): class<T>;
+}
+
+final class Words<In, Out>
+{
+    private list<In> $ins = [];
+
+    make(): Throws => new Throws();
+
+    nothrow(): int nothrow => NOTHROW;
+
+    raw(string $s): bytes => (bytes) $s;
+
+    spaced(string $s): bytes => ( bytes ) $s;
+
+    named(Map<string, int> $m, Bytes $b, class<Out> $c): int => \count($m) + \count($this->ins);
+}
+
+function find(int $id): ?int
+    nothrow {
+    return null;
+}
