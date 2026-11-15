@@ -42,6 +42,13 @@ interface Coll
 {
 }
 
+/**
+ * @template T
+ */
+interface Slot
+{
+}
+
 abstract class Base
 {
     /** @param list<int> $x */
@@ -101,6 +108,15 @@ abstract class Base
     /** @param Box<Thing> $x */
     abstract public function invariantArgument(Box $x): void;
 
+    /** @return Slot<Open|null> */
+    abstract public function unionArgument(): Slot;
+
+    /** @param Slot<Open> $x */
+    abstract public function unionParam(Slot $x): void;
+
+    /** @return Slot<array-key|null> */
+    abstract public function arrayKeyOrNull(): Slot;
+
     /** @return list<Open> */
     abstract public function unrelatedClasses(): array;
 
@@ -157,6 +173,12 @@ abstract class Base
 
     /** @return Coll<array-key, Open> */
     abstract public function arrayKey(): Coll;
+
+    /** @return Slot<array-key|null> */
+    abstract public function sharesWithArrayKey(): Slot;
+
+    /** @return Slot<Open|Other> */
+    abstract public function sameUnion(): Slot;
 
     /** @return string|array<string> */
     abstract public function sharedMember(): string|array;
@@ -281,6 +303,25 @@ abstract class Child extends Base
     {
     }
 
+    // A union is an argument like any other: the same type or none.
+    /** @return Slot<Open> */
+    public function unionArgument(): Slot // want P2502 "return type App\OverrideTypes\Slot<App\OverrideTypes\Open> of App\OverrideTypes\Child::unionArgument() is not covariant with App\OverrideTypes\Base::unionArgument() (App\OverrideTypes\Slot<App\OverrideTypes\Open|null>)"
+    {
+        throw new \LogicException();
+    }
+
+    /** @param Slot<Open|null> $x */
+    public function unionParam(Slot $x): void // want P2502
+    {
+    }
+
+    // array-key takes what shares a value with it; array-key|null does not.
+    /** @return Slot<int> */
+    public function arrayKeyOrNull(): Slot // want P2502
+    {
+        throw new \LogicException();
+    }
+
     /** @return list<Other> */
     public function unrelatedClasses(): array // want P2502
     {
@@ -382,6 +423,18 @@ abstract class Child extends Base
 
     /** @return Coll<int, Open> */
     public function arrayKey(): Coll
+    {
+        throw new \LogicException();
+    }
+
+    /** @return Slot<array-key> */
+    public function sharesWithArrayKey(): Slot
+    {
+        throw new \LogicException();
+    }
+
+    /** @return Slot<Other|Open> */
+    public function sameUnion(): Slot
     {
         throw new \LogicException();
     }

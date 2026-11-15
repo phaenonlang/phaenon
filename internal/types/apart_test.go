@@ -71,6 +71,11 @@ func TestNeverSubtype(t *testing.T) {
 		{of("Box", order), of("Box", user)},
 		{of("Box", admin), of("Box", user)}, // an invariant argument is the same type or none
 		{of("Box", narrower), of("Box", object)},
+		{of("Box", user), of("Box", Nullable(user))}, // a union is the same type or none
+		{of("Box", Nullable(user)), of("Box", user)},
+		{of("Box", MakeUnion(user, order)), of("Box", user)},
+		{of("Box", TInt), of("Box", MakeUnion(TInt, TString, TNull))}, // array-key|null is no array-key
+		{of("Box", order), of("Box", TArrayKey)},
 		{of("Source", order), of("Source", user)},
 		{of("Sink", order), of("Sink", user)},
 		{sig(TInt, TString), sig(TString, TInt)},
@@ -114,6 +119,10 @@ func TestNeverSubtype(t *testing.T) {
 		{object, renamed},
 		{list(Param{Name: "T"}), list(TInt)},
 		{of("Box", TArrayKey), of("Box", TInt)}, // array-key takes either of its members
+		{of("Box", TInt), of("Box", TArrayKey)},
+		{of("Box", MakeUnion(TInt, TString, TNull)), of("Box", TArrayKey)}, // and what shares a value with it
+		{of("Box", MakeUnion(user, order)), of("Box", MakeUnion(order, user))},
+		{of("Box", MakeUnion(Static{}, TNull)), of("Box", Nullable(user))},
 		{of("Box", TMixed), of("Box", user)},
 		{of("Source", user), of("Source", admin)},
 		{of("Sink", admin), of("Sink", user)},

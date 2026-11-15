@@ -207,9 +207,12 @@ func classesApart(a, b Type, h Hierarchy, depth int) bool {
 }
 
 // argsApart compares the type arguments of one class by their variance. An
-// invariant argument must be the same type, as PHPStan has it, but for a
-// union: `array-key` there takes `int` and `string`, and it is the union
-// Phaenon reads it as.
+// invariant argument must be the same type, as PHPStan has it, but for
+// `int|string`: PHPStan reads `array-key` as a benevolent union, which takes
+// any argument that shares a value with it, where `int|string` written out
+// takes only itself. Phaenon reads both as the one union and cannot tell
+// which was written, so it lets the union pass as it would `array-key`.
+// `array-key|null` is no longer benevolent there, and it is compared.
 func argsApart(a, b Class, h Hierarchy, depth int) bool {
 	if len(a.Args) == 0 || len(a.Args) != len(b.Args) {
 		return false
@@ -231,13 +234,13 @@ func argsApart(a, b Class, h Hierarchy, depth int) bool {
 				return true
 			}
 		default:
-			if !decidable(classOfCase(x)) && !isUnion(x) || !decidable(classOfCase(y)) && !isUnion(y) {
+			if !decidableArg(x) || !decidableArg(y) {
 				continue // mixed, never, static: any argument goes with them
 			}
 			if apart(x, y, h, depth+1) || apart(y, x, h, depth+1) {
 				return true
 			}
-			if isUnion(x) || isUnion(y) {
+			if Equal(x, TArrayKey) || Equal(y, TArrayKey) {
 				continue
 			}
 			if !subtype(x, y, h, 0) || !subtype(y, x, h, 0) {
@@ -248,9 +251,15 @@ func argsApart(a, b Class, h Hierarchy, depth int) bool {
 	return false
 }
 
-func isUnion(t Type) bool {
-	_, ok := t.(Union)
-	return ok
+// decidableArg tells an invariant type argument argsApart can hold to
+// sameness: one whose every member is decidable.
+func decidableArg(t Type) bool {
+	for _, m := range Members(t) {
+		if !decidable(classOfCase(m)) {
+			return false
+		}
+	}
+	return true
 }
 
 // callablesApart compares two signatures: a is no b when it requires more
