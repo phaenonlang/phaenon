@@ -311,8 +311,9 @@ func (c *Class) ensureMembers() {
 // parameters are mapped through @extends / @implements. Each parameter and
 // the return take their type from the first declaration that documents it,
 // in the order PHPStan inherits a docblock: the method in the parent's
-// table, then what that one inherits, then the methods of the interfaces
-// the class implements itself, each with what it inherits (Overridden).
+// table, then what that one inherits, then the methods of the class's
+// immediate interfaces in the order declared, each with what it inherits
+// (Overridden).
 // Symfony's Kernel takes registerBundles() through a trait that documents
 // nothing from the KernelInterface of the class using the trait, which
 // says iterable<BundleInterface>. An interface that a class in between

@@ -74,3 +74,56 @@ function viaQuietLeaf(QuietLeaf $l): void throws FromInterface|FromBase // want 
 {
     $l->take(1);
 }
+
+// The class's own interfaces are asked in the order declared, each for
+// the method it has, its own or inherited: InheritsFromBase's pass() is
+// ThrowsFromBase's.
+interface ThrowsFromBase
+{
+    pass(): void throws FromBase;
+}
+
+interface InheritsFromBase extends ThrowsFromBase
+{
+}
+
+interface ThrowsFromInterface
+{
+    pass(): void throws FromInterface;
+}
+
+final class BothInterfaces implements InheritsFromBase, ThrowsFromInterface
+{
+    pass(): void
+    {
+    }
+}
+
+function viaBoth(BothInterfaces $b): void throws FromBase
+{
+    $b->pass();
+}
+
+function viaBothNotTheSecond(BothInterfaces $b): void throws FromInterface // want P2404
+{
+    $b->pass();
+}
+
+// An interface the parent implements already, repeated on the class, is
+// not asked again: the parent's method declares nothing, and a call of
+// the method may throw anything.
+class QuietTakes extends Quiet implements Takes
+{
+}
+
+final class RepeatsTakes extends QuietTakes implements Takes
+{
+    take(int $x): void
+    {
+    }
+}
+
+function viaRepeats(RepeatsTakes $r): void throws FromBase
+{
+    $r->take(1);
+}

@@ -17,14 +17,16 @@ import (
 // docblock type only when the compiled signature stays the one PHP saw.
 
 // Overridden returns the declarations m overrides or implements that PHP
-// holds it to, nil when there are none. First comes the method in the
-// parent's method table (tableEntry), unless it is private, which holds m
-// to nothing; PHP checks m against that one, and it was checked in turn
-// against every interface above it. Then come the methods of the
-// interfaces m's class implements itself, and of the interfaces those
-// extend, in the order they are declared. A @method tag is no
-// declaration. This is also the order PHPStan inherits a docblock in: the
-// parent's method first, then the class's own interfaces.
+// holds it to, nil when there are none, in the order PHPStan inherits a
+// docblock from them. First comes the method in the parent's method table
+// (tableEntry), unless it is private, which holds m to nothing; PHP checks
+// m against that one, and it was checked in turn against every interface
+// above it. Then come the methods of the class's immediate interfaces:
+// those it declares, but for one a parent class implements already and
+// one that another of them extends, whose method the other's table holds
+// (PHPStan's ClassReflection::getImmediateInterfaces). Each is the method
+// that interface's table holds, its own or one it inherits. A @method tag
+// is no declaration.
 //
 // A constructor is held only to an abstract declaration, since PHP checks
 // no other constructor's signature: the abstract constructor the parent's
@@ -55,8 +57,9 @@ func (m *Method) Overridden() []*Method {
 	if entry, _ := tableEntry(cl.ParentClass(), key, map[*Class]bool{cl: true}); entry != nil && (entry.Vis != Private || entry.Abstract) {
 		add(entry)
 	}
-	for _, a := range ownInterfaces(cl) {
-		add(a.ownMethod(key))
+	for _, i := range immediateInterfaces(cl) {
+		entry, _ := tableEntry(i, key, map[*Class]bool{cl: true})
+		add(entry)
 	}
 	return out
 }
@@ -133,29 +136,35 @@ func abstractConstructor(cl *Class) *Method {
 	return nil
 }
 
-// ownInterfaces lists the interfaces cl declares it implements (an
-// interface: extends), and the ones those extend, breadth first.
-func ownInterfaces(cl *Class) []*Class {
+// immediateInterfaces lists the interfaces cl declares (an interface: the
+// ones it extends) in the order declared, without one that a parent class
+// implements already, which PHP does not check cl's methods against again,
+// nor one that another of them extends.
+func immediateInterfaces(cl *Class) []*Class {
 	cl.ensure()
 	p := cl.File.program
-	var out []*Class
-	seen := map[*Class]bool{cl: true}
-	var queue []*Class
-	push := func(names []string) {
-		for _, n := range names {
-			if ic := p.Class(n); ic != nil && !seen[ic] && ic.Kind == ast.KindInterface {
-				seen[ic] = true
-				out = append(out, ic)
-				queue = append(queue, ic)
-			}
+	var declared []*Class
+	for _, name := range cl.Interfaces {
+		if i := p.Class(name); i != nil && i.Kind == ast.KindInterface && !slices.Contains(declared, i) {
+			declared = append(declared, i)
 		}
 	}
-	push(cl.Interfaces)
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		cur.ensure()
-		push(cur.Interfaces)
+	parent := cl.ParentClass()
+	var out []*Class
+	for _, i := range declared {
+		if parent != nil && parent.IsSubclassOf(i.Name) {
+			continue
+		}
+		indirect := false
+		for _, o := range declared {
+			if o != i && o.IsSubclassOf(i.Name) {
+				indirect = true
+				break
+			}
+		}
+		if !indirect {
+			out = append(out, i)
+		}
 	}
 	return out
 }
@@ -362,8 +371,8 @@ func orMixed(t types.Type) types.Type {
 // declaration, else the one it inherits from the methods it overrides, as
 // PHPStan inherits @throws with the rest of a docblock: the parent's
 // method first, with what that one inherits, then the methods of the
-// interfaces m's class implements itself (Overridden). nil when nothing
-// declares it (design/tooling.md §9.1).
+// class's immediate interfaces in the order declared (Overridden). nil
+// when nothing declares it (design/tooling.md §9.1).
 func (m *Method) DeclaredThrows() types.Type {
 	return m.declaredThrows(map[*Method]bool{})
 }

@@ -12,9 +12,9 @@ import (
 // its parent's method table, as PHP fills it (the class's own, a concrete
 // trait method, the inherited one, a trait's abstract one, then the first
 // interface that has it, farthest class first), then the methods of the
-// interfaces its class implements itself; a constructor's are the
-// abstract one the parent's table holds or implements, and every
-// interface's.
+// class's immediate interfaces in the order declared, each its own or
+// inherited; a constructor's are the abstract one the parent's table
+// holds or implements, and every interface's.
 func TestOverridden(t *testing.T) {
 	p := New()
 	src := `namespace X;
@@ -51,6 +51,15 @@ class BelowOnlyNeeds extends OnlyNeeds implements Narrow { take(int $x): void {}
 trait Gives { take(int $x): void {} }
 abstract class NeedsAndGives { use Needs, Gives; }
 class BelowGives extends NeedsAndGives { take(int $x): void {} }
+interface A0 { take(int $x): void; }
+interface A extends A0 {}
+interface B { take(int $x): void; }
+class ImplementsAB implements A, B { take(int $x): void {} }
+class ImplementsBA implements B, A { take(int $x): void {} }
+class ImplementsA0A implements A0, A { take(int $x): void {} }
+class Quiet { take(int $x): void {} }
+class QuietTakes extends Quiet implements Takes {}
+class RepeatsTakes extends QuietTakes implements Takes { take(int $x): void {} }
 `
 	if _, err := p.AddFile("src/override.phn", []byte(src), lexer.ModePhaenon, true); err != nil {
 		t.Fatal(err)
@@ -72,6 +81,10 @@ class BelowGives extends NeedsAndGives { take(int $x): void {} }
 		{`X\BelowNeeds`, "take", []string{`X\Base::take`}},
 		{`X\BelowOnlyNeeds`, "take", []string{`X\OnlyNeeds::take`, `X\Narrow::take`}},
 		{`X\BelowGives`, "take", []string{`X\Gives::take`}},
+		{`X\ImplementsAB`, "take", []string{`X\A0::take`, `X\B::take`}},
+		{`X\ImplementsBA`, "take", []string{`X\B::take`, `X\A0::take`}},
+		{`X\ImplementsA0A`, "take", []string{`X\A0::take`}},
+		{`X\RepeatsTakes`, "take", []string{`X\Quiet::take`}},
 	}
 	for _, c := range cases {
 		cl := p.Class(c.class)

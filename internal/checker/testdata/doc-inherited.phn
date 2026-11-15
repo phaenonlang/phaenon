@@ -43,3 +43,27 @@ final class Leaf extends Impl
         }
     }
 }
+
+// An interface the parent implements already, repeated on the class, is
+// not asked again: the parent's method documents nothing, and PHPStan
+// leaves the parameter an array of mixed.
+class Undocumented
+{
+    public function take(array $x): void // want P2516
+    {
+    }
+}
+
+abstract class UndocumentedTakes extends Undocumented implements Takes
+{
+}
+
+final class RepeatsTakes extends UndocumentedTakes implements Takes
+{
+    public function take(array $x): void // want P2516
+    {
+        foreach ($x as $v) {
+            takesInt($v); // want P2103 "mixed"
+        }
+    }
+}
