@@ -84,6 +84,8 @@ func apart(a, b Type, h Hierarchy, depth int) bool {
 		return apart(ak, bk, h, depth+1) || apart(av, bv, h, depth+1)
 	case ka == kindObject && kb == kindObject:
 		return classesApart(a, b, h, depth)
+	case ka == kindObject && kb == kindIterable:
+		return traversableApart(a, b, h, depth)
 	case ka == kindCallable && kb == kindCallable:
 		return callablesApart(a.(Callable), b.(Callable), h, depth)
 	case ka == kindBytes && kb == kindString, ka == kindString && kb == kindBytes:
@@ -215,6 +217,24 @@ func classesApart(a, b Type, h Hierarchy, depth int) bool {
 		return true
 	}
 	return !h.IsInterface(ca.Name) && !h.IsInterface(cb.Name)
+}
+
+// traversableApart tells a Traversable class from an iterable it never is,
+// by the key and value its Traversable ancestor is given, which is what
+// foreach reads: `Generator<int, Cat>` is never an `iterable<Dog>`. A class
+// that passes Traversable no arguments decides nothing, nor does one that
+// is no Traversable: PHP's own rule refuses it already.
+func traversableApart(a, b Type, h Hierarchy, depth int) bool {
+	c, ok := a.(Class)
+	if !ok || h == nil || !h.Exists(c.Name) || !h.IsSubclassOf(c.Name, "Traversable") {
+		return false
+	}
+	k, v, found := h.IteratorArgs(c)
+	if !found {
+		return false
+	}
+	bk, bv := keyValue(b)
+	return apart(toBounds(k), bk, h, depth+1) || apart(toBounds(v), bv, h, depth+1)
 }
 
 // inheritedArgsApart compares a class with a generic ancestor of it by the

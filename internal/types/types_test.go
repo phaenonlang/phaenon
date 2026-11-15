@@ -28,12 +28,11 @@ func (h mapHierarchy) IsSubclassOf(sub, super string) bool {
 	}
 	return false
 }
-func (h mapHierarchy) IsFinal(name string) bool              { return h.final[strings.ToLower(name)] }
-func (h mapHierarchy) IteratorArgs(Class) (Type, Type, bool) { return nil, nil, false }
-func (h mapHierarchy) IsInvokable(string) bool               { return false }
-func (h mapHierarchy) IsInterface(name string) bool          { return h.iface[strings.ToLower(name)] }
-func (h mapHierarchy) Variances(name string) []Variance      { return h.vars[strings.ToLower(name)] }
-func (h mapHierarchy) IsCallableName(name string) bool       { return false }
+func (h mapHierarchy) IsFinal(name string) bool         { return h.final[strings.ToLower(name)] }
+func (h mapHierarchy) IsInvokable(string) bool          { return false }
+func (h mapHierarchy) IsInterface(name string) bool     { return h.iface[strings.ToLower(name)] }
+func (h mapHierarchy) Variances(name string) []Variance { return h.vars[strings.ToLower(name)] }
+func (h mapHierarchy) IsCallableName(name string) bool  { return false }
 func (h mapHierarchy) PropertyType(class, name string) (Type, bool) {
 	return nil, false
 }
@@ -49,6 +48,13 @@ func (h mapHierarchy) SuperArgs(c Class, super string) ([]Type, bool) {
 		c = up(c.Args)
 	}
 	return nil, false
+}
+func (h mapHierarchy) IteratorArgs(c Class) (Type, Type, bool) {
+	args, ok := h.SuperArgs(c, "Traversable")
+	if !ok || len(args) != 2 {
+		return nil, nil, false
+	}
+	return args[0], args[1], true
 }
 func (h mapHierarchy) Exists(name string) bool {
 	_, ok := h.parents[strings.ToLower(name)]

@@ -68,6 +68,27 @@ class RawSlot implements Slot
 {
 }
 
+/**
+ * @template T
+ * @implements \IteratorAggregate<int, T>
+ */
+class Bag implements \IteratorAggregate
+{
+    /** @return \Iterator<int, T> */
+    public function getIterator(): \Iterator
+    {
+        throw new \LogicException();
+    }
+}
+
+class Pile implements \IteratorAggregate
+{
+    public function getIterator(): \Iterator
+    {
+        throw new \LogicException();
+    }
+}
+
 enum Suit
 {
     case Hearts;
@@ -179,6 +200,15 @@ abstract class Base
     /** @return \Iterator<int, Open> */
     abstract public function iteratorArgument(): \Iterator;
 
+    /** @return iterable<int, Open> */
+    abstract public function traversableValue(): iterable;
+
+    /** @return iterable<string, Open> */
+    abstract public function traversableKey(): iterable;
+
+    /** @param Bag<Open> $x */
+    abstract public function traversableParam(Bag $x): void;
+
     /**
      * @template T of object
      * @param class-string<T> $x
@@ -229,6 +259,12 @@ abstract class Base
 
     /** @return Slot<Open> */
     abstract public function passesNothing(): Slot;
+
+    /** @return iterable<Thing> */
+    abstract public function traversableCovariant(): iterable;
+
+    /** @return iterable<int, Open> */
+    abstract public function traversableUntyped(): iterable;
 
     /** @return string|array<string> */
     abstract public function sharedMember(): string|array;
@@ -443,6 +479,24 @@ abstract class Child extends Base
         throw new \LogicException();
     }
 
+    // A Traversable class is the iterable its Traversable ancestor is given.
+    /** @return Bag<Other> */
+    public function traversableValue(): Bag // want P2502 "return type App\OverrideTypes\Bag<App\OverrideTypes\Other> of App\OverrideTypes\Child::traversableValue() is not covariant with App\OverrideTypes\Base::traversableValue() (iterable<int, App\OverrideTypes\Open>)"
+    {
+        throw new \LogicException();
+    }
+
+    /** @return \Generator<int, Open> */
+    public function traversableKey(): \Generator // want P2502
+    {
+        throw new \LogicException();
+    }
+
+    /** @param iterable<int, Other> $x */
+    public function traversableParam(iterable $x): void // want P2502
+    {
+    }
+
     /**
      * @template TOpen of Open
      * @param class-string<TOpen> $x
@@ -532,6 +586,17 @@ abstract class Child extends Base
     }
 
     public function passesNothing(): RawSlot
+    {
+        throw new \LogicException();
+    }
+
+    /** @return \Generator<int, Open> */
+    public function traversableCovariant(): \Generator
+    {
+        throw new \LogicException();
+    }
+
+    public function traversableUntyped(): Pile
     {
         throw new \LogicException();
     }

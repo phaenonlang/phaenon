@@ -5,8 +5,9 @@ import "testing"
 // apartH has classes on two branches (User with its final Admin, Order),
 // an interface neither Order nor Foo implements, a generic class of each
 // variance, and subclasses that pass their generic parent arguments: their
-// own (SubBox<T> extends Box<T>), fixed ones (AdminBox extends Box<Admin>,
-// UserSource extends Source<User>) or none (RawBox extends Box).
+// own (SubBox<T> extends Box<T>, Users<T> is a Traversable<int, T>), fixed
+// ones (AdminBox extends Box<Admin>, UserSource extends Source<User>) or
+// none (RawBox extends Box, Rows is a Traversable).
 var apartH = mapHierarchy{
 	parents: map[string][]string{
 		"user":             {"JsonSerializable"},
@@ -21,15 +22,20 @@ var apartH = mapHierarchy{
 		"adminbox":         {"Box"},
 		"rawbox":           {"Box"},
 		"usersource":       {"Source"},
+		"traversable":      {},
+		"users":            {"Traversable"},
+		"rows":             {"Traversable"},
 	},
 	final: map[string]bool{"admin": true, "foo": true},
-	iface: map[string]bool{"jsonserializable": true},
-	vars:  map[string][]Variance{"source": {Covariant}, "sink": {Contravariant}},
+	iface: map[string]bool{"jsonserializable": true, "traversable": true},
+	vars:  map[string][]Variance{"source": {Covariant}, "sink": {Contravariant}, "traversable": {Covariant, Covariant}},
 	supers: map[string]func([]Type) Class{
 		"subbox":     func(args []Type) Class { return Class{Name: "Box", Args: args} },
 		"adminbox":   func([]Type) Class { return Class{Name: "Box", Args: []Type{NewClass("Admin")}} },
 		"rawbox":     func([]Type) Class { return Class{Name: "Box"} },
 		"usersource": func([]Type) Class { return Class{Name: "Source", Args: []Type{NewClass("User")}} },
+		"users":      func(args []Type) Class { return Class{Name: "Traversable", Args: []Type{TInt, args[0]}} },
+		"rows":       func([]Type) Class { return Class{Name: "Traversable"} },
 	},
 }
 
@@ -100,6 +106,8 @@ func TestNeverSubtype(t *testing.T) {
 		{NewClass("AdminBox"), of("Box", user)},
 		{NewClass("UserSource"), of("Source", order)},
 		{list(of("SubBox", order)), list(of("Box", user))},
+		{of("Users", order), Iterable{TMixed, user}}, // what a Traversable class yields
+		{of("Users", user), Iterable{TString, user}},
 		{sig(TInt, TString), sig(TString, TInt)},
 		{sig(TString, TInt, TInt), sig(TString, TInt)}, // requires an argument its callers do not pass
 		{sig(TString, list(TInt)), sig(TString, list(TString))},
@@ -155,7 +163,10 @@ func TestNeverSubtype(t *testing.T) {
 		{of("SubBox", user), of("Box", user)},
 		{NewClass("AdminBox"), of("Box", admin)},
 		{NewClass("UserSource"), of("Source", json)},
-		{NewClass("RawBox"), of("Box", user)},  // no arguments passed up
+		{NewClass("RawBox"), of("Box", user)}, // no arguments passed up
+		{of("Users", admin), Iterable{TInt, user}},
+		{NewClass("Rows"), Iterable{TInt, user}},
+		{order, Iterable{TMixed, user}},        // PHP's own rule decides a class that is no Traversable
 		{of("Box", user), of("SubBox", order)}, // the class given may be the subclass expected
 		{NewClass("Unknown"), user},
 		{Static{}, user},
