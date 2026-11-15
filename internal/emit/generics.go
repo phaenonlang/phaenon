@@ -592,7 +592,7 @@ func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra st
 	if oneLine {
 		// The content moves into a new docblock: its written types erase
 		// as translateWrittenDocs would have translated them in place.
-		content := translateDoc(oneLineContent(filled))
+		content := translateDocWith(oneLineContent(filled), l.e.aliasExpander(idx))
 		if len(tags) == 1 && strings.HasPrefix(tags[0], "@var ") && content != "" {
 			// A property's `/** what it holds */` gets its type back on the
 			// tag's line: `@var list<string> what it holds`, the PHP it

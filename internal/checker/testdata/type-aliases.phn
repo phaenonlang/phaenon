@@ -104,3 +104,14 @@ final class Own
         return $ids[0];
     }
 }
+
+// A docblock of a .phn names an alias as a signature does.
+/**
+ * @param array{ids: Ids, table?: Table<int>} $row
+ * @return list<Ids>
+ */
+function documented(array $row): array
+{
+    $n = $row['ids'][0] + 1;
+    return [$row['ids'], [$n]];
+}

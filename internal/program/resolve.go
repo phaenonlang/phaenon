@@ -441,7 +441,11 @@ func (r *resolver) docType(n *docblock.TypeNode) types.Type {
 		if strings.EqualFold(strings.TrimPrefix(n.Name, "\\"), "Closure") {
 			return types.TClosure
 		}
-		return r.classType(r.special(r.scope.ResolveClassString(n.Name)), args)
+		name := r.special(r.scope.ResolveClassString(n.Name))
+		if a, ok := r.typeAlias(name, args); ok {
+			return a // a .phn docblock names an alias as a signature does
+		}
+		return r.classType(name, args)
 	case docblock.KindNullable:
 		return types.Nullable(r.docType(n.Args[0]))
 	case docblock.KindUnion:

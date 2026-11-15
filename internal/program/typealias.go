@@ -180,3 +180,28 @@ func (r *Resolver) TypeAlias(n *ast.Name) *TypeAlias {
 	}
 	return a
 }
+
+// DocAlias is TypeAlias for a name as a docblock writes it (`Row`,
+// `Orders\Row`, `\App\Orders\Row`): a docblock of a .phn may name an alias,
+// and resolves it as a signature does (design/collections.md §6.5).
+func (r *Resolver) DocAlias(name string) *TypeAlias {
+	if name == "" || strings.HasPrefix(name, "$") || !r.namesAliases() {
+		return nil
+	}
+	if !strings.Contains(name, "\\") {
+		if _, param := r.params[name]; param {
+			return nil
+		}
+		if _, keyword := r.keyword(strings.ToLower(name), nil, nil); keyword {
+			return nil
+		}
+		if _, own := r.alias(name); own {
+			return nil
+		}
+	}
+	a := r.aliasNamed(r.special(r.scope.ResolveClassString(name)))
+	if a != nil {
+		r.p.resolveAlias(a)
+	}
+	return a
+}

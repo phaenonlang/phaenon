@@ -32,7 +32,7 @@ func (e *emitter) translateWrittenDocs() {
 		if t.Kind != token.T_DOC_COMMENT {
 			continue
 		}
-		for _, ed := range docTranslations(string(e.src[t.Start:t.End])) {
+		for _, ed := range docTranslations(string(e.src[t.Start:t.End]), e.aliasExpander(t.Start)) {
 			span := ast.Span{Start: t.Start + ed.Start, End: t.Start + ed.End}
 			if !e.edited(span) {
 				e.replace(span, ed.text)
@@ -53,8 +53,12 @@ func (e *emitter) edited(s ast.Span) bool {
 
 // translateDoc is docTranslations applied to a docblock's text (or to the
 // content of a one-line docblock, which addDoc copies into a new one).
-func translateDoc(doc string) string {
-	eds := docTranslations(doc)
+func translateDoc(doc string) string { return translateDocWith(doc, nil) }
+
+// translateDocWith is translateDoc with the aliases expand knows written
+// out (aliasExpander).
+func translateDocWith(doc string, expand func(mention string) (string, bool)) string {
+	eds := docTranslations(doc, expand)
 	if len(eds) == 0 {
 		return doc
 	}
@@ -77,14 +81,15 @@ type docEdit struct {
 }
 
 // docTranslations finds the tag types of a docblock that are spelled in
-// Phaenon's vocabulary, as offsets into doc, in order.
-func docTranslations(doc string) []docEdit {
+// Phaenon's vocabulary, as offsets into doc, in order. expand, when set,
+// gives what the name of a type alias stands for.
+func docTranslations(doc string, expand func(mention string) (string, bool)) []docEdit {
 	blank := blankDecorations(doc)
 	var out []docEdit
 	off := 0
 	for _, line := range strings.SplitAfter(blank, "\n") {
 		for _, r := range tagTypeRegions(blank, off, off+len(line)) {
-			if text := translateType(doc[r.Start:r.End], blank[r.Start:r.End]); text != doc[r.Start:r.End] {
+			if text := translateType(doc[r.Start:r.End], blank[r.Start:r.End], expand); text != doc[r.Start:r.End] {
 				out = append(out, docEdit{r, text})
 			}
 		}
@@ -233,8 +238,11 @@ func tagTypeRegions(blank string, start, end int) []ast.Span {
 // translateType spells a piece of type syntax for PHPStan. orig is the
 // text as written, blank the same text with the comment's marks blanked
 // (blankDecorations): the words and brackets are read from blank and
-// replaced in orig, so every other byte stays.
-func translateType(orig, blank string) string {
+// replaced in orig, so every other byte stays. expand gives the type the
+// name of a type alias stands for, with its type arguments when it has
+// them (`Page<Row>`), in PHPStan's spelling: PHPStan knows no alias of a
+// namespace (design/collections.md §4, §6.5).
+func translateType(orig, blank string, expand func(mention string) (string, bool)) string {
 	type repl struct {
 		start, end int
 		text       string
@@ -288,6 +296,24 @@ func translateType(orig, blank string) string {
 				rs = append(rs, repl{i, j, "class-string"})
 			case w == "closure" && next(j) == '(':
 				rs = append(rs, repl{i, i, "\\"})
+			case expand != nil && s[i] != '$' && !strings.HasPrefix(s[j:], "::"):
+				// The mention is the name and the type arguments that
+				// follow it. One that runs over lines stays as written: an
+				// edit in place keeps its line breaks, and an expansion has
+				// none of its own.
+				end := j
+				if next(j) == '<' {
+					if close, ok := angleEnd(s, j); ok {
+						end = close
+					}
+				}
+				if strings.ContainsAny(s[i:end], "\r\n") {
+					break
+				}
+				if text, ok := expand(s[i:end]); ok {
+					rs = append(rs, repl{i, end, text})
+					j = end
+				}
 			}
 		}
 		i = j
@@ -305,6 +331,30 @@ func translateType(orig, blank string) string {
 	}
 	b.WriteString(orig[pos:])
 	return b.String()
+}
+
+// angleEnd is the offset after the `>` that closes the type arguments
+// opening at or after s[from], blanks apart.
+func angleEnd(s string, from int) (int, bool) {
+	depth := 0
+	for k := from; k < len(s); k++ {
+		switch c := s[k]; c {
+		case '\'', '"':
+			q := strings.IndexByte(s[k+1:], c)
+			if q < 0 {
+				return 0, false
+			}
+			k += q + 1
+		case '<', '(', '{', '[':
+			depth++
+		case '>', ')', '}', ']':
+			depth--
+			if depth == 0 {
+				return k + 1, c == '>'
+			}
+		}
+	}
+	return 0, false
 }
 
 // tupleAt reports whether the `(` at s[i] opens a tuple, `(A, B)`, and

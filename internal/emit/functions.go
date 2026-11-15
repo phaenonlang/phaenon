@@ -216,7 +216,7 @@ func (e *emitter) mergeThrows(declStart, nameStart int, doc, tag string) {
 		return // the docblock states it already
 	}
 	if !strings.Contains(doc, "\n") {
-		e.rewriteDoc(idx, doc, translateDoc(oneLineContent(doc)), []string{tag})
+		e.rewriteDoc(idx, doc, translateDocWith(oneLineContent(doc), e.aliasExpander(idx)), []string{tag})
 		return
 	}
 	src := e.src

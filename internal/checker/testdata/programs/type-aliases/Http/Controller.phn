@@ -24,6 +24,12 @@ final class Controller
 
     name(Buyer $b): string => $b->name;
 
+    /**
+     * @param list<Row> $rows
+     * @return array{rows: list<Row>, page: Paged<Row>, buyer?: Buyer}
+     */
+    summary(array $rows): array => ['rows' => $rows, 'page' => [$rows, count($rows)]];
+
     // An alias of another namespace is not found without its import: a name
     // never falls back to another namespace.
     lost(Page<int> $p): void {} // want P2001

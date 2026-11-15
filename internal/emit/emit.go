@@ -263,6 +263,9 @@ type emitter struct {
 	// toks is the source's token stream, read when an edit needs a
 	// position the tree does not keep (layout.go).
 	toks []token.Token
+	// docs are the declarations whose docblocks may name a type alias,
+	// each with its resolver (docalias.go); built on first use.
+	docs []docScope
 	// aliasUses are the use statements that import type aliases only,
 	// which the output leaves out (aliasuse.go).
 	aliasUses map[*ast.Use]bool

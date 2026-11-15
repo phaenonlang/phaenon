@@ -24,4 +24,16 @@ final class Controller
     name(Buyer $b): string => $b->name;
 
     listing(): Listing => $this->orders->listing();
+
+    /**
+     * A docblock names an alias as a signature does, and the output holds
+     * what it stands for.
+     *
+     * @param list<Row> $rows
+     * @return array{rows: list<Row>, page: Paged<Row>, buyer?: Buyer}
+     */
+    summary(array $rows): array => ['rows' => $rows, 'page' => [$rows, count($rows)]];
+
+    /** @param list<Row> $rows a docblock on one line, which gains the tag of the return type */
+    paged(array $rows): Paged<Row> => [$rows, count($rows)];
 }
