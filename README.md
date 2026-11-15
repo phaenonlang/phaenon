@@ -429,9 +429,11 @@ phn watch               # the same project: check and build its roots each time 
 phn fmt --stdin         # the first layer, standard input to standard output (the plugin's Reformat Code)
 ```
 
-A library ships its `.phn` sources and no compiled PHP (`roadmap.md` D13): with `phn` and the
-library pinned, the output is reproducible byte for byte, and the Composer plugin below builds it
-where it is installed.
+A library written for Phaenon projects ships its `.phn` sources and no compiled PHP (`roadmap.md`
+D13): with `phn` and the library pinned, the output is reproducible byte for byte, and the
+Composer plugin below builds it where it is installed. One published for PHP projects at large
+commits its outputs as well, the roots `phaenon.json` names under `committed` (D28,
+[above](#how-it-fits-into-a-composer-project)).
 
 ### Installing
 
@@ -627,8 +629,8 @@ its site.
   positions in production for Monolog and Sentry
 - [`jetbrains`](https://github.com/phaenonlang/jetbrains) — the PhpStorm plugin
 - [`vscode`](https://github.com/phaenonlang/vscode) — the VS Code extension
-- [`website`](https://github.com/phaenonlang/website) — phaenon.dev: the landing page, the
-  playground and the release downloads
+- [phaenon.dev](https://phaenon.dev) — the landing page, the documentation, the playground and
+  the release downloads
 
 ## Development
 
