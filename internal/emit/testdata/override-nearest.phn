@@ -126,6 +126,38 @@ final class LoudGreet extends Greet
     }
 }
 
+// A union the demands meet in is written as PHP accepts it: iterable is
+// Traversable|array to PHP, which refuses Traversable|iterable as
+// redundant, so the parameter takes int|string|iterable.
+interface TakesTwo<V of int|string>
+{
+    take(\Traversable<mixed, mixed>|V $x): void;
+}
+
+final class TakesIterable implements TakesTwo<int>
+{
+    take(iterable<mixed>|int $x): void
+    {
+    }
+}
+
+interface TakesIterables<V of iterable<mixed>|int>
+{
+    take(V $x): void;
+}
+
+interface TakesTraversables<W of \Traversable<mixed, mixed>|string>
+{
+    take(W $x): void;
+}
+
+final class TakesArrayIterator implements TakesIterables<\ArrayIterator<int, int>>, TakesTraversables<\ArrayIterator<int, int>>
+{
+    take(\ArrayIterator<int, int> $x): void
+    {
+    }
+}
+
 // The parent's table holds what the farthest class brought in: Wide's
 // take(mixed), which Narrow's take(int) was checked against.
 interface Wide<T>

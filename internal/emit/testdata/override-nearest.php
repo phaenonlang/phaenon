@@ -192,6 +192,69 @@ final class LoudGreet extends Greet
     }
 }
 
+// A union the demands meet in is written as PHP accepts it: iterable is
+// Traversable|array to PHP, which refuses Traversable|iterable as
+// redundant, so the parameter takes int|string|iterable.
+/**
+ * @template V of int|string
+ */
+interface TakesTwo
+{
+    /**
+     * @param \Traversable<mixed, mixed>|V $x
+     */
+    public function take(\Traversable|int|string $x): void;
+}
+
+/**
+ * @implements TakesTwo<int>
+ */
+final class TakesIterable implements TakesTwo
+{
+    /**
+     * @param iterable<mixed>|int $x
+     */
+    public function take(int|string|iterable $x): void
+    {
+    }
+}
+
+/**
+ * @template V of iterable<mixed>|int
+ */
+interface TakesIterables
+{
+    /**
+     * @param V $x
+     */
+    public function take(iterable|int $x): void;
+}
+
+/**
+ * @template W of \Traversable<mixed, mixed>|string
+ */
+interface TakesTraversables
+{
+    /**
+     * @param W $x
+     */
+    public function take(\Traversable|string $x): void;
+}
+
+/**
+ * @implements TakesIterables<\ArrayIterator<int, int>>
+ * @implements TakesTraversables<\ArrayIterator<int, int>>
+ */
+final class TakesArrayIterator implements TakesIterables, TakesTraversables
+{
+    /**
+     * @param \ArrayIterator<int, int> $x
+     */
+    public function take(int|string|iterable $x): void
+    {
+    }
+}
+
 // The parent's table holds what the farthest class brought in: Wide's
 // take(mixed), which Narrow's take(int) was checked against.
 /**
@@ -252,4 +315,4 @@ final class BelowNeedsTake extends MidNeedsTake
     {
     }
 }
-// phaenon-map v1 override-nearest.phn 1-6=1 7:1 17-19=11 20:11 22-24=13 25:13 30-32=18 33:18 50-52=35 53:35 60-62=42 63:42 71-73=50 74:50 80-82=56 83:56 85-87=58 88:58 91-93=61 94:61 100-102=67 103:67 119-121=83 122:83 124-126=85 127:85 137-139=95 140:95 142-144=97 145:97 152-154=104 155:104 157-159=106 160:106 163-165=109 166:109 170-172=113 173:113 179-181=118 182:119 186-188=123 189:123 197-199=131 200:131 202-204=133 205:133 213-215=141 216:141 226-228=151 229:151 248-250=170 251:170
+// phaenon-map v1 override-nearest.phn 1-6=1 7:1 17-19=11 20:11 22-24=13 25:13 30-32=18 33:18 50-52=35 53:35 60-62=42 63:42 71-73=50 74:50 80-82=56 83:56 85-87=58 88:58 91-93=61 94:61 100-102=67 103:67 119-121=83 122:83 124-126=85 127:85 137-139=95 140:95 142-144=97 145:97 152-154=104 155:104 157-159=106 160:106 163-165=109 166:109 170-172=113 173:113 179-181=118 182:119 186-188=123 189:123 198-200=132 201:132 203-205=134 206:134 209-211=137 212:137 214-216=139 217:139 222-224=144 225:144 227-229=146 230:146 233-235=149 236:149 238-240=151 241:151 244-247=154 248:154 250-252=156 253:156 260-262=163 263:163 265-267=165 268:165 276-278=173 279:173 289-291=183 292:183 311-313=202 314:202

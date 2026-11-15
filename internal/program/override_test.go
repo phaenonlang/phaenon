@@ -1,6 +1,12 @@
 package program
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -138,4 +144,83 @@ final class IntSource extends Source<int> implements Ints { get(): int => 1; }
 	if s, _ := types.Native(got); !ok || s != "int" {
 		t.Errorf("IntSource::get() narrows mixed to %q (%v), want int", s, ok)
 	}
+}
+
+// TestErasedUnionsLoad: the parameter the rule widens to accepts both
+// types it is made of, and php compiles it as written, whatever pair of
+// types meets: none of the unions PHP refuses as redundant (iterable is
+// Traversable|array to PHP; object beside a class; mixed beside anything;
+// bool beside true or false; a type twice).
+func TestErasedUnionsLoad(t *testing.T) {
+	php, err := exec.LookPath("php")
+	if err != nil {
+		t.Skip("no php on PATH")
+	}
+	p := New()
+	if err := p.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	decls := `namespace X;
+class Foo {}
+class Sub extends Foo {}
+interface Iface {}
+final class Name implements \Stringable { __toString(): string => 'name'; }
+`
+	if _, err := p.AddFile("src/unions.phn", []byte(decls), lexer.ModePhaenon, true); err != nil {
+		t.Fatal(err)
+	}
+	class := types.NewClass
+	values := []types.Type{
+		types.TInt, types.TString, types.TFloat, types.TBool, types.TTrue, types.TFalse, types.TNull,
+		types.TArray, types.TIterable, types.TObject, types.TCallable,
+		class("Traversable"), class("ArrayIterator"), class("Countable"), class("Stringable"),
+		class(`X\Foo`), class(`X\Sub`), class(`X\Iface`), class(`X\Name`),
+		types.MakeUnion(class(`X\Foo`), types.TNull), types.MakeUnion(types.TInt, types.TString),
+		types.MakeUnion(class("Traversable"), types.TInt), types.MakeUnion(types.TArray, types.TString),
+		types.MakeUnion(types.TIterable, types.TInt), types.MakeUnion(types.TBool, types.TNull),
+		types.MakeUnion(types.TFalse, types.TInt), types.MakeUnion(types.TObject, types.TInt),
+	}
+	var src strings.Builder
+	src.WriteString("<?php\nnamespace X;\nclass Foo {}\nclass Sub extends Foo {}\ninterface Iface {}\nfinal class Name implements \\Stringable { public function __toString(): string { return 'name'; } }\n")
+	var lines []string
+	emit := func(what, decl string) {
+		src.WriteString(decl + "\n")
+		lines = append(lines, what)
+	}
+	n := 0
+	for _, a := range values {
+		for _, b := range values {
+			if types.IsSubtype(b, a, p) {
+				continue // the rule leaves a parameter that accepts b alone
+			}
+			w := widenParam(a, b, p)
+			if !types.IsSubtype(a, w, p) || !types.IsSubtype(b, w, p) {
+				t.Errorf("parameter %s widened for %s to %s, which refuses one of them", types.Print(a), types.Print(b), types.Print(w))
+			}
+			s, ok := types.Native(w)
+			if !ok {
+				t.Errorf("parameter %s widened for %s to %s, which PHP cannot spell", types.Print(a), types.Print(b), types.Print(w))
+				continue
+			}
+			n++
+			emit(types.Print(a)+" widened for "+types.Print(b), fmt.Sprintf("function p%d(%s $x): void {}", n, s))
+		}
+	}
+	src.WriteString("echo 'loaded';\n")
+	file := filepath.Join(t.TempDir(), "unions.php")
+	if err := os.WriteFile(file, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(php, "-n", "-d", "display_errors=1", file).CombinedOutput()
+	if err == nil && string(out) == "loaded" {
+		return
+	}
+	// Name the declaration php stopped at: the prelude is 6 lines.
+	msg := string(out)
+	if m := regexp.MustCompile(`on line (\d+)`).FindStringSubmatch(msg); m != nil {
+		if line, _ := strconv.Atoi(m[1]); line > 6 && line-7 < len(lines) {
+			t.Fatalf("php refuses the type of %s:\n%s", lines[line-7], msg)
+		}
+	}
+	t.Fatalf("php: %v\n%s", err, msg)
 }

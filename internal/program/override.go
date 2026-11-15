@@ -274,13 +274,7 @@ func (m *Method) erasureAt(decls []signature, slot int, own types.Type) (types.T
 		if types.IsSubtype(pe, ce, h) {
 			continue
 		}
-		if types.IsSubtype(ce, pe, h) {
-			cur = pe
-		} else if both := widen(ce, pe, h); isNative(both) {
-			cur = both
-		} else {
-			cur = pe
-		}
+		cur = widenParam(ce, pe, h)
 		changed = true
 	}
 	if !changed || !isNative(cur) {
@@ -289,25 +283,56 @@ func (m *Method) erasureAt(decls []signature, slot int, own types.Type) (types.T
 	return cur, true
 }
 
-func isNative(t types.Type) bool {
-	_, ok := types.Native(t)
-	return ok
+// widenParam is the parameter type that accepts what own, a parameter's
+// type, and pe, an overridden declaration's that own does not cover,
+// accept: pe when it covers own, else their union, or pe when the union
+// has no PHP spelling.
+func widenParam(own, pe types.Type, h types.Hierarchy) types.Type {
+	if types.IsSubtype(own, pe, h) {
+		return pe
+	}
+	if both := phpUnion(h, own, pe); isNative(both) {
+		return both
+	}
+	return pe
 }
 
-// widen is a type that accepts what t and u accept, for two that do not
-// contain each other: their union, without t's members that u already
-// accepts, which PHP may refuse as redundant (`Foo|object`).
-func widen(t, u types.Type, h types.Hierarchy) types.Type {
-	if types.IsMixed(t) || types.IsMixed(u) {
-		return types.TMixed
+// phpUnion is the union of ts as a PHP declaration may write it: mixed
+// alone, and without a member that another member accepts, since PHP
+// refuses a union it can see is redundant (`Foo|object`,
+// `Traversable|iterable`, `array|iterable`, `bool|false`, a type twice).
+func phpUnion(h types.Hierarchy, ts ...types.Type) types.Type {
+	var all []types.Type
+	for _, t := range ts {
+		if types.IsMixed(t) {
+			return types.TMixed
+		}
+		all = append(all, types.Members(t)...)
 	}
-	keep := []types.Type{u}
-	for _, mt := range types.Members(t) {
-		if !types.IsSubtype(mt, u, h) {
-			keep = append(keep, mt)
+	var keep []types.Type
+	for i, a := range all {
+		redundant := false
+		for j, b := range all {
+			if i == j || !types.IsSubtype(a, b, h) {
+				continue
+			}
+			// b accepts a: a goes, unless the two are the same type and a
+			// is the first of them.
+			if !types.IsSubtype(b, a, h) || j < i {
+				redundant = true
+				break
+			}
+		}
+		if !redundant {
+			keep = append(keep, a)
 		}
 	}
 	return types.MakeUnion(keep...)
+}
+
+func isNative(t types.Type) bool {
+	_, ok := types.Native(t)
+	return ok
 }
 
 // PHPSignature returns the native types PHP sees in m's declaration, one
