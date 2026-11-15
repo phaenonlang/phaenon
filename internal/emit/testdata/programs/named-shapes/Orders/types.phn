@@ -1,0 +1,8 @@
+namespace Shop\Orders;
+
+// The shapes of the namespace, in a file of their own: its output holds
+// nothing, and every file that names one gets its expansion.
+
+type Line = array{sku: string, qty: int};
+type Order = array{id: int, lines: list<Line>, buyer?: Customer};
+type Page<T> = array{items: list<T>, total: int, next?: string};

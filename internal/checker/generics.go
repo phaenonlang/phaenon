@@ -74,6 +74,8 @@ func (x *fnCtx) checkTypeExpr(t ast.TypeExpr) {
 		for _, m := range t.Elems {
 			x.checkTypeExpr(m)
 		}
+	case *ast.ShapeType:
+		x.checkShape(t)
 	}
 }
 

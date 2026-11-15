@@ -666,7 +666,7 @@ func (p *Parser) typeAlias(attrs []*ast.AttrGroup) ast.Stmt {
 	t := &ast.TypeAlias{Doc: doc, Attrs: attrs, Name: p.stringIdent()}
 	t.TypeParams = p.typeParams()
 	p.expect(token.Kind('='))
-	t.Type = p.typeExpr()
+	t.Type = p.aliasedType()
 	p.semi()
 	t.S = p.span(start)
 	return t
@@ -833,7 +833,7 @@ func (p *Parser) functionDecl(attrs []*ast.AttrGroup) ast.Stmt {
 	f.TypeParams = p.typeParams()
 	f.Params = p.params()
 	if p.accept(token.Kind(':')) {
-		f.ReturnType = p.typeExpr()
+		f.ReturnType = p.typeBeforeBody(false)
 	}
 	f.Throws = p.throwsClause()
 	if f.Arrow = p.exprBody(); f.Arrow != nil {
@@ -941,7 +941,7 @@ func (p *Parser) anonymousClass() *ast.ClassDecl {
 
 func (p *Parser) classHeader(c *ast.ClassDecl) {
 	if c.Kind == ast.KindEnum && p.accept(token.Kind(':')) {
-		c.BackingType = p.typeExpr()
+		c.BackingType = p.typeBeforeBody(false)
 	}
 	if p.accept(token.T_EXTENDS) {
 		for {
@@ -1058,7 +1058,7 @@ func (p *Parser) classMember() ast.ClassMember {
 		m.TypeParams = p.typeParams()
 		m.Params = p.params()
 		if p.accept(token.Kind(':')) {
-			m.ReturnType = p.typeExpr()
+			m.ReturnType = p.typeBeforeBody(true)
 		}
 		m.Throws = p.throwsClause()
 		switch {

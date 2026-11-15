@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 )
@@ -52,4 +53,30 @@ func (c *Checker) unknownClass(what, name string) string {
 		return fmt.Sprintf("unknown %s %s: %s is a type alias, which is erased and names no class", what, name, a.Decl.Name.Name)
 	}
 	return fmt.Sprintf("unknown %s %s", what, name)
+}
+
+// checkShape validates a shape written in a `type` declaration
+// (design/collections.md §6.1): the types of its entries, and that a key
+// is written once. A quoted key that is a decimal integer is that
+// integer's key, so `'1'` after `1` is the same key again.
+func (x *fnCtx) checkShape(t *ast.ShapeType) {
+	type key struct {
+		name  string
+		n     int64
+		isInt bool
+	}
+	seen := map[key]bool{}
+	for _, e := range t.Entries {
+		k := key{name: e.Name}
+		if v, err := strconv.ParseInt(e.Name, 10, 64); e.IsInt {
+			k = key{n: e.Int, isInt: true}
+		} else if err == nil {
+			k = key{n: v, isInt: true}
+		}
+		if seen[k] {
+			x.report(e.Key, P2511, "shape key %s is written twice", e.Raw)
+		}
+		seen[k] = true
+		x.checkTypeExpr(e.Type)
+	}
 }

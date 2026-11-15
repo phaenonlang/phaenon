@@ -64,7 +64,7 @@ func hasGenerics(f *ast.File) bool {
 			return false
 		}
 		switch n := n.(type) {
-		case *ast.TypeParam, *ast.TypeAlias, *ast.IsExpr, *ast.AsExpr, *ast.ClosureType, *ast.TupleType:
+		case *ast.TypeParam, *ast.TypeAlias, *ast.IsExpr, *ast.AsExpr, *ast.ClosureType, *ast.TupleType, *ast.ShapeType:
 			found = true
 		case *ast.Cast:
 			found = found || n.Op == token.T_BYTES_CAST
@@ -278,7 +278,7 @@ func (l *lowering) erase(t ast.TypeExpr, sc *scope) string {
 		return s
 	case *ast.ClosureType:
 		return "\\Closure"
-	case *ast.TupleType:
+	case *ast.TupleType, *ast.ShapeType:
 		return "array"
 	}
 	return "mixed"
@@ -397,6 +397,11 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 			parts = append(parts, l.docType(m, sc))
 		}
 		return "array{" + strings.Join(parts, ", ") + "}"
+	case *ast.ShapeType:
+		// A shape stands in a `type` declaration alone, which leaves no
+		// trace in the output: its uses print the alias expanded. Printed
+		// here it is the lattice's text, which is the one they get.
+		return types.PrintQualified(sc.res.Native(t))
 	case *ast.ClosureType:
 		var parts []string
 		for _, m := range t.Params {
@@ -467,7 +472,7 @@ func (l *lowering) needsDoc(t ast.TypeExpr, sc *scope) bool {
 			}
 		}
 		return false
-	case *ast.ClosureType, *ast.TupleType:
+	case *ast.ClosureType, *ast.TupleType, *ast.ShapeType:
 		return true
 	}
 	return false

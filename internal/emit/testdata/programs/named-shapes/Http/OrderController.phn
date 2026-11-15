@@ -1,0 +1,26 @@
+namespace Shop\Http;
+
+use Shop\Orders\Line;
+use Shop\Orders\Order;
+use Shop\Orders\Orders;
+use Shop\Orders\Page;
+
+// A caller in another namespace names the shapes by their imports. In the
+// output the classes of a shape are written by their qualified names,
+// whatever this file imports.
+final class OrderController
+{
+    __construct(private Orders $orders) {}
+
+    show(int $id): ?Order => $this->orders->find($id);
+
+    index(): Page<Order> => $this->orders->page(0);
+
+    buyer(Order $order): string => isset($order['buyer']) ? $order['buyer']->name : 'nobody';
+
+    /**
+     * @param list<Line> $lines
+     * @return array{count: int, first?: Line}
+     */
+    summary(array $lines): array => $lines === [] ? ['count' => 0] : ['count' => count($lines), 'first' => $lines[0]];
+}

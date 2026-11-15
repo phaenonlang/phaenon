@@ -1,0 +1,31 @@
+namespace Shop\Orders;
+
+final class Customer
+{
+    __construct(public readonly string $name) {}
+}
+
+final class Orders
+{
+    /** @var list<Order> */
+    private array $orders = [];
+
+    find(int $id): ?Order
+    {
+        foreach ($this->orders as $order) {
+            if ($order['id'] === $id) {
+                return $order;
+            }
+        }
+        return null;
+    }
+
+    page(int $offset): Page<Order> => ['items' => array_slice($this->orders, $offset), 'total' => count($this->orders)];
+
+    place(Customer $buyer, Line ...$lines): Order
+    {
+        $order = ['id' => count($this->orders) + 1, 'lines' => array_values($lines), 'buyer' => $buyer];
+        $this->orders[] = $order;
+        return $order;
+    }
+}

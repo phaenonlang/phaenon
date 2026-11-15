@@ -599,6 +599,29 @@ type (
 		S     Span
 		Elems []TypeExpr
 	}
+	// ShapeType is Phaenon's array{id: int, name?: string}: an array by its
+	// keys, written in the right-hand side of a `type` declaration and
+	// nowhere else (design/collections.md §6.1). Unsealed says `...` ends
+	// the entries: the array may hold keys the shape does not name.
+	ShapeType struct {
+		S        Span
+		Entries  []ShapeEntry
+		Unsealed bool
+	}
+	// ShapeEntry is one `key: T` or `key?: T` of a ShapeType. Raw is the key
+	// as written: a name (`id`, `class`), a quoted string (`'$set'`) or an
+	// integer (`0`, `-1`). Name is the key a name or a string spells, Int
+	// the one an integer does.
+	ShapeEntry struct {
+		S        Span
+		Key      Span
+		Raw      string
+		Name     string
+		Int      int64
+		IsInt    bool
+		Optional bool
+		Type     TypeExpr
+	}
 )
 
 func (*NamedType) typeNode()        {}
@@ -607,6 +630,7 @@ func (*UnionType) typeNode()        {}
 func (*IntersectionType) typeNode() {}
 func (*ClosureType) typeNode()      {}
 func (*TupleType) typeNode()        {}
+func (*ShapeType) typeNode()        {}
 
 func (n *NamedType) Span() Span        { return n.S }
 func (n *NullableType) Span() Span     { return n.S }
@@ -614,6 +638,7 @@ func (n *UnionType) Span() Span        { return n.S }
 func (n *IntersectionType) Span() Span { return n.S }
 func (n *ClosureType) Span() Span      { return n.S }
 func (n *TupleType) Span() Span        { return n.S }
+func (n *ShapeType) Span() Span        { return n.S }
 
 // Variance of a Phaenon type parameter.
 type Variance uint8

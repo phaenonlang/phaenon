@@ -188,6 +188,22 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 			sh.Entries = append(sh.Entries, types.ShapeEntry{IsInt: true, IntKey: int64(i), Type: r.native(el)})
 		}
 		return sh
+	case *ast.ShapeType:
+		// array{id: int, name?: string} is the lattice's shape, the one a
+		// docblock's shape is (docType): the two spell one type.
+		sh := types.Shape{Unsealed: t.Unsealed}
+		for _, e := range t.Entries {
+			se := types.ShapeEntry{Type: r.native(e.Type), Optional: e.Optional}
+			if v, err := strconv.ParseInt(e.Name, 10, 64); e.IsInt {
+				se.IsInt, se.IntKey = true, e.Int
+			} else if err == nil {
+				se.IsInt, se.IntKey = true, v // a quoted decimal integer is that integer's key
+			} else {
+				se.Key = e.Name
+			}
+			sh.Entries = append(sh.Entries, se)
+		}
+		return sh
 	}
 	return types.TMixed
 }

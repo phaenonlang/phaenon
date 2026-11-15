@@ -170,6 +170,10 @@ func (x *fnCtx) declaredTypes(t ast.TypeExpr, erased bool) {
 		for _, m := range t.Elems {
 			x.declaredTypes(m, true)
 		}
+	case *ast.ShapeType:
+		for _, e := range t.Entries {
+			x.declaredTypes(e.Type, true)
+		}
 	}
 }
 
