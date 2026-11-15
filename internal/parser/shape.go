@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -210,7 +211,7 @@ func (p *Parser) shapeEntry() ast.ShapeEntry {
 		e.Raw = t.Text(p.src)
 		e.Name = e.Raw
 	default:
-		p.errorf("every entry of a shape has a key, `key: T`: a positional shape is a tuple, (A, B)")
+		p.noShapeKey()
 	}
 	e.Key = ast.Span{Start: t.Start, End: p.end()}
 	e.Optional = p.accept(token.Kind('?'))
@@ -218,6 +219,76 @@ func (p *Parser) shapeEntry() ast.ShapeEntry {
 	e.Type = p.typeExpr()
 	e.S = p.span(t.Start)
 	return e
+}
+
+// noShapeKey reports what stands where a shape's entry should begin with
+// its key, by what it is: the end of the file, a number that is no integer
+// key, a key that needs its quotes, an entry without a key, which is what
+// a tuple has, or a token no entry begins with.
+func (p *Parser) noShapeKey() {
+	const positional = "every entry of a shape has a key, `key: T`: a positional shape is a tuple, (A, B)"
+	t := p.tok()
+	text := t.Text(p.src)
+	switch {
+	case t.Kind == token.EOF:
+		p.errorf("unexpected end of file in a shape: expecting an entry, `key: T`, or `}`")
+	case t.Kind == token.T_DNUMBER:
+		if strings.Trim(text, "0123456789") == "" {
+			p.errorf("a shape's integer key fits PHP's int: %s does not, and as a string it is quoted, '%s'", text, text)
+		}
+		p.errorf("a shape's key is a name, a quoted string or an integer: %s is none, and as a string it is quoted, '%s'", text, text)
+	case t.Kind == token.T_STRING || isSemiReserved(t.Kind):
+		switch next := p.peek(1); {
+		case next.Kind == token.EOF:
+			p.errorAt(next, "unexpected end of file in a shape: expecting `:` after the key %s", text)
+		case next.Kind == token.Kind('-'):
+			// a-b, as a docblock writes the key: the lexer has no such
+			// token, so the syntax quotes it.
+			key, i := text, 1
+			for p.peekKind(i) == token.Kind('-') && (p.peekKind(i+1) == token.T_STRING || isSemiReserved(p.peekKind(i+1)) || p.peekKind(i+1) == token.T_LNUMBER) {
+				key += "-" + p.peek(i+1).Text(p.src)
+				i += 2
+			}
+			p.errorf("a shape's key that is not a name is quoted: '%s'", key)
+		case next.Kind == token.Kind(','), next.Kind == token.Kind('}'), next.Kind == token.Kind('<'), next.Kind == token.Kind('|'),
+			next.Kind == token.Kind('('), next.Kind == token.Kind('{'), next.Kind == token.T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG:
+			p.errorf(positional) // a type where an entry should be
+		default:
+			p.errorAt(next, "unexpected %s after the key %s: an entry of a shape is written `key: T` or `key?: T`", describeToken(next, p.src), text)
+		}
+	case t.Kind == token.T_NAME_QUALIFIED, t.Kind == token.T_NAME_FULLY_QUALIFIED, t.Kind == token.T_NAME_RELATIVE:
+		if k := p.peekKind(1); k == token.Kind(':') || k == token.Kind('?') {
+			p.errorf("a shape's key that is not a name is quoted: '%s'", text)
+		}
+		p.errorf(positional)
+	case t.Kind == token.Kind('?'), t.Kind == token.Kind('('):
+		p.errorf(positional)
+	}
+	p.errorf("unexpected %s: an entry of a shape begins with its key, a name, a quoted string or an integer", p.describe())
+}
+
+// describeToken is describe for a token that is not the current one.
+func describeToken(t token.Token, src []byte) string {
+	if t.Kind == token.EOF {
+		return "end of file"
+	}
+	return fmt.Sprintf("token %q (%s)", t.Text(src), t.Kind)
+}
+
+// hyphenatedShape reports `non-empty-array{…}` and `non-empty-list{…}` in
+// a `type` declaration, at the `-` after `non`: PHPStan's hyphenated names
+// are docblock vocabulary, and the refinement they spell is one the
+// checker infers.
+func (p *Parser) hyphenatedShape(name *ast.Name) {
+	if !p.shapes || len(name.Parts) != 1 || name.Kind != ast.NameUnqualified || !strings.EqualFold(name.Parts[0], "non") {
+		return
+	}
+	if p.peekKind(1) != token.T_EMPTY || p.peekKind(2) != token.Kind('-') || p.peekKind(4) != token.Kind('{') {
+		return
+	}
+	if k := p.peekKind(3); k == token.T_ARRAY || k == token.T_LIST {
+		p.errorf("non-empty-%s{…} stays docblock vocabulary: a shape is written array{…}, and that it is not empty is what the checker infers", strings.ToLower(p.peek(3).Text(p.src)))
+	}
 }
 
 // quotedKey is the key a quoted string spells: the text between its

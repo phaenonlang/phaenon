@@ -451,6 +451,9 @@ func (p *Parser) singleType() ast.TypeExpr {
 		if p.at(token.Kind('{')) && p.shapeAhead(name) {
 			return p.shapeType(start)
 		}
+		if p.at(token.Kind('-')) {
+			p.hyphenatedShape(name)
+		}
 		if p.at(token.Kind('<')) {
 			nt.TypeArgs = p.typeArgs()
 			nt.S = p.span(start)

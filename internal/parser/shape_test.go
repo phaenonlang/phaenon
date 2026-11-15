@@ -88,8 +88,20 @@ func TestShapeEntries(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
 		{"type T = array{int, string};", "every entry of a shape has a key"},
 		{"type T = array{?int};", "every entry of a shape has a key"},
-		{"type T = array{Foo\\Bar: int};", "every entry of a shape has a key"},
-		{"type T = array{a-b: int};", "every entry of a shape has a key"},
+		{"type T = array{Foo\\Bar};", "every entry of a shape has a key"},
+		{"type T = array{list<int>, int};", "every entry of a shape has a key"},
+		{"type T = array{Foo\\Bar: int};", "a shape's key that is not a name is quoted: 'Foo\\Bar'"},
+		{"type T = array{a-b: int};", "a shape's key that is not a name is quoted: 'a-b'"},
+		{"type T = array{unit-price-2?: int};", "is quoted: 'unit-price-2'"},
+		{"type T = array{1.5: int};", "1.5 is none, and as a string it is quoted, '1.5'"},
+		{"type T = array{99999999999999999999: int};", "a shape's integer key fits PHP's int"},
+		{"type T = array{", "unexpected end of file in a shape: expecting an entry"},
+		{"type T = array{id", "unexpected end of file in a shape: expecting `:` after the key id"},
+		{"type T = array{id => int};", "after the key id: an entry of a shape is written `key: T` or `key?: T`"},
+		{"type T = array{$id: int};", "an entry of a shape begins with its key"},
+		{"type T = array{id: int,, name: string};", "an entry of a shape begins with its key"},
+		{"type T = non-empty-array{id: int};", "non-empty-array{…} stays docblock vocabulary"},
+		{"type T = list<non-empty-list{int, string}>;", "non-empty-list{…} stays docblock vocabulary"},
 		{"type T = array{..., id: int};", "`...` is a shape's last entry"},
 		{"type T = array{id: int, ...<string, int>};", "the typed form, `...<K, V>`, is not read"},
 		{"type T = array{\"a$b\": int};", "holds no interpolation"},
@@ -101,7 +113,7 @@ func TestShapeEntries(t *testing.T) {
 		{"type T = list{int, string};", "list{…} stays docblock vocabulary"},
 		{"type T = object{id: int};", "object{…} stays docblock vocabulary"},
 		{"type T = array{id: int;", "expecting"},
-		{"type T = array{id int};", "every entry of a shape has a key"},
+		{"type T = array{id int};", "after the key id: an entry of a shape is written"},
 	} {
 		_, err := Parse([]byte(c.src), lexer.ModePhaenon)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
