@@ -11,6 +11,7 @@ package program
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -232,32 +233,47 @@ func (p *Program) ClassPolyfilled(name string) bool {
 // Class returns the class with the given fully-qualified name (any case,
 // with or without a leading backslash), loading it if a loader knows it.
 //
-// An alias may name another alias, maxAliasHops deep. Aliases that name each
-// other name no class, as in PHP, where the first class_alias() of the
+// A name class_alias() gives a class is followed to the class, through any
+// number of aliases of aliases, as Canonical follows it. Aliases that name
+// each other name no class, as in PHP, where the first class_alias() of the
 // cycle fails for want of its original: the lookup ends with nil.
 func (p *Program) Class(name string) *Class {
+	_, key, ok := p.unalias(name, true)
+	if !ok {
+		return nil
+	}
+	return p.classes[key]
+}
+
+// unalias follows the class_alias() calls from a name to the name they end
+// at, the name itself when no call aliases it, and returns that name as
+// written and as a lookup key. With load, a name that is neither a class
+// nor an alias yet is asked of the loaders first, since the file that
+// declares it may alias it. ok is false when the aliases form a cycle: a
+// name met a second time on the way.
+func (p *Program) unalias(name string, load bool) (string, string, bool) {
 	key := strings.ToLower(strings.TrimPrefix(name, "\\"))
-	for range maxAliasHops {
+	var followed []string
+	for {
 		// An alias wins over a declaration kept for IDEs
 		// (`if (false) { class Old … }`).
 		target, aliased := p.aliasTarget(key)
-		if !aliased {
-			if c, ok := p.classes[key]; ok {
-				return c
+		if !aliased && load {
+			if _, declared := p.classes[key]; !declared {
+				p.load(key)
+				target, aliased = p.aliasTarget(key)
 			}
-			p.load(key)
-			if target, aliased = p.aliasTarget(key); !aliased {
-				return p.classes[key]
-			}
-			// The loaded file aliased the name.
 		}
-		key = strings.ToLower(strings.TrimPrefix(target, "\\"))
+		if !aliased {
+			return name, key, true
+		}
+		if slices.Contains(followed, key) {
+			return "", "", false
+		}
+		followed = append(followed, key)
+		name, key = target, strings.ToLower(strings.TrimPrefix(target, "\\"))
 	}
-	return nil
 }
-
-// maxAliasHops is how many class_alias() steps a name is followed through.
-const maxAliasHops = 8
 
 // aliasTarget is the class a class_alias() call points the name at, if one
 // does and it is not the name itself.
@@ -359,15 +375,13 @@ func (p *Program) IsSubclassOf(sub, super string) bool {
 }
 
 // Canonical is the class a name stands for: the class itself, or the one
-// class_alias() points the name at.
+// class_alias() points the name at, through any number of aliases of
+// aliases, as Class follows it. A name whose aliases form a cycle stands
+// for no class and is returned as given. Unlike Class, Canonical loads
+// nothing: it sees the aliases declared so far.
 func (p *Program) Canonical(name string) string {
-	key := strings.ToLower(strings.TrimPrefix(name, "\\"))
-	for range maxAliasHops {
-		target, ok := p.aliasTarget(key)
-		if !ok {
-			break
-		}
-		name, key = target, strings.ToLower(target)
+	if target, _, ok := p.unalias(name, false); ok {
+		return target
 	}
 	return name
 }
