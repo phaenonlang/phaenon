@@ -287,3 +287,46 @@ class Free extends Plain
         parent::__construct($id);
     }
 }
+
+// The final and visibility rules stay the nearest constructor's, whatever
+// abstract constructor binds the signature: Sealed's is final, and
+// SubLedger narrows Ledger's public one.
+abstract class Entry
+{
+    abstract public function __construct(int $id);
+}
+
+class Sealed extends Entry
+{
+    final public function __construct(public int $id)
+    {
+    }
+}
+
+class Unsealed extends Sealed
+{
+    public function __construct(int $id) // want P2505 "overrides final method App\OverrideInterfaces\Sealed::__construct()"
+    {
+        parent::__construct($id);
+    }
+}
+
+abstract class Account
+{
+    abstract protected function __construct(int $id);
+}
+
+class Ledger extends Account
+{
+    public function __construct(public int $id)
+    {
+    }
+}
+
+class SubLedger extends Ledger
+{
+    protected function __construct(int $id) // want P2502 "must be at least public like App\OverrideInterfaces\Ledger::__construct()"
+    {
+        parent::__construct($id);
+    }
+}

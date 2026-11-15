@@ -970,14 +970,6 @@ func overriddenMethods(cl *program.Class, m *program.Method) []*program.Method {
 			class = pm
 		}
 	}
-	if class != nil && strings.EqualFold(m.Name, "__construct") && !class.Abstract {
-		// A constructor is free of a concrete parent's signature, not of
-		// the abstract constructor that one implements: PHP holds it to
-		// that prototype, however far up it sits.
-		if proto := abstractConstructor(class.Class); proto != nil {
-			class = proto
-		}
-	}
 	var out []*program.Method
 	if class != nil {
 		out = append(out, class)
@@ -991,13 +983,22 @@ func overriddenMethods(cl *program.Class, m *program.Method) []*program.Method {
 	return out
 }
 
-// abstractConstructor is the abstract constructor a class's own constructor
-// implements, declared by the class or a parent class, or nil: what PHP
-// calls the prototype of a constructor and holds an overriding one to.
-// Interfaces' constructors are compared as every interface method is.
-func abstractConstructor(cl *program.Class) *program.Method {
+// constructorSignature is the constructor whose signature an override of
+// parent, the nearest constructor up the parent classes or an interface's,
+// is held to, or nil when none is. PHP leaves a constructor free of a
+// concrete parent's signature, not of the abstract constructor that one
+// implements: the nearest abstract constructor up the parent classes,
+// however far up it sits. PHP takes the top-most one, which differs only
+// where a nearer abstract constructor widened a farther one; there the
+// override is held to the nearer, as PHPStan holds it to the nearest
+// constructor. An interface's constructor binds its own signature. The
+// final and visibility checks stay the nearest constructor's.
+func constructorSignature(parent *program.Method) *program.Method {
+	if parent.Abstract || parent.Class.Kind == ast.KindInterface {
+		return parent
+	}
 	seen := map[*program.Class]bool{}
-	for c := cl; c != nil && !seen[c]; c = c.ParentClass() {
+	for c := parent.Class; c != nil && !seen[c]; c = c.ParentClass() {
 		seen[c] = true
 		c.Signature()
 		if pm := c.FindMethod("__construct"); pm != nil && pm.Class == c && pm.Abstract {
@@ -1024,8 +1025,10 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method) 
 	if m.Vis > parent.Vis {
 		mismatch(m.Span, "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, parent.Vis, parent.Class.Name, parent.Name)
 	}
-	if strings.EqualFold(m.Name, "__construct") && !parent.Abstract && parent.Class.Kind != ast.KindInterface {
-		return broken // constructors are exempt unless the parent's is abstract
+	if strings.EqualFold(m.Name, "__construct") {
+		if parent = constructorSignature(parent); parent == nil {
+			return broken // a concrete constructor binds no signature
+		}
 	}
 	// Map the parent's types into this class's generic arguments.
 	ctx := c.newCtx(cl.File, cl.Scope, cl, m.Static)
