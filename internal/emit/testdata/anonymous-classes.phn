@@ -116,3 +116,45 @@ function nested(): Source<Sized>
         }
     };
 }
+
+// Two tags: a docblock of its own before `class`.
+function both(): Box<int>
+{
+    return new class(1) extends Box<int> implements Source<string> {
+        put(int $value): void
+        {
+        }
+
+        next(): ?string => null;
+    };
+}
+
+// A docblock already before `class` takes the tag, on one line or on
+// several; before an attribute or `readonly`, the tag stands where PHPStan
+// reads it as well.
+function heads(): list<Source<int>>
+{
+    $short = new /** Counts nothing. */ class implements Source<int> {
+        next(): ?int => null;
+    };
+    $long = new
+        /**
+         * Counts nothing either.
+         */
+        class implements Source<int> {
+            next(): ?int => null;
+        };
+    $attributed = new #[\AllowDynamicProperties] class implements Source<int> {
+        next(): ?int => null;
+    };
+    $marked = new
+        #[\AllowDynamicProperties]
+        class implements Source<int> {
+            next(): ?int => null;
+        };
+    $readonly = new readonly class implements Source<int> {
+        next(): ?int => null;
+    };
+
+    return [$short, $long, $attributed, $marked, $readonly];
+}

@@ -215,4 +215,85 @@ function nested(): Source
         }
     };
 }
-// phaenon-map v1 anonymous-classes.phn 1-6=1 7:1 13-15=7 16:7 18-20=9 21:9 29-31=17 32:17 34-36=19 37:19 41-43=23 44:23 46-48=25 49:25 50-52=25 53:26 58-60=31 61:31 62-63=31 64-66=32 67:32 72-74=37 75:37 76-78=37 79:38 80-80=38 81:39 83-86=41 87:41 88-89=41 90-92=42 93:42 95-97=44 98:44 113-115=58 116:59 117-119=60 120:60 121-123=60 124:61 125-127=62 128:62 133-133=66 134:67 138-142=71 143:71 144-146=71 147:72 148-150=73 151:73 159-161=80 162:81 163-165=82 166:82 167-169=82 170:83 185-187=98 188:98 203-205=112 206:113 207-209=114 210:114 211-213=114 214:115
+
+// Two tags: a docblock of its own before `class`.
+/**
+ * @return Box<int>
+ */
+function both(): Box
+{
+    return new /**
+     * @extends Box<int>
+     * @implements Source<string>
+     */
+    class(1) extends Box implements Source {
+        /**
+         * @param int $value
+         */
+        public function put(mixed $value): void
+        {
+        }
+
+        public function next(): ?string
+        {
+            return null;
+        }
+    };
+}
+
+// A docblock already before `class` takes the tag, on one line or on
+// several; before an attribute or `readonly`, the tag stands where PHPStan
+// reads it as well.
+/**
+ * @return list<Source<int>>
+ */
+function heads(): array
+{
+    $short = new /**
+     * Counts nothing.
+     * @implements Source<int>
+     */
+    class implements Source {
+        public function next(): ?int
+        {
+            return null;
+        }
+    };
+    $long = new
+        /**
+         * Counts nothing either.
+         * @implements Source<int>
+         */
+        class implements Source {
+            public function next(): ?int
+            {
+                return null;
+            }
+        };
+    $attributed = new /** @implements Source<int> */ #[\AllowDynamicProperties] class implements Source {
+        public function next(): ?int
+        {
+            return null;
+        }
+    };
+    $marked = new
+        /**
+         * @implements Source<int>
+         */
+        #[\AllowDynamicProperties]
+        class implements Source {
+            public function next(): ?int
+            {
+                return null;
+            }
+        };
+    $readonly = new /** @implements Source<int> */ readonly class implements Source {
+        public function next(): ?int
+        {
+            return null;
+        }
+    };
+
+    return [$short, $long, $attributed, $marked, $readonly];
+}
+// phaenon-map v1 anonymous-classes.phn 1-6=1 7:1 13-15=7 16:7 18-20=9 21:9 29-31=17 32:17 34-36=19 37:19 41-43=23 44:23 46-48=25 49:25 50-52=25 53:26 58-60=31 61:31 62-63=31 64-66=32 67:32 72-74=37 75:37 76-78=37 79:38 80-80=38 81:39 83-86=41 87:41 88-89=41 90-92=42 93:42 95-97=44 98:44 113-115=58 116:59 117-119=60 120:60 121-123=60 124:61 125-127=62 128:62 133-133=66 134:67 138-142=71 143:71 144-146=71 147:72 148-150=73 151:73 159-161=80 162:81 163-165=82 166:82 167-169=82 170:83 185-187=98 188:98 203-205=112 206:113 207-209=114 210:114 211-213=114 214:115 220-222=121 223:121 226-229=123 230-232=124 233:124 238-240=128 241:129 247-249=135 250:135 253-256=137 257:138 258-260=138 261:139 265-265=143 266:143 269-271=145 272:146 275-277=148 278:149 280-282=151 283:151 286-288=153 289:154 292-294=156 295:157
