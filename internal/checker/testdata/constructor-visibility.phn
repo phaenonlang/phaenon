@@ -265,3 +265,26 @@ final class BelowTheTraitTemplate extends TraitTemplate
     {
     }
 }
+
+// `new class` calls the constructor from where it stands, as `new Foo`
+// does: the anonymous class's own private or protected constructor, or a
+// protected one it inherits, cannot be called from outside.
+final class MakesOne extends Protects
+{
+    public static function make(): object
+    {
+        return new class extends Protects {};
+    }
+}
+
+/** @return list<object> */
+function anonymous(): array
+{
+    return [
+        new class extends Open { private function __construct() {} }, // want P2108 "constructor of class@anonymous is private"
+        new class extends Open { protected function __construct() {} }, // want P2108
+        new class { private function __construct() {} }, // want P2108
+        new class extends Protects {}, // want P2108 "Protects::__construct(), is protected"
+        new class extends Protects { public function __construct() { parent::__construct(); } },
+    ];
+}

@@ -1496,6 +1496,16 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 			args = e.Anon.Args // `new class (...) extends …`
 		}
 		if ctor := cl.FindMethod("__construct"); ctor != nil {
+			// `new class` calls the constructor from where it stands, as
+			// `new Foo` does: its own private one is no more callable from
+			// there than an inherited protected one.
+			if !x.canAccess(ctor.Vis, ctor.Class) {
+				if ctor.Class == cl {
+					x.report(e.S, P2108, "constructor of class@anonymous is %s", ctor.Vis)
+				} else {
+					x.report(e.S, P2108, "constructor of class@anonymous, %s::__construct(), is %s", ctor.Class.Name, ctor.Vis)
+				}
+			}
 			sig := &signature{name: "class@anonymous::__construct()", params: ctor.Params, ret: types.TVoid, decl: ctor.Class, node: e, meth: ctor}
 			x.checkCall(sig, args, env, e.S, nil)
 		} else {
