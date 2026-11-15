@@ -1,0 +1,2 @@
+36: kept @param Map<string, int>: it erases to a different type than the declared array
+37: kept @param Class<T>: it erases to a different type than the declared string

@@ -23,6 +23,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/program"
 )
 
 // depthPasses bounds the passes over the declarations: a cut lets those
@@ -317,9 +318,10 @@ func isArrayTypeExpr(t ast.TypeExpr) bool {
 		if len(t.TypeArgs) == 0 || len(t.Name.Parts) != 1 {
 			return false
 		}
-		switch strings.ToLower(t.Name.Parts[0]) {
+		// `Map<K, V>` is a class (design/roadmap.md D30).
+		switch lower, otherCase := program.OtherCaseTypeName(t.Name.Parts[0]); lower {
 		case "list", "map", "array", "non-empty-list", "non-empty-array":
-			return true
+			return !otherCase
 		}
 	}
 	return false

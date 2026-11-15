@@ -1257,6 +1257,10 @@ func renderType(n *docblock.TypeNode, alias bool) (string, bool) {
 			// The one hyphenated name with a Phaenon spelling; the rest stay
 			// docblock vocabulary (design/generics.md §11.2).
 			name = "class"
+		case "list":
+			// PHPStan's word in any case, Phaenon's in lower case only
+			// (design/roadmap.md D30): `List<T>` would be P1006.
+			name = "list"
 		case "int", "float":
 			if len(n.Args) > 0 {
 				return "", false // int<0, max>
@@ -1477,8 +1481,10 @@ func (l *lifter) docAtoms(n *docblock.TypeNode, sc scope) atoms {
 			}
 			break
 		}
-		lower := strings.ToLower(strings.TrimPrefix(n.Name, "\\"))
-		if e, ok := keywordErasure[lower]; ok {
+		// `Map` is a class's name, as PHPStan reads it and as a .phn reads
+		// what the lift writes (design/roadmap.md D30).
+		lower, otherCase := program.OtherCaseTypeName(strings.TrimPrefix(n.Name, "\\"))
+		if e, ok := keywordErasure[lower]; ok && !otherCase {
 			for _, k := range e {
 				out[k] = true
 			}
