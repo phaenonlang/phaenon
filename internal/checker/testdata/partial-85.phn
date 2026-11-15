@@ -33,6 +33,15 @@ function lowered(Box $box, string $sep): void {
     })->get());
 }
 
+// A bound argument in a built-in's variadic part: the closure, as on 8.6.
+function variadic(): void {
+    $sp = sprintf('%s: %s', 'id', ?);
+    wantsString($sp); // want P2103 "Closure(mixed $values0): string"
+    $mx = max(1, ?);
+    wantsString($mx); // want P2103 "Closure(mixed $values0): mixed"
+    echo $sp('x');
+}
+
 function refused(Box $box, string $sep): void {
     $a = pair(strtoupper($sep), ?); // want P1002 "assign it to a variable first"
     $bb = pair($box->label, ?); // want P1002
