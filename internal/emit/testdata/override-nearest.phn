@@ -1,0 +1,127 @@
+namespace App\Nearest;
+
+use Stringable;
+
+// The override-erasure rule holds a method to every declaration PHP holds
+// it to: the one in its parent's method table, which is the nearest
+// declaration up the parent chain however far it is, and the interfaces
+// its class implements itself. An interface an ancestor implements is the
+// parent's to keep.
+
+class Base<T>
+{
+    take(T $x): void
+    {
+    }
+}
+
+class Mid extends Base<int>
+{
+}
+
+interface Takes
+{
+    take(int $x): void;
+}
+
+// Impl's table holds Base::take(mixed $x), not Takes::take(int $x): Leaf
+// widens to mixed, as Leaf2 does without the interface.
+abstract class Impl extends Mid implements Takes
+{
+}
+
+class Leaf extends Impl
+{
+    take(int $x): void
+    {
+    }
+}
+
+class Leaf2 extends Mid
+{
+    take(int $x): void
+    {
+    }
+}
+
+// The interface on the class itself demands int, the parent mixed.
+final class TakesItself extends Mid implements Takes
+{
+    take(int $x): void
+    {
+    }
+}
+
+// No class declares put(): the parent's table holds the interface's.
+interface Puts<T>
+{
+    put(T $x): void;
+}
+
+abstract class Holder implements Puts<int>
+{
+}
+
+final class IntHolder extends Holder
+{
+    put(int $x): void
+    {
+    }
+}
+
+// The parent demands a Stringable and the interface an int or a Name:
+// the parameter takes both, Stringable|int, where the parent's alone
+// would refuse the interface's int.
+final class Name implements Stringable
+{
+    __toString(): string
+    {
+        return 'name';
+    }
+}
+
+class Labels<T of Stringable>
+{
+    add(T $label): void
+    {
+    }
+}
+
+interface Counts
+{
+    add(int|Name $label): void;
+}
+
+final class NameCounts extends Labels<Name> implements Counts
+{
+    add(int|Name $label): void
+    {
+    }
+}
+
+// A constructor is held to the nearest abstract one, through the concrete
+// constructor that implements it.
+abstract class Command<T>
+{
+    abstract __construct(T $input);
+}
+
+class Greet extends Command<string>
+{
+    private string $text;
+
+    __construct(string $input)
+    {
+        $this->text = $input;
+    }
+
+    text(): string => $this->text;
+}
+
+final class LoudGreet extends Greet
+{
+    __construct(string $input)
+    {
+        parent::__construct($input);
+    }
+}
