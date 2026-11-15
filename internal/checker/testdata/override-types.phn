@@ -718,9 +718,9 @@ class OpenTree extends \RecursiveArrayIterator
 
 // PHP's own generic classes take their arguments with the variance
 // PHPStan's stubs give them: what an iterator yields, what a weak
-// reference holds, the node of a node list and a DatePeriod's dates are
-// covariant; the iterator a wrapper holds and an SPL structure's element
-// are invariant.
+// reference holds, the node of a node list, a DatePeriod's dates, an
+// attribute's class and a hidden parameter's value are covariant; the
+// iterator a wrapper holds and an SPL structure's element are invariant.
 /**
  * @implements \RecursiveIterator<int, Open>
  */
@@ -756,6 +756,15 @@ abstract class Producer
 
     /** @return \SplObjectStorage<Thing, int> */
     abstract public function storage(): \SplObjectStorage;
+
+    /** @return \ReflectionAttribute<Thing> */
+    abstract public function attribute(): \ReflectionAttribute;
+
+    /** @return \ReflectionAttribute<object> */
+    abstract public function attributeUnion(): \ReflectionAttribute;
+
+    /** @return \SensitiveParameterValue<Thing> */
+    abstract public function hidden(): \SensitiveParameterValue;
 }
 
 abstract class Narrower extends Producer
@@ -785,4 +794,13 @@ abstract class Narrower extends Producer
 
     /** @return \SplObjectStorage<Open, int> */
     abstract public function storage(): \SplObjectStorage; // want P2502
+
+    /** @return \ReflectionAttribute<Open> */
+    abstract public function attribute(): \ReflectionAttribute;
+
+    /** @return \ReflectionAttribute<Open|Leaf> */
+    abstract public function attributeUnion(): \ReflectionAttribute;
+
+    /** @return \SensitiveParameterValue<Open> */
+    abstract public function hidden(): \SensitiveParameterValue;
 }
