@@ -75,6 +75,12 @@ func TestStubs(t *testing.T) {
 	if p.Class("ArrayIterator") == nil || !p.IsSubclassOf("ArrayIterator", "Traversable") {
 		t.Error("ArrayIterator should be Traversable")
 	}
+	// ArrayIterator passes its arguments up through SeekableIterator, the
+	// interface it implements.
+	if args, ok := p.Class("ArrayIterator").SuperArgs("Iterator", []types.Type{types.TInt, types.TString}); !ok || len(args) != 2 ||
+		types.Print(args[0]) != "int" || types.Print(args[1]) != "string" {
+		t.Errorf("ArrayIterator<int, string> as an Iterator: %v %v", args, ok)
+	}
 	if !p.IsFinal("Closure") {
 		t.Error("Closure is final in php-src")
 	}

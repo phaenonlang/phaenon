@@ -41,6 +41,15 @@ interface IteratorAggregate extends Traversable
 }
 
 /**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @extends Iterator<TKey, TValue>
+ */
+interface SeekableIterator extends Iterator
+{
+}
+
+/**
  * @template TKey
  * @template TValue
  */
@@ -107,7 +116,7 @@ class ArrayObject implements IteratorAggregate, ArrayAccess, Serializable, Count
 /**
  * @template TKey of array-key
  * @template TValue
- * @implements Iterator<TKey, TValue>
+ * @implements SeekableIterator<TKey, TValue>
  * @implements ArrayAccess<TKey, TValue>
  */
 class ArrayIterator implements SeekableIterator, ArrayAccess, Serializable, Countable
