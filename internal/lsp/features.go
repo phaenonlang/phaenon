@@ -25,6 +25,7 @@ type symbol struct {
 	prop     *program.Property
 	constant *program.Constant
 	enumCase *program.EnumCase
+	alias    *program.TypeAlias
 	variable string     // a variable's name, without the $
 	typ      types.Type // an expression's type, when the checker gave one
 	span     ast.Span   // the name or expression at the position
@@ -133,6 +134,12 @@ func (r *fileCheck) resolve(path []ast.Node, i, off int) *symbol {
 					return &symbol{fn: fn, span: n.S}
 				}
 			}
+		case *ast.TypeAlias:
+			if par.Name == n {
+				if a := r.aliasDeclared(par); a != nil {
+					return &symbol{alias: a, span: n.S}
+				}
+			}
 		case *ast.ConstItem, *ast.EnumCase:
 			if c := r.enclosingClass(path, off); c != nil {
 				if k := c.FindCase(n.Name); k != nil {
@@ -164,7 +171,15 @@ func (r *fileCheck) resolve(path []ast.Node, i, off int) *symbol {
 			if c := p.Class(strings.Join(n.Parts, `\`)); c != nil {
 				return &symbol{class: c, span: n.S}
 			}
+			if a := r.aliasNamed(n, path, i, off); a != nil {
+				return &symbol{alias: a, span: n.S}
+			}
 			return nil
+		}
+		if _, typed := parent.(*ast.NamedType); typed {
+			if a := r.aliasNamed(n, path, i, off); a != nil {
+				return &symbol{alias: a, span: n.S}
+			}
 		}
 		if c := r.className(n, path, off); c != nil {
 			return &symbol{class: c, span: n.S}
@@ -427,6 +442,9 @@ func describe(sym *symbol) (code, doc string) {
 		c := sym.class.Signature()
 		code = classHead(c)
 		doc = summary(c.Doc)
+	case sym.alias != nil:
+		code = describeAlias(sym.alias)
+		doc = summary(docblock.Parse(sym.alias.Decl.Doc))
 	case sym.variable != "":
 		code = "$" + sym.variable
 		if sym.typ != nil {
@@ -620,6 +638,8 @@ func declaration(sym *symbol) *location {
 			return &location{sym.class.File, sym.class.Decl.Name.S}
 		}
 		return &location{sym.class.File, sym.class.Span}
+	case sym.alias != nil:
+		return &location{sym.alias.File, sym.alias.Decl.Name.S}
 	case sym.decl != nil:
 		return sym.decl
 	}
