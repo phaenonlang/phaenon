@@ -586,7 +586,10 @@ func (p *Parser) optionalCallTypeArgs() []ast.TypeExpr {
 }
 
 // looksLikeTypeArgs speculatively checks that `<…>` at the current position
-// is a type-argument list followed by '(' — the C#/TypeScript rule.
+// is a type-argument list followed by '(' — the C#/TypeScript rule. It
+// leaves the parser where it was, tokens included: closeAngle splits a
+// `>>` into a slice of its own, so the one saved here comes back as it was
+// saved, and `A < B >> 1` goes on as PHP's comparison with a shift.
 func (p *Parser) looksLikeTypeArgs() bool {
 	save := p.i
 	saveToks := p.toks
