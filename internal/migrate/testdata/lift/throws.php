@@ -131,6 +131,25 @@ final class MemoryStore implements Store
 
     /**
      * @throws void when nothing is stored
+     * @throws NotFound
+     * @throws \LogicException
+     */
+    public function describedVoid(int $id): string
+    {
+        return $this->get($id);
+    }
+
+    /**
+     * @throws void
+     * @phpstan-throws void
+     */
+    public function twiceVoid(): int
+    {
+        return 0;
+    }
+
+    /**
+     * @throws void when nothing is stored
      */
     public function described(): int
     {

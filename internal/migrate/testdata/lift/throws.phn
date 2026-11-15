@@ -46,8 +46,24 @@ final class MemoryStore<T of object> implements Store
 
     size(): int => \count($this->items);
 
-    /** @throws void */
-    both(int $id): string throws NotFound => $this->get($id);
+    /**
+     * @throws void
+     * @throws NotFound
+     */
+    both(int $id): string => $this->get($id);
+
+    /**
+     * @throws void when nothing is stored
+     * @throws NotFound
+     * @throws \LogicException
+     */
+    describedVoid(int $id): string => $this->get($id);
+
+    /**
+     * @throws void
+     * @phpstan-throws void
+     */
+    twiceVoid(): int => 0;
 
     /** @throws void when nothing is stored */
     described(): int => 0;

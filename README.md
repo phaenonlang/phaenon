@@ -280,7 +280,8 @@ JSDoc, tells an IDE that expects a type that none follows) and a property's `@va
 its docblock `/** prose */`; the emitter puts the types back and drops the dash. A `@throws X`
 without a description becomes `throws X` after the return type, several of them one union
 (`throws A|B`), and a `@throws void` that is the only `@throws` tag becomes `nothrow`; a `@throws`
-with prose stays. It also runs on `.phn` files, so a project migrated earlier can be lifted later;
+with prose stays, and so does every `@throws` tag of a docblock that holds `@throws void` beside
+another. It also runs on `.phn` files, so a project migrated earlier can be lifted later;
 a declaration already written in Phaenon keeps its type then.
 
 Next it writes chains of nested calls as pipelines (`design/tooling.md` §8.1): PHP 8.5's `|>`

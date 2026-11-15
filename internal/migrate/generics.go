@@ -559,20 +559,52 @@ func (l *lifter) methodDecl(m *ast.MethodDecl, outer scope) {
 // @param keeps its prose (D14); so does one whose type is no class or
 // names a type parameter left in the docblock. A bare `@throws void`
 // becomes `nothrow` when it is the declaration's only @throws tag (§4.5);
-// beside other tags or a `throws` clause it stays, and beside `nothrow`
-// it goes, the declaration saying it already. A tag that names what
-// escapes stays beside `nothrow`, which the checker reports (P2320).
+// beside a `throws` clause it stays, and beside `nothrow` it goes, the
+// declaration saying it already. A tag that names what escapes stays
+// beside `nothrow`, which the checker reports (P2320). A docblock that
+// says both that nothing escapes and that something does, `@throws void`
+// beside another @throws tag, keeps all its @throws tags, with a note:
+// lifting either side would write into the signature the contradiction
+// P2320 reports, and the lift does not decide which side was meant. One
+// that says `@throws void` more than once keeps the tags too: `nothrow`
+// is lifted from a sole tag.
 func (l *lifter) liftThrows(d *doc, name *ast.Ident, tps []*ast.TypeParam, ret ast.TypeExpr, existing *ast.Throws, sc scope) {
 	if d == nil {
 		return
 	}
 	tags := 0
+	var voids, others []string // the tags as written, read as the checker reads them
+	voidAt := 0
 	for _, g := range d.groups {
-		if g.name == "@throws" {
-			tags++
+		if g.name != "@throws" {
+			continue
 		}
+		tags++
+		t, rest, err := docblock.ParseTypePrefix(g.text)
+		if err != nil || t == nil {
+			continue
+		}
+		written := g.tag + " " + strings.TrimSpace(g.text[:len(g.text)-len(rest)])
+		if !t.IsVoid() {
+			others = append(others, written)
+			continue
+		}
+		if len(voids) == 0 {
+			voidAt = d.start + lineOffset(d, g.first)
+		}
+		voids = append(voids, written)
 	}
 	nothrow := existing != nil && existing.Nothrow
+	keep := false
+	switch {
+	case nothrow:
+	case len(voids) > 0 && len(others) > 0:
+		keep = true
+		l.note(voidAt, "kept %s beside %s: they say that nothing escapes and that something does (P2320), and the lift does not decide which was meant", voids[0], strings.Join(others, " and "))
+	case len(voids) > 1 && existing == nil:
+		keep = true
+		l.note(voidAt, "kept %s: the docblock says it %d times, and only a sole @throws void becomes nothrow", voids[0], len(voids))
+	}
 	have := map[string]bool{}
 	if existing != nil {
 		for _, t := range existing.Types {
@@ -589,6 +621,9 @@ func (l *lifter) liftThrows(d *doc, name *ast.Ident, tps []*ast.TypeParam, ret a
 		t, rest, err := docblock.ParseTypePrefix(g.text)
 		if err != nil || t == nil {
 			l.note(off, "kept %s: its type cannot be read", g.tag)
+			continue
+		}
+		if keep {
 			continue
 		}
 		written := strings.TrimSpace(g.text[:len(g.text)-len(rest)])
