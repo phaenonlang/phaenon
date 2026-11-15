@@ -1543,6 +1543,17 @@ func withKey(t types.Type, key types.Type, present bool) types.Type {
 			}
 			return types.Array{Key: types.TArrayKey, Value: types.TMixed, NonEmpty: true}
 		}
+		if p, ok := m.(types.Param); ok {
+			// `T of array{…}`: the test narrows what T is known to be,
+			// and T stays itself.
+			switch p.Bound.(type) {
+			case types.Shape, types.Array:
+				if b := withKey(p.Bound, key, present); !isNeverType(b) {
+					p.Bound = b
+				}
+			}
+			return p
+		}
 		s, ok := m.(types.Shape)
 		if !ok {
 			if a, ok := m.(types.Array); ok && present {
