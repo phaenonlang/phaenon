@@ -872,8 +872,10 @@ func (p *Parser) throwsClause() *ast.Throws {
 		kw := p.next()
 		t = &ast.Throws{Kw: ast.Span{Start: kw.Start, End: kw.End}}
 		for {
+			// A member is a name or `static`, the keyword the lexer does
+			// not read as one (§8, "`throws` members").
 			start := p.tok().Start
-			t.Types = append(t.Types, &ast.NamedType{Name: p.name(), S: p.span(start)})
+			t.Types = append(t.Types, &ast.NamedType{Name: p.className(), S: p.span(start)})
 			if !p.accept(token.Kind('|')) {
 				break
 			}
