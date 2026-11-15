@@ -117,6 +117,11 @@ var (
 	// P2319: a `throws` clause names a class, an interface or a type
 	// parameter that is not a Throwable (design/functions.md §4).
 	P2319 = Code{"P2319", Error, "throws names a non-Throwable"}
+	// P2320: `nothrow` on a declaration whose docblock has a @throws tag
+	// other than `@throws void` (design/functions.md §4.5): the
+	// contradiction of `nothrow` beside `throws`, a syntax error, written
+	// in two places.
+	P2320 = Code{"P2320", Error, "nothrow beside a @throws tag"}
 
 	// P2 — flow
 	P2401 = Code{"P2401", Warning, "unreachable code"}

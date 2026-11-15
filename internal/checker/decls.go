@@ -57,7 +57,7 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 		ctx.inScope[tp.Name] = true
 	}
 	ctx.checkSignatureTypes(fn.Decl.TypeParams, fn.Decl.Params, fn.Decl.ReturnType)
-	ctx.throwsClause(fn.Decl.Throws)
+	ctx.throwsClause(fn.Decl.Throws, fn.Doc)
 	c.declaredName(fn.Decl.Name.S, "function", fn.Decl.Name.Name)
 	c.checkUntyped(f, fn.Decl.Params, fn.Params, fn.Decl.ReturnType, fn.Return, fn.Decl.Name.Name, fn.Decl.S, fn.Doc, false)
 	ctx.pushThrows()
@@ -66,7 +66,7 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 	if c.opts.Thrown != nil {
 		c.opts.Thrown(f, fn.Decl, exported(points))
 	}
-	ctx.bodyThrows(fn.Throws, "declares @throws void", false, ctx.name, fn.Decl.Name.S, points)
+	ctx.bodyThrows(fn.Throws, "declares "+voidSpelling(fn.Decl.Throws), false, ctx.name, fn.Decl.Name.S, points)
 }
 
 // declSpan is where method-level diagnostics point: the method name.
@@ -717,7 +717,7 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	sctx := c.newCtx(cl.File, cl.Scope, cl, m.Static)
 	sctx.res = sctx.res.WithParams(m.TypeParams)
 	sctx.checkSignatureTypes(d.TypeParams, d.Params, d.ReturnType)
-	sctx.throwsClause(d.Throws)
+	sctx.throwsClause(d.Throws, m.Doc)
 	if !d.HasBody {
 		return
 	}

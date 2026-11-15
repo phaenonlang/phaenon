@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/docblock"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -19,9 +20,22 @@ import (
 // clause is documentation the checker verifies, as a @throws tag is, and
 // not a checked-exception rule: callers are not held to it. It compiles
 // to a docblock, so like a `catch` it fails nothing on a target that
-// lacks the class.
-func (x *fnCtx) throwsClause(t *ast.Throws) {
+// lacks the class. `nothrow` names nothing; a @throws tag of the
+// declaration's docblock (doc) that says something escapes contradicts
+// it, P2320 for each.
+func (x *fnCtx) throwsClause(t *ast.Throws, doc *docblock.Doc) {
 	if t == nil {
+		return
+	}
+	if t.Nothrow {
+		if doc == nil {
+			return
+		}
+		for _, tag := range doc.Throws {
+			if !isVoidTag(tag) {
+				x.report(t.Kw, P2320, "nothrow says that nothing escapes, and the docblock says @throws %s", tag)
+			}
+		}
 		return
 	}
 	for _, nt := range t.Types {
@@ -42,6 +56,11 @@ func (x *fnCtx) throwsClause(t *ast.Throws) {
 			x.report(nt.S, P2319, "%s is not a Throwable, so throws cannot name it", name)
 		}
 	}
+}
+
+// isVoidTag says a @throws tag is `@throws void`, what `nothrow` says.
+func isVoidTag(t *docblock.TypeNode) bool {
+	return t != nil && t.Kind == docblock.KindNamed && len(t.Args) == 0 && strings.EqualFold(t.Name, "void")
 }
 
 // exprBody judges where an expression body stands (design/functions.md

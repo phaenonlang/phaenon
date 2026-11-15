@@ -19,8 +19,8 @@ import (
 // implicit, which is lenient, never stricter.
 //
 // Three findings read the points: a catch no point reaches (P2403), a
-// throws member the body never throws (P2404), and `@throws void` on a
-// body that throws (P2405).
+// throws member the body never throws (P2404), and `@throws void`, or
+// `nothrow`, its clause spelling, on a body that throws (P2405).
 
 // ThrowPoint is a throw point as Options.Thrown reports it: the classes
 // it may raise (less what earlier catches took; "Throwable" for any), and
@@ -431,12 +431,13 @@ func mayBeZero(t types.Type) bool {
 
 // heldThrows is the declaration a method's body is held to, and how the
 // P2405 message names it: the method's own, or, when it declares nothing,
-// a `@throws void` it inherits from the method it overrides, which PHPStan
-// holds the body to as well (throws.void). An inherited list of classes is
-// not the body's: P2404 counts only the members a declaration writes.
+// a `@throws void` or `nothrow` it inherits from the method it overrides,
+// which PHPStan holds the body to as well (throws.void). An inherited list
+// of classes is not the body's: P2404 counts only the members a
+// declaration writes.
 func heldThrows(m *program.Method) (types.Type, string) {
 	if m.Throws != nil {
-		return m.Throws, "declares @throws void"
+		return m.Throws, "declares " + voidSpelling(declThrows(m))
 	}
 	d := m.ThrowsDeclarer()
 	if d == nil || !isVoidThrows(d.Throws) {
@@ -446,7 +447,24 @@ func heldThrows(m *program.Method) (types.Type, string) {
 	if d.Class != nil {
 		from = d.Class.Name + "::" + d.Name
 	}
-	return d.Throws, "inherits @throws void from " + from + "()"
+	return d.Throws, "inherits " + voidSpelling(declThrows(d)) + " from " + from + "()"
+}
+
+// declThrows is the clause a method's declaration writes, nil without one.
+func declThrows(m *program.Method) *ast.Throws {
+	if m.Decl == nil {
+		return nil
+	}
+	return m.Decl.Throws
+}
+
+// voidSpelling names a declaration of "throws nothing" as it is written:
+// `nothrow` (design/functions.md §4.5), or the docblock's `@throws void`.
+func voidSpelling(clause *ast.Throws) string {
+	if clause != nil && clause.Nothrow {
+		return "nothrow"
+	}
+	return "@throws void"
 }
 
 // bodyThrows checks a body's escaping throw points against its
