@@ -1,0 +1,51 @@
+// targets: 8.5, 8.6
+// A partial application lowered for PHP 8.5 to a function-form closure
+// (design/php-versions.md §5.3: a parameter whose type says more than PHP
+// declares takes an inline @var, which PHPStan reads in a function body
+// only) inside an expression body: the body's statement moves to a line
+// of its own one level in, and the closure's docblock, statement and
+// closing brace are laid out from there, as PER Coding Style wants them.
+
+/**
+ * @param list<int> $xs
+ */
+function total(int $base, array $xs): int
+{
+    return $base + array_sum($xs);
+}
+
+interface Totaller {
+    m(): Closure(list<int>): int;
+}
+
+final class Totals {
+    __construct(private int $base) {}
+
+    base(): int => $this->base;
+
+    // A partial application outside a pipe.
+    totaller(): Closure(list<int>): int => total(10, ?);
+
+    // A stage that does not fold: the call is made after the left side.
+    /**
+     * @param list<int> $xs
+     */
+    sum(array $xs): int => $xs |> total($this->base(), ?);
+
+    // The same written over lines.
+    /**
+     * @param list<int> $xs
+     */
+    sumLong(array $xs): int => $xs
+        |> total($this->base(), ?);
+
+    // An expression body in a class written on the line of another: the
+    // closure is laid out from the innermost statement, the method's.
+    anon(): Totaller => new class implements Totaller { m(): Closure(list<int>): int => total(1, ?); };
+}
+
+$t = new Totals(10);
+echo ($t->totaller())([1, 2]), "\n";
+echo $t->sum([3, 4]), "\n";
+echo $t->sumLong([5, 6]), "\n";
+echo ($t->anon()->m())([7, 8]), "\n";
