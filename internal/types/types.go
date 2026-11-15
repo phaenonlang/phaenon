@@ -1049,6 +1049,19 @@ func meet2(a, b Type) Type {
 		}
 		return meet2(meet2(TextSide(a), other), TBytes)
 	}
+	// non-empty-array&array{a?: int} is array{a: int}: the shape holds an
+	// entry at least, which the relation below leaves out.
+	if arr, ok := b.(Array); ok && arr.NonEmpty {
+		if _, ok := a.(Shape); ok {
+			a, b = b, a
+		}
+	}
+	if arr, ok := a.(Array); ok && arr.NonEmpty {
+		if sh, ok := b.(Shape); ok {
+			arr.NonEmpty = false
+			return meet2(arr, NonEmptyShape(sh))
+		}
+	}
 	if structuralSub(a, b) {
 		return a
 	}

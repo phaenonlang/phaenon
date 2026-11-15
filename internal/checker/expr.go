@@ -205,7 +205,7 @@ func (x *fnCtx) exprLenient(e ast.Expr, env *state) types.Type {
 		// A narrowed offset reads as narrowed here too: `is_bool($e['v'])`
 		// after `is_scalar($e['v'])` subtracts bool from scalar, not from
 		// the element type.
-		if key, ok := pathKey(e); ok {
+		if key, ok := x.pathKey(e); ok {
 			if t, ok := env.getPath(key); ok {
 				return t
 			}
@@ -216,7 +216,12 @@ func (x *fnCtx) exprLenient(e ast.Expr, env *state) types.Type {
 		base := x.exprLenient(e.Array, env)
 		return x.indexType(base, e, env, true) // types the key, once
 	case *ast.PropertyFetch:
+		x.quietOffsets++
+		defer func() { x.quietOffsets-- }()
 		return x.propertyFetch(e, env, true)
+	case *ast.StaticPropertyFetch:
+		x.quietOffsets++
+		defer func() { x.quietOffsets-- }()
 	case *ast.Paren:
 		return x.exprLenient(e.Expr, env)
 	}
@@ -741,7 +746,7 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 
 func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) types.Type {
 	x.prematureRead(e, env)
-	if key, ok := pathKey(e); ok {
+	if key, ok := x.pathKey(e); ok {
 		if t, ok := env.getPath(key); ok {
 			// The member was narrowed: its type is known without re-checking
 			// the object; only a ?-> on a never-null object is still worth a word.
@@ -1082,7 +1087,7 @@ func (x *fnCtx) staticPropertyFetch(e *ast.StaticPropertyFetch, env *state) (typ
 		if !x.canAccess(pr.Vis, pr.Class) {
 			x.report(v.S, P2108, "property %s::$%s is %s", pr.Class.Name, v.Name, pr.Vis)
 		}
-		if key, ok := pathKey(e); ok {
+		if key, ok := x.pathKey(e); ok {
 			if t, ok := env.getPath(key); ok {
 				return t, pr
 			}
@@ -1100,7 +1105,7 @@ func (x *fnCtx) narrowedByLiteralKeys(e *ast.Index, env *state) (types.Type, boo
 	if !ok {
 		return nil, false
 	}
-	base, ok := pathKey(e.Array)
+	base, ok := x.pathKey(e.Array)
 	if !ok {
 		return nil, false
 	}
@@ -1129,7 +1134,7 @@ func shapeValueTypes(m types.Shape) []types.Type {
 }
 
 func (x *fnCtx) index(e *ast.Index, env *state) types.Type {
-	if key, ok := pathKey(e); ok {
+	if key, ok := x.pathKey(e); ok {
 		if t, ok := env.getPath(key); ok {
 			if mayBeObject(x.pathType(e.Array, env)) {
 				x.implicitThrow() // offsetGet() runs
@@ -1164,6 +1169,13 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 		x.reportNoOffsets(e, base, raw, env)
 		return types.TMixed
 	}
+	// A read of an offset the shapes may lack is P2321, once, and reads as
+	// the entry PHPStan reads it as: the finding is the guard missing, not
+	// a null to report again where the value goes.
+	mayLack := !lenient && x.quietOffsets == 0 && !x.writeOffsets[e] && offsetMayBeMissing(base, idx)
+	if mayLack {
+		x.reportMayLack(e.Index.Span(), raw, base, false)
+	}
 	var out []types.Type
 	for _, m := range types.Members(base) {
 		if types.IsTextBytes(m) {
@@ -1174,6 +1186,15 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 		}
 		switch m := m.(type) {
 		case types.Shape:
+			if mayLack {
+				if entry, ok := constantEntry(m, idx); ok {
+					out = append(out, entry.Type)
+					continue
+				}
+				if !m.Unsealed {
+					continue // a shape without the key adds no value
+				}
+			}
 			t, found, certain := shapeOffset(m, idx)
 			if !found {
 				if !lenient && !m.Unsealed && certain {
@@ -1307,6 +1328,119 @@ func (x *fnCtx) undefinedRoot(e ast.Expr, env *state) bool {
 			return false
 		}
 	}
+}
+
+// markWritten marks the offsets of e, `$a['k']['l']` and the arrays it is
+// in, as written while e is evaluated (writeOffsets); the function it
+// returns unmarks them.
+func (x *fnCtx) markWritten(e ast.Expr) func() {
+	var marked []*ast.Index
+	for {
+		switch n := e.(type) {
+		case *ast.Paren:
+			e = n.Expr
+			continue
+		case *ast.Index:
+			if x.writeOffsets == nil {
+				x.writeOffsets = map[*ast.Index]bool{}
+			}
+			x.writeOffsets[n] = true
+			marked = append(marked, n)
+			e = n.Array
+			continue
+		}
+		break
+	}
+	return func() {
+		for _, n := range marked {
+			delete(x.writeOffsets, n)
+		}
+	}
+}
+
+// offsetMayBeMissing reports a constant offset that the array may lack,
+// as PHPStan's offsetAccess.notFound has it at level max ("might not
+// exist"): every value of the type is a shape, and one of them has the key
+// as an optional entry, or does not name it, unsealed or beside another
+// shape that has it. Where no value can have the key it does not exist,
+// P2313's; null is P2302's, and a general array PHPStan does not hold to
+// its keys, so a member of either leaves it to them.
+func offsetMayBeMissing(base, idx types.Type) bool {
+	idx = normaliseKey(idx)
+	switch k := idx.(type) {
+	case types.StringLit:
+	case types.Int:
+		if k.Lo != k.Hi {
+			return false
+		}
+	default:
+		return false
+	}
+	maybe, has, open := false, false, false
+	for _, m := range types.Members(base) {
+		s, ok := m.(types.Shape)
+		if !ok {
+			return false
+		}
+		entry, found := constantEntry(s, idx)
+		switch {
+		case found:
+			has = true
+			maybe = maybe || entry.Optional
+		case s.Unsealed:
+			maybe, open = true, true
+		default:
+			maybe = true // a shape without the key, beside others
+		}
+	}
+	return maybe && (has || open)
+}
+
+// offsetMayLack reports P2321 for an offset an argument by reference reads
+// where no test stands guard: what index() would report of the read.
+func (x *fnCtx) offsetMayLack(e *ast.Index, env *state) {
+	if e.Index == nil || x.writeOffsets[e] {
+		return
+	}
+	if key, ok := x.pathKey(e); ok {
+		if _, narrowed := env.getPath(key); narrowed {
+			return
+		}
+	}
+	base := x.pathType(e.Array, env)
+	if raw := x.pathType(e.Index, env); offsetMayBeMissing(base, raw) {
+		x.reportMayLack(e.Index.Span(), raw, base, false)
+	}
+}
+
+// reportMayLack reports P2321 for the offset raw of base, the offset
+// normalised as PHP stores it ('1' is 1). A destructuring has no place for
+// a default, so its message leaves ?? out.
+func (x *fnCtx) reportMayLack(at ast.Span, raw, base types.Type, destructuring bool) {
+	if destructuring {
+		x.report(at, P2321, "offset %s might not exist on %s: test it with isset() or array_key_exists() before destructuring", x.typeName(normaliseKey(raw)), x.typeName(base))
+		return
+	}
+	x.report(at, P2321, "offset %s might not exist on %s: test it with isset() or array_key_exists() first, or give ?? a default", x.typeName(normaliseKey(raw)), x.typeName(base))
+}
+
+// constantEntry is the entry of a shape a constant key names.
+func constantEntry(s types.Shape, idx types.Type) (types.ShapeEntry, bool) {
+	switch k := normaliseKey(idx).(type) {
+	case types.StringLit:
+		for _, e := range s.Entries {
+			if !e.IsInt && e.Key == k.V {
+				return e, true
+			}
+		}
+	case types.Int:
+		for _, e := range s.Entries {
+			if k.Lo == k.Hi && e.IsInt && e.IntKey == k.Lo {
+				return e, true
+			}
+		}
+	}
+	return types.ShapeEntry{}, false
 }
 
 // shapeOffset finds the entry for a literal key; certain says the key was
@@ -2073,6 +2207,10 @@ func (x *fnCtx) coalesce(e *ast.Binary, env *state, expected types.Type) types.T
 	// The right side is evaluated only when the left is null: narrow.
 	rightEnv := env.clone()
 	right := x.expr(e.Right, rightEnv, expected)
+	if rightEnv.dead {
+		// `$a['k'] ?? throw …`: past it, the left was set, and not null.
+		x.narrowPath(env, e.Left, types.StripNull(left), false)
+	}
 	*env = *join(env, rightEnv)
 	return types.MakeUnion(types.StripNull(left), right)
 }
@@ -2166,7 +2304,10 @@ func (x *fnCtx) condValue() types.Type { return x.condValueType }
 
 func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 	if e.ByRef {
+		// A reference to a missing offset creates it: no P2321.
+		done := x.markWritten(e.Value)
 		vt := x.expr(e.Value, env, nil)
+		done()
 		if v, ok := e.Value.(*ast.Variable); ok {
 			x.byRef[v.Name] = true
 		}
@@ -2212,7 +2353,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		// `$parts[0] .= $chunk` reads the offset before it writes it: the
 		// write replaces an existing entry, so a list stays a list (PHPStan's
 		// setExistingOffsetValueType, as for the key of a foreach).
-		if key, ok := pathKey(idx); ok {
+		if key, ok := x.pathKey(idx); ok {
 			env.setPath(key, cur)
 		}
 	}
@@ -2323,7 +2464,7 @@ func (x *fnCtx) assignTo(target ast.Expr, vt types.Type, env *state, span ast.Sp
 		if pr != nil && !types.IsAcceptable(vt, pr.Type, x.p()) {
 			x.report(span, P2201, "property %s::$%s (%s) does not accept %s", pr.Class.Name, pr.Name, x.typeName(pt), x.typeName(vt))
 		}
-		if key, ok := pathKey(t); ok {
+		if key, ok := x.pathKey(t); ok {
 			env.setPath(key, vt)
 		}
 	case *ast.Index:
@@ -2378,7 +2519,7 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 	if v, ok := t.Object.(*ast.Variable); ok && v.Name == "this" && x.trackInits {
 		env.initialise(name)
 	}
-	if key, ok := pathKey(t); ok {
+	if key, ok := x.pathKey(t); ok {
 		env.invalidatePrefix(key)
 		env.setPath(key, vt)
 	}
@@ -2483,7 +2624,7 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 	// list-ness stay (PHPStan's setExistingOffsetValueType).
 	existing := false
 	if keyT != nil {
-		if key, ok := pathKey(t); ok {
+		if key, ok := x.pathKey(t); ok {
 			if cur, found := env.getPath(key); found && !types.IsNullable(cur) {
 				existing = true
 			}
@@ -2543,7 +2684,7 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 		newT = arrayWithEntry(types.Shape{}, keyT, vt)
 	}
 	x.assignTo(t.Array, newT, env, span)
-	if key, ok := pathKey(t); ok {
+	if key, ok := x.pathKey(t); ok {
 		env.setPath(key, vt)
 	}
 }
@@ -2688,7 +2829,7 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 			if idx == nil {
 				idx = &ast.IntLit{Raw: strconv.FormatInt(pos-1, 10)}
 			}
-			if key, ok := pathKey(&ast.Index{Array: src, Index: idx}); ok {
+			if key, ok := x.pathKey(&ast.Index{Array: src, Index: idx}); ok {
 				if nt, found := env.getPath(key); found {
 					elem = nt
 				}
@@ -2699,10 +2840,23 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 		} else if types.IsMixed(vt) {
 			elem = types.TMixed
 		} else {
+			// A key the shapes may lack is read as a direct read is: P2321,
+			// and the entry's own type (indexType). It is reported at the
+			// pattern, which PHPStan reports on the first line of.
+			mayLack := offsetMayBeMissing(vt, keyT)
+			if mayLack {
+				x.reportMayLack(t.S, keyT, vt, true)
+			}
 			var out []types.Type
 			for _, m := range types.Members(vt) {
 				switch m := m.(type) {
 				case types.Shape:
+					if entry, ok := constantEntry(m, keyT); ok && mayLack {
+						out = append(out, entry.Type)
+						continue
+					} else if mayLack && !m.Unsealed {
+						continue
+					}
 					et, found, _ := shapeOffset(m, keyT)
 					if found {
 						out = append(out, et)
@@ -2815,8 +2969,15 @@ func arrayPlus(l, r types.Type) types.Type {
 			if lok && rok && !ls.Unsealed && !rs.Unsealed {
 				merged := types.Shape{Entries: append([]types.ShapeEntry{}, ls.Entries...)}
 				for _, e := range rs.Entries {
-					if !hasShapeEntry(merged, e) {
+					have, found := shapeEntry(merged, e)
+					switch {
+					case !found:
 						merged.Entries = append(merged.Entries, e)
+					case have.Optional:
+						// The right side's entry stands where the left's is
+						// missing: the key is there when either has it.
+						merged.Entries = upsert(merged.Entries, types.ShapeEntry{Key: e.Key, IntKey: e.IntKey, IsInt: e.IsInt,
+							Type: types.MakeUnion(have.Type, e.Type), Optional: e.Optional})
 					}
 				}
 				out = append(out, merged)
@@ -2828,15 +2989,6 @@ func arrayPlus(l, r types.Type) types.Type {
 		}
 	}
 	return types.MakeUnion(out...)
-}
-
-func hasShapeEntry(s types.Shape, e types.ShapeEntry) bool {
-	for _, have := range s.Entries {
-		if have.IsInt == e.IsInt && have.IntKey == e.IntKey && have.Key == e.Key {
-			return true
-		}
-	}
-	return false
 }
 
 // shapeEntry is the entry of s under key's key.
@@ -2877,6 +3029,78 @@ func arrayKV(m types.Type) (key, value types.Type, nonEmpty bool) {
 	return types.TArrayKey, types.TMixed, false
 }
 
+// coalesceConds records on $n, assigned `$a['k'] ?? $default`, the types
+// of $n that say the left side was set, each matched exactly as PHPStan
+// matches its holders of the assignment: $n without null where the default
+// is null (`$n !== null`, isset($n)); $n's truthy part where the default is
+// always falsy (`if ($n)`); $n without the default where the default is
+// one falsy value, the empty string or 0 or false or [] (`$n !== 0`). Any
+// other test of $n, `is_string($n)` after `?? 5`, says nothing of the
+// offset, as in PHPStan; a default that may be anything says nothing
+// either. After `?? throw` the offset is set already (coalesce).
+func (x *fnCtx) coalesceConds(name string, e *ast.Binary, then, els, before, env *state) {
+	if _, throws := e.Right.(*ast.Throw); throws {
+		return
+	}
+	info, ok := env.get(name)
+	if !ok {
+		return
+	}
+	def := x.expr(e.Right, els, nil)
+	if types.IsMixed(def) {
+		return
+	}
+	var whens []types.Type
+	add := func(w types.Type) {
+		if isNeverType(w) || types.Equal(w, info.t) {
+			return
+		}
+		for _, have := range whens {
+			if types.Equal(have, w) {
+				return
+			}
+		}
+		whens = append(whens, w)
+	}
+	if isNullType(def) {
+		add(types.StripNull(info.t))
+	}
+	if isNeverType(types.Truthy(def)) {
+		add(types.Truthy(info.t))
+	}
+	if falsyScalar(def) {
+		add(x.subtract(info.t, def, x.p()))
+	}
+	delete(then.vars, name)
+	var holders []*condHolder
+	for _, w := range whens {
+		h := condBranch(w, then, before)
+		h.exact = true
+		holders = append(holders, h)
+	}
+	env.setConds(name, holders...)
+}
+
+// falsyScalar reports one of PHP's falsy values as a type: null, false, 0,
+// 0.0, the empty string or '0', or the empty array.
+func falsyScalar(t types.Type) bool {
+	switch v := t.(type) {
+	case types.Null:
+		return true
+	case types.BoolLit:
+		return !v.V
+	case types.Int:
+		return v.Lo == 0 && v.Hi == 0
+	case types.FloatLit:
+		return v.V == 0
+	case types.StringLit:
+		return v.V == "" || v.V == "0"
+	case types.Shape:
+		return len(v.Entries) == 0 && !v.Unsealed
+	}
+	return false
+}
+
 // rememberCondition records on a variable assigned a condition, or a
 // ternary, what each branch narrowed: `$ok = is_string($v) && …` says $v
 // is a string when $ok is true; `$s = $b instanceof X ? $b->s : null`
@@ -2894,6 +3118,7 @@ func (x *fnCtx) rememberCondition(name string, value ast.Expr, env *state) {
 	var whenThen, whenElse types.Type
 	var condExpr ast.Expr
 	var ternary *ast.Ternary
+	var coalesce *ast.Binary
 	switch v := value.(type) {
 	case *ast.Ternary:
 		ternary, condExpr = v, v.Cond
@@ -2902,6 +3127,10 @@ func (x *fnCtx) rememberCondition(name string, value ast.Expr, env *state) {
 		case token.T_BOOLEAN_AND, token.T_LOGICAL_AND, token.T_BOOLEAN_OR, token.T_LOGICAL_OR,
 			token.T_IS_IDENTICAL, token.T_IS_NOT_IDENTICAL, token.T_IS_EQUAL, token.T_IS_NOT_EQUAL:
 			condExpr = v
+		case token.T_COALESCE:
+			// `$n = $a['k'] ?? null` is `isset($a['k']) ? $a['k'] : null`:
+			// a $n that is not null says the offset is set (coalesceConds).
+			coalesce, condExpr = v, &ast.Isset{S: v.Left.Span(), Vars: []ast.Expr{v.Left}}
 		}
 	case *ast.Unary:
 		if v.Op == token.Kind('!') {
@@ -2910,10 +3139,10 @@ func (x *fnCtx) rememberCondition(name string, value ast.Expr, env *state) {
 	case *ast.Instanceof, *ast.IsExpr, *ast.Isset, *ast.Empty:
 		condExpr = value
 	case *ast.Call:
-		// The type tests, and the UTF-8 test that tells text from bytes
-		// (design/strings.md §6).
+		// The type tests, the UTF-8 test that tells text from bytes
+		// (design/strings.md §6) and the test of a key.
 		if n, ok := v.Callee.(*ast.Name); ok {
-			if name := strings.ToLower(n.Parts[len(n.Parts)-1]); predicateTarget(name) != nil || name == "mb_check_encoding" {
+			if name := strings.ToLower(n.Parts[len(n.Parts)-1]); predicateTarget(name) != nil || name == "mb_check_encoding" || name == "array_key_exists" || name == "key_exists" {
 				condExpr = value
 			}
 		}
@@ -2924,14 +3153,20 @@ func (x *fnCtx) rememberCondition(name string, value ast.Expr, env *state) {
 	before := env.clone()
 	saved := x.c.mark()
 	then, els := x.cond(condExpr, env.clone())
-	if ternary != nil {
+	if coalesce != nil {
+		x.coalesceConds(name, coalesce, then, els, before, env)
+		x.c.rollback(saved)
+		return
+	}
+	switch {
+	case ternary != nil:
 		if ternary.Then == nil {
 			whenThen = types.Truthy(x.condValueType)
 		} else {
 			whenThen = x.expr(ternary.Then, then, nil)
 		}
 		whenElse = x.expr(ternary.Else, els, nil)
-	} else {
+	default:
 		whenThen, whenElse = types.TTrue, types.TFalse
 	}
 	x.c.rollback(saved)

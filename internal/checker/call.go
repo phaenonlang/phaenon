@@ -428,9 +428,14 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 				for _, en := range t.(types.Shape).Entries {
 					if en.IsInt {
 						merged = arrayWithEntry(merged, nil, en.Type).(types.Shape)
-					} else {
-						merged.Entries = upsert(merged.Entries, en)
+						continue
 					}
+					if have, found := shapeEntry(merged, en); found && en.Optional {
+						// A later optional entry may be missing, and the
+						// earlier one's value then stays.
+						en.Type, en.Optional = types.MakeUnion(have.Type, en.Type), have.Optional
+					}
+					merged.Entries = upsert(merged.Entries, en)
 				}
 			}
 			return merged
@@ -668,6 +673,8 @@ func (x *fnCtx) filteredValue(callback ast.Expr, value types.Type, env *state) t
 	cenv.set(param, value)
 	then, _ := x.cond(cond, cenv)
 	x.c.rollback(saved) // the callback was checked as an argument already
+	// What the callback proved of the element, `isset($r['name'])`
+	// included, is in its type: the key is there, as PHPStan has it.
 	if info, ok := then.get(param); ok {
 		return info.t
 	}
@@ -962,12 +969,12 @@ func (x *fnCtx) argsOnly(args *ast.ArgList, env *state) {
 
 func (x *fnCtx) methodCall(e *ast.MethodCall, env *state, expected types.Type) types.Type {
 	defer x.unresolvedCall(e.S, e.Args)
-	if key, ok := pathKey(e); ok {
+	if key, ok := x.pathKey(e); ok {
 		if t, ok := env.getPath(key); ok {
 			return t // narrowed earlier (assertInstanceOf, instanceof, === null)
 		}
 	}
-	if base, ok := pathKey(e.Object); ok {
+	if base, ok := x.pathKey(e.Object); ok {
 		// A call may change what the receiver's other methods answer.
 		env.invalidateCalls(base)
 	}
@@ -1132,7 +1139,7 @@ func (x *fnCtx) unionCall(e *ast.MethodCall, base types.Type, name string, env *
 		file: methodFile(first), decl: first.Class, node: e, meth: first}
 	ret := x.checkCall(sig, e.Args, env, e.S, expected)
 	if void {
-		if base, ok := pathKey(e.Object); ok && !(base == "$this" && x.forgetOwnScope(env, first.Class)) {
+		if base, ok := x.pathKey(e.Object); ok && !(base == "$this" && x.forgetOwnScope(env, first.Class)) {
 			env.invalidateUnder(base)
 		}
 	}
@@ -1266,7 +1273,7 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 					// what was known of the members under the receiver may be
 					// gone (PHPStan forgets them as well); the receiver stands.
 					// On $this, the class's static members may have changed too.
-					if base, ok := pathKey(e.Object); ok && !(base == "$this" && x.forgetOwnScope(env, meth.Class)) {
+					if base, ok := x.pathKey(e.Object); ok && !(base == "$this" && x.forgetOwnScope(env, meth.Class)) {
 						env.invalidateUnder(base)
 					}
 				}
@@ -1942,6 +1949,96 @@ func (x *fnCtx) reportOverwrites(sig *signature, found []overwrite) {
 	}
 }
 
+// byRefReads names, by function or Class::method, the by-reference
+// parameters of php-src that read the argument they are given, as PHPStan
+// 2.3 has them: its function map lists the function, and the parameter is
+// `&rw_…` there, or is not by reference there at all. An offset passed to
+// one is read as any argument is, and may be missing (offsetAccess.notFound).
+// Every other by-reference parameter of php-src creates what it is given,
+// preg_match()'s $matches, parse_str()'s $result and sodium_memzero()'s
+// $string among them. The list classifies each by-reference parameter of
+// stdlib/php-src against the function map with the deltas up to PHP 8.5.
+var byRefReads = map[string]string{
+	"array_multisort":                  "array rest",
+	"array_pop":                        "array",
+	"array_push":                       "array",
+	"array_shift":                      "array",
+	"array_splice":                     "array",
+	"array_unshift":                    "array",
+	"array_walk":                       "array",
+	"array_walk_recursive":             "array",
+	"arsort":                           "array",
+	"asort":                            "array",
+	"collator::asort":                  "array",
+	"collator::sort":                   "array",
+	"collator::sortwithsortkeys":       "array",
+	"collator_asort":                   "array",
+	"collator_sort":                    "array",
+	"collator_sort_with_sort_keys":     "array",
+	"datefmt_localtime":                "offset",
+	"datefmt_parse":                    "offset",
+	"enchant_dict_quick_check":         "suggestions",
+	"end":                              "array",
+	"extract":                          "array",
+	"krsort":                           "array",
+	"ksort":                            "array",
+	"ldap_parse_reference":             "referrals",
+	"mb_convert_variables":             "var vars",
+	"mysqli_poll":                      "read error reject",
+	"mysqli_stmt::bind_param":          "vars",
+	"mysqli_stmt_bind_param":           "vars",
+	"natcasesort":                      "array",
+	"natsort":                          "array",
+	"next":                             "array",
+	"numberformatter::parse":           "offset",
+	"numberformatter::parsecurrency":   "offset",
+	"numfmt_parse":                     "offset",
+	"numfmt_parse_currency":            "offset",
+	"php_user_filter::filter":          "consumed",
+	"prev":                             "array",
+	"reset":                            "array",
+	"rsort":                            "array",
+	"settype":                          "var",
+	"shuffle":                          "array",
+	"sodium_add":                       "string1",
+	"sodium_crypto_generichash_final":  "state",
+	"sodium_crypto_generichash_update": "state",
+	"sodium_crypto_secretstream_xchacha20poly1305_pull":  "state",
+	"sodium_crypto_secretstream_xchacha20poly1305_push":  "state",
+	"sodium_crypto_secretstream_xchacha20poly1305_rekey": "state",
+	"sort":                   "array",
+	"sqlite3stmt::bindparam": "var",
+	"stream_select":          "read write except",
+	"uasort":                 "array",
+	"uksort":                 "array",
+	"usort":                  "array",
+}
+
+// readsByRef reports a by-reference parameter that reads the argument it
+// is given, so that an offset passed to it may be missing (P2321), as
+// PHPStan has it. Of php-src, those byRefReads names. Of any other code,
+// one whose declared type does not take null: PHP creates a missing offset
+// as null for the reference, which a parameter with no type, mixed or a
+// nullable type takes as it is, and the others refuse.
+func readsByRef(sig *signature, p *program.Param) bool {
+	if !sig.stub {
+		return p.NativeType != nil && !types.IsMixed(p.NativeType) && !types.IsNullable(p.NativeType)
+	}
+	key := ""
+	switch {
+	case sig.fn != nil:
+		key = strings.ToLower(sig.fn.Name)
+	case sig.meth != nil && sig.meth.Class != nil:
+		key = strings.ToLower(sig.meth.Class.Name + "::" + sig.meth.Name)
+	}
+	for _, name := range strings.Fields(byRefReads[key]) {
+		if name == p.Name {
+			return true
+		}
+	}
+	return false
+}
+
 func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, span ast.Span, expected types.Type) types.Type {
 	// A partial application binds its arguments now and leaves the
 	// placeholders' parameters to the closure it creates.
@@ -2219,6 +2316,12 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			}
 			if at = known(b.arg.Value); at == nil {
 				at = x.exprLenient(b.arg.Value, env)
+				// A by-reference parameter that reads what it is given,
+				// sort()'s and array_push()'s, reads an offset the shape may
+				// lack as a direct read does (P2321).
+				if idx, ok := unparen(b.arg.Value).(*ast.Index); ok && readsByRef(sig, b.param) {
+					x.offsetMayLack(idx, env)
+				}
 			}
 			switch {
 			case b.arg.Value == x.pipeOperand:
@@ -2415,7 +2518,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 	}
 	for _, b := range bindings {
 		// `render($event)` may change what $event->getResponse() answers.
-		if key, ok := pathKey(b.arg.Value); ok {
+		if key, ok := x.pathKey(b.arg.Value); ok {
 			env.invalidateCalls(key)
 		}
 	}

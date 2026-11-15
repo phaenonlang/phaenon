@@ -485,6 +485,18 @@ type fnCtx struct {
 	// its body's first throw point (tryStmt).
 	throwEnvs []*state
 	trySeeds  map[*ast.Try]*state
+	// writeOffsets are the offsets a reference is taken to, `$v = &$a['k']`,
+	// which PHP creates when they are missing: no P2321 for them, as
+	// PHPStan has none. `.=` and `++` read the offset first, and are P2321.
+	writeOffsets map[*ast.Index]bool
+	// quietOffsets is above zero while the object of a member that
+	// isset(), empty() or ?? tests is typed, `$r['o']` of `isset($r['o']->p)`:
+	// PHP reads the whole chain as quietly as its last link, so an offset in
+	// it that may be missing is no P2321, as PHPStan has it.
+	quietOffsets int
+	// constKeys caches the key of an offset a class constant names
+	// (constOffsetKey), "" where it has none.
+	constKeys map[*ast.ClassConstFetch]string
 	// argKnown holds a pipe's left side, typed before the stage it feeds
 	// is checked as a call that takes it as an argument; pipeOperand is
 	// that expression while its stage is checked, and pipeParam the

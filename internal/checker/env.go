@@ -3,10 +3,12 @@ package checker
 import (
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -29,10 +31,17 @@ type varInfo struct {
 
 // condHolder is one branch of a condition a variable was assigned from:
 // when the variable's narrowed type fits whenType, the branch was taken,
-// and narrowed says what the variables mentioned were in it.
+// and narrowed says what the variables mentioned were in it, offsets
+// says what the constant offsets of local arrays were (`$n = $a['k'] ??
+// null` leaves `$a['k']` set where $n is not null).
 type condHolder struct {
 	whenType types.Type
 	narrowed map[string]types.Type
+	offsets  map[string]types.Type
+	// exact holds the branch only where the variable is narrowed to
+	// whenType itself, not to a part of it, as PHPStan's holders of an
+	// assigned `??` are matched (coalesceConds).
+	exact bool
 }
 
 // condBranch records the narrowings of one branch of a condition against
@@ -49,7 +58,27 @@ func condBranch(whenType types.Type, branch, before *state) *condHolder {
 			narrowed[k] = v.t
 		}
 	}
-	return &condHolder{whenType: whenType, narrowed: narrowed}
+	offsets := map[string]types.Type{}
+	for k, v := range branch.paths {
+		if _, ok := offsetRoot(k); !ok {
+			continue
+		}
+		if b, ok := before.paths[k]; !ok || !types.Equal(b, v) {
+			offsets[k] = v
+		}
+	}
+	return &condHolder{whenType: whenType, narrowed: narrowed, offsets: offsets}
+}
+
+// offsetRoot is the variable a path of constant offsets is rooted at,
+// `a` for `$a['k'][0]`; false for any other path: a member, a call, an
+// offset another variable names, `$this`.
+func offsetRoot(path string) (string, bool) {
+	name, rest, found := strings.Cut(strings.TrimPrefix(path, "$"), "[")
+	if !found || !strings.HasPrefix(path, "$") || name == "this" || strings.ContainsAny(rest, "$:") || strings.Contains(rest, "->") {
+		return "", false
+	}
+	return name, true
 }
 
 // setConds attaches the condition branches to a variable just assigned;
@@ -64,7 +93,7 @@ func (e *state) setConds(name string, holders ...*condHolder) {
 	for _, h := range holders {
 		if h != nil {
 			info.conds = append(info.conds, *h)
-			any = any || len(h.narrowed) > 0
+			any = any || len(h.narrowed) > 0 || len(h.offsets) > 0
 		}
 	}
 	if !any {
@@ -83,7 +112,7 @@ func (e *state) applyConds(name string, t types.Type, p *program.Program) {
 	}
 	var taken []condHolder
 	for _, c := range info.conds {
-		if types.IsSubtype(t, c.whenType, p) {
+		if c.exact && types.Equal(t, c.whenType) || !c.exact && types.IsSubtype(t, c.whenType, p) {
 			taken = append(taken, c)
 		}
 	}
@@ -103,6 +132,25 @@ func (e *state) applyConds(name string, t types.Type, p *program.Program) {
 		cur.native = narrowNative(cur.native, r, p)
 		e.vars[k] = cur
 	}
+	for k, nt := range taken[0].offsets {
+		if cur, ok := e.paths[k]; ok {
+			if r := types.Intersect(cur, nt, p); !isNeverType(r) {
+				e.paths[k] = r
+			}
+			continue
+		}
+		e.paths[k] = nt
+	}
+}
+
+// offsetsUnder reports an offset of the variable name among offsets.
+func offsetsUnder(offsets map[string]types.Type, name string) bool {
+	for k := range offsets {
+		if root, _ := offsetRoot(k); root == name {
+			return true
+		}
+	}
+	return false
 }
 
 // dropConds forgets the conditions that mention name: the variable it
@@ -114,7 +162,7 @@ func (e *state) dropConds(name string) {
 		}
 		kept := v.conds[:0:0]
 		for _, c := range v.conds {
-			if _, mentions := c.narrowed[name]; !mentions {
+			if _, mentions := c.narrowed[name]; !mentions && !offsetsUnder(c.offsets, name) {
 				kept = append(kept, c)
 			}
 		}
@@ -706,15 +754,25 @@ func (e *state) names() []string {
 }
 
 // pathKey returns the narrowing key of an expression that denotes a
-// stable path: $x, $x->p, $x['k'], Foo::$p, $this->p->q.
+// stable path: $x, $x->p, $x['k'], Foo::$p, $this->p->q. An offset is
+// keyed by the key PHP stores, whatever its spelling: `$a['1']`, `$a[1]`
+// and `$a[0x1]` are one path, and so are `$a['name']` and the `$a[name]`
+// of a string. A class constant is keyed as written; the checker's own
+// pathKey keys it by its value.
 func pathKey(e ast.Expr) (string, bool) {
+	return pathKeyWith(e, nil)
+}
+
+// pathKeyWith is pathKey with constKey, when not nil, giving the key of an
+// offset a class constant names.
+func pathKeyWith(e ast.Expr, constKey func(*ast.ClassConstFetch) (string, bool)) (string, bool) {
 	switch e := e.(type) {
 	case *ast.Variable:
 		return "$" + e.Name, true
 	case *ast.Paren:
-		return pathKey(e.Expr)
+		return pathKeyWith(e.Expr, constKey)
 	case *ast.PropertyFetch:
-		base, ok := pathKey(e.Object)
+		base, ok := pathKeyWith(e.Object, constKey)
 		if !ok {
 			return "", false
 		}
@@ -735,7 +793,7 @@ func pathKey(e ast.Expr) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		base, ok := pathKey(e.Object)
+		base, ok := pathKeyWith(e.Object, constKey)
 		if !ok {
 			return "", false
 		}
@@ -774,28 +832,64 @@ func pathKey(e ast.Expr) (string, bool) {
 		}
 		return strings.ToLower(strings.Join(n.Parts, "\\")) + "::$" + v.Name, true
 	case *ast.Index:
-		base, ok := pathKey(e.Array)
+		base, ok := pathKeyWith(e.Array, constKey)
 		if !ok || e.Index == nil {
 			return "", false
 		}
-		switch i := e.Index.(type) {
-		case *ast.Variable:
+		if i, ok := e.Index.(*ast.Variable); ok {
 			return base + "[$" + i.Name + "]", true // until $i is assigned again
-		case *ast.StringLit:
-			return base + "['" + program.StringValue(i) + "']", true
-		case *ast.IntLit:
-			return base + "[" + i.Raw + "]", true
-		case *ast.ClassConstFetch:
-			// A constant key names one offset, whatever its value.
-			n, ok := i.Class.(*ast.Name)
-			id, isIdent := i.Name.(*ast.Ident)
-			if ok && isIdent {
-				return base + "[" + strings.ToLower(strings.Join(n.Parts, "\\")) + "::" + id.Name + "]", true
+		}
+		if c, ok := e.Index.(*ast.ClassConstFetch); ok && constKey != nil {
+			if k, ok := constKey(c); ok {
+				return base + "[" + k + "]", true
 			}
+		}
+		if k, ok := offsetKey(e.Index); ok {
+			return base + "[" + k + "]", true
 		}
 		return "", false
 	}
 	return "", false
+}
+
+// offsetKey is the key of an offset written as a literal, as PHP stores
+// it: an int for an int literal and for a string that is a canonical
+// decimal integer, `'name'` for any other string, the bare word of a
+// string's `$a[name]` included. A class constant is keyed as written: it
+// names one offset, whatever its value.
+func offsetKey(idx ast.Expr) (string, bool) {
+	switch i := idx.(type) {
+	case *ast.StringLit:
+		return storedKey(program.StringValue(i)), true
+	case *ast.Ident:
+		return storedKey(i.Name), true
+	case *ast.IntLit:
+		if n, ok := types.IsIntLit(intLitType(i.Raw)); ok {
+			return strconv.FormatInt(n, 10), true
+		}
+	case *ast.Unary:
+		if lit, ok := i.Expr.(*ast.IntLit); ok && i.Op == token.Kind('-') {
+			if n, ok := types.IsIntLit(intLitType(lit.Raw)); ok {
+				return strconv.FormatInt(-n, 10), true
+			}
+		}
+	case *ast.ClassConstFetch:
+		n, ok := i.Class.(*ast.Name)
+		id, isIdent := i.Name.(*ast.Ident)
+		if ok && isIdent {
+			return strings.ToLower(strings.Join(n.Parts, "\\")) + "::" + id.Name, true
+		}
+	}
+	return "", false
+}
+
+// storedKey is the key of a string offset: the int a canonical decimal
+// integer is, the quoted string otherwise.
+func storedKey(v string) string {
+	if n, ok := types.IntKey(v); ok {
+		return strconv.FormatInt(n, 10)
+	}
+	return "'" + v + "'"
 }
 
 // generalize widens next, a loop variable's type after one more iteration,
