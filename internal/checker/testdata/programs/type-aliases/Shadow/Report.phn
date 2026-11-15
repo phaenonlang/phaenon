@@ -1,0 +1,18 @@
+namespace Shop\Shadow;
+
+use Shop\Orders\Page as Sheet;
+use Shop\Shadow\Models\{Line, Row};
+
+// An alias declared under a name its file imports is an error at the
+// alias: in a type position the name is the import, as PHP reads a class
+// name, so the file's own alias could never be meant by it.
+type Row = map<string, int>; // want P2511 "`use Shop\Shadow\Models\Row;` on line 4"
+type sheet = list<int>; // want P2511 "`use Shop\Orders\Page as Sheet;` on line 3"
+
+// The name stays the import's: one finding, at the declaration.
+function id(Row $row, Sheet<int> $sheet): int => $row->id + $sheet[1];
+
+// A name the file does not import is the namespace's to declare.
+type Rows = list<Row>;
+
+function count(Rows $rows, Line $line): int => \count($rows);

@@ -3,6 +3,7 @@ package checker
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 )
@@ -25,6 +26,12 @@ func (x *fnCtx) checkTypeAlias(a *ast.TypeAlias) {
 		x.report(a.Name.S, P2511, "type alias %s is already declared (%s:%d)", decl.Name, decl.File.Path, line)
 		return
 	}
+	// The file gives the name to something else: a type position reads the
+	// import, as PHP reads a class name, and the alias would never be
+	// meant by its own file.
+	if it := x.importNamed(a.Name.Name); it != nil && !strings.EqualFold(it.target, name) {
+		x.report(a.Name.S, P2511, "type alias %s is declared under a name its file imports: `use %s%s;` on line %d gives %s to another type", decl.Name, it.target, it.as, it.line, a.Name.Name)
+	}
 	// One table of names is what makes `use` unambiguous: a namespace's
 	// name is an alias or a class-like, never both.
 	if cl := x.p().Class(name); cl != nil {
@@ -42,6 +49,52 @@ func (x *fnCtx) checkTypeAlias(a *ast.TypeAlias) {
 	// where PHPStan would meet a class that does not exist.
 	x.declaredTypes(a.Type, true)
 	x.res = saved
+}
+
+// fileImport is a class import of a file: what it names, the ` as Name` it
+// was written with, and its line.
+type fileImport struct {
+	target, as string
+	line       int
+}
+
+// importNamed is the class import that gives name, in any letter case, in
+// the namespace the context checks; nil when the file imports none.
+func (x *fnCtx) importNamed(name string) *fileImport {
+	scope := x.res.Scope()
+	if _, imported := scope.Imports()[strings.ToLower(name)]; !imported {
+		return nil
+	}
+	var found *fileImport
+	ast.Inspect(x.file.AST, func(n ast.Node) bool {
+		u, ok := n.(*ast.Use)
+		if !ok {
+			return found == nil
+		}
+		if u.Kind != ast.UseClass || x.file.ScopeAt(u.S.Start) != scope {
+			return false
+		}
+		for _, it := range u.Items {
+			if it.Kind != ast.UseClass {
+				continue
+			}
+			given, as := it.Name.Parts[len(it.Name.Parts)-1], ""
+			if it.Alias != nil {
+				given, as = it.Alias.Name, " as "+it.Alias.Name
+			}
+			if !strings.EqualFold(given, name) {
+				continue
+			}
+			target := strings.Join(it.Name.Parts, "\\")
+			if u.Prefix != nil {
+				target = strings.Join(u.Prefix.Parts, "\\") + "\\" + target
+			}
+			line, _ := x.file.Position(it.S.Start)
+			found = &fileImport{target: target, as: as, line: line}
+		}
+		return false
+	})
+	return found
 }
 
 // unknownClass is the message of a name PHP would look for a class under
