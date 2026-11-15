@@ -64,3 +64,71 @@ function wrapped(\ArrayIterator $rows, \Traversable $any): void
         takesDog($key); // want P2103
     }
 }
+
+// A bound that names a template the arguments left open holds the
+// argument to that template's own bound, in turn, and to nothing more:
+// an iterator keyed by objects breaks Keyed's `I of Iterator<K, mixed>`
+// with `K of int|string`, an int breaks `U of T` with `T of Countable`,
+// and a map of ints breaks `D of array<string, B>` with `B of list<A>`.
+// What fits those bounds passes.
+/**
+ * @template K of int|string
+ * @template I of \Iterator<K, mixed>
+ */
+final class Keyed
+{
+    /** @param I $i */
+    public function __construct(public \Iterator $i)
+    {
+    }
+}
+
+/**
+ * @template T of \Countable
+ * @template U of T
+ * @param U $u
+ * @return U
+ */
+function counted(mixed $u): mixed
+{
+    return $u;
+}
+
+/**
+ * @template A
+ * @template B of list<A>
+ * @template D of array<string, B>
+ */
+final class Chain
+{
+    /** @param D $d */
+    public function __construct(public array $d)
+    {
+    }
+}
+
+final class Tally implements \Countable
+{
+    public function count(): int
+    {
+        return 0;
+    }
+}
+
+function keep(mixed $kept): void
+{
+}
+
+/**
+ * @param \Iterator<\stdClass, int> $objectKeys
+ * @param \Iterator<string, int> $stringKeys
+ */
+function bounded(\Iterator $objectKeys, \Iterator $stringKeys): void
+{
+    keep(new Keyed($objectKeys)); // want P3002 "Iterator<stdClass, int> inferred for I of App\TemplateBounds\Keyed::__construct() is not a subtype of its bound Iterator<int|string, mixed>"
+    keep(new Keyed($stringKeys));
+    keep(counted(5)); // want P3002 "type argument 5 inferred for U of App\TemplateBounds\counted() is not a subtype of its bound Countable"
+    keep(counted(new Tally()));
+    keep(new Chain(['a' => 5])); // want P3002
+    keep(new Chain(['a' => [5]]));
+}

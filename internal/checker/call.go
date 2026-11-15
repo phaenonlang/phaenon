@@ -1688,26 +1688,39 @@ func argsSoFar(tps []*program.TypeParam, args []types.Type) map[string]types.Typ
 	return m
 }
 
-// openToMixed replaces in a bound the call's own type parameters that its
-// arguments left unbound by mixed: `new IteratorIterator($nodes)` binds
-// TIterator before TKey and TValue, which its bound Traversable<TKey,
-// TValue> names, and the bound holds it to nothing they have not said.
-func openToMixed(bound types.Type, tps []*program.TypeParam, subst map[string]types.Type) types.Type {
-	open := map[string]bool{}
+// openToBounds replaces in a bound the call's own type parameters that
+// its arguments left unbound by their own bounds, in turn, and by mixed
+// where they have none: `new IteratorIterator($nodes)` binds TIterator
+// before TKey and TValue, which its bound Traversable<TKey, TValue>
+// names, and TIterator is held to what their bounds say of them, no more.
+func openToBounds(bound types.Type, tps []*program.TypeParam, subst map[string]types.Type) types.Type {
+	open := map[string]*program.TypeParam{}
 	for _, tp := range tps {
 		if _, ok := subst[tp.Name]; !ok {
-			open[tp.Name] = true
+			open[tp.Name] = tp
 		}
 	}
 	if len(open) == 0 {
 		return bound
 	}
-	return types.MapDeep(bound, func(t types.Type) types.Type {
-		if p, ok := t.(types.Param); ok && open[p.Name] {
-			return types.TMixed
-		}
-		return t
-	})
+	var close func(t types.Type, depth int) types.Type
+	close = func(t types.Type, depth int) types.Type {
+		return types.MapDeep(t, func(n types.Type) types.Type {
+			p, ok := n.(types.Param)
+			if !ok {
+				return n
+			}
+			tp, isOpen := open[p.Name]
+			if !isOpen {
+				return n
+			}
+			if tp.Bound == nil || depth > 8 {
+				return types.TMixed
+			}
+			return close(types.Substitute(tp.Bound, subst), depth+1)
+		})
+	}
+	return close(bound, 0)
 }
 
 // namesClass reports a static, $this or class type of the named class.
@@ -2083,7 +2096,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		if _, unknown := v.(types.Unknown); unknown || types.IsMixed(v) {
 			continue // mixed may still fit; the argument itself is reported where it is passed
 		}
-		bound := openToMixed(types.Substitute(tp.Bound, subst), sig.typeParams, subst)
+		bound := openToBounds(types.Substitute(tp.Bound, subst), sig.typeParams, subst)
 		if !types.IsSubtype(v, bound, x.p()) {
 			x.report(span, P3002, "type argument %s inferred for %s of %s is not a subtype of its bound %s", x.typeName(v), tp.Name, sig.name, x.typeName(bound))
 		}
