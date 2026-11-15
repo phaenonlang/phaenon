@@ -446,6 +446,14 @@ func (e *emitter) prologue(f *ast.File) {
 // fills its lines goes with them, a run of them together, and with a blank
 // line that would otherwise follow a blank line; one that shares its line
 // with code goes, and its line breaks stay.
+//
+// A declaration's attributes begin where it does, so the docblock an
+// earlier pass inserted at its start stands where dropped lines that hold
+// its first attribute group begin, after their indentation. The insertion
+// stays the declaration's: the drop then starts at it, and runs to the
+// code after the dropped lines, their line breaks and the next line's
+// indentation included, so that the inserted text, which ends in the
+// indentation it was written for, stands right before that code.
 func (e *emitter) dropLines() {
 	sort.Slice(e.drop, func(i, j int) bool { return e.drop[i].Start < e.drop[j].Start })
 	src := e.src
@@ -484,8 +492,28 @@ func (e *emitter) dropLines() {
 				s.End += nl + 1
 			}
 		}
+		at := s.Start
+		for at < s.End && (src[at] == ' ' || src[at] == '\t') {
+			at++
+		}
+		if e.insertsAt(at) {
+			s.Start = at
+			for s.End < len(src) && (isBlank(src[s.End]) || src[s.End] == '\n') {
+				s.End++
+			}
+		}
 		e.replaceFree(s, "")
 	}
+}
+
+// insertsAt reports whether an edit inserts text at offset off.
+func (e *emitter) insertsAt(off int) bool {
+	for _, ed := range e.edits {
+		if ed.Start == off && ed.End == off {
+			return true
+		}
+	}
+	return false
 }
 
 // lineBefore is the start of the line before the line starting at off, -1

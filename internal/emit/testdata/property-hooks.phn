@@ -1,0 +1,93 @@
+namespace App\Hooks;
+
+// A hook's parameter is typed like any other: the Phaenon type is erased
+// and a @param tag before the hook keeps it. The hooks of a promoted
+// constructor parameter are the property's hooks, and are lowered too.
+
+function first<T>(list<T> $items): ?T => $items[0] ?? null;
+
+function parse(string $csv): list<int> => \array_map(\intval(...), \explode(',', $csv));
+
+class Series
+{
+    public list<int> $points = [] {
+        set(list<int> $value) {
+            $this->points = \array_values(\array_filter($value, fn(int $p): bool => $p >= 0));
+        }
+    }
+
+    // A set hook may take more than the property holds.
+    public list<int> $raw = [] {
+        get => $this->raw;
+        set(list<int>|string $value) {
+            $this->raw = \is_string($value) ? parse($value) : $value;
+        }
+    }
+
+    public map<string, list<int>> $byName = [] { set(map<string, list<int>> $value) { $this->byName = $value; } }
+
+    public ?int $head {
+        get => first<int>($this->points);
+    }
+
+    public bytes $key {
+        set(bytes $value) {
+            $this->key = $value;
+        }
+    }
+
+    public list<string> $labels = [] {
+        /** Trims every label. */
+        set(list<string> $value) {
+            $this->labels = \array_map(\trim(...), $value);
+        }
+    }
+
+    public (int, int) $range = [0, 0] {
+        /**
+         * Orders the two ends.
+         */
+        set((int, int) $value) {
+            $this->range = [\min($value), \max($value)];
+        }
+    }
+
+    // Plain PHP stays as written.
+    public string $name = '' {
+        set(string $value) {
+            $this->name = \trim($value);
+        }
+    }
+
+    public function __construct(
+        public list<int> $weights = [] {
+            set(list<int> $value) {
+                $this->weights = \array_reverse($value);
+            }
+        },
+        public list<string> $tags = [] {
+            get => \array_map(fn(string $t): string => \strtolower($t), $this->tags);
+            set(list<string>|string $value) {
+                $split = function (string $csv): list<string> {
+                    return \explode(',', $csv);
+                };
+                $this->tags = \is_string($value) ? $split($value) : $value;
+            }
+        },
+        public ?string $top = null {
+            get => $this->top ?? first<string>($this->tags);
+        },
+    ) {
+    }
+}
+
+function series(): object
+{
+    return new class {
+        public list<int> $points = [] {
+            set(list<int> $value) {
+                $this->points = \array_reverse($value);
+            }
+        }
+    };
+}

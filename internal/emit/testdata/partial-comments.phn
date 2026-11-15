@@ -1,0 +1,30 @@
+// targets: 8.5, 8.6
+// A `...` that has no parameter left to stand for goes with the comma
+// before it when the application is lowered for PHP 8.5. The comma is the
+// token: one inside a comment between the arguments is text, and the
+// comment stays.
+
+function both(int $a, int $b): int { return $a * 10 + $b; }
+
+$plain = both(1, 2, ...);
+$after = both(1, 2, /* a, b */ ...);
+$before = both(1, 2 /* a, b */, ...);
+$around = both(1, 2 /* a, b */ , /* c, d */ ...);
+$doc = both(1, 2, /** a, b */ ...);
+$line = both(1, 2, // one, two
+    ...);
+$hash = both(1, 2, # one, two
+    ...);
+$lines = both(
+    1,
+    2, /* the rest, if there were any */
+    ...
+);
+$named = both(b: 2, a: 1, /* named, too */ ...);
+echo $plain(), ' ', $after(), ' ', $before(), ' ', $around(), ' ', $doc(), ' ', $line(), ' ', $hash(), ' ', $lines(), ' ', $named(), "\n";
+
+// In a pipe the placeholder takes the value and `...` takes nothing.
+echo 5 |> both(1, ?, /* x, y */ ...), "\n";
+echo 6
+    |> both(?, 2, // the left, the right
+        ...), "\n";
