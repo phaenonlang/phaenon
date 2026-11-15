@@ -10,6 +10,7 @@ package program
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -60,6 +61,9 @@ type Program struct {
 	Parses *ParseCache
 	// aliases are the type aliases, by qualified name (typealias.go).
 	aliases aliasTable
+	// expected are the absolute paths of the files the caller adds after
+	// the loaders (Expect), which no loader preloads.
+	expected map[string]bool
 }
 
 // Problem is a finding attached to a declaration site.
@@ -109,15 +113,39 @@ func (p *Program) Target() phpversion.Version {
 // phaenon.json and composer.json; tests set it directly.
 func (p *Program) SetTarget(v phpversion.Version) { p.target = v }
 
-// AddLoader appends a loader; loaders are consulted in order.
+// Expect names the files the caller adds after the loaders, as AddFile
+// will be given them. A file a loader preloads that is one of them, under
+// this spelling of its path or another, is left to the caller: read from
+// the loader too, it would declare everything in it a second time (a
+// Composer `files` entry naming a file of the project, or its output).
+func (p *Program) Expect(paths []string) {
+	if p.expected == nil {
+		p.expected = map[string]bool{}
+	}
+	for _, path := range paths {
+		if abs, err := filepath.Abs(path); err == nil {
+			p.expected[abs] = true
+		}
+	}
+}
+
+// AddLoader appends a loader; loaders are consulted in order. The files it
+// preloads are added now, but those Expect names.
 func (p *Program) AddLoader(l Loader) {
 	p.loaders = append(p.loaders, l)
 	for _, path := range l.Preload() {
+		if abs, err := filepath.Abs(path); err == nil && p.expected[abs] {
+			continue
+		}
 		src, err := l.Read(path)
 		if err != nil {
 			continue
 		}
-		p.AddFile(path, src, lexer.ModePHP, false) // parse errors in vendor files are ignored
+		mode := lexer.ModePHP
+		if strings.HasSuffix(path, ".phn") {
+			mode = lexer.ModePhaenon // a source behind an output
+		}
+		p.AddFile(path, src, mode, false) // parse errors in vendor files are ignored
 	}
 }
 

@@ -571,7 +571,7 @@ func loadProgram(files []string, target phpversion.Version, checked bool) (*prog
 	if len(files) > 0 {
 		anchor = files[0]
 	}
-	p, diags := newProgram(anchor, target)
+	p, diags := newProgram(anchor, target, files)
 	for _, in := range files {
 		src, err := os.ReadFile(in)
 		if err != nil {
@@ -595,10 +595,12 @@ func loadProgram(files []string, target phpversion.Version, checked bool) (*prog
 // newProgram is a program with the standard library, the extensions the
 // local php loads and, found from anchor (a file of the project), the
 // vendor code; without an anchor, the standard library alone. diags are
-// the warnings about what could not be read.
-func newProgram(anchor string, target phpversion.Version) (*program.Program, []checker.Diagnostic) {
+// the warnings about what could not be read. files are the paths the
+// caller adds next, which Composer's `files` entries do not add again.
+func newProgram(anchor string, target phpversion.Version, files []string) (*program.Program, []checker.Diagnostic) {
 	p := program.New()
 	p.SetTarget(target)
+	p.Expect(files)
 	if share != nil {
 		p.Parses = share.parses
 	}
@@ -1035,12 +1037,12 @@ func migrateLoad(anchor string, target phpversion.Version) func(map[string][]byt
 		share = newProgramShare()
 	}
 	return func(files map[string][]byte, checked map[string]bool) (*program.Program, error) {
-		p, _ := newProgram(anchor, target)
 		paths := make([]string, 0, len(files))
 		for path := range files {
 			paths = append(paths, path)
 		}
 		sort.Strings(paths)
+		p, _ := newProgram(anchor, target, paths)
 		for _, path := range paths {
 			if _, err := p.AddFile(path, files[path], lexer.ModePhaenon, checked[path]); err != nil {
 				return nil, fmt.Errorf("%s: %w", path, err)

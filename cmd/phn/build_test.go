@@ -79,3 +79,39 @@ func TestBuildAbsentRoot(t *testing.T) {
 		t.Errorf("build with no root present should fail and say so (%v):\n%s", err, stderr)
 	}
 }
+
+// TestFilesEntryOfAnOutput: a Composer `files` entry that names one of the
+// project's outputs is read from the source behind it, as a class found
+// through the maps is, and not besides it: every build, the ones after the
+// first that wrote the output among them, declares the function once. A
+// check of another file alone reads the function from the source, not
+// from an output that is no longer current. A plain PHP file of a root
+// that a `files` entry names is declared once as well.
+func TestFilesEntryOfAnOutput(t *testing.T) {
+	bin := phnBinary(t)
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"composer.json":                     `{"name": "acme/app", "require": {"php": ">=8.5"}, "autoload": {"psr-4": {"App\\": ".src/"}, "files": [".src/functions.php", ".src/helpers.php"]}}`,
+		"phaenon.json":                      `{"roots": {"src": ".src"}}`,
+		"vendor/composer/installed.json":    `{"packages": []}`,
+		"vendor/composer/autoload_psr4.php": "<?php\n\n$baseDir = dirname(dirname(__DIR__));\n\nreturn array(\n    'App\\\\' => array($baseDir . '/.src'),\n);\n",
+		"vendor/composer/autoload_files.php": "<?php\n\n$baseDir = dirname(dirname(__DIR__));\n\nreturn array(\n" +
+			"    'a1' => $baseDir . '/.src/functions.php',\n    'a2' => $baseDir . '/.src/helpers.php',\n);\n",
+		"src/functions.phn": "namespace App;\n\nfunction greet(string $name): string => \"Hello, {$name}\";\n",
+		"src/helpers.php":   "<?php\n\nnamespace App;\n\nfunction shout(string $s): string\n{\n    return \\strtoupper($s);\n}\n",
+		"src/Greeter.phn":   "namespace App;\n\nfinal class Greeter\n{\n    hello(): string => shout(greet('world'));\n}\n",
+	})
+	for i := 1; i <= 2; i++ {
+		if stdout, stderr, err := run(t, root, bin, "build"); err != nil {
+			t.Fatalf("build %d (%v):\n%s%s", i, err, stdout, stderr)
+		}
+	}
+	if stdout, stderr, err := run(t, root, bin, "check"); err != nil || !strings.Contains(stdout, "0 errors") {
+		t.Errorf("check after the builds (%v):\n%s%s", err, stdout, stderr)
+	}
+	writeTree(t, root, map[string]string{"src/functions.phn": "namespace App;\n\nfunction greet(string $name): int => \\strlen($name);\n"})
+	stdout, stderr, err := run(t, root, bin, "check", "src/Greeter.phn")
+	if err == nil || !strings.Contains(stderr, "P2103") {
+		t.Errorf("a check of Greeter alone should read greet() from its changed source (%v):\n%s%s", err, stdout, stderr)
+	}
+}
