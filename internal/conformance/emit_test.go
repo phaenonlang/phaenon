@@ -392,6 +392,14 @@ var emitDeviations = map[string]bool{
 	// (design/functions.md); PHP's compile error for a non-static one is
 	// the checker's P2531, which the harness does not run.
 	"Zend/tests/closures/closure_const_expr/disallows_non_static.phpt": true,
+	// phn migrate writes a long cast as the canonical one, the only cast
+	// Phaenon has (design/language-overview.md §3, P1001): PHP's deprecation
+	// of (integer) and its parse error for (real) are what each file tests.
+	"Zend/tests/type_coercion/type_casts/non_canonical_binary_cast.phpt":  true,
+	"Zend/tests/type_coercion/type_casts/non_canonical_boolean_cast.phpt": true,
+	"Zend/tests/type_coercion/type_casts/non_canonical_double_cast.phpt":  true,
+	"Zend/tests/type_coercion/type_casts/non_canonical_integer_cast.phpt": true,
+	"Zend/tests/type_coercion/type_casts/real_cast.phpt":                  true,
 }
 
 // hasRunSections reports whether the test needs stdin, arguments, ini

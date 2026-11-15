@@ -1390,6 +1390,9 @@ func (x *fnCtx) unary(e *ast.Unary, env *state) types.Type {
 
 func (x *fnCtx) cast(e *ast.Cast, env *state) types.Type {
 	t := x.expr(e.Expr, env, nil)
+	// A long spelling, (integer) or (real), is lexed as the canonical
+	// cast's token and typed as that cast: withdrawnSpellings reports the
+	// spelling, and nothing else follows from it.
 	switch e.Op {
 	case token.T_INT_CAST:
 		if types.IsObjectLike(t) && !types.IsMixed(t) {
@@ -1453,10 +1456,6 @@ func (x *fnCtx) cast(e *ast.Cast, env *state) types.Type {
 		return types.NewClass("stdClass")
 	case token.T_UNSET_CAST:
 		return types.TNull
-	}
-	if strings.Contains(strings.ToLower(e.Raw), "integer") || strings.Contains(strings.ToLower(e.Raw), "boolean") ||
-		strings.Contains(strings.ToLower(e.Raw), "double") || strings.Contains(strings.ToLower(e.Raw), "real") || strings.Contains(strings.ToLower(e.Raw), "binary") {
-		x.removed(e.S, e.Raw+" cast", "the canonical cast")
 	}
 	return types.TMixed
 }

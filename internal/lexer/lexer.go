@@ -11,6 +11,7 @@ package lexer
 import (
 	"bytes"
 	"strconv"
+	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/token"
 )
@@ -441,6 +442,39 @@ var casts = []struct {
 	{"array", token.T_ARRAY_CAST}, {"object", token.T_OBJECT_CAST},
 	{"bool", token.T_BOOL_CAST}, {"boolean", token.T_BOOL_CAST},
 	{"unset", token.T_UNSET_CAST}, {"void", token.T_VOID_CAST},
+}
+
+// longCasts are the spellings of a cast that Phaenon does not have
+// (design/language-overview.md §3), each with the canonical word it means:
+// PHP 8.0 removed `(real)` and refuses to parse it, and PHP 8.5 deprecates
+// the other four. The lexer reads them as their canonical cast's token, so
+// that the checker reports the spelling once (P1001) and types the cast as
+// the canonical one.
+var longCasts = map[string]string{
+	"integer": "int", "boolean": "bool", "double": "float", "real": "float", "binary": "string",
+}
+
+// LongCast reads the text of a cast token, `(integer)` or `( Integer )`,
+// and returns where its word stands in the text and, for a long spelling,
+// the canonical word that replaces it: `int` for `integer`, `bool` for
+// `boolean`, `float` for `double` and `real`, `string` for `binary`.
+// canonical is "" for any other text.
+func LongCast(text string) (start, end int, canonical string) {
+	if len(text) < 2 || text[0] != '(' || text[len(text)-1] != ')' {
+		return 0, 0, ""
+	}
+	start, end = 1, len(text)-1
+	for start < end && (text[start] == ' ' || text[start] == '\t') {
+		start++
+	}
+	for end > start && (text[end-1] == ' ' || text[end-1] == '\t') {
+		end--
+	}
+	canonical = longCasts[strings.ToLower(text[start:end])]
+	if canonical == "" {
+		return 0, 0, ""
+	}
+	return start, end, canonical
 }
 
 func (l *Lexer) cast(i int) (token.Kind, int) {

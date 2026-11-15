@@ -26,8 +26,9 @@ type Code struct {
 
 var (
 	// P1 — removed constructs, and constructs the target PHP lacks.
-	// P1001 is `var`, a `concurrently` block or `spawn` (D25), and the
-	// spellings D26 and D27 withdrew: `is`, `as`, `as?` and `fun`.
+	// P1001 is `var`, a `concurrently` block or `spawn` (D25), the
+	// spellings D26 and D27 withdrew: `is`, `as`, `as?` and `fun`, and the
+	// casts PHP removed or deprecates, `(integer)` to `(real)` and `(unset)`.
 	P1001 = Code{"P1001", Error, "construct removed from Phaenon"}
 	// P1002: "… needs PHP 8.6 (target 8.5)" for a construct newer than the
 	// target that is not lowered (design/php-versions.md §3).

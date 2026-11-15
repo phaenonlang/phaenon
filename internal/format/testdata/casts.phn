@@ -1,0 +1,19 @@
+namespace App\Casts;
+
+// The long casts become the canonical ones, the word alone: in any letter
+// case, the parentheses and their blanks as written.
+function casts(string $s, int $n): string
+{
+    $i = (integer) $s + (INTEGER) $s + ( Integer ) $s;
+    $b = (boolean) $s;
+    $f = (double) $s + (real) $s + (  Real  ) $s;
+    $t = (binary) $n;
+    // (unset) has no certain rewrite: it stays, and is P1001.
+    $u = (unset) $n;
+
+    // A string or a comment holds no cast: "(integer)", (real).
+    return '(integer) ' . "(binary) {$t}" . $i . ($b ? 'y' : 'n') . $f;
+}
+
+// The canonical casts stay as written.
+function canonical(string $s): float => (int) $s + (float) $s + ((bool) $s ? 1 : 0) + \strlen((string) $s);
