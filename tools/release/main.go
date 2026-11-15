@@ -21,6 +21,10 @@
 // PR before the release is tagged and published. Both keep the main line's
 // branch alias at the release's minor version (dev-main is X.Y.x-dev,
 // design/tooling.md §3.4), which the first writes and the second checks.
+// Between two releases the alias may stand a line ahead: the commit that
+// adds a key to phaenon.json moves it to the minor version the key is
+// released in (cmd/phn's TestBranchAliasCoversTheKeys), which is the
+// version the next release then has, so this tool writes what is there.
 // composer.json requires no package (T16), so no other version moves with
 // the release: the phaenon/debug it suggests reads the line map format,
 // v1, whichever release wrote it.

@@ -88,6 +88,19 @@ them another or inside another, so that every file compiles into one place. `exc
 (fixtures another analyser owns); `phn build` compiles them all the same. `unused` narrows which
 attributes spare a private property the dead-code warnings (above).
 
+The file is one JSON object, in UTF-8. A key `phn` does not know is an error of the project's own
+file, which catches a key misspelt; so are a known key in another letter case, a key written
+twice, and `null` where a list holds strings. The error says which `phn` read the file (`unknown
+key "…" (this is phn 0.5.0; a newer release may know it)`): an editor's `phn lsp` from `PATH`, or
+`PHN_BINARY`, may be older than the release the project pins, and takes a key of a newer one for a
+mistake. In the file of an installed package a key it does not know is passed over, in silence
+(`composer dump-autoload -v` names it): the project that installed the package cannot change its
+file, and a later compiler may have given the library a key this one has not heard of. That an
+older compiler does not meet a key it must not ignore is for the library's Composer `conflict` on
+`phaenon/phn` to see to. Everything else is refused in an installed package's file as in the
+project's own, a key under `unused` that is not known among it (`unknown key "unused.…"`), and
+such a package is warned of and left out.
+
 `committed` lists the roots whose outputs the repository tracks, each a key of `roots`; an entry
 that is not one is an error of the project file:
 
@@ -96,16 +109,62 @@ that is not one is an error of the project file:
 ```
 
 It is for a library published for PHP projects at large, which a project that has no `phn` then
-installs as the plain PHP it compiles to (`roadmap.md` D28). In the library's own project the key
-changes nothing: `phn build`, `phn watch` and the editor build a committed root as any other, which
-is how its outputs are made and kept current. It speaks where the library is an installed package:
-`phn build --vendor` leaves such a root as installed, with no output written, no stamp and nothing
-removed, and builds the package's other roots as before. A committed root that came without its
+installs as the plain PHP it compiles to (`roadmap.md` D28). In the library's own project `phn
+build`, `phn watch` and the editor build a committed root as any other, which is how its outputs
+are made and kept current; the one difference is a stamp found there (below). The key speaks
+where the library is an installed package:
+`phn build --vendor` leaves such a root as installed, with no output written and no stamp, and
+builds the package's other roots as before. A committed root that came without its
 outputs (no output directory, or a `.phn` with no `.php` there) fails the command with an error
 naming the package, its version and the root, and nothing is built in its place: the same release
 is broken for every project without `phn`, and it is the package's to repair. The project that
 installed it can report it, or require a version that has its outputs. A project written in
 Phaenon still reads such a package from its `.phn`, as it reads any installed Phaenon package.
+
+One thing is removed from a committed root: what a build of an earlier release left there. A
+library that shipped its sources alone was built where it is installed, and an upgrade that keeps
+the directory (a source install, which is a git checkout) leaves that build's stamp, `.phn-build`,
+and the outputs of the sources the new release dropped beside the committed files, where they
+still load. Where a committed root's output directory holds a stamp, `phn build --vendor`
+removes the files no source stands behind, by the rule of `phn build` itself, then the stamp. It
+prints a line that names the package and the stamp and a line for each file removed; the next run
+finds no stamp and says nothing.
+
+- It does so only where an earlier build can have survived: in a checkout of the package's
+  repository (`"installation-source": "source"` in `vendor/composer/installed.json`) and in a path
+  repository linked to a checkout. Composer installs an archive, and a path repository it copies,
+  into an emptied directory, so a stamp there came with the files: it is left alone with
+  everything beside it, and nothing is said.
+- It removes nothing it is not sure of. With a root or an output directory that is a symbolic
+  link or lies behind one, a root the install lacks, a directory of the outputs it cannot read,
+  or a source whose absence it cannot prove (a link among the sources that leads nowhere, a
+  directory behind a link that it cannot read or search), it leaves the whole root as it is and
+  warns, saying what can be done. A package that is no link is removed and installed again. In a
+  linked checkout the library's own `phn build` removes the same files once what stands in the
+  way is put right; where that build does not look at the directory either, for a root the
+  checkout lacks or a directory that is a link, the stamp and what lies beside it are removed by
+  hand. A directory of the root itself that cannot be read fails the command, as before.
+- It never clears the project's own directory, whatever `installed.json` says of a package's
+  path.
+- A symbolic link in the output directory is neither followed nor removed, and only the
+  directories a removal empties go with the files.
+- A file that cannot be removed is a warning, and the stamp then stays for the next run.
+- A package that came without its outputs is not touched, nor is any package beside it.
+- A package whose project file has a key `phn` does not know is read, checked and built all the
+  same (above), but this clean-up removes nothing from it: it does not rest on a file its reader
+  understands in part. The warning names the key. The ordinary build of a root such a package
+  does not commit still removes the outputs that have no source, as any build does.
+
+In the library's own project, `phn build` removes a `.phn-build` from the output directory of a
+root the project commits, as it removes a file with no source, and `phn build --check` reports
+it: no build writes a stamp there, so one found there was left by a build of the checkout as an
+installed package, before the root was committed. Were it to stay, a release could track it, and
+a project that installs that release as a checkout would have a tracked file removed: its
+checkout is then modified, and a `composer update` of the package made without interaction fails
+on "has uncommitted changes". With the stamp removed by the build, a tracked one shows in `git
+status`, and the gate of a library that commits its outputs, the state of the tree after a
+build, fails until the removal is committed. The stamp of a root the project does not commit
+stays, as the record of the build that wrote it.
 
 ```sh
 phn migrate src tests          # once: Foo.php → Foo.phn, docblock types lifted into syntax, `public function title()` → `title()`, nested calls as |> pipelines, canonical layout
@@ -116,6 +175,58 @@ phn check                      # type-check the roots, minus "exclude"
 
 Without a project file, `phn build src tests` writes `Foo.php` next to `Foo.phn` — the adoption
 case, a `.phn` at a time in a PHP tree — or under `--out DIR`.
+
+### The compilers a library keeps out
+
+A library that commits its outputs requires `phaenon/phn` under `require-dev` alone, which binds
+none of the projects that install it, while a project written in Phaenon reads the library's
+`phaenon.json` with its own `phn`. A release from before a key the file uses cannot read it as
+written: it refuses the file, or reads it without the key. So the library's `composer.json` keeps
+those releases out with a `conflict`, which Composer applies wherever `phaenon/phn` is installed
+beside the library:
+
+```json
+{"require-dev": {"phaenon/phn": "0.5.0"}, "conflict": {"phaenon/phn": "<0.5.0"}}
+```
+
+Nothing makes an author write that line, and one that is missing or too low shows only in
+somebody else's project. So `phn build` of a project that commits a root checks it, and
+`phn build --check` does. The floor is the newest first release among the keys the project file
+uses: 0.5.0 for `committed`. The build fails, with one line on stderr and status 1, while a release
+from before the floor can be installed beside the package:
+
+```text
+composer.json: "conflict": {"phaenon/phn": "<0.4"} does not keep this package from being installed beside phaenon/phn 0.4.1 or 0.4.0, which cannot read its phaenon.json: the key "committed" is known from 0.5.0 on; write "phaenon/phn": "<0.5.0" under "conflict"
+```
+
+- **The outputs are written all the same**, or compared under `--check`: the line and the status
+  are all the check adds. The plugin builds the project when Composer writes the autoloader, so a
+  `composer install` in the library's own checkout fails on it too, after building.
+- **It asks about the releases that exist**, each tried against the constraint as Composer tries
+  it. `<0.5`, `<0.5.0`, `<=0.4.99` and `<0.5 || >=9` keep out the same releases and pass alike;
+  `<0.4`, `0.3.*` and no `conflict` on `phaenon/phn` at all do not. The package's name is read in
+  any letter case, and of two spellings the last counts, as Composer takes them; the line to
+  write names the entry as the file writes it. A project on the compiler's main branch is not kept out
+  by the line the check asks for: Composer takes `dev-main` for its branch alias, which stands at
+  the newest key's release line (`0.5.x-dev`).
+- **A constraint `phn` cannot read fails the build as well**, as one that "cannot be judged", with
+  the reason: it is not known to keep anything out. `phn` reads the comparisons, `~`, `^`,
+  wildcards, hyphen ranges, alternatives, stability suffixes and flags, and branches. It does not
+  read an inline alias (`as`), a numeric branch (`0.5.x-dev`), a version made of a date, a space
+  that is not the plain one, alternatives of which one is a range that ends before it begins
+  (Composer joins such ranges into something else), or what Composer itself refuses (`~>0.4`). A
+  `composer.json` that cannot be read fails the same way.
+- **The reader is its own, and is held to Composer's.** `phn` depends on no package, so it reads
+  the constraint itself, aiming to read it as Composer does or not at all. That is measured, not
+  proved: a table of constraints with Composer's answers is asked of a real Composer in CI, and
+  the reader was compared with Composer 2.9.5 over generated constraints, each difference found
+  becoming a row of the table. A constraint Composer reads another way than `phn` would be a bug
+  to report.
+- **It is asked of the project's whole build only**: not by `phn check`, `phn watch`, the editor's
+  build on save or a build of some paths; not of a project that commits no root or has no
+  `composer.json`; and never of an installed package, whose release is its maintainers' to repair.
+
+Design: `design/tooling.md` §3.7.
 
 ### The PHP target
 
@@ -323,12 +434,35 @@ it as `vendor/bin/phn`. When Composer writes the autoloader, it compiles every i
 that has a `phaenon.json` (each for its own target, its findings shown as warnings, skipped while
 nothing changed: `phn build --vendor`), then the project itself (`phn build`), so that
 `--classmap-authoritative` finds the outputs. With no `phaenon.json` anywhere it does nothing.
+A root an installed package lists under `committed` (above) is left as installed, and a package
+whose installed roots are all committed is nothing to build: alone, it makes the plugin neither
+fetch the binary nor run it. A package that came without the outputs it commits fails the command
+before any binary is fetched, with the error `phn build --vendor` gives, under `--quiet` too. A
+committed root that holds the stamp of a build (`.phn-build`), in a checkout of the package's
+repository or a linked path repository, was built there by an earlier release, before its outputs
+were committed: what that build left is removed, the files no source stands behind and the stamp,
+as `phn build --vendor` does (above), each file named. The plugin does it itself at every dump,
+in PHP and before it looks for a compiler, so it does not depend on which `phn` the project has.
+When it then runs `phn build --vendor` for the packages that are built, it names in
+`PHN_EARLIER_BUILDS_CLEARED` the packages it has looked at, and `phn` leaves the committed roots
+of those alone, so that one dump says a thing once. A package the plugin could not read is not
+among them, and `phn` clears it, or warns of it, in the same dump. The variable is the plugin's
+word to `phn`, not a setting: a value that names no installed package leaves nothing out. Where
+the plugin is not sure, it removes nothing and warns at each dump, saying what to do; it is no
+less careful than `phn`, and removes nothing either when PHP runs under `open_basedir`, where the
+warning points at `phn build --vendor`, which is not bound by it. A package whose project file
+`phn` refuses is left out by the plugin as by `phn`, and one with nothing to build makes the dump
+fetch no compiler to say so (`-v` names the key). Under `--quiet` the removal is made and nothing
+is printed. `composer dump-autoload --dry-run` builds and clears as a dump does: Composer sends
+the plugin the same event and does not say that the run is a dry one.
 It requires no other package, since the compiled output needs none, and suggests
 `phaenon/debug`, which points production errors at `.phn` positions (`design/line-map.md` §4.3).
 It conflicts with `phaenon/runtime` below 0.4, that package's name until then, which declares the
 same classes.
 
-- `PHN_BINARY=/path/to/phn` uses another binary, such as one built from a checkout.
+- `PHN_BINARY=/path/to/phn` uses another binary, such as one built from a checkout. A binary
+  older than the plugin builds as it always did: what the plugin does itself (the check of
+  committed outputs, the removal of an earlier build's leftovers) does not wait for it.
 - `"extra": {"phaenon": {"binary-url": "https://mirror/{version}/{file}"}}` fetches the binary from
   a mirror, with the credentials of `auth.json`.
 - `"extra": {"phaenon": {"build": false}}` leaves the project's own build to its workflow.
