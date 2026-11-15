@@ -1,0 +1,24 @@
+namespace App;
+
+type Row=array { id :int ,name ? :string };
+type Order  =  array{id:int,lines:list < array{ sku : string , qty:int } >,buyer : ? Customer};
+type Page < T >  = array{ items: list<T>,total: int , next?:string , };
+type Open = array{id : int , ... };
+type Any = array{  ...  };
+type None = array{ };
+type Keys = array{class:string,'a-b' :int, '$set' ? : bool,0:int, - 1 : string};
+type Mixed = ?array{pair:( int,array{x:int} ),f:Closure( array{a:int} ) :array{b:int}};
+
+// A shape over several lines keeps its line breaks: only the spacing
+// within a line is the formatter's.
+type Lines = array{
+    id :int,
+    name ? :  ?string,
+      lines:list<array{
+        sku:string,
+    }>,
+    ...
+};
+
+// A shape with a comment inside is left as it is.
+type Commented = array{id :int , /* the name */ name?:string};
