@@ -1,0 +1,1882 @@
+{
+  "format": "What `phn build --vendor` and the Composer plugin do about a build of an earlier release in a root an installed package now commits (../design/tooling.md §3.7): where the root's output directory holds a stamp, .phn-build, and the package is one an earlier build can have survived in, the files no source stands behind are removed, then the stamp. Each vector is the package acme/kit 1.0.0 as installed in vendor/acme/kit: \"project\" is its phaenon.json, \"files\" its other files by path, \"dirs\" directories that are empty, \"links\" symbolic links with their targets. \"installation-source\" is what installed.json records for the package, \"source\" for a checkout of its repository and \"dist\" for an archive or a path repository, null when it records nothing; \"linked\" says that vendor/acme/kit is a link to the package's directory, as for a linked path repository. For a linked package the install path is given with a slash at its end, as some installers give it. \"is-the-project\" says that the package's directory is the project's own root. \"unreadable\" are directories nobody may read or search (mode 0), \"unlisted\" directories that may be searched and not read (mode 0311), \"unsearchable\" directories that may be read and not searched (mode 0444), \"readonly\" directories nothing can be removed from (mode 0555), and \"permissions\" marks a vector that rests on them, which the superuser cannot run. \"folds\" marks a vector that needs a file system which takes one letter case of a name for another, \"normalises\" one which takes one Unicode normalisation for another; elsewhere they are skipped. \"said\" are the lines printed, whole and in order, a line for what was done and one for each file; \"warned\" those printed as a warning, and \"again\" the warning of a second run when it differs; a second run says nothing where the first only \"said\". \"left\" is every path the package holds afterwards, sorted, a directory with a trailing slash and a symbolic link with a trailing @; a link is not looked through. \"errors\" are the errors of the check of presence (committed-outputs.json), after which nothing is removed. \"undecided\" marks a tree the plugin does not judge, leaving the package in the build, where phn fails before it removes anything. \"compiler\" is part of phn's warning about a project file both readers refuse: phn leaves the package out, the plugin leaves it to phn or out, and nothing is removed.",
+  "vectors": [
+    {
+      "name": "no stamp: a file with no source is left where it is, and nothing is said",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "what the earlier build left: outputs of sources that are gone, a copy of a file that is gone, and the directories they empty",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/old.txt": "old\n",
+        ".src/Gone/Leaf.php": "<?php\n",
+        ".src/Deep/a/b/c.txt": "c\n",
+        ".src/Sub/Old.php": "<?php\n"
+      },
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 5 files with no source behind them",
+        "  - removed .src/Deep/a/b/c.txt",
+        "  - removed .src/Gone/Leaf.php",
+        "  - removed .src/Legacy.php",
+        "  - removed .src/Sub/Old.php",
+        "  - removed .src/old.txt"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "the files are named in the order of their paths, not as they were found",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Old/x.php": "<?php\n",
+        ".src/Old-1.php": "<?php\n"
+      },
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 2 files with no source behind them",
+        "  - removed .src/Old-1.php",
+        "  - removed .src/Old/x.php"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "one file",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 1 file with no source behind it",
+        "  - removed .src/Legacy.php"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "an archive, or a path repository Composer copies: no build made there survives an update, so the stamp came with the files and nothing is removed or said",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "dist"
+    },
+    {
+      "name": "a package installed.json says nothing of: not known to keep its directory, and nothing is removed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": null
+    },
+    {
+      "name": "a path repository linked to a checkout: an earlier build survives there, and the checkout is cleared",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "linked": true,
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 1 file with no source behind it",
+        "  - removed .src/Legacy.php"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "dist"
+    },
+    {
+      "name": "a linked checkout that lacks the root: the library's own build does not look at that directory either, and the warning says to clear it by hand",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "linked": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: the package is installed without src. What a build left there may still load. The package is a link to a checkout, where `phn build` does not get to this directory: remove .src/.phn-build there by hand, and what a build left beside it"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json"
+      ],
+      "installation-source": "dist"
+    },
+    {
+      "name": "a linked checkout with a link among the sources that leads nowhere: the library's own build removes the files once the link is put right, and the warning says so",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/broken.txt": "copied when the link led somewhere\n"
+      },
+      "links": {
+        "src/broken.txt": "../nowhere"
+      },
+      "installation-source": "dist",
+      "linked": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: whether src/broken.txt exists cannot be told. What a build left there may still load. The package is a link to a checkout: with that put right there, `phn build` removes what a build left, the stamp with it"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/broken.txt",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/broken.txt@",
+        "src/data.json"
+      ]
+    },
+    {
+      "name": "a linked checkout whose output directory is a link: no build walks through it, and the warning says to clear it by hand",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "elsewhere/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        "elsewhere/A.php": "<?php\n",
+        "elsewhere/Legacy.php": "<?php\n"
+      },
+      "links": {
+        ".src": "elsewhere"
+      },
+      "installation-source": "dist",
+      "linked": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: .src is a symbolic link. What a build left there may still load. The package is a link to a checkout, where `phn build` does not get to this directory: remove .src/.phn-build there by hand, and what a build left beside it"
+      ],
+      "left": [
+        ".src@",
+        "elsewhere/",
+        "elsewhere/.phn-build",
+        "elsewhere/A.php",
+        "elsewhere/Legacy.php",
+        "phaenon.json",
+        "src/",
+        "src/A.phn"
+      ]
+    },
+    {
+      "name": "a file named .phn-build that does not begin as a stamp is no stamp",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a package whose directory is the project's own is never cleared, whatever installed.json says of it",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "installation-source": "source",
+      "is-the-project": true,
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ]
+    },
+    {
+      "name": "a file name with a line break in it is printed on one line, the break as \\u000a",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/two\nlines.php": "<?php\n"
+      },
+      "installation-source": "source",
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 1 file with no source behind it",
+        "  - removed .src/two\\u000alines.php"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ]
+    },
+    {
+      "name": "a project file with a key the reader does not know: the package is read, checked and built, and nothing is removed from it",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"], \"later\": true}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source",
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: its phaenon.json has the key \"later\", which this version of phn does not know. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ]
+    },
+    {
+      "name": "the same in a linked checkout, whose own `phn build` refuses the file: the warning says to clear it by hand",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"], \"later\": true}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "dist",
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: its phaenon.json has the key \"later\", which this version of phn does not know. What a build left there may still load. The package is a link to a checkout, where `phn build` does not get to this directory: remove .src/.phn-build there by hand, and what a build left beside it"
+      ],
+      "linked": true
+    },
+    {
+      "name": "several unknown keys: the first by its spelling is named",
+      "project": "{\"zeta\": 1, \"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"], \"a \\\"key\\\"\": null}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source",
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: its phaenon.json has the key \"a \\\"key\\\"\", which this version of phn does not know. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ]
+    },
+    {
+      "name": "an unknown key with an escape sequence, a tab and a character of no width in it: named with them as \\u and four digits, by both",
+      "project": "{\"\\u001b[31mred\\tkey\\u200b\": 1, \"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source",
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: its phaenon.json has the key \"\\u001b[31mred\\u0009key\\u200b\", which this version of phn does not know. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ]
+    },
+    {
+      "name": "a file name with an escape sequence in it does not reach the terminal as one",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/\u001b[2Jgone.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source",
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 1 file with no source behind it",
+        "  - removed .src/\\u001b[2Jgone.php"
+      ]
+    },
+    {
+      "name": "a project file with a key written twice: both readers refuse it, phn warns of the file and leaves the package out, and nothing is removed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"], \"php\": \"8.5\", \"php\": \"8.5\"}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source",
+      "compiler": "is written twice"
+    },
+    {
+      "name": "a project file with a value a known key cannot have: phn warns of the file and leaves the package out, and the plugin leaves it out as well, without asking for phn where the package has nothing to build",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"], \"fmt\": [null]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source",
+      "compiler": "\"fmt\" lists strings, and null is not one"
+    },
+    {
+      "name": "the stamp alone",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n"
+      },
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it, and no file, since every file there has a source"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "what stands behind a file: for a .php its .phn or the .php itself, for any other file the file of the same path, a directory of that path too",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        "src/plain.php": "<?php\n",
+        ".src/plain.php": "<?php\n",
+        ".src/A.txt": "not what A.phn compiles into\n",
+        "src/X.phn": "namespace Xcme\\Kit;\n\nfinal class X {}\n",
+        ".src/X.php": "<?php\n",
+        ".src/X.phn": "a source in the output directory\n",
+        "src/Dir.txt/keep": "",
+        ".src/Dir.txt": "a file where the root has a directory\n",
+        "src/.php": "<?php\n",
+        ".src/.php": "<?php\n",
+        ".src/B.phn": "no such source\n"
+      },
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 2 files with no source behind them",
+        "  - removed .src/A.txt",
+        "  - removed .src/B.phn"
+      ],
+      "left": [
+        ".src/",
+        ".src/.php",
+        ".src/A.php",
+        ".src/Dir.txt",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/X.phn",
+        ".src/X.php",
+        ".src/data.json",
+        ".src/plain.php",
+        "phaenon.json",
+        "src/",
+        "src/.php",
+        "src/A.phn",
+        "src/Dir.txt/",
+        "src/Dir.txt/keep",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/X.phn",
+        "src/data.json",
+        "src/plain.php"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a path that runs through a file of the root has no source",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        "src/Was": "a directory once\n",
+        ".src/Was/Old.php": "<?php\n",
+        ".src/Was/deep/old.txt": "old\n"
+      },
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 2 files with no source behind them",
+        "  - removed .src/Was/Old.php",
+        "  - removed .src/Was/deep/old.txt"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/Was",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "only the output directory's own .phn-build is a stamp: one below it is a file like any other",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/Sub/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/.phn-build",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a .phn-build below the stamp goes with the files that have no source",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Sub/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n"
+      },
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 1 file with no source behind it",
+        "  - removed .src/Sub/.phn-build"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a stamp that is a symbolic link is no stamp",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        "elsewhere/stamp": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "links": {
+        ".src/.phn-build": "../elsewhere/stamp"
+      },
+      "left": [
+        ".src/",
+        ".src/.phn-build@",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "elsewhere/",
+        "elsewhere/stamp",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a directory that was empty before is left: only the directories a removal empties go",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Gone/Leaf.php": "<?php\n"
+      },
+      "dirs": [
+        ".src/Empty",
+        ".src/Gone/Hollow"
+      ],
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 1 file with no source behind it",
+        "  - removed .src/Gone/Leaf.php"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Empty/",
+        ".src/Gone/",
+        ".src/Gone/Hollow/",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "symbolic links in the output directory are neither followed nor removed, and a directory that holds one stays",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/Held/Old.php": "<?php\n",
+        "elsewhere/Kept.php": "<?php\n",
+        "elsewhere/kept.txt": "kept\n"
+      },
+      "links": {
+        ".src/Linked": "../elsewhere",
+        ".src/Kept.php": "../elsewhere/Kept.php",
+        ".src/Held/kept.txt": "../../elsewhere/kept.txt",
+        ".src/Nowhere.php": "../nowhere"
+      },
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 2 files with no source behind them",
+        "  - removed .src/Held/Old.php",
+        "  - removed .src/Legacy.php"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Held/",
+        ".src/Held/kept.txt@",
+        ".src/Kept.php@",
+        ".src/Linked@",
+        ".src/Nowhere.php@",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "elsewhere/",
+        "elsewhere/Kept.php",
+        "elsewhere/kept.txt",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a nested vendor directory in the output is judged file by file, against the root's",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        "src/vendor/k/K.php": "<?php\n",
+        ".src/vendor/k/K.php": "<?php\n",
+        ".src/vendor/x/Y.php": "<?php\n"
+      },
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 1 file with no source behind it",
+        "  - removed .src/vendor/x/Y.php"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        ".src/vendor/",
+        ".src/vendor/k/",
+        ".src/vendor/k/K.php",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json",
+        "src/vendor/",
+        "src/vendor/k/",
+        "src/vendor/k/K.php"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a source reached through a linked directory or a linked file stands behind its output",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        "elsewhere/x.txt": "x\n",
+        "elsewhere/L.phn": "namespace Lcme\\Kit;\n\nfinal class L {}\n",
+        ".src/Linked/x.txt": "x\n",
+        ".src/Linked/gone.txt": "gone\n",
+        ".src/L.php": "<?php\n"
+      },
+      "links": {
+        "src/Linked": "../elsewhere",
+        "src/L.phn": "../elsewhere/L.phn"
+      },
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 1 file with no source behind it",
+        "  - removed .src/Linked/gone.txt"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/L.php",
+        ".src/Linked/",
+        ".src/Linked/x.txt",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "elsewhere/",
+        "elsewhere/L.phn",
+        "elsewhere/x.txt",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/L.phn@",
+        "src/Linked@",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "the install has no such root: with no sources every file would look like one that has none, and nothing is removed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: the package is installed without src. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a root that is a symbolic link: nothing is removed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        ".src/A.php": "<?php\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        "elsewhere/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n"
+      },
+      "links": {
+        "src": "elsewhere"
+      },
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: src is a symbolic link. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        "elsewhere/",
+        "elsewhere/A.phn",
+        "phaenon.json",
+        "src@"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "an output directory that is a symbolic link: nothing is removed through it",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        "elsewhere/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        "elsewhere/Legacy.php": "<?php\n",
+        "elsewhere/A.php": "<?php\n",
+        "elsewhere/Sub/B.php": "<?php\n"
+      },
+      "links": {
+        ".src": "elsewhere"
+      },
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: .src is a symbolic link. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src@",
+        "elsewhere/",
+        "elsewhere/.phn-build",
+        "elsewhere/A.php",
+        "elsewhere/Legacy.php",
+        "elsewhere/Sub/",
+        "elsewhere/Sub/B.php",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a root behind a linked directory of the package: the link may lead anywhere, and nothing is removed",
+      "project": "{\"roots\": {\"lib/src\": \"lib/.src\"}, \"committed\": [\"lib/src\"]}",
+      "files": {
+        "elsewhere/src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "elsewhere/.src/A.php": "<?php\n",
+        "elsewhere/.src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        "elsewhere/.src/Legacy.php": "<?php\n"
+      },
+      "links": {
+        "lib": "elsewhere"
+      },
+      "warned": [
+        "acme/kit 1.0.0: lib/.src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: lib is a symbolic link. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        "elsewhere/",
+        "elsewhere/.src/",
+        "elsewhere/.src/.phn-build",
+        "elsewhere/.src/A.php",
+        "elsewhere/.src/Legacy.php",
+        "elsewhere/src/",
+        "elsewhere/src/A.phn",
+        "lib@",
+        "phaenon.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a link in the root that leads nowhere proves nothing of its source: nothing is removed, the other files included",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/broken.txt": "copied when the link led somewhere\n"
+      },
+      "links": {
+        "src/broken.txt": "../nowhere"
+      },
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: whether src/broken.txt exists cannot be told. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/broken.txt",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/broken.txt@",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a .php whose .phn is a link that leads nowhere: that no .php of its path exists settles nothing",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/Broken.php": "<?php\n"
+      },
+      "links": {
+        "src/Broken.phn": "../nowhere"
+      },
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: whether src/Broken.phn exists cannot be told. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Broken.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Broken.phn@",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a link that leads nowhere, under another letter case than the output's: where the file system takes one for the other, nothing is removed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/x.txt": "x\n"
+      },
+      "links": {
+        "src/X.TXT": "../nowhere"
+      },
+      "folds": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: whether src/x.txt exists cannot be told. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        ".src/x.txt",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/X.TXT@",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "the .phn of an output, a link that leads nowhere under another letter case: nothing is removed, and the package still passes the check of presence",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/Service.php": "<?php\n"
+      },
+      "links": {
+        "src/SERVICE.phn": "../nowhere"
+      },
+      "folds": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: whether src/Service.phn exists cannot be told. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Service.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/SERVICE.phn@",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a directory on the way that is a link leading nowhere under another letter case",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/sub2/x.txt": "x\n"
+      },
+      "links": {
+        "src/SUB2": "../nowhere"
+      },
+      "folds": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: whether src/sub2 exists cannot be told. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        ".src/sub2/",
+        ".src/sub2/x.txt",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/SUB2@",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a link that leads nowhere under another Unicode normalisation of the name",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/Café.txt": "x\n"
+      },
+      "links": {
+        "src/Café.txt": "../nowhere"
+      },
+      "normalises": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: whether src/Café.txt exists cannot be told. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Café.txt",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Café.txt@",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a stamp the directory lists under another letter case goes as a file, and no failure is reported for it",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.PHN-BUILD": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "folds": true,
+      "said": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 2 files with no source behind them",
+        "  - removed .src/.PHN-BUILD",
+        "  - removed .src/Legacy.php"
+      ],
+      "left": [
+        ".src/",
+        ".src/A.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a source directory that cannot be read, reached through a link: nothing is removed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        "elsewhere/x.txt": "x\n",
+        ".src/Linked/x.txt": "x\n"
+      },
+      "links": {
+        "src/Linked": "../elsewhere"
+      },
+      "unreadable": [
+        "elsewhere"
+      ],
+      "permissions": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: whether src/Linked/x.txt exists cannot be told. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Linked/",
+        ".src/Linked/x.txt",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "elsewhere/",
+        "elsewhere/x.txt",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Linked@",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a source directory that can be searched and not read proves no absence: nothing is removed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        "elsewhere/x.txt": "x\n",
+        ".src/Linked/gone.txt": "gone\n"
+      },
+      "links": {
+        "src/Linked": "../elsewhere"
+      },
+      "unlisted": [
+        "elsewhere"
+      ],
+      "permissions": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: whether src/Linked/gone.txt exists cannot be told. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Linked/",
+        ".src/Linked/gone.txt",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "elsewhere/",
+        "elsewhere/x.txt",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Linked@",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a source directory that can be read and not searched proves no absence either: nothing is removed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        "elsewhere/x.txt": "x\n",
+        ".src/Linked/gone.txt": "gone\n"
+      },
+      "links": {
+        "src/Linked": "../elsewhere"
+      },
+      "unsearchable": [
+        "elsewhere"
+      ],
+      "permissions": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: whether src/Linked/gone.txt exists cannot be told. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Linked/",
+        ".src/Linked/gone.txt",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "elsewhere/",
+        "elsewhere/x.txt",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Linked@",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a directory of the output that cannot be read: nothing is removed, the files beside it included",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/Locked/Old.php": "<?php\n"
+      },
+      "unreadable": [
+        ".src/Locked"
+      ],
+      "permissions": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: .src/Locked cannot be read. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Locked/",
+        ".src/Locked/Old.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a directory of the output that can be read and not searched: nothing is removed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/Locked/Old.php": "<?php\n"
+      },
+      "unsearchable": [
+        ".src/Locked"
+      ],
+      "permissions": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: .src/Locked cannot be read. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Locked/",
+        ".src/Locked/Old.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a file that cannot be removed: the others go, the stamp stays, and the next run says so again",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/Locked/Old.php": "<?php\n",
+        ".src/Locked/Older.php": "<?php\n"
+      },
+      "readonly": [
+        ".src/Locked"
+      ],
+      "permissions": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed 1 file with no source behind it, but 2 files could not be removed, so the stamp stays and the removal is tried again next time. To clear the directory, remove vendor/acme/kit and install the package again",
+        "  - removed .src/Legacy.php",
+        "  - could not remove .src/Locked/Old.php",
+        "  - could not remove .src/Locked/Older.php"
+      ],
+      "again": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: 2 files could not be removed, so the stamp stays and the removal is tried again next time. To clear the directory, remove vendor/acme/kit and install the package again",
+        "  - could not remove .src/Locked/Old.php",
+        "  - could not remove .src/Locked/Older.php"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Locked/",
+        ".src/Locked/Old.php",
+        ".src/Locked/Older.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "two committed roots, in the order of their names; the stamp of a root the package does not commit is not looked at",
+      "project": "{\"roots\": {\"src\": \".src\", \"lib\": \".lib\", \"gen\": \".gen\"}, \"committed\": [\"src\", \"lib\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        ".src/A.php": "<?php\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        "lib/L.phn": "namespace Lcme\\Kit;\n\nfinal class L {}\n",
+        ".lib/L.php": "<?php\n",
+        ".lib/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".lib/Old.php": "<?php\n",
+        ".gen/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".gen/Old.php": "<?php\n"
+      },
+      "said": [
+        "acme/kit 1.0.0: .lib/.phn-build is the stamp of a build, in a root the package commits: removed it and 1 file with no source behind it",
+        "  - removed .lib/Old.php",
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits: removed it and 1 file with no source behind it",
+        "  - removed .src/Legacy.php"
+      ],
+      "left": [
+        ".gen/",
+        ".gen/.phn-build",
+        ".gen/Old.php",
+        ".lib/",
+        ".lib/L.php",
+        ".src/",
+        ".src/A.php",
+        "lib/",
+        "lib/L.phn",
+        "phaenon.json",
+        "src/",
+        "src/A.phn"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a package that came without an output it commits is not touched: the check of presence comes first",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "errors": [
+        "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: .src/Sub/B.php is missing"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a directory of the root that cannot be read: the plugin leaves the package to phn, which fails on it, and nothing is removed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n"
+      },
+      "unreadable": [
+        "src/Sub"
+      ],
+      "permissions": true,
+      "undecided": true,
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "an empty source directory that can be read and not searched proves no absence either",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        ".src/d/x.txt": "x\n"
+      },
+      "dirs": [
+        "src/d"
+      ],
+      "unsearchable": [
+        "src/d"
+      ],
+      "permissions": true,
+      "warned": [
+        "acme/kit 1.0.0: .src/.phn-build is the stamp of a build, in a root the package commits, and nothing was removed: whether src/d/x.txt exists cannot be told. What a build left there may still load. To clear the directory, remove vendor/acme/kit and install the package again"
+      ],
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/d/",
+        ".src/d/x.txt",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/d/",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    },
+    {
+      "name": "a source directory that can be read and not searched, with a directory in it: the plugin leaves the package to phn, which fails on it, and nothing is removed",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n",
+        ".src/.phn-build": "phn 0.4.1 0000\ntarget 8.5\ninstalled 0000\nsources 0000\n",
+        ".src/Legacy.php": "<?php\n",
+        "src/a/b/keep.txt": "kept\n"
+      },
+      "unsearchable": [
+        "src/a"
+      ],
+      "permissions": true,
+      "undecided": true,
+      "left": [
+        ".src/",
+        ".src/.phn-build",
+        ".src/A.php",
+        ".src/Legacy.php",
+        ".src/Sub/",
+        ".src/Sub/B.php",
+        ".src/data.json",
+        "phaenon.json",
+        "src/",
+        "src/A.phn",
+        "src/Sub/",
+        "src/Sub/B.phn",
+        "src/a/",
+        "src/a/b/",
+        "src/a/b/keep.txt",
+        "src/data.json"
+      ],
+      "installation-source": "source"
+    }
+  ]
+}

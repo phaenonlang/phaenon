@@ -20,6 +20,20 @@
       "builds": false
     },
     {
+      "name": "a key the readers do not know, and every output there: nothing to build",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"], \"later\": {\"than\": \"this\"}}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/Sub/B.php": "<?php\n",
+        ".src/data.json": "{}\n"
+      },
+      "errors": [],
+      "builds": false
+    },
+    {
       "name": "a root the package does not commit is in the install",
       "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
       "files": {
@@ -62,6 +76,20 @@
     {
       "name": "one output",
       "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"]}",
+      "files": {
+        "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
+        "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",
+        "src/data.json": "{}\n",
+        ".src/A.php": "<?php\n",
+        ".src/data.json": "{}\n"
+      },
+      "errors": [
+        "acme/kit 1.0.0: its phaenon.json commits the outputs of the root src, but this release is installed without them: .src/Sub/B.php is missing"
+      ]
+    },
+    {
+      "name": "a key the readers do not know changes nothing: the package is read, and the output is asked for",
+      "project": "{\"roots\": {\"src\": \".src\", \"tests\": \".tests\"}, \"committed\": [\"src\"], \"later\": {\"than\": \"this\"}}",
       "files": {
         "src/A.phn": "namespace Acme\\Kit;\n\nfinal class A {}\n",
         "src/Sub/B.phn": "namespace Acme\\Kit\\Sub;\n\nfinal class B {}\n",

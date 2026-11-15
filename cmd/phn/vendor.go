@@ -12,11 +12,11 @@ package main
 // lists under "committed" (design/roadmap.md D28, design/tooling.md §3.7,
 // T18): a library published for PHP projects at large, installed as plain
 // PHP by a project without phn. The build leaves such a root as installed:
-// it writes no output and no stamp there and removes nothing. A committed
-// root that came without its outputs fails the build, which does not
-// compile it instead: the same release is broken for every project without
-// phn. The project's check and build still read such a package from its
-// sources.
+// it writes no output and no stamp there, and removes nothing but what a
+// build of an earlier release left (earlier.go). A committed root that
+// came without its outputs fails the build, which does not compile it
+// instead: the same release is broken for every project without phn. The
+// project's check and build still read such a package from its sources.
 
 import (
 	"crypto/sha256"
@@ -33,6 +33,17 @@ import (
 	"strings"
 )
 
+// earlierBuildsCleared names the environment variable the Composer plugin
+// sets when it runs `phn build --vendor` (composer/src/Plugin.php). Its
+// value lists, with spaces between them, the names of the installed
+// packages whose committed roots the plugin has itself looked at for what
+// earlier builds left: this command leaves those alone, and makes its own
+// pass for every other package, among them the ones whose project file
+// the plugin could not read. It is the plugin's word to this command, not
+// a setting: a value that names no installed package, as "1" does, leaves
+// nothing out.
+const earlierBuildsCleared = "PHN_EARLIER_BUILDS_CLEARED"
+
 // stampFile records, in each output directory of an installed package, what
 // the last build compiled: the compiler, the target, the installed set and
 // the sources. A build that would compile the same is skipped.
@@ -43,7 +54,38 @@ type installedPackage struct {
 	Name        string `json:"name"`
 	Version     string `json:"version"`
 	InstallPath string `json:"install-path"`
-	dir         string // where it is installed, relative to the working directory when under it
+	// InstallationSource is "source" for a checkout of the package's
+	// repository and "dist" for an archive or a path repository.
+	InstallationSource string `json:"installation-source"`
+	dir                string // where it is installed, relative to the working directory when under it
+}
+
+// isLink reports whether the package's directory is a symbolic link: a
+// path repository linked to a checkout.
+func (p installedPackage) isLink() bool {
+	st, err := os.Lstat(p.dir)
+	return err == nil && st.Mode()&fs.ModeSymlink != 0
+}
+
+// mayBeTheProject reports whether the package's directory is the project's
+// own, or cannot be told from it. Composer installs no package there; an
+// installed.json that says so is not followed into removing files of the
+// project itself.
+func (p installedPackage) mayBeTheProject() bool {
+	project, err1 := os.Stat(".")
+	dir, err2 := os.Stat(p.dir)
+	return err1 != nil || err2 != nil || os.SameFile(project, dir)
+}
+
+// keepsItsDirectory reports whether a build made in the package's directory
+// can have outlived an upgrade of the package. Composer updates an archive
+// and a copied path repository by removing the directory and installing
+// anew, so nothing of an earlier build is ever there. A checkout of the
+// package's repository is updated in place, and a linked path repository
+// is a checkout Composer never empties. A package installed.json says
+// nothing of is not known to be either.
+func (p installedPackage) keepsItsDirectory() bool {
+	return p.InstallationSource == "source" || p.isLink()
 }
 
 // vendorComposerDir is the vendor/composer directory of the project in the
@@ -109,7 +151,12 @@ type phaenonPackage struct {
 
 // phaenonPackages lists the installed packages that carry a phaenon.json
 // naming roots. A project file that cannot be read is passed to warn and
-// its package left out.
+// its package left out; a key it has that this compiler does not know is
+// passed over, and no reason to leave the package out (readInstalledProject).
+// Every reader of an installed package's project file comes through here:
+// the build of installed packages, and the sources the project's own
+// check, build and language server read such packages from
+// (installedSources).
 func phaenonPackages(composerDir string, warn func(error)) []phaenonPackage {
 	pkgs, err := installedPackages(composerDir)
 	if err != nil {
@@ -118,7 +165,7 @@ func phaenonPackages(composerDir string, warn func(error)) []phaenonPackage {
 	}
 	var out []phaenonPackage
 	for _, p := range pkgs {
-		proj, err := readProject(filepath.Join(p.dir, ProjectFile))
+		proj, err := readInstalledProject(filepath.Join(p.dir, ProjectFile))
 		switch {
 		case err != nil:
 			warn(err)
@@ -180,9 +227,10 @@ func committedGapsSummary(n int) string {
 
 // buildVendor is `phn build --vendor`: every installed Phaenon package is
 // compiled whose sources, compiler, target or installed set changed since
-// its last build, but for the roots it commits. It fails when an output
-// cannot be written, and before it builds anything when a committed root
-// came without its outputs.
+// its last build, but for the roots it commits, where it removes only what
+// an earlier build left. It fails when an output cannot be written, and
+// before it builds or removes anything when a committed root came without
+// its outputs.
 func buildVendor() {
 	dir := vendorComposerDir()
 	installed := filepath.Join(dir, "installed.json")
@@ -216,6 +264,24 @@ func buildVendor() {
 	}
 	if broken > 0 {
 		fail("%s", committedGapsSummary(broken))
+	}
+	// Then, and only when every package came whole, what an earlier build
+	// left in a root its package now commits is removed (earlier.go), in
+	// the packages an earlier build can have survived in, but for the
+	// ones the Composer plugin says it has looked at in this dump.
+	cleared := strings.Fields(strings.ToLower(os.Getenv(earlierBuildsCleared)))
+	for _, p := range pkgs {
+		if slices.Contains(cleared, strings.ToLower(p.Name)) || !p.keepsItsDirectory() || p.mayBeTheProject() {
+			continue
+		}
+		for _, e := range p.earlierBuilds() {
+			lines, warning := e.report(strings.TrimSpace(p.Name+" "+p.Version), filepath.ToSlash(p.dir), p.isLink())
+			if warning {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", strings.Join(lines, "\n"))
+			} else {
+				fmt.Println(strings.Join(lines, "\n"))
+			}
+		}
 	}
 	compiler := compilerStamp()
 	built, current, failed, left := 0, 0, 0, 0

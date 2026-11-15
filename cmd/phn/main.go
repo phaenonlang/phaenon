@@ -749,6 +749,9 @@ func migrateCmd(args []string) {
 		if !v.Supported() {
 			fail("phn migrate --php: PHP %s is not a target phn compiles for: targets are %s to %s", v, phpversion.Floor, phpversion.Newest)
 		}
+		// A project file this compiler refuses is refused before it is
+		// written to, not after.
+		loadProject()
 		if err := setProjectTarget(v); err != nil {
 			fail("phn migrate --php: %v", err)
 		}
