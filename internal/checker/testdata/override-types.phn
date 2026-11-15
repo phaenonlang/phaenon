@@ -715,3 +715,74 @@ class OpenTree extends \RecursiveArrayIterator
         return parent::current();
     }
 }
+
+// PHP's own generic classes take their arguments with the variance
+// PHPStan's stubs give them: what an iterator yields, what a weak
+// reference holds, the node of a node list and a DatePeriod's dates are
+// covariant; the iterator a wrapper holds and an SPL structure's element
+// are invariant.
+/**
+ * @implements \RecursiveIterator<int, Open>
+ */
+abstract class OpenBranches implements \RecursiveIterator
+{
+}
+
+abstract class Producer
+{
+    /** @return \RecursiveIterator<int, Thing> */
+    abstract public function tree(): \RecursiveIterator;
+
+    /** @return \OuterIterator<int, Thing> */
+    abstract public function outer(): \OuterIterator;
+
+    /** @return \WeakReference<Thing> */
+    abstract public function weak(): \WeakReference;
+
+    /** @return \WeakReference<Thing> */
+    abstract public function weakUnion(): \WeakReference;
+
+    /** @return \DOMNodeList<\DOMNode> */
+    abstract public function nodes(): \DOMNodeList;
+
+    /** @return \DatePeriod<\DateTimeInterface, ?\DateTimeInterface, ?int> */
+    abstract public function period(): \DatePeriod;
+
+    /** @return \LimitIterator<int, Thing, \Iterator<int, Thing>> */
+    abstract public function limited(): \LimitIterator;
+
+    /** @return \SplQueue<Thing> */
+    abstract public function queue(): \SplQueue;
+
+    /** @return \SplObjectStorage<Thing, int> */
+    abstract public function storage(): \SplObjectStorage;
+}
+
+abstract class Narrower extends Producer
+{
+    abstract public function tree(): OpenBranches;
+
+    /** @return \OuterIterator<int, Open|Leaf> */
+    abstract public function outer(): \OuterIterator;
+
+    /** @return \WeakReference<Open> */
+    abstract public function weak(): \WeakReference;
+
+    /** @return \WeakReference<Open|Leaf> */
+    abstract public function weakUnion(): \WeakReference;
+
+    /** @return \DOMNodeList<\DOMElement> */
+    abstract public function nodes(): \DOMNodeList;
+
+    /** @return \DatePeriod<\DateTimeImmutable, null, int> */
+    abstract public function period(): \DatePeriod;
+
+    /** @return \LimitIterator<int, Open, \Iterator<int, Open>> */
+    abstract public function limited(): \LimitIterator; // want P2502
+
+    /** @return \SplQueue<Open> */
+    abstract public function queue(): \SplQueue; // want P2502
+
+    /** @return \SplObjectStorage<Open, int> */
+    abstract public function storage(): \SplObjectStorage; // want P2502
+}

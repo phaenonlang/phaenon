@@ -50,6 +50,24 @@ interface SeekableIterator extends Iterator
 }
 
 /**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @extends Iterator<TKey, TValue>
+ */
+interface RecursiveIterator extends Iterator
+{
+}
+
+/**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @extends Iterator<TKey, TValue>
+ */
+interface OuterIterator extends Iterator
+{
+}
+
+/**
  * @template TKey
  * @template TValue
  */
@@ -144,6 +162,16 @@ class ArrayIterator implements SeekableIterator, ArrayAccess, Serializable, Coun
 }
 
 /**
+ * @template TKey of array-key
+ * @template TValue
+ * @extends ArrayIterator<TKey, TValue>
+ * @implements RecursiveIterator<TKey, TValue>
+ */
+class RecursiveArrayIterator extends ArrayIterator implements RecursiveIterator
+{
+}
+
+/**
  * Generator<TKey, TValue, TSend, TReturn>: send and return default to mixed,
  * so Generator<K, V> names the key and the value, as PHPStan reads it; a
  * single argument is the value (the resolver's rule for the iterator family).
@@ -175,10 +203,16 @@ final class Generator implements Iterator
 /**
  * The outer iterator forwards unknown method calls to the inner one
  * (`getSubPathname()` of a RecursiveDirectoryIterator); the stub does not
- * declare the forwarding.
+ * declare the forwarding. T is the iterator it walks, as PHPStan declares
+ * it.
+ *
+ * @template T of RecursiveIterator|IteratorAggregate
  */
 class RecursiveIteratorIterator implements OuterIterator
 {
+    /** @param T $iterator */
+    public function __construct(Traversable $iterator, int $mode = RecursiveIteratorIterator::LEAVES_ONLY, int $flags = 0) {}
+
     // The directory iterator's path methods, forwarded to the inner iterator
     // by __call(): typed here because that is what a recursive walk reads.
     public function getSubPath(): string {}
@@ -186,6 +220,244 @@ class RecursiveIteratorIterator implements OuterIterator
     public function getSubPathname(): string {}
 
     public function __call(string $name, array $arguments): mixed {}
+}
+
+/**
+ * The iterators that wrap another, generic as PHPStan declares them: the
+ * key and the value they yield, covariant where PHPStan has them so, and
+ * the iterator they wrap, which their constructor takes.
+ *
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @template TIterator of Traversable<TKey, TValue>
+ * @implements OuterIterator<TKey, TValue>
+ */
+class IteratorIterator implements OuterIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(Traversable $iterator, ?string $class = null) {}
+}
+
+/**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @template TIterator of Traversable<TKey, TValue>
+ * @extends IteratorIterator<TKey, TValue, TIterator>
+ */
+abstract class FilterIterator extends IteratorIterator
+{
+}
+
+/**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @template TIterator of Traversable<TKey, TValue>
+ * @extends FilterIterator<TKey, TValue, TIterator>
+ */
+class CallbackFilterIterator extends FilterIterator
+{
+}
+
+/**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @template TIterator of Traversable<TKey, TValue>
+ * @extends CallbackFilterIterator<TKey, TValue, TIterator>
+ * @implements RecursiveIterator<TKey, TValue>
+ */
+class RecursiveCallbackFilterIterator extends CallbackFilterIterator implements RecursiveIterator
+{
+}
+
+/**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @template TIterator of RecursiveIterator<TKey, TValue>
+ * @extends FilterIterator<TKey, TValue, TIterator>
+ * @implements RecursiveIterator<TKey, TValue>
+ */
+abstract class RecursiveFilterIterator extends FilterIterator implements RecursiveIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(RecursiveIterator $iterator) {}
+}
+
+/**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @template TIterator of RecursiveIterator<TKey, TValue>
+ * @extends RecursiveFilterIterator<TKey, TValue, TIterator>
+ */
+class ParentIterator extends RecursiveFilterIterator
+{
+}
+
+/**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ * @implements OuterIterator<TKey, TValue>
+ * @extends IteratorIterator<TKey, TValue, TIterator>
+ */
+class LimitIterator extends IteratorIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(Iterator $iterator, int $offset = 0, int $limit = -1) {}
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ * @implements OuterIterator<TKey, TValue>
+ * @implements ArrayAccess<TKey, TValue>
+ * @extends IteratorIterator<TKey, TValue, TIterator>
+ */
+class CachingIterator extends IteratorIterator implements ArrayAccess, Countable, Stringable
+{
+    /** @param TIterator $iterator */
+    public function __construct(Iterator $iterator, int $flags = CachingIterator::CALL_TOSTRING) {}
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ * @extends CachingIterator<TKey, TValue, TIterator>
+ * @implements RecursiveIterator<TKey, TValue>
+ */
+class RecursiveCachingIterator extends CachingIterator implements RecursiveIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(Iterator $iterator, int $flags = RecursiveCachingIterator::CALL_TOSTRING) {}
+}
+
+/**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ * @extends IteratorIterator<TKey, TValue, TIterator>
+ */
+class NoRewindIterator extends IteratorIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(Iterator $iterator) {}
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ * @extends IteratorIterator<TKey, TValue, TIterator>
+ */
+class AppendIterator extends IteratorIterator
+{
+    /** @param TIterator $iterator */
+    public function append(Iterator $iterator): void {}
+}
+
+/**
+ * @template-covariant TKey
+ * @template-covariant TValue
+ * @template TIterator of Iterator<TKey, TValue>
+ * @extends IteratorIterator<TKey, TValue, TIterator>
+ */
+class InfiniteIterator extends IteratorIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(Iterator $iterator) {}
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ * @template TIterator of Traversable<TKey, TValue>
+ * @extends FilterIterator<TKey, TValue, TIterator>
+ */
+class RegexIterator extends FilterIterator
+{
+    /** @param Iterator<TKey, TValue> $iterator */
+    public function __construct(Iterator $iterator, string $pattern, int $mode = RegexIterator::MATCH, int $flags = 0, int $pregFlags = 0) {}
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ * @template TIterator of RecursiveIterator<TKey, TValue>
+ * @extends RegexIterator<TKey, TValue, TIterator>
+ * @implements RecursiveIterator<TKey, TValue>
+ */
+class RecursiveRegexIterator extends RegexIterator implements RecursiveIterator
+{
+    /** @param TIterator $iterator */
+    public function __construct(RecursiveIterator $iterator, string $pattern, int $mode = RecursiveRegexIterator::MATCH, int $flags = 0, int $pregFlags = 0) {}
+}
+
+/**
+ * The SPL's data structures, generic as PHPStan declares them.
+ *
+ * @template TValue
+ * @implements Iterator<int, TValue>
+ * @implements ArrayAccess<int, TValue>
+ */
+class SplDoublyLinkedList implements Iterator, Countable, ArrayAccess, Serializable
+{
+}
+
+/**
+ * @template TValue
+ * @extends SplDoublyLinkedList<TValue>
+ */
+class SplQueue extends SplDoublyLinkedList
+{
+}
+
+/**
+ * @template TPriority
+ * @template TValue
+ * @implements Iterator<int, TValue>
+ */
+class SplPriorityQueue implements Iterator, Countable
+{
+}
+
+/**
+ * @template TObject of object
+ * @template TData
+ * @implements Iterator<int, TObject>
+ * @implements SeekableIterator<int, TObject>
+ * @implements ArrayAccess<TObject, TData>
+ */
+class SplObjectStorage implements Countable, SeekableIterator, Serializable, ArrayAccess
+{
+}
+
+/**
+ * @template TValue
+ * @implements Iterator<int, TValue|null>
+ * @implements IteratorAggregate<int, TValue|null>
+ * @implements ArrayAccess<int, TValue|null>
+ */
+class SplFixedArray implements IteratorAggregate, ArrayAccess, Countable, JsonSerializable
+{
+}
+
+/**
+ * WeakReference<T of object>, covariant, as PHPStan declares it.
+ *
+ * @template-covariant T of object
+ */
+final class WeakReference
+{
+    /**
+     * @template TIn of object
+     * @param TIn $object
+     * @return WeakReference<TIn>
+     */
+    public static function create(object $object): WeakReference {}
+
+    /** @return ?T */
+    public function get(): ?object {}
 }
 
 /**
