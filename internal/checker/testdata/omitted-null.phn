@@ -1,0 +1,59 @@
+namespace App\OmittedNull;
+
+// A null default of PHP's that stands for the argument left out is no
+// value to give: implode()'s $array after a separator is the one-argument
+// form's, strtr()'s $to the two-argument form's. PHPStan's function map
+// holds such an argument, when given, to the parameter's type without
+// null (argument.type), and so does the checker (P2103), for implode(),
+// join(), strtr(), phpversion(), strtok(), stream_context_set_option(),
+// PDO::query(), XSLTProcessor::setParameter() and ReflectionMethod's
+// constructor. PHP throws a TypeError for the null in the first three,
+// runs phpversion(), strtok(), PDO::query() and ReflectionMethod with it,
+// and throws a ValueError in the other two. Plain PHP, so that PHPStan
+// reads this file as written.
+
+/**
+ * @param list<string>|null $xs
+ * @param list<string> $list
+ * @param array<string, string> $pairs
+ * @param resource $context
+ */
+function given(?array $xs, array $list, ?string $s, string $str, array $pairs, $context): void
+{
+    echo implode(',', $xs); // want P2103 "argument 2 ($array) of implode() expects array, list<string>|null given"
+    echo implode(',', null); // want P2103
+    echo join(',', $xs); // want P2103
+    echo strtr($str, 'ab', $s); // want P2103 "argument 3 ($to) of strtr() expects string, string|null given"
+    echo strtr($str, 'ab', null); // want P2103
+    var_dump(phpversion($s)); // want P2103
+    var_dump(strtok($str, $s)); // want P2103
+    var_dump(stream_context_set_option($context, 'http', $s, 1)); // want P2103
+    // Left out, the argument takes the default.
+    echo implode($list);
+    echo implode(',', $list);
+    echo strtr($str, $pairs);
+    echo strtr($str, 'ab', 'xy');
+    var_dump(phpversion(), phpversion('json'), strtok(' '));
+    // Other functions with a null default take a null as PHPStan does.
+    var_dump(getenv($s), version_compare('1', '2', $s), mb_detect_order(null));
+}
+
+/**
+ * @param list<string> $xs
+ */
+function guarded(?array $xs, ?string $to): string
+{
+    if ($xs === null || $to === null) {
+        return '';
+    }
+    return implode(',', $xs) . strtr('ab', 'a', $to);
+}
+
+// The methods PHPStan holds alike.
+function methods(\PDO $pdo, \XSLTProcessor $xsl, ?int $mode, ?string $s): void
+{
+    var_dump($pdo->query('select 1', $mode)); // want P2103 "argument 2 ($fetchMode) of PDO::query() expects int, int|null given"
+    var_dump($xsl->setParameter('', 'a', $s)); // want P2103
+    var_dump(new \ReflectionMethod('App\\OmittedNull\\given', $s)); // want P2103
+    var_dump($pdo->query('select 1'), new \ReflectionMethod('ReflectionMethod::getName'));
+}

@@ -1,0 +1,85 @@
+// targets: 8.5, 8.6
+// A stage that does not fold is lowered for PHP 8.5 to a closure that
+// takes the piped value (design/php-versions.md §5.3), here because a
+// bound argument is a call, which PHP 8.6 makes after the left side. The
+// closure's parameter is the callee's declared type, but where php-src's
+// null default stands for the argument left out and PHP throws a
+// TypeError for an explicit null: implode()'s `?array $array = null` and
+// strtr()'s `?string $to = null` give `array` and `string`, as PHPStan
+// holds the argument to them. A null there is a TypeError on either
+// target, the 8.5 closure's or the built-in's. Every other parameter keeps
+// its null, mb_substr()'s `?int $length = null` included, and passes a
+// null on as PHP 8.6 does.
+
+final class Text {
+    __construct(private string $sep, private string $text) {}
+
+    sep(): string {
+        echo "sep\n";
+        return $this->sep;
+    }
+
+    text(): string {
+        return $this->text;
+    }
+
+    /**
+     * @param list<string> $xs
+     */
+    join(array $xs): string {
+        return $xs |> implode($this->sep(), ?);
+    }
+
+    translate(string $to): string {
+        return $to |> strtr($this->text(), 'ab', ?);
+    }
+
+    cut(?int $n): string {
+        return $n |> mb_substr($this->text(), \strlen($this->sep()), ?);
+    }
+
+    cutTo(int $n): string {
+        return $n |> mb_substr($this->text(), \strlen($this->sep()), ?);
+    }
+
+    // A docblock's int that is null at run time: both targets pass it on.
+    cutLying(): string {
+        /** @var int $n */
+        $n = \json_decode('null');
+        return $n |> mb_substr($this->text(), \strlen($this->sep()), ?);
+    }
+
+    // A docblock's list and string that are null at run time: a TypeError
+    // on both targets. PHP 8.6 makes the call, its other arguments first,
+    // and the built-in throws; the 8.5 closure throws at its parameter,
+    // before them, so the bound argument here has no side effect to show.
+    joinLying(): string {
+        /** @var list<string> $xs */
+        $xs = \json_decode('null');
+        return $xs |> implode($this->text(), ?);
+    }
+
+    translateLying(): string {
+        /** @var string $to */
+        $to = \json_decode('null');
+        return $to |> strtr($this->text(), 'ab', ?);
+    }
+}
+
+function run(string $label, \Closure $f): void
+{
+    try {
+        echo $label, ': ', \var_export($f(), true), "\n";
+    } catch (\Throwable $e) {
+        echo $label, ': ', $e::class, "\n";
+    }
+}
+
+$t = new Text(',', 'abcdef');
+run('join', fn() => $t->join(['a', 'b']));
+run('translate', fn() => $t->translate('xy'));
+run('cut', fn() => $t->cut(null) . '|' . $t->cut(2));
+run('cutTo', fn() => $t->cutTo(3));
+run('cutLying', fn() => $t->cutLying());
+run('joinLying', fn() => $t->joinLying());
+run('translateLying', fn() => $t->translateLying());

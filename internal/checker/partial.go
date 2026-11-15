@@ -194,7 +194,16 @@ func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature
 	for _, s := range slots {
 		pp := program.PartialParam{Name: s.name, Optional: !s.required, Variadic: s.variadic, ByRef: s.param.ByRef, Arg: s.arg}
 		if s.param.NativeType != nil {
-			if n, ok := types.Native(x.selfResolved(s.param.NativeType, sig)); ok {
+			native := x.selfResolved(s.param.NativeType, sig)
+			if omitted, typeError := omittedNull(sig, s.param); omitted && typeError && s.required {
+				// The stub's null stands for the argument left out, and
+				// the closure always passes one: implode() and strtr() throw
+				// a TypeError for the null, as the closure's parameter does
+				// without it, and PHPStan holds the argument to the type
+				// without null (omittedOnly).
+				native = types.StripNull(native)
+			}
+			if n, ok := types.Native(native); ok {
 				pp.Native = n
 			}
 		}
