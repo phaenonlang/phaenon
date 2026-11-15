@@ -72,3 +72,46 @@ final class LoudGreet extends Greet
         parent::__construct($input);
     }
 }
+
+/**
+ * The parent's table holds what the farthest class brought in:
+ * Wide::take(mixed), which Narrow::take(int) was checked against. The tag
+ * is lifted, compiling back to mixed.
+ */
+interface Wide<T>
+{
+    take(T $x): void;
+}
+
+interface Narrow
+{
+    take(int $x): void;
+}
+
+abstract class ImplementsWide implements Wide<int> {}
+
+abstract class ImplementsNarrow extends ImplementsWide implements Narrow {}
+
+final class BelowWideAndNarrow extends ImplementsNarrow
+{
+    take(int $x): void {}
+}
+
+/**
+ * A trait's abstract method beside an inherited one is checked against it
+ * and dropped: the table keeps Base::take(mixed).
+ */
+trait NeedsTake
+{
+    abstract take(int $x): void;
+}
+
+abstract class MidNeedsTake extends Mid
+{
+    use NeedsTake;
+}
+
+final class BelowNeedsTake extends MidNeedsTake
+{
+    take(int $x): void {}
+}

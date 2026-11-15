@@ -17,22 +17,19 @@ import (
 // docblock type only when the compiled signature stays the one PHP saw.
 
 // Overridden returns the declarations m overrides or implements that PHP
-// holds it to, nil when there are none. First comes the parent's: the
-// nearest declaration up the parent chain, a class's own or one a trait
-// brought in, else the interface method an ancestor implements without
-// declaring it, which is what the parent's method table holds; a private
-// one holds m to nothing. PHP checks m against that one alone, and it was
-// checked in turn against every interface above it, so an interface of an
-// ancestor demands nothing more of m. Then come the methods of the
+// holds it to, nil when there are none. First comes the method in the
+// parent's method table (tableEntry), unless it is private, which holds m
+// to nothing; PHP checks m against that one, and it was checked in turn
+// against every interface above it. Then come the methods of the
 // interfaces m's class implements itself, and of the interfaces those
 // extend, in the order they are declared. A @method tag is no
 // declaration. This is also the order PHPStan inherits a docblock in: the
 // parent's method first, then the class's own interfaces.
 //
 // A constructor is held only to an abstract declaration, since PHP checks
-// no other constructor's signature: the nearest abstract constructor up
-// the parent chain, which the parent's concrete one passes on as its
-// prototype, and the constructor of any interface above.
+// no other constructor's signature: the abstract constructor the parent's
+// table holds, or the one its concrete constructor implements in turn (its
+// prototype), and the constructor of any interface above.
 func (m *Method) Overridden() []*Method {
 	cl := m.Class
 	if cl == nil || m.Magic {
@@ -55,7 +52,9 @@ func (m *Method) Overridden() []*Method {
 		}
 		return out
 	}
-	add(parentEntry(cl, key))
+	if entry, _ := tableEntry(cl.ParentClass(), key, map[*Class]bool{cl: true}); entry != nil && (entry.Vis != Private || entry.Abstract) {
+		add(entry)
+	}
 	for _, a := range ownInterfaces(cl) {
 		add(a.ownMethod(key))
 	}
@@ -66,45 +65,70 @@ func (m *Method) Overridden() []*Method {
 // brought in by one of its traits.
 func (c *Class) ownMethod(key string) *Method {
 	c.ensure()
-	return c.methods[key]
-}
-
-// parentEntry is the method PHP finds under key in the method table of
-// cl's parent, nil for none or for a private one.
-func parentEntry(cl *Class, key string) *Method {
-	parent := cl.ParentClass()
-	seen := map[*Class]bool{cl: true}
-	for pc := parent; pc != nil && !seen[pc]; pc = pc.ParentClass() {
-		seen[pc] = true
-		if pm := pc.ownMethod(key); pm != nil && !pm.Magic {
-			if pm.Vis == Private && !pm.Abstract {
-				return nil
-			}
-			return pm
-		}
-	}
-	if parent == nil {
-		return nil
-	}
-	for _, a := range parent.Ancestors() {
-		if a.Kind == ast.KindInterface {
-			if pm := a.ownMethod(key); pm != nil {
-				return pm
-			}
-		}
+	if m := c.methods[key]; m != nil && !m.Magic {
+		return m
 	}
 	return nil
 }
 
-// abstractConstructor is the nearest abstract constructor up cl's parent
-// chain, nil for none.
-func abstractConstructor(cl *Class) *Method {
-	seen := map[*Class]bool{cl: true}
-	for pc := cl.ParentClass(); pc != nil && !seen[pc]; pc = pc.ParentClass() {
-		seen[pc] = true
-		if pm := pc.ownMethod("__construct"); pm != nil && pm.Abstract && !pm.Magic {
-			return pm
+// tableEntry is the method PHP's method table of c holds under key, and
+// the class whose declaration put it there, as zend_do_link_class fills
+// the table: c's own method; else a concrete trait method, bound before
+// inheritance whatever the order of the traits; else the parent's entry,
+// private included; else a trait's abstract method, bound after
+// inheritance into an empty slot only (zend_add_trait_method); else the
+// first of c's interfaces, in the order declared, whose table holds the
+// method, its own before what it inherits. nil for none.
+func tableEntry(c *Class, key string, seen map[*Class]bool) (*Method, *Class) {
+	if c == nil || seen[c] {
+		return nil, nil
+	}
+	seen[c] = true
+	own := c.ownMethod(key)
+	if own != nil && (own.FromTrait == nil || !own.Abstract) {
+		return own, c
+	}
+	p := c.File.program
+	for _, name := range c.Traits {
+		if t := p.Class(name); t != nil && t.Kind == ast.KindTrait {
+			if tm := t.FindMethod(key); tm != nil && !tm.Abstract && !tm.Magic {
+				return tm, c
+			}
 		}
+	}
+	if entry, at := tableEntry(c.ParentClass(), key, seen); entry != nil {
+		return entry, at
+	}
+	if own != nil {
+		return own, c
+	}
+	for _, name := range c.Interfaces {
+		if i := p.Class(name); i != nil && i.Kind == ast.KindInterface {
+			if entry, at := tableEntry(i, key, seen); entry != nil {
+				return entry, at
+			}
+		}
+	}
+	return nil, nil
+}
+
+// abstractConstructor is the abstract constructor a constructor of cl is
+// held to: the one in the parent's table when it is abstract, else the one
+// that table's concrete constructor implements, up the chain. nil for none,
+// and for a private constructor, which implements nothing.
+func abstractConstructor(cl *Class) *Method {
+	const key = "__construct"
+	seen := map[*Class]bool{}
+	for at := cl; at != nil && !seen[at]; {
+		seen[at] = true
+		entry, holder := tableEntry(at.ParentClass(), key, map[*Class]bool{at: true})
+		if entry == nil || entry.Vis == Private && !entry.Abstract {
+			return nil
+		}
+		if entry.Abstract {
+			return entry
+		}
+		at = holder
 	}
 	return nil
 }

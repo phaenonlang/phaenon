@@ -9,10 +9,12 @@ import (
 )
 
 // TestOverridden: the declarations a method is held to are the one in
-// its parent's method table, the nearest up the parent chain however far
-// it is (an interface's only when no class declares the method), then the
-// methods of the interfaces its class implements itself; a constructor's
-// are the nearest abstract one up the chain and every interface's.
+// its parent's method table, as PHP fills it (the class's own, a concrete
+// trait method, the inherited one, a trait's abstract one, then the first
+// interface that has it, farthest class first), then the methods of the
+// interfaces its class implements itself; a constructor's are the
+// abstract one the parent's table holds or implements, and every
+// interface's.
 func TestOverridden(t *testing.T) {
 	p := New()
 	src := `namespace X;
@@ -36,6 +38,19 @@ class AfterPlain extends Plain { __construct(string $x) {} }
 interface Made { __construct(); }
 class MadeBase implements Made { __construct() {} }
 class MadeLeaf extends MadeBase { __construct() {} }
+interface Wide<T> { take(T $x): void; }
+interface Narrow { take(int $x): void; }
+abstract class G implements Wide<int> {}
+abstract class P extends G implements Narrow {}
+class BelowBoth extends P { take(int $x): void {} }
+trait Needs { abstract take(int $x): void; }
+abstract class NeedsMid extends Base<int> { use Needs; }
+class BelowNeeds extends NeedsMid { take(int $x): void {} }
+abstract class OnlyNeeds { use Needs; }
+class BelowOnlyNeeds extends OnlyNeeds implements Narrow { take(int $x): void {} }
+trait Gives { take(int $x): void {} }
+abstract class NeedsAndGives { use Needs, Gives; }
+class BelowGives extends NeedsAndGives { take(int $x): void {} }
 `
 	if _, err := p.AddFile("src/override.phn", []byte(src), lexer.ModePhaenon, true); err != nil {
 		t.Fatal(err)
@@ -53,6 +68,10 @@ class MadeLeaf extends MadeBase { __construct() {} }
 		{`X\LoudGreet`, "__construct", []string{`X\Command::__construct`}},
 		{`X\AfterPlain`, "__construct", nil},
 		{`X\MadeLeaf`, "__construct", []string{`X\Made::__construct`}},
+		{`X\BelowBoth`, "take", []string{`X\Wide::take`}},
+		{`X\BelowNeeds`, "take", []string{`X\Base::take`}},
+		{`X\BelowOnlyNeeds`, "take", []string{`X\OnlyNeeds::take`, `X\Narrow::take`}},
+		{`X\BelowGives`, "take", []string{`X\Gives::take`}},
 	}
 	for _, c := range cases {
 		cl := p.Class(c.class)

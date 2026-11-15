@@ -191,4 +191,65 @@ final class LoudGreet extends Greet
         parent::__construct($input);
     }
 }
-// phaenon-map v1 override-nearest.phn 1-6=1 7:1 17-19=11 20:11 22-24=13 25:13 30-32=18 33:18 50-52=35 53:35 60-62=42 63:42 71-73=50 74:50 80-82=56 83:56 85-87=58 88:58 91-93=61 94:61 100-102=67 103:67 119-121=83 122:83 124-126=85 127:85 137-139=95 140:95 142-144=97 145:97 152-154=104 155:104 157-159=106 160:106 163-165=109 166:109 170-172=113 173:113 179-181=118 182:119 186-188=123 189:123
+
+// The parent's table holds what the farthest class brought in: Wide's
+// take(mixed), which Narrow's take(int) was checked against.
+/**
+ * @template T
+ */
+interface Wide
+{
+    /**
+     * @param T $x
+     */
+    public function take(mixed $x): void;
+}
+
+interface Narrow
+{
+    public function take(int $x): void;
+}
+
+/**
+ * @implements Wide<int>
+ */
+abstract class ImplementsWide implements Wide
+{
+}
+
+abstract class ImplementsNarrow extends ImplementsWide implements Narrow
+{
+}
+
+final class BelowWideAndNarrow extends ImplementsNarrow
+{
+    /**
+     * @param int $x
+     */
+    public function take(mixed $x): void
+    {
+    }
+}
+
+// A trait's abstract method beside an inherited one is checked against
+// it and dropped: the table keeps Base::take(mixed).
+trait NeedsTake
+{
+    abstract public function take(int $x): void;
+}
+
+abstract class MidNeedsTake extends Mid
+{
+    use NeedsTake;
+}
+
+final class BelowNeedsTake extends MidNeedsTake
+{
+    /**
+     * @param int $x
+     */
+    public function take(mixed $x): void
+    {
+    }
+}
+// phaenon-map v1 override-nearest.phn 1-6=1 7:1 17-19=11 20:11 22-24=13 25:13 30-32=18 33:18 50-52=35 53:35 60-62=42 63:42 71-73=50 74:50 80-82=56 83:56 85-87=58 88:58 91-93=61 94:61 100-102=67 103:67 119-121=83 122:83 124-126=85 127:85 137-139=95 140:95 142-144=97 145:97 152-154=104 155:104 157-159=106 160:106 163-165=109 166:109 170-172=113 173:113 179-181=118 182:119 186-188=123 189:123 197-199=131 200:131 202-204=133 205:133 213-215=141 216:141 226-228=151 229:151 248-250=170 251:170
