@@ -432,6 +432,10 @@ func TestPrintQualifiedClosure(t *testing.T) {
 		{Array{Key: TInt, Value: closure, List: true}, `list<\Closure(int): int>`, `list<Closure(int): int>`},
 		{Callable{HasSig: true, Return: TInt}, `callable(): int`, `callable(): int`},
 		{Callable{Closure: true, Pure: true, HasSig: true, Return: TInt}, `pure-Closure(): int`, `pure-Closure(): int`},
+		// A shape that names no key and admits any is any array.
+		{Shape{Unsealed: true}, `array<mixed>`, `array{...}`},
+		{Shape{Unsealed: true, Entries: []ShapeEntry{{Key: "id", Type: TInt}}}, `array{id: int, ...}`, `array{id: int, ...}`},
+		{Shape{}, `array{}`, `array{}`},
 		// bytes is a string to PHPStan, which would read the word as a class.
 		{TBytes, `string`, `bytes`},
 		{MakeUnion(TString, TBytes), `string`, `string|bytes`},

@@ -17,6 +17,7 @@ type Keys = array{
     '7': float,
 };
 type None = array{};
+type Any = array{...};
 
 /**
  * What the orders are sorted by. The docblock of a `type` declaration goes
@@ -60,6 +61,8 @@ final class Orders
     keys(Keys $k): string => $k['class'] . $k[-1] . ($k['a-b'] + $k[0] + (int) $k[7]);
 
     none(): None => [];
+
+    any(Any $any): int => count($any);
 
     rank(Rank $rank): string => $rank['by'];
 

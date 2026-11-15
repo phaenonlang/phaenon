@@ -210,6 +210,14 @@ func (pr *printer) print(t Type, nested bool) {
 			b.WriteString(")")
 			return
 		}
+		if pr.qualified && !t.List && t.Unsealed && len(t.Entries) == 0 {
+			// `array{...}` names no key and admits every one: any array.
+			// PHPStan reads the shape so and then asks for the value type
+			// it does not state (missingType.iterableValue); array<mixed>
+			// is the same type with it stated.
+			b.WriteString("array<mixed>")
+			return
+		}
 		if t.List {
 			b.WriteString("list{")
 		} else {
