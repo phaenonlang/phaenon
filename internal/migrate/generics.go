@@ -556,12 +556,23 @@ func (l *lifter) methodDecl(m *ast.MethodDecl, outer scope) {
 // description, several of them into one union, written after the return
 // type (or the parameter list), or added to the clause the declaration
 // has. A tag with a description stays in the docblock, as a typeless
-// @param keeps its prose (D14); so does one whose type is no class (`@throws
-// void`) or names a type parameter left in the docblock.
+// @param keeps its prose (D14); so does one whose type is no class or
+// names a type parameter left in the docblock. A bare `@throws void`
+// becomes `nothrow` when it is the declaration's only @throws tag (§4.5);
+// beside other tags or a `throws` clause it stays, and beside `nothrow`
+// it goes, the declaration saying it already. A tag that names what
+// escapes stays beside `nothrow`, which the checker reports (P2320).
 func (l *lifter) liftThrows(d *doc, name *ast.Ident, tps []*ast.TypeParam, ret ast.TypeExpr, existing *ast.Throws, sc scope) {
 	if d == nil {
 		return
 	}
+	tags := 0
+	for _, g := range d.groups {
+		if g.name == "@throws" {
+			tags++
+		}
+	}
+	nothrow := existing != nil && existing.Nothrow
 	have := map[string]bool{}
 	if existing != nil {
 		for _, t := range existing.Types {
@@ -569,6 +580,7 @@ func (l *lifter) liftThrows(d *doc, name *ast.Ident, tps []*ast.TypeParam, ret a
 		}
 	}
 	var names []string
+	liftVoid := false
 	for _, g := range d.groups {
 		if g.name != "@throws" {
 			continue
@@ -582,6 +594,28 @@ func (l *lifter) liftThrows(d *doc, name *ast.Ident, tps []*ast.TypeParam, ret a
 		written := strings.TrimSpace(g.text[:len(g.text)-len(rest)])
 		if strings.TrimSpace(rest) != "" {
 			l.note(off, "kept %s %s: it has a description", g.tag, written)
+			continue
+		}
+		if isVoidNode(t) {
+			switch {
+			case nothrow:
+			case existing != nil:
+				l.note(off, "kept %s %s: the declaration has a throws clause", g.tag, written)
+				continue
+			case tags > 1:
+				l.note(off, "kept %s %s: the declaration has other @throws tags", g.tag, written)
+				continue
+			default:
+				liftVoid = true
+			}
+			d.remove(g)
+			if l.stats != nil {
+				l.stats.Throws++
+			}
+			continue
+		}
+		if nothrow {
+			l.note(off, "kept %s %s: the declaration says nothrow", g.tag, written)
 			continue
 		}
 		members, why := throwsMembers(t, sc)
@@ -600,10 +634,13 @@ func (l *lifter) liftThrows(d *doc, name *ast.Ident, tps []*ast.TypeParam, ret a
 			l.stats.Throws++
 		}
 	}
-	if len(names) == 0 {
+	clause := " throws " + strings.Join(names, "|")
+	switch {
+	case liftVoid:
+		clause = " nothrow"
+	case len(names) == 0:
 		return
-	}
-	if existing != nil {
+	case existing != nil:
 		l.insert(existing.S.End, "|"+strings.Join(names, "|"))
 		return
 	}
@@ -623,7 +660,12 @@ func (l *lifter) liftThrows(d *doc, name *ast.Ident, tps []*ast.TypeParam, ret a
 	if at < 0 {
 		return
 	}
-	l.insert(at, " throws "+strings.Join(names, "|"))
+	l.insert(at, clause)
+}
+
+// isVoidNode says a docblock type is `void`, as `@throws void` writes it.
+func isVoidNode(t *docblock.TypeNode) bool {
+	return t.Kind == docblock.KindNamed && len(t.Args) == 0 && strings.EqualFold(t.Name, "void")
 }
 
 // throwsMembers splits a @throws type into the class names a `throws`

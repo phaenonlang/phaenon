@@ -10,6 +10,8 @@ interface Store
 
     /** Removes the entry. */
     remove(int $id): void throws NotFound|\RuntimeException|\LogicException;
+
+    size(): int nothrow;
 }
 
 final class MemoryStore<T of object> implements Store
@@ -32,8 +34,7 @@ final class MemoryStore<T of object> implements Store
         $this->items[$id] = $value;
     }
 
-    /** @throws void */
-    count(): int => \count($this->items);
+    count(): int nothrow => \count($this->items);
 
     rethrow(T $item): void throws T {}
 
@@ -42,6 +43,16 @@ final class MemoryStore<T of object> implements Store
     twice(int $id): string throws NotFound => $this->get($id);
 
     prefixed(int $id): string throws NotFound => $this->get($id);
+
+    size(): int => \count($this->items);
+
+    /** @throws void */
+    both(int $id): string throws NotFound => $this->get($id);
+
+    /** @throws void when nothing is stored */
+    described(): int => 0;
+
+    prefixedVoid(): int nothrow => 1;
 }
 
 function load(Store $store, int $id): string throws NotFound => $store->get($id);
@@ -49,3 +60,6 @@ function load(Store $store, int $id): string throws NotFound => $store->get($id)
 function untyped($x) throws \LogicException {
     throw new \LogicException((string) $x);
 }
+
+/** Counts the entries. */
+function size(Store $store): int nothrow => $store->size();
