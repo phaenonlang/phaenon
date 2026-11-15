@@ -140,7 +140,10 @@ func (l *lowering) stmt(s ast.Stmt) error {
 		}
 		return nil
 	case *ast.TypeAlias:
-		l.blank(s.S)
+		// With its docblock: left behind, the comment would document
+		// whatever declaration comes next, a @deprecated of the alias
+		// deprecating the class after it.
+		l.blank(l.e.aliasDeclaration(s))
 		return nil
 	case *ast.ClassDecl:
 		return l.classDecl(s, nil)

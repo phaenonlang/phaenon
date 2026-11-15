@@ -29,8 +29,8 @@ import (
 // generated text and is left to it.
 func (e *emitter) translateWrittenDocs() {
 	for _, t := range lexer.Tokenize(e.src, lexer.ModePhaenon) {
-		if t.Kind != token.T_DOC_COMMENT {
-			continue
+		if t.Kind != token.T_DOC_COMMENT || e.dropped(t.Start) {
+			continue // no docblock, or one that goes with its declaration
 		}
 		for _, ed := range docTranslations(string(e.src[t.Start:t.End]), e.aliasExpander(t.Start)) {
 			span := ast.Span{Start: t.Start + ed.Start, End: t.Start + ed.End}
@@ -39,6 +39,17 @@ func (e *emitter) translateWrittenDocs() {
 			}
 		}
 	}
+}
+
+// dropped reports whether offset off lies in a statement the compiler
+// removes.
+func (e *emitter) dropped(off int) bool {
+	for _, s := range e.drop {
+		if s.Start <= off && off < s.End {
+			return true
+		}
+	}
+	return false
 }
 
 // edited reports whether an edit already touches s.

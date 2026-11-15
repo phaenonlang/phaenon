@@ -18,6 +18,13 @@ type Keys = array{
 };
 type None = array{};
 
+/**
+ * What the orders are sorted by. The docblock of a `type` declaration goes
+ * with it: left behind, this one would document the class below.
+ *
+ * @deprecated sort by Row
+ */
+type Rank = array{by: string, down?: bool};
 final class Customer
 {
     __construct(public readonly string $name) {}
@@ -53,6 +60,8 @@ final class Orders
     keys(Keys $k): string => $k['class'] . $k[-1] . ($k['a-b'] + $k[0] + (int) $k[7]);
 
     none(): None => [];
+
+    rank(Rank $rank): string => $rank['by'];
 
     /**
      * A docblock's shape may hold a named one.
