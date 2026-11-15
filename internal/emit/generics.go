@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/docblock"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
@@ -689,7 +690,10 @@ func (l *lowering) replaceVar(doc string, idx int, tags []string) []string {
 }
 
 // missingTags drops the tags a docblock already states (same tag and, for
-// @param / @template, the same name).
+// @param / @template, the same name). The `@throws void` of `nothrow` is
+// stated by any tag the checker reads as one (docblock.Doc.ThrowsVoid):
+// `@throws VOID` and `@throws (void)` as well, so that the output does not
+// say it twice.
 func missingTags(doc string, tags []string) []string {
 	have := map[string]bool{}
 	for _, line := range strings.Split(doc, "\n") {
@@ -700,9 +704,11 @@ func missingTags(doc string, tags []string) []string {
 	}
 	var out []string
 	for _, t := range tags {
-		if !have[tagKey(t)] {
-			out = append(out, t)
+		key := tagKey(t)
+		if have[key] || key == "@throws void" && docblock.Parse(doc).ThrowsVoid() {
+			continue
 		}
+		out = append(out, t)
 	}
 	return out
 }

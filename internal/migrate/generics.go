@@ -596,7 +596,7 @@ func (l *lifter) liftThrows(d *doc, name *ast.Ident, tps []*ast.TypeParam, ret a
 			l.note(off, "kept %s %s: it has a description", g.tag, written)
 			continue
 		}
-		if isVoidNode(t) {
+		if t.IsVoid() {
 			switch {
 			case nothrow:
 			case existing != nil:
@@ -661,11 +661,6 @@ func (l *lifter) liftThrows(d *doc, name *ast.Ident, tps []*ast.TypeParam, ret a
 		return
 	}
 	l.insert(at, clause)
-}
-
-// isVoidNode says a docblock type is `void`, as `@throws void` writes it.
-func isVoidNode(t *docblock.TypeNode) bool {
-	return t.Kind == docblock.KindNamed && len(t.Args) == 0 && strings.EqualFold(t.Name, "void")
 }
 
 // throwsMembers splits a @throws type into the class names a `throws`

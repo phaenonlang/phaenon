@@ -4,7 +4,8 @@ namespace App;
 // way a `throws` clause compiles to its tag: on a line of its own, in a
 // new docblock above the declaration and its attributes or in the
 // docblock the declaration has. A docblock that holds the tag already is
-// left as it is.
+// left as it is, the tag read as the checker reads it: in any letter case,
+// in parentheses, beside the tags the generics lowering adds.
 
 interface Lookup
 {
@@ -33,6 +34,15 @@ final class Memory implements Lookup {
 
     /** @throws void */
     stated(): bool nothrow => $this->items === [];
+
+    /** @throws VOID */
+    upper(): bool nothrow => $this->items === [];
+
+    /** @throws (void) */
+    parenthesised(): bool nothrow => $this->items === [];
+
+    /** @throws Void */
+    firstOf<T of object>(list<T> $items): ?T nothrow => $items[0] ?? null;
 
     clear(): void
         nothrow {

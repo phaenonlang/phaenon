@@ -10,7 +10,8 @@ namespace App;
 // way a `throws` clause compiles to its tag: on a line of its own, in a
 // new docblock above the declaration and its attributes or in the
 // docblock the declaration has. A docblock that holds the tag already is
-// left as it is.
+// left as it is, the tag read as the checker reads it: in any letter case,
+// in parentheses, beside the tags the generics lowering adds.
 
 interface Lookup
 {
@@ -61,6 +62,29 @@ final class Memory implements Lookup
     public function stated(): bool
     {
         return $this->items === [];
+    }
+
+    /** @throws VOID */
+    public function upper(): bool
+    {
+        return $this->items === [];
+    }
+
+    /** @throws (void) */
+    public function parenthesised(): bool
+    {
+        return $this->items === [];
+    }
+
+    /**
+     * @throws Void
+     * @template T of object
+     * @param list<T> $items
+     * @return ?T
+     */
+    public function firstOf(array $items): ?object
+    {
+        return $items[0] ?? null;
     }
 
     /**
@@ -121,4 +145,4 @@ function size(Memory $store): int
 {
     return $store->size();
 }
-// phaenon-map v1 nothrow.phn 1-6=1 7:1 17-19=11 20:11 22-25=13 26:14 30-30=17 31:18 34-36=21 37:21 38-40=21 41:22 42-45=23 46:24 47-47=24 48:25 53-53=30 54:30 56-56=31 57:32 58-58=32 59:33 62-64=35 65:36 66-68=37 69:37 74-76=42 77:42 79-81=43 82:44 83-86=45 87:45 88-90=45 91:46 92-97=47 98:48 99-101=48 102:49 103-105=50 106:50 109-111=53 112:53 117-119=58 120:58 121-123=58
+// phaenon-map v1 nothrow.phn 1-6=1 7:1 18-20=12 21:12 23-26=14 27:15 31-31=18 32:19 35-37=22 38:22 39-41=22 42:23 43-46=24 47:25 48-48=25 49:26 54-54=31 55:31 57-57=32 58:33 59-59=33 60:34 63-65=36 66:37 69-71=39 72:40 75-77=42 78:43 79-84=44 85:45 86-88=45 89:46 90-92=47 93:47 98-100=52 101:52 103-105=53 106:54 107-110=55 111:55 112-114=55 115:56 116-121=57 122:58 123-125=58 126:59 127-129=60 130:60 133-135=63 136:63 141-143=68 144:68 145-147=68

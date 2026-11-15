@@ -32,7 +32,7 @@ func (x *fnCtx) throwsClause(t *ast.Throws, doc *docblock.Doc) {
 			return
 		}
 		for _, tag := range doc.Throws {
-			if !isVoidTag(tag) {
+			if !tag.IsVoid() {
 				x.report(t.Kw, P2320, "nothrow says that nothing escapes, and the docblock says @throws %s", tag)
 			}
 		}
@@ -56,11 +56,6 @@ func (x *fnCtx) throwsClause(t *ast.Throws, doc *docblock.Doc) {
 			x.report(nt.S, P2319, "%s is not a Throwable, so throws cannot name it", name)
 		}
 	}
-}
-
-// isVoidTag says a @throws tag is `@throws void`, what `nothrow` says.
-func isVoidTag(t *docblock.TypeNode) bool {
-	return t != nil && t.Kind == docblock.KindNamed && len(t.Args) == 0 && strings.EqualFold(t.Name, "void")
 }
 
 // exprBody judges where an expression body stands (design/functions.md
