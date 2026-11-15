@@ -75,6 +75,45 @@ func TestPhaenonMode(t *testing.T) {
 	}
 }
 
+// TestLongCast: the long spellings of a cast, in any letter case and with
+// the blanks the scanner admits, give the word's place and the canonical
+// word, and are lexed as the canonical cast's token; a canonical cast and
+// anything else give nothing.
+func TestLongCast(t *testing.T) {
+	cases := []struct {
+		text, word, canonical string
+	}{
+		{"(integer)", "integer", "int"},
+		{"(boolean)", "boolean", "bool"},
+		{"(double)", "double", "float"},
+		{"(real)", "real", "float"},
+		{"(binary)", "binary", "string"},
+		{"( Integer )", "Integer", "int"},
+		{"(\tREAL\t)", "REAL", "float"},
+		{"(int)", "", ""},
+		{"(float)", "", ""},
+		{"(string)", "", ""},
+		{"(bytes)", "", ""},
+		{"integer", "", ""},
+		{"()", "", ""},
+	}
+	for _, c := range cases {
+		start, end, canonical := LongCast(c.text)
+		if canonical != c.canonical || c.text[start:end] != c.word {
+			t.Errorf("LongCast(%q) = %q, %q; want %q, %q", c.text, c.text[start:end], canonical, c.word, c.canonical)
+		}
+		if canonical == "" {
+			continue
+		}
+		src := c.text + "$x;"
+		got := Tokenize([]byte(src), ModePhaenon)[0]
+		want := Tokenize([]byte("("+canonical+")$x;"), ModePhaenon)[0]
+		if got.Kind != want.Kind || got.Text([]byte(src)) != c.text {
+			t.Errorf("%q: lexed as %s(%s), want %s(%s)", src, got.Kind, got.Text([]byte(src)), want.Kind, c.text)
+		}
+	}
+}
+
 func TestLossless(t *testing.T) {
 	srcs := []string{
 		"<?php\n$a = \"x {$a['b']} ${c}\" . <<<X\n  $y\n  X . `cmd $z`;\n?>\ntail",

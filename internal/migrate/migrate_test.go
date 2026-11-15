@@ -27,6 +27,11 @@ func TestFile(t *testing.T) {
 		{"close tag on its own line", "<?php\necho 1;\n\n?>\n", "echo 1;\n"},
 		{"only tags", "<?php ?>", ""},
 		{"crlf", "<?php\r\n\r\necho 1;\r\n", "echo 1;\r\n"},
+		// Phaenon has the canonical casts only (design/language-overview.md
+		// §3): the word changes, in any case; text that is no cast stays.
+		{"long casts", "<?php\n$a = (integer) $s + ( Boolean )$b . (binary) 1 . (double) 1 . (REAL) 1 . '(real)'; // (integer)\n",
+			"$a = (int) $s + ( bool )$b . (string) 1 . (float) 1 . (float) 1 . '(real)'; // (integer)\n"},
+		{"canonical casts", "<?php\n$a = (int) $s . (bool) $b . (float) 1 . (string) 1;\n", "$a = (int) $s . (bool) $b . (float) 1 . (string) 1;\n"},
 	}
 	for _, c := range cases {
 		got, err := File([]byte(c.in), Options{})

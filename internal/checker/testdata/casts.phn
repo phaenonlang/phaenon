@@ -1,0 +1,82 @@
+namespace App\Casts;
+
+// The long spellings of PHP's casts are removed from Phaenon (P1001,
+// design/language-overview.md §3): PHP 8.0 removed (real) and refuses to
+// parse it, PHP 8.5 deprecates (integer), (boolean), (double) and
+// (binary). Each is reported once, in any letter case and spacing PHP's
+// scanner reads, and typed as the canonical cast it stands for, so that
+// nothing else follows: a (real) returned as float is no P2202.
+
+function real(string $s): float
+{
+    return (real) $s; // want P1001 "(real) is not available in Phaenon; use (float), which phn fmt writes"
+}
+
+function integer(string $s): int
+{
+    return (integer) $s; // want P1001 "use (int)"
+}
+
+function boolean(string $s): bool
+{
+    return (boolean) $s; // want P1001 "use (bool)"
+}
+
+function double(string $s): float
+{
+    return (double) $s; // want P1001 "use (float)"
+}
+
+function binary(int $n): string
+{
+    return (binary) $n; // want P1001 "use (string)"
+}
+
+// The message names the cast normalised, whatever the case and the blanks
+// (a tab is P1005 besides, once per file).
+function spaced(string $s): int
+{
+    return ( Integer ) $s + (int) (  REAL  ) $s; // want P1001 "(integer) is not available", P1001 "(real) is not available"
+}
+
+function tabbed(string $s): int
+{
+    return (	integer	) $s; // want P1005, P1001 "(integer) is not available in Phaenon; use (int)"
+}
+
+// (unset) left PHP with 8.0 and has no rewrite: its value is null, and
+// whether the code meant the value or the removal is not known.
+function unsetCast(int $n): void
+{
+    $x = (unset) $n; // want P1001 "(unset) is not available in Phaenon, and PHP refuses it; write null for its value, or unset() as a statement"
+    \var_dump($x);
+}
+
+// Typed as the canonical cast: (integer) of an int literal string is that
+// int, (binary) of an int a decimal-int-string, which a key stores as an
+// int; the string cast's own finding is reported beside the spelling's.
+function typed(int $i, object $o): int
+{
+    $n = (integer) '42'; // want P1001
+    $keys = [(binary) $i => true]; // want P1001
+    (binary) $o; // want P1001, P2312
+    return $n + \count($keys);
+}
+
+// Wherever a cast stands: a constant expression, a default, code after a
+// return.
+final class Limits
+{
+    public const int MAX = (integer) 10.5; // want P1001
+
+    public static clamp(int $n, float $max = (double) self::MAX): float { // want P1001
+        return \min((float) $n, $max);
+        (boolean) $n; // want P1001, P2401
+    }
+}
+
+// The canonical casts are what Phaenon has.
+function canonical(string $s): float
+{
+    return (int) $s + (float) $s + ((bool) $s ? 1 : 0) + \strlen((string) $s);
+}

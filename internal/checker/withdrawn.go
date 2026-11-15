@@ -9,6 +9,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
 )
 
 // withdrawnSpellings reports the spellings roadmap D26 and D27 withdrew on
@@ -16,7 +17,13 @@ import (
 // (design/tooling.md §5.6): a declaration spelled `fun`, and the type
 // tests `is`, `as` and `as?`. It runs after the file's code, whose checks
 // derived each test's PHP (typetest.go); a test the checker never reached,
-// in code after a return, is reported without it.
+// in code after a return, is reported without it. The long casts PHP
+// removed or deprecates, `(integer)`, `(boolean)`, `(double)`, `(real)`
+// and `(binary)`, are reported here too (design/language-overview.md §3),
+// wherever they stand, a constant expression or a key included: the lexer
+// reads each as its canonical cast, which every path that types a cast
+// types it as. So is `(unset)`, which PHP 8.0 removed and which has no
+// rewrite: its value is null, and what the code meant by it is not known.
 func (c *Checker) withdrawnSpellings(f *program.File) {
 	if f.Mode != lexer.ModePhaenon {
 		return
@@ -38,6 +45,15 @@ func (c *Checker) withdrawnSpellings(f *program.File) {
 			}
 		case *ast.IsExpr, *ast.AsExpr:
 			tests = append(tests, n.(ast.Expr))
+		case *ast.Cast:
+			at := ast.Span{Start: n.S.Start, End: n.S.Start + len(n.Raw)}
+			if start, end, canonical := lexer.LongCast(n.Raw); canonical != "" {
+				c.report(at, P1001, "(%s) is not available in Phaenon; use (%s), which phn fmt writes", strings.ToLower(n.Raw[start:end]), canonical)
+			} else if n.Op == token.T_UNSET_CAST {
+				// PHP 8.0 removed it, and nothing writes the same in every
+				// place it stands: the value is null, the variable stays.
+				c.report(at, P1001, "(unset) is not available in Phaenon, and PHP refuses it; write null for its value, or unset() as a statement to remove a variable")
+			}
 		}
 		return true
 	})

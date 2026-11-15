@@ -99,6 +99,10 @@ func Prepare(src []byte, opts Options) (out []byte, notes []Note, closeTag bool,
 	// Phaenon's whitespace is spaces (design/functions.md §5.5): not a
 	// layout --keep-layout keeps, since a tab would not compile.
 	out = tabs.Expand(out)
+	// Phaenon's casts are the canonical ones (design/language-overview.md
+	// §3): not a spelling --keep-layout keeps either, since a long cast
+	// would not compile.
+	out = CanonicalCasts(out)
 	if opts.Generics {
 		if out, notes, err = Lift(out, opts); err != nil {
 			return nil, nil, false, err

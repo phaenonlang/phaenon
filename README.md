@@ -395,10 +395,15 @@ and becomes `function` before a function's, `function` is lifted off every metho
 need it (the modifiers stay as written), and a leftover `is`, `as` or `as?` becomes the PHP test
 it compiled to — `$x is int` → `is_int($x)`, `$b is string` on `bytes` →
 `mb_check_encoding($b, 'UTF-8')`. Most of those depend on the operand's type, so `phn fmt` in a
-project checks the files that hold one first; `phn fmt --stdin`, with no program, rewrites only
-`fun`, `function` and `$x is Foo` with a class name, and reports the rest (`P1001`). It writes
-Phaenon's words in lower case where the compiler reports another case (`P1006`: `THROWS`,
-`TYPE`, `(BYTES)`), and leaves `Map` and `Bytes`, which may be a class's.
+project checks the files that hold one first; `phn fmt --stdin`, with no program, rewrites of
+those only `fun`, `function` and `$x is Foo` with a class name, and reports the rest (`P1001`).
+With a program or without, it writes the long casts PHP removed or deprecates as the canonical
+ones, the only casts Phaenon has (`P1001`): `(integer)` → `(int)`, `(boolean)` → `(bool)`,
+`(double)` and `(real)` → `(float)`, `(binary)` → `(string)`; `phn migrate` writes them so too.
+`(unset)`, which PHP 8.0 removed, is `P1001` and left as written: `null` or a statement
+`unset($x);` replaces it, depending on what was meant. It writes Phaenon's words in lower
+case where the compiler reports another case (`P1006`: `THROWS`, `TYPE`, `(BYTES)`), and leaves
+`Map` and `Bytes`, which may be a class's.
 
 ```sh
 phn fmt                 # the roots: Phaenon's layout, then the fixer (phaenon.json "fmt", or tools/php-cs-fixer)
