@@ -21,7 +21,38 @@ func Print(t Type) string {
 // PrintQualified prints t for a docblock in emitted code: like Print, but
 // class names carry a leading backslash so they resolve regardless of the
 // file's imports.
+//
+// The text is PHPStan's to read, in a file of any namespace, so it holds no
+// word PHPStan would take for a class of that namespace: Closure is
+// \Closure, and bytes, which PHPStan has no type for, is string
+// (design/strings.md §5), as the emitter writes both for a type spelled in
+// a signature.
 func PrintQualified(t Type) string {
+	t = MapDeep(t, func(m Type) Type {
+		switch v := m.(type) {
+		case Bytes:
+			return TString
+		case Intersection:
+			// string&bytes, text known to be both, is string twice now.
+			var kept []Type
+			text := false
+			for _, member := range v.Types {
+				if member == TString {
+					if text {
+						continue
+					}
+					text = true
+				}
+				kept = append(kept, member)
+			}
+			if len(kept) == 1 {
+				return kept[0]
+			}
+			v.Types = kept
+			return v
+		}
+		return m
+	})
 	var b strings.Builder
 	(&printer{b: &b, qualified: true}).print(t, false)
 	return b.String()
@@ -266,10 +297,24 @@ func (pr *printer) print(t Type, nested bool) {
 		b.WriteString("::")
 		b.WriteString(t.Case)
 	case Callable:
+		// A signature's return type takes what follows it. In the text
+		// PHPStan reads, a callable among the members of a union or an
+		// intersection stands in parentheses, `(\Closure(int): int)|null`,
+		// and so does a return type that is one.
+		if nested && t.HasSig && pr.qualified {
+			b.WriteString("(")
+			defer b.WriteString(")")
+		}
 		if t.Pure {
 			b.WriteString("pure-")
 		}
 		if t.Closure {
+			// Closure is a class: where class names are qualified it is
+			// \Closure, which a file of any namespace reads as PHP's.
+			// pure-Closure is PHPStan's word for one, and no name.
+			if pr.qualified && !t.Pure {
+				b.WriteByte('\\')
+			}
 			b.WriteString("Closure")
 		} else {
 			b.WriteString("callable")
@@ -302,7 +347,8 @@ func (pr *printer) print(t Type, nested bool) {
 			if t.Return == nil {
 				b.WriteString("mixed")
 			} else {
-				pr.print(t.Return, false)
+				// `Closure(U): (A|B)`, not `(Closure(U): A)|B`.
+				pr.print(t.Return, pr.qualified)
 			}
 		}
 	case Iterable:
@@ -453,6 +499,10 @@ func Native(t Type) (string, bool) {
 		return "\\" + t.Class, true
 	case Unknown:
 		return "\\" + t.Name, true
+	case Callable:
+		if t.Closure {
+			return "\\Closure", true // a class, named as PHP knows it from any namespace
+		}
 	}
 	return Print(t), true
 }

@@ -13,6 +13,7 @@ type Rows = list<Row>;
 type Pair = (int, string);
 type Numbered = array{0: int, -1?: string, '7': map<int, Row>};
 type Nothing = array{};
+type Sorter = Closure(Row, Row): int;
 type Positional = (int, string);
 
 /**
@@ -35,6 +36,12 @@ final class Orders
     add(Row $row, Line ...$lines): void => $this->rows[] = $row;
 
     all(): Rows => $this->rows;
+
+    sorted(Sorter $sorter, ?Sorter $then = null): Rows {
+        $rows = $this->rows;
+        usort($rows, $sorter);
+        return $rows;
+    }
 
     price(Json $json): Price => ['amount' => count($json), 'currency' => 'EUR'];
 

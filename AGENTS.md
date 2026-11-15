@@ -213,7 +213,8 @@ from the package by hand.
 - **Emitter goldens** `internal/emit/testdata/X.phn` → `X.php`: regenerate with `PHAENON_UPDATE=1`,
   never edit by hand, and read the diff before committing it, the map line included. A directory
   under `testdata/programs/` is one program of several files, each `X.phn` compiled to the `X.php`
-  beside it (`TestPrograms`), and PHPStan analyses its outputs together.
+  beside it (`TestPrograms`), and PHPStan analyses its outputs together; a `run.php` in the
+  directory is run under php and held to `run.out`, for what PHP checks only when code runs.
 - **Line map vectors** `internal/linemap/testdata/vectors.json` are the reference of the format's
   three readers; the PhpStorm plugin and `phaenon/debug` keep copies, which
   `TestVectorCopiesFresh` compares.

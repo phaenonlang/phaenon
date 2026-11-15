@@ -224,7 +224,9 @@ func TestNative(t *testing.T) {
 		{MakeUnion(TInt, TString, TNull), "int|string|null"},
 		{Param{Name: "T", Bound: NewClass("Foo")}, "\\Foo"},
 		{Param{Name: "T"}, "mixed"},
-		{Callable{Closure: true, HasSig: true, Return: TInt}, "Closure"},
+		{Callable{Closure: true, HasSig: true, Return: TInt}, "\\Closure"},
+		{Nullable(Callable{Closure: true, HasSig: true, Return: TInt}), "?\\Closure"},
+		{Callable{HasSig: true, Return: TInt}, "callable"},
 		{MakeUnion(IntLit(1), IntLit(2)), "int"},
 		{Static{&Class{Name: "A"}}, "static"},
 	}
@@ -409,5 +411,40 @@ func TestTextBytes(t *testing.T) {
 	}
 	if got, ok := Native(tb); !ok || got != "string" {
 		t.Errorf("Native = %q, %v", got, ok)
+	}
+}
+
+// PrintQualified is the text of an emitted docblock, read in a file of any
+// namespace: a class name carries its backslash, Closure among them, and a
+// callable's signature is bracketed where a union would otherwise read as
+// its return type.
+func TestPrintQualifiedClosure(t *testing.T) {
+	closure := Callable{Closure: true, HasSig: true, Params: []CallableParam{{Type: TInt}}, Return: TInt}
+	cases := []struct {
+		t          Type
+		want, bare string
+	}{
+		{closure, `\Closure(int): int`, `Closure(int): int`},
+		{TClosure, `\Closure`, `Closure`},
+		{Nullable(closure), `(\Closure(int): int)|null`, `Closure(int): int|null`},
+		{Callable{Closure: true, HasSig: true, Return: MakeUnion(TInt, TString)}, `\Closure(): (int|string)`, `Closure(): int|string`},
+		{Shape{Entries: []ShapeEntry{{Key: "run", Type: closure}, {Key: "who", Type: NewClass(`App\User`)}}}, `array{run: \Closure(int): int, who: \App\User}`, `array{run: Closure(int): int, who: App\User}`},
+		{Array{Key: TInt, Value: closure, List: true}, `list<\Closure(int): int>`, `list<Closure(int): int>`},
+		{Callable{HasSig: true, Return: TInt}, `callable(): int`, `callable(): int`},
+		{Callable{Closure: true, Pure: true, HasSig: true, Return: TInt}, `pure-Closure(): int`, `pure-Closure(): int`},
+		// bytes is a string to PHPStan, which would read the word as a class.
+		{TBytes, `string`, `bytes`},
+		{MakeUnion(TString, TBytes), `string`, `string|bytes`},
+		{Nullable(TBytes), `string|null`, `null|bytes`},
+		{TTextBytes, `string`, `string&bytes`},
+		{Shape{Entries: []ShapeEntry{{Key: "body", Type: TBytes}, {Key: "f", Type: Callable{Closure: true, HasSig: true, Params: []CallableParam{{Type: TBytes}}, Return: TBytes}}}}, `array{body: string, f: \Closure(string): string}`, `array{body: bytes, f: Closure(bytes): bytes}`},
+	}
+	for _, c := range cases {
+		if got := PrintQualified(c.t); got != c.want {
+			t.Errorf("PrintQualified: %s, want %s", got, c.want)
+		}
+		if got := Print(c.t); got != c.bare {
+			t.Errorf("Print: %s, want %s", got, c.bare)
+		}
 	}
 }

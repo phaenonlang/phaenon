@@ -1,16 +1,16 @@
-20: kept @phpstan-type Status: no Phaenon spelling for it
-21: kept @phpstan-type Legacy: its file imports another Legacy
-22: kept @phpstan-type Report: the class App\Orders\Report bears the name
-23: kept @phpstan-type Nested: it names Status, which stays a tag
-24: kept @phpstan-type Described: it has a description
-27: kept @phpstan-import-type Old: the alias it imports stays a tag (Acme\Legacy is not among the files being migrated)
-69: kept @param Status: it erases to a different type than the declared string
-70: kept @param Old: it erases to a different type than the declared array
-82: kept @phpstan-import-type Status: the alias it imports stays a tag (no Phaenon spelling for it)
-84: kept @phpstan-type Dup: App\Orders\Other declares a Dup too, and a namespace declares a name once
-99: kept @param Dup: it erases to a different type than the declared array
-100: kept @param Status: it erases to a different type than the declared string
-110: kept @phpstan-type Dup: App\Orders\Report declares a Dup too, and a namespace declares a name once
-111: kept @phpstan-type Boxed: it mentions T, a type parameter of App\Orders\Other
-112: kept @phpstan-type cased: the class declares Cased too, and the names of a namespace are compared without regard to case
-113: kept @phpstan-type Cased: the class declares cased too, and the names of a namespace are compared without regard to case
+21: kept @phpstan-type Status: no Phaenon spelling for it
+22: kept @phpstan-type Legacy: its file imports another Legacy
+23: kept @phpstan-type Report: the class App\Orders\Report bears the name
+24: kept @phpstan-type Nested: it names Status, which stays a tag
+25: kept @phpstan-type Described: it has a description
+28: kept @phpstan-import-type Old: the alias it imports stays a tag (Acme\Legacy is not among the files being migrated)
+82: kept @param Status: it erases to a different type than the declared string
+83: kept @param Old: it erases to a different type than the declared array
+95: kept @phpstan-import-type Status: the alias it imports stays a tag (no Phaenon spelling for it)
+97: kept @phpstan-type Dup: App\Orders\Other declares a Dup too, and a namespace declares a name once
+112: kept @param Dup: it erases to a different type than the declared array
+113: kept @param Status: it erases to a different type than the declared string
+123: kept @phpstan-type Dup: App\Orders\Report declares a Dup too, and a namespace declares a name once
+124: kept @phpstan-type Boxed: it mentions T, a type parameter of App\Orders\Other
+125: kept @phpstan-type cased: the class declares Cased too, and the names of a namespace are compared without regard to case
+126: kept @phpstan-type Cased: the class declares cased too, and the names of a namespace are compared without regard to case

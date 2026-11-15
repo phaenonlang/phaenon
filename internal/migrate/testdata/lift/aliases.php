@@ -17,6 +17,7 @@ use Acme\Legacy;
  * @phpstan-type Pair array{int, string}
  * @phpstan-type Numbered array{0: int, -1?: string, '7': array<int, Row>}
  * @phpstan-type Nothing array{}
+ * @phpstan-type Sorter \Closure(Row, Row): int
  * @phpstan-type Status 'open'|'closed'
  * @phpstan-type Legacy array{id: int}
  * @phpstan-type Report array{rows: Rows}
@@ -54,6 +55,18 @@ final class Orders
     public function all(): array
     {
         return $this->rows;
+    }
+
+    /**
+     * @param Sorter $sorter
+     * @param Sorter|null $then
+     * @return Rows
+     */
+    public function sorted(\Closure $sorter, ?\Closure $then = null): array
+    {
+        $rows = $this->rows;
+        usort($rows, $sorter);
+        return $rows;
     }
 
     /**

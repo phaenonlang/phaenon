@@ -65,7 +65,8 @@ func loadGoldenProgram(t *testing.T, dir string) *goldenProgram {
 // project. It is where a declaration of one file shapes the output of
 // another: a type alias, which belongs to its namespace
 // (design/generics.md §11.6). Each output is held to TestGenerics's
-// checks, `php -l` and the line map's property among them, and PHPStan
+// checks, `php -l` and the line map's property among them, a program with
+// a run.php is run under php and compared with its run.out, and PHPStan
 // analyses the directory's outputs together at level max when
 // PHAENON_PHPSTAN names the binary. PHAENON_UPDATE=1 rewrites the expected
 // files.
@@ -102,6 +103,19 @@ func TestPrograms(t *testing.T) {
 				if php != "" {
 					if out, err := exec.Command(php, "-l", wantPath).CombinedOutput(); err != nil {
 						t.Errorf("php -l: %s", out)
+					}
+				}
+			}
+			// A program with a run.php is run under php: the script
+			// requires the outputs and calls into them, and prints what
+			// run.out holds. A type PHP checks when a function is called,
+			// not when it is declared, is checked there.
+			if script := filepath.Join(dir, "run.php"); php != "" && !t.Failed() {
+				if _, err := os.Stat(script); err == nil {
+					want, _ := os.ReadFile(filepath.Join(dir, "run.out"))
+					out, err := exec.Command(php, "-n", "-d", "display_errors=1", "-d", "error_reporting=-1", script).CombinedOutput()
+					if err != nil || !bytes.Equal(out, want) {
+						t.Errorf("php %s (%v) prints:\n%s\nwant:\n%s", script, err, out, want)
 					}
 				}
 			}
