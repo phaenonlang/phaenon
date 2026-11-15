@@ -309,9 +309,15 @@ func (c *Class) ensureMembers() {
 // parameters are matched by name, and constructors are left alone, since a
 // child's constructor overrides nothing in PHP. The parent's type
 // parameters are mapped through @extends / @implements. Each parameter and
-// the return take their type from the nearest ancestor that documents it:
-// Symfony's Kernel takes registerBundles() from a trait that documents
-// nothing, and its KernelInterface says iterable<BundleInterface>.
+// the return take their type from the first declaration that documents it,
+// in the order PHPStan inherits a docblock: the method in the parent's
+// table, then what that one inherits, then the methods of the interfaces
+// the class implements itself, each with what it inherits (Overridden).
+// Symfony's Kernel takes registerBundles() through a trait that documents
+// nothing from the KernelInterface of the class using the trait, which
+// says iterable<BundleInterface>. An interface that a class in between
+// implements, below the one whose method the parent's table holds, gives
+// nothing.
 func (c *Class) inheritDocTypes() {
 	var self []types.Type
 	if t, ok := c.TypeOf().(types.Class); ok {
@@ -321,7 +327,6 @@ func (c *Class) inheritDocTypes() {
 		if m.Decl == nil || m.FromTrait != nil || strings.EqualFold(m.Name, "__construct") {
 			continue
 		}
-		key := strings.ToLower(m.Name)
 		open := map[*Param]bool{}
 		for _, cp := range m.Params {
 			hasDoc := cp.NativeType == nil && !types.IsMixed(cp.Type) || cp.NativeType != nil && !types.Equal(cp.Type, cp.NativeType) || ownNative(cp.NativeType) || docParam(m.Doc, cp.Name)
@@ -330,15 +335,11 @@ func (c *Class) inheritDocTypes() {
 			}
 		}
 		openReturn := !(m.Return != nil && (m.NativeReturn == nil || !types.Equal(m.Return, m.NativeReturn)) || ownNative(m.NativeReturn) || m.Doc != nil && m.Doc.Return != nil)
-		for _, a := range c.Ancestors() {
+		for _, pm := range inheritedFrom(m) {
 			if len(open) == 0 && !openReturn {
 				break
 			}
-			a.ensure()
-			pm, ok := a.methods[key]
-			if !ok || pm.Vis == Private {
-				continue
-			}
+			a := pm.Class
 			var subst map[string]types.Type
 			if args, ok := c.SuperArgs(a.Name, self); ok {
 				subst = a.Subst(args)
@@ -363,6 +364,27 @@ func (c *Class) inheritDocTypes() {
 			}
 		}
 	}
+}
+
+// inheritedFrom lists the declarations m inherits a docblock from, in the
+// order PHPStan consults them: each one Overridden gives, followed by
+// what that one inherits in turn.
+func inheritedFrom(m *Method) []*Method {
+	var out []*Method
+	seen := map[*Method]bool{m: true}
+	var walk func(m *Method)
+	walk = func(m *Method) {
+		for _, d := range m.Overridden() {
+			if seen[d] || len(out) > maxOverrideDepth {
+				continue
+			}
+			seen[d] = true
+			out = append(out, d)
+			walk(d)
+		}
+	}
+	walk(m)
+	return out
 }
 
 // docParam reports whether a docblock gives the named parameter a type.
