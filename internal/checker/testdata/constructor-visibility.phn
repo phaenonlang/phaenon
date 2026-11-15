@@ -1,0 +1,215 @@
+// A constructor may narrow the visibility of the one it overrides: PHP
+// checks it only where an abstract declaration fixes the constructor, an
+// interface's or an abstract one up the parent chain (declared in a class
+// or brought in by a trait). Such a declaration holds every constructor
+// below it to the visibility of the nearest one above: a concrete
+// constructor that implements an abstract one passes the demand on to its
+// subclasses. A trait's abstract constructor binds only the classes below
+// the one that uses it.
+
+namespace App\Constructors;
+
+final class Failed extends \RuntimeException
+{
+    private function __construct(string $message)
+    {
+        parent::__construct($message);
+    }
+
+    public static function because(string $why): self
+    {
+        return new self($why);
+    }
+}
+
+class Open
+{
+    public function __construct()
+    {
+    }
+}
+
+class Guarded extends Open
+{
+    protected function __construct()
+    {
+    }
+}
+
+final class Sealed extends Guarded
+{
+    private function __construct()
+    {
+    }
+}
+
+class Hidden
+{
+    private function __construct()
+    {
+    }
+}
+
+final class Shown extends Hidden
+{
+    public function __construct()
+    {
+    }
+}
+
+trait MustConstruct
+{
+    abstract public function __construct();
+}
+
+final class UsesTheTrait
+{
+    use MustConstruct;
+
+    private function __construct()
+    {
+    }
+}
+
+class ImplementsTheTrait
+{
+    use MustConstruct;
+
+    public function __construct()
+    {
+    }
+}
+
+final class BelowTheTraitUser extends ImplementsTheTrait
+{
+    private function __construct()
+    {
+    }
+}
+
+interface Constructible
+{
+    public function __construct();
+}
+
+class Protects
+{
+    protected function __construct()
+    {
+    }
+}
+
+final class OpensForTheInterface extends Protects implements Constructible
+{
+    public function __construct()
+    {
+    }
+}
+
+// Refused: an interface's constructor is public in every class below it.
+
+final class HidesTheInterface implements Constructible
+{
+    private function __construct() // want P2502 "must be at least public like App\Constructors\Constructible::__construct()"
+    {
+    }
+}
+
+class KeepsTheInterface implements Constructible
+{
+    public function __construct()
+    {
+    }
+}
+
+class Between extends KeepsTheInterface
+{
+}
+
+final class BelowTheInterface extends Between
+{
+    protected function __construct() // want P2502 "must be at least public"
+    {
+    }
+}
+
+abstract class ImplementsLater implements Constructible
+{
+}
+
+final class BelowAnAbstractImplementer extends ImplementsLater
+{
+    private function __construct() // want P2502 "must be at least public"
+    {
+    }
+}
+
+interface ConstructibleToo extends Constructible
+{
+}
+
+final class ThroughAnInterface implements ConstructibleToo
+{
+    protected function __construct() // want P2502 "must be at least public"
+    {
+    }
+}
+
+final class ProtectsForTheInterface extends Protects implements Constructible
+{
+    protected function __construct() // want P2502 "must be at least public like App\Constructors\Constructible::__construct()"
+    {
+    }
+}
+
+// Refused: an abstract constructor up the chain.
+
+abstract class Template
+{
+    abstract public function __construct();
+}
+
+final class HidesTheTemplate extends Template
+{
+    private function __construct() // want P2502 "must be at least public like App\Constructors\Template::__construct()"
+    {
+    }
+}
+
+abstract class ProtectedTemplate
+{
+    abstract protected function __construct();
+}
+
+final class HidesTheProtectedTemplate extends ProtectedTemplate
+{
+    private function __construct() // want P2502 "must be at least protected"
+    {
+    }
+}
+
+class OpensTheProtectedTemplate extends ProtectedTemplate
+{
+    public function __construct()
+    {
+    }
+}
+
+final class BelowTheOpenedTemplate extends OpensTheProtectedTemplate
+{
+    protected function __construct() // want P2502 "must be at least public like App\Constructors\OpensTheProtectedTemplate::__construct()"
+    {
+    }
+}
+
+abstract class TraitTemplate
+{
+    use MustConstruct;
+}
+
+final class BelowTheTraitTemplate extends TraitTemplate
+{
+    protected function __construct() // want P2502 "must be at least public"
+    {
+    }
+}
