@@ -3,6 +3,19 @@
 From 0.3.0 on, release-please writes each entry from the Conventional Commits merged since the
 previous release (`release-please-config.json`). The two releases before were cut by hand.
 
+## [0.7.0](https://github.com/phaenonlang/phaenon/compare/v0.6.0...v0.7.0) (2026-11-15)
+
+
+### Features
+
+* **checker:** an unguarded offset a shape might lack is P2321 ([#46](https://github.com/phaenonlang/phaenon/issues/46)) ([7abd5e1](https://github.com/phaenonlang/phaenon/commit/7abd5e1f1726f865ebcfbdbeec999cd230460a93))
+
+
+### Bug Fixes
+
+* **checker:** unset() of an offset types the array as PHPStan does ([#44](https://github.com/phaenonlang/phaenon/issues/44)) ([16d79d8](https://github.com/phaenonlang/phaenon/commit/16d79d8f08c8164c47b361ff98fa7434ec78cfa0))
+* **emit:** closures lowered in expression bodies are indented as a block ([#45](https://github.com/phaenonlang/phaenon/issues/45)) ([dd65e25](https://github.com/phaenonlang/phaenon/commit/dd65e25ecad56cf84fe81909be06f41ecb768c15))
+
 ## [0.6.0](https://github.com/phaenonlang/phaenon/compare/v0.5.0...v0.6.0) (2026-11-15)
 
 
