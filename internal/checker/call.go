@@ -1688,6 +1688,17 @@ func argsSoFar(tps []*program.TypeParam, args []types.Type) map[string]types.Typ
 	return m
 }
 
+// mentionsTemplate reports whether a type names the template parameter.
+func mentionsTemplate(t types.Type, name string) bool {
+	found := false
+	types.Walk(t, func(n types.Type) {
+		if p, ok := n.(types.Param); ok && p.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
 // openToBounds replaces in a bound the call's own type parameters that
 // its arguments left unbound by their own bounds, in turn, and by mixed
 // where they have none: `new IteratorIterator($nodes)` binds TIterator
@@ -2085,6 +2096,27 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			subst[tp.Name] = v
 		}
 	}
+	// An argument that the native type of a parameter written with the
+	// template refuses is the plain mismatch PHP raises, reported before
+	// the type argument it stands for: `new LimitIterator($traversable)`
+	// passes no Iterator, rather than a TIterator outside its bound.
+	nativeMismatch := func(template string) bool {
+		found := false
+		for i, b := range bindings {
+			native := b.param.NativeType
+			if b.param.ByRef || b.arg.Unpack || argTypes[i] == nil || native == nil || mentionsParam(native) || !mentionsTemplate(b.param.Type, template) {
+				continue
+			}
+			at := types.Substitute(argTypes[i], freshOnly(subst))
+			if at == nil || types.IsAcceptable(at, native, x.p()) {
+				continue
+			}
+			found = true
+			x.c.reportRelated(b.arg.S, P2103, related(sig.file, b.param.Span, "parameter $%s of %s declared here", b.param.Name, sig.name),
+				"argument %d ($%s) of %s expects %s, %s given", b.idx+1, b.param.Name, sig.name, x.typeName(native), x.typeName(at))
+		}
+		return found
+	}
 	// An inferred type argument must respect its bound, like a written one
 	// (`repo(Order::class)` against `class<T of User>`): PHPStan reports
 	// the argument, Phaenon the type argument it stands for.
@@ -2098,6 +2130,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		}
 		bound := openToBounds(types.Substitute(tp.Bound, subst), sig.typeParams, subst)
 		if !types.IsSubtype(v, bound, x.p()) {
+			if nativeMismatch(tp.Name) {
+				continue // the argument PHP refuses is the finding
+			}
 			x.report(span, P3002, "type argument %s inferred for %s of %s is not a subtype of its bound %s", x.typeName(v), tp.Name, sig.name, x.typeName(bound))
 		}
 	}

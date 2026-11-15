@@ -132,3 +132,13 @@ function bounded(\Iterator $objectKeys, \Iterator $stringKeys): void
     keep(new Chain(['a' => 5])); // want P3002
     keep(new Chain(['a' => [5]]));
 }
+
+// An argument the parameter's native type refuses is that plain mismatch,
+// the TypeError PHP raises, rather than a type argument outside its bound.
+/** @param \Traversable<string, int> $any */
+function refused(\Traversable $any, ?\Iterator $maybe): void
+{
+    keep(new Keyed($any)); // want P2103 "argument 1 ($i) of App\TemplateBounds\Keyed::__construct() expects Iterator, Traversable<string, int> given"
+    keep(new Keyed($maybe)); // want P2103 "expects Iterator, Iterator|null given"
+    keep(new \LimitIterator($any)); // want P2103 "argument 1 ($iterator) of LimitIterator::__construct() expects Iterator, Traversable<string, int> given"
+}
