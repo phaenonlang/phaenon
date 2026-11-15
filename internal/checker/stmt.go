@@ -1727,7 +1727,14 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 			for _, cond := range arm.Conds {
 				ct := x.expr(cond, armEnv, nil)
 				if !types.IsMixed(subject) && !types.IsMixed(ct) && !types.Overlaps(subject, ct, x.p()) {
-					x.report(cond.Span(), P2305, "match arm %s can never match %s", x.typeName(ct), x.typeName(subject))
+					if bytesAgainstText(subject, ct) {
+						// Both are PHP strings, which may hold the same
+						// bytes: the arm can match, and the finding is
+						// that binary data meets text (strings.md §2).
+						x.report(cond.Span(), P2305, "match arm %s on %s compares binary data with text, which may still hold the same bytes: %s", x.typeName(ct), x.typeName(subject), convertBytesHint(e.Subject, subject, cond))
+					} else {
+						x.report(cond.Span(), P2305, "match arm %s can never match %s", x.typeName(ct), x.typeName(subject))
+					}
 					impossible = true
 				}
 				ts = append(ts, ct)
