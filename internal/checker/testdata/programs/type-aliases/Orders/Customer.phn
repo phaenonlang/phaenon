@@ -1,0 +1,27 @@
+namespace Shop\Orders;
+
+final class Customer
+{
+    __construct(public readonly string $name) {}
+}
+
+// A file of the same namespace names the alias bare.
+final class Orders
+{
+    private list<Row> $rows = [];
+
+    find(int $id): ?Row => $this->rows[$id] ?? null;
+
+    page(int $offset): Page<Row> => [array_slice($this->rows, $offset), count($this->rows)];
+
+    buyer(): Buyer => new Customer('a');
+
+    wrong(): Row => 1; // want P2202
+}
+
+// An alias is declared once in its namespace, whatever the file: the
+// program reads this file before Types.phn, so that one's is the second.
+type Dup = string;
+
+// A class and an alias of another file collide too.
+type Orders = int; // want P2511 "has the name of the class Shop\Orders\Orders (testdata/programs/type-aliases/Orders/Customer.phn:9)"

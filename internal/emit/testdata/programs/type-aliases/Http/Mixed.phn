@@ -1,0 +1,15 @@
+namespace Shop\Http;
+
+use Shop\Orders\Customer, Shop\Orders\Row, Shop\Orders\Orders;
+use Shop\Orders\{
+    Buyer,
+    Customer as Client,
+    Page,
+};
+
+// An import statement that names classes and aliases keeps the classes.
+function first(Orders $orders): ?Row => $orders->find(0);
+
+function client(Buyer $b, Customer $c): Client => $b->name === '' ? $c : $b;
+
+function total(Page<Row> $page): int => $page[1];

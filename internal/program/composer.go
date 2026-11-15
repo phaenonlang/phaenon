@@ -33,6 +33,11 @@ type ComposerLoader struct {
 	names     []string // the classmap's names, declared case
 	namesOnce sync.Once
 	allNames  []string
+
+	// sourcePrefixes are the prefixes whose directories Sources maps to a
+	// source root, found on the first SourceDirs: Sources is set by then.
+	sourcesOnce    sync.Once
+	sourcePrefixes []sourcePrefix
 }
 
 // ErrNoComposer is returned when no vendor/composer directory is found.

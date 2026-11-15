@@ -3,7 +3,6 @@
 package checker
 
 import (
-	"bytes"
 	"fmt"
 	"sort"
 	"strings"
@@ -350,8 +349,8 @@ func (c *Checker) checkFile(f *program.File) {
 
 // checkUses reports the imports nothing in the file uses (P2013). A use is
 // a token that names a class, a function or a constant, or a mention in a
-// docblock, whose types PHPStan and the checker read; usedImports has the
-// rule.
+// docblock, whose types PHPStan and the checker read; program.ImportUses
+// has the rule.
 func (c *Checker) checkUses(f *program.File, uses []*ast.Use, toks []token.Token) {
 	if len(uses) == 0 {
 		return
@@ -380,7 +379,14 @@ func (c *Checker) checkUses(f *program.File, uses []*ast.Use, toks []token.Token
 		}
 		return true
 	})
-	usedImports(f.Src, toks, statements, idents, used)
+	wanted := make(map[string]bool, len(used))
+	for name := range used {
+		wanted[name] = true
+	}
+	program.ImportUses(f.Src, toks, statements, idents, wanted, func(name string, _ ast.Span, _ bool) bool {
+		used[name] = true
+		return false // one use is all an import needs
+	})
 	for _, u := range uses {
 		for _, it := range u.Items {
 			if !used[alias(it)] {
@@ -388,113 +394,6 @@ func (c *Checker) checkUses(f *program.File, uses []*ast.Use, toks []token.Token
 			}
 		}
 	}
-}
-
-// usedImports marks, among the lower-cased aliases that are the keys of
-// used, those the file's tokens use. The use statements themselves,
-// statements in source order, name nothing through an alias, and neither
-// do the tokens that start at idents, the tree's identifiers.
-//
-// A name is a use where it stands alone or begins a qualified name
-// (`ORM\Column`). What merely spells the alias is not: a variable, a member
-// after `->`, `?->` or `::`, the name a declaration gives, a named
-// argument, the text of a string or a heredoc, a `//` or `#` comment, a
-// segment after a backslash, a namespace's own name. A docblock's mention
-// is a use, since its types are read, and so is a block comment's, where
-// an editor reads `/* @var T $x */`; a `$name` there is a variable.
-//
-// The rule errs on the side of a use, so that an import reported here is
-// one that can be deleted: the kinds of import are not told apart (a call
-// of user() uses `use App\User;`), any word of a docblock counts, and a
-// file of several namespaces is searched as one.
-func usedImports(src []byte, toks []token.Token, statements []ast.Span, idents map[int]bool, used map[string]bool) {
-	var buf []byte
-	mark := func(name []byte) {
-		buf = append(buf[:0], name...)
-		for i, b := range buf {
-			if b >= 'A' && b <= 'Z' {
-				buf[i] = b + 'a' - 'A'
-			}
-		}
-		if seen, ok := used[string(buf)]; ok && !seen {
-			used[string(buf)] = true
-		}
-	}
-	prev := token.EOF // the token before, whitespace and comments apart
-	for _, t := range toks {
-		switch t.Kind {
-		case token.T_WHITESPACE:
-			continue
-		case token.T_COMMENT, token.T_DOC_COMMENT:
-			if text := src[t.Start:t.End]; bytes.HasPrefix(text, []byte("/*")) {
-				lower := strings.ToLower(string(text))
-				for name, seen := range used {
-					if !seen && mentions(lower, name) {
-						used[name] = true
-					}
-				}
-			}
-			continue
-		}
-		before := prev
-		prev = t.Kind
-		for len(statements) > 0 && statements[0].End <= t.Start {
-			statements = statements[1:]
-		}
-		if len(statements) > 0 && statements[0].Start <= t.Start {
-			continue // inside a use statement
-		}
-		if idents[t.Start] {
-			continue
-		}
-		switch t.Kind {
-		case token.T_VARIABLE, token.T_STRING_VARNAME, token.T_NUM_STRING,
-			token.T_CONSTANT_ENCAPSED_STRING, token.T_ENCAPSED_AND_WHITESPACE,
-			token.T_START_HEREDOC, token.T_END_HEREDOC, token.T_INLINE_HTML,
-			token.T_NAME_FULLY_QUALIFIED, token.T_NAME_RELATIVE:
-			continue
-		}
-		switch before {
-		case token.T_OBJECT_OPERATOR, token.T_NULLSAFE_OBJECT_OPERATOR, token.T_PAAMAYIM_NEKUDOTAYIM, token.T_NAMESPACE:
-			continue // a member's name, a namespace's
-		}
-		// Any other token is a name, a keyword or punctuation. Only a
-		// name spells an alias, and Phaenon's contextual keywords
-		// (`type`, `of`, `in`, `out`), which are names where the grammar
-		// allows one: the token's text is looked up, whatever its kind.
-		name := src[t.Start:t.End]
-		if i := bytes.IndexByte(name, '\\'); i >= 0 {
-			name = name[:i]
-		}
-		mark(name)
-	}
-}
-
-// mentions reports the lower-cased word in the lower-cased text of a
-// comment, as a name of its own or the first segment of a qualified one.
-func mentions(lower, w string) bool {
-	i := 0
-	for {
-		j := strings.Index(lower[i:], w)
-		if j < 0 {
-			return false
-		}
-		start := i + j
-		end := start + len(w)
-		// A backslash before the word makes it another name's segment and
-		// a dollar a variable; a backslash after it continues a name the
-		// alias begins (`ORM\Column` after `use Doctrine\ORM\Mapping as ORM`).
-		okStart := start == 0 || !isWordByte(lower[start-1]) && lower[start-1] != '$'
-		okEnd := end == len(lower) || !isWordByte(lower[end]) || lower[end] == '\\'
-		if okStart && okEnd {
-			return true
-		}
-		i = start + 1
-	}
-}
-
-func isWordByte(b byte) bool {
-	return b == '_' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '\\' || b >= 0x80
 }
 
 // ------------------------------------------------------------------ function context
@@ -666,7 +565,7 @@ func (x *fnCtx) resolveClassName(n *ast.Name, span ast.Span) (string, bool) {
 	}
 	cl := x.p().Class(name)
 	if cl == nil {
-		x.report(span, P2001, "unknown class %s", name)
+		x.report(span, P2001, "%s", x.c.unknownClass("class", name))
 		return name, false
 	}
 	if !x.nameOnly {
@@ -707,7 +606,7 @@ func (x *fnCtx) classesOf(t types.Type, span ast.Span) []*program.Class {
 	for _, name := range types.ClassNames(t) {
 		cl := x.p().Class(name)
 		if cl == nil {
-			x.report(span, P2001, "unknown class %s", name)
+			x.report(span, P2001, "%s", x.c.unknownClass("class", name))
 			continue
 		}
 		out = append(out, cl)

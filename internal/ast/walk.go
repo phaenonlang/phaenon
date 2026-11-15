@@ -175,6 +175,10 @@ func Inspect(n Node, f func(Node) bool) {
 		Inspect(n.Return, f)
 	case *TupleType:
 		types(n.Elems, f)
+	case *ShapeType:
+		for _, e := range n.Entries {
+			Inspect(e.Type, f)
+		}
 	case *TypeParam:
 		Inspect(n.Name, f)
 		Inspect(n.Bound, f)
@@ -359,7 +363,6 @@ func Inspect(n Node, f func(Node) bool) {
 			Inspect(c, f)
 		}
 	case *TypeAlias:
-		attrs(n.Attrs, f)
 		Inspect(n.Name, f)
 		typeParams(n.TypeParams, f)
 		Inspect(n.Type, f)

@@ -248,7 +248,9 @@ func TestNative(t *testing.T) {
 		{MakeUnion(TInt, TString, TNull), "int|string|null"},
 		{Param{Name: "T", Bound: NewClass("Foo")}, "\\Foo"},
 		{Param{Name: "T"}, "mixed"},
-		{Callable{Closure: true, HasSig: true, Return: TInt}, "Closure"},
+		{Callable{Closure: true, HasSig: true, Return: TInt}, "\\Closure"},
+		{Nullable(Callable{Closure: true, HasSig: true, Return: TInt}), "?\\Closure"},
+		{Callable{HasSig: true, Return: TInt}, "callable"},
 		{MakeUnion(IntLit(1), IntLit(2)), "int"},
 		{Static{&Class{Name: "A"}}, "static"},
 	}
@@ -433,5 +435,92 @@ func TestTextBytes(t *testing.T) {
 	}
 	if got, ok := Native(tb); !ok || got != "string" {
 		t.Errorf("Native = %q, %v", got, ok)
+	}
+}
+
+// PrintQualified is the text of an emitted docblock, read in a file of any
+// namespace: a class name carries its backslash, Closure among them, and a
+// callable's signature is bracketed where a union would otherwise read as
+// its return type.
+func TestPrintQualifiedClosure(t *testing.T) {
+	closure := Callable{Closure: true, HasSig: true, Params: []CallableParam{{Type: TInt}}, Return: TInt}
+	cases := []struct {
+		t          Type
+		want, bare string
+	}{
+		{closure, `\Closure(int): int`, `Closure(int): int`},
+		{TClosure, `\Closure`, `Closure`},
+		{Nullable(closure), `(\Closure(int): int)|null`, `Closure(int): int|null`},
+		{Callable{Closure: true, HasSig: true, Return: MakeUnion(TInt, TString)}, `\Closure(): (int|string)`, `Closure(): int|string`},
+		{Shape{Entries: []ShapeEntry{{Key: "run", Type: closure}, {Key: "who", Type: NewClass(`App\User`)}}}, `array{run: \Closure(int): int, who: \App\User}`, `array{run: Closure(int): int, who: App\User}`},
+		{Array{Key: TInt, Value: closure, List: true}, `list<\Closure(int): int>`, `list<Closure(int): int>`},
+		{Callable{HasSig: true, Return: TInt}, `callable(): int`, `callable(): int`},
+		{Callable{Closure: true, Pure: true, HasSig: true, Return: TInt}, `pure-Closure(): int`, `pure-Closure(): int`},
+		// A shape that names no key and admits any is any array.
+		{Shape{Unsealed: true}, `array<mixed>`, `array{...}`},
+		{Shape{Unsealed: true, Entries: []ShapeEntry{{Key: "id", Type: TInt}}}, `array{id: int, ...}`, `array{id: int, ...}`},
+		{Shape{}, `array{}`, `array{}`},
+		// bytes is a string to PHPStan, which would read the word as a class.
+		{TBytes, `string`, `bytes`},
+		{MakeUnion(TString, TBytes), `string`, `string|bytes`},
+		{Nullable(TBytes), `string|null`, `null|bytes`},
+		{TTextBytes, `string`, `string&bytes`},
+		{Shape{Entries: []ShapeEntry{{Key: "body", Type: TBytes}, {Key: "f", Type: Callable{Closure: true, HasSig: true, Params: []CallableParam{{Type: TBytes}}, Return: TBytes}}}}, `array{body: string, f: \Closure(string): string}`, `array{body: bytes, f: Closure(bytes): bytes}`},
+	}
+	for _, c := range cases {
+		if got := PrintQualified(c.t); got != c.want {
+			t.Errorf("PrintQualified: %s, want %s", got, c.want)
+		}
+		if got := Print(c.t); got != c.bare {
+			t.Errorf("Print: %s, want %s", got, c.bare)
+		}
+	}
+}
+
+// An alias's expansion is printed for where the alias stood: after `?`,
+// and among the members of a union or of an intersection.
+func TestPrintQualifiedInPlace(t *testing.T) {
+	a, b := NewClass(`App\A`), NewClass(`App\B`)
+	both := Intersection{[]Type{a, b}}
+	closure := Callable{Closure: true, HasSig: true, Params: []CallableParam{{Type: TInt}}, Return: TInt}
+	row := Shape{Entries: []ShapeEntry{{Key: "id", Type: TInt}}}
+	cases := []struct {
+		t                              Type
+		nullable, inUnion, inIntersect string
+	}{
+		{MakeUnion(TInt, TString), `int|string|null`, `int|string`, `(int|string)`},
+		{Nullable(TInt), `int|null`, `int|null`, `(int|null)`},
+		{both, `(\App\A&\App\B)|null`, `(\App\A&\App\B)`, `\App\A&\App\B`},
+		{Nullable(both), `(\App\A&\App\B)|null`, `(\App\A&\App\B)|null`, `((\App\A&\App\B)|null)`},
+		{closure, `(\Closure(int): int)|null`, `(\Closure(int): int)`, `(\Closure(int): int)`},
+		{TClosure, `?\Closure`, `\Closure`, `\Closure`},
+		{row, `?array{id: int}`, `array{id: int}`, `array{id: int}`},
+		{a, `?\App\A`, `\App\A`, `\App\A`},
+		{TBytes, `?string`, `string`, `string`},
+	}
+	for _, c := range cases {
+		if got := PrintQualifiedNullable(c.t); got != c.nullable {
+			t.Errorf("?%s: %s, want %s", Print(c.t), got, c.nullable)
+		}
+		if got := PrintQualifiedMember(c.t, false); got != c.inUnion {
+			t.Errorf("%s in a union: %s, want %s", Print(c.t), got, c.inUnion)
+		}
+		if got := PrintQualifiedMember(c.t, true); got != c.inIntersect {
+			t.Errorf("%s in an intersection: %s, want %s", Print(c.t), got, c.inIntersect)
+		}
+	}
+	// The native spelling brackets an intersection in a union, PHP's DNF.
+	for _, c := range []struct {
+		t    Type
+		want string
+	}{
+		{Nullable(both), `(\App\A&\App\B)|null`},
+		{MakeUnion(TInt, both), `int|(\App\A&\App\B)`},
+		{both, `\App\A&\App\B`},
+		{Nullable(a), `?\App\A`},
+	} {
+		if got, ok := Native(c.t); !ok || got != c.want {
+			t.Errorf("Native(%s) = %q, want %q", Print(c.t), got, c.want)
+		}
 	}
 }

@@ -1,0 +1,25 @@
+namespace Shop\Http;
+
+use Shop\Model\Customer;
+use Shop\Model\Money;
+use Shop\Model\Tag;
+use Shop\Orders;
+use Shop\Orders\{Page, Row as R};
+
+// An import that only erased names use is left out of the output, as an
+// alias's own import is: `Orders`, through which aliases alone are named,
+// and `Customer`, named as an alias's type argument, whose expansion writes
+// the class in full, and as a call's, which is erased. `Money` and `Tag`
+// stay: a docblock the output keeps mentions the one, an attribute the
+// other.
+
+function head<T>(list<T> $xs): ?T => $xs[0] ?? null;
+
+#[Tag]
+final class Show
+{
+    count(Orders\Page<Customer> $page, Orders\Row $row): int => $page['total'] + $row['id'] + (head<Customer>($page['items']) === null ? 0 : 1);
+
+    /** @see Money for what a row was paid with */
+    first(Page<R> $page): ?R => $page['items'][0] ?? null;
+}

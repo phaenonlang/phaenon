@@ -1,0 +1,39 @@
+namespace Shop\Http;
+
+use Shop\Orders;
+use Shop\Orders\Buyer;
+use Shop\Orders\Customer;
+use Shop\Orders\Dup; // want P2013
+use Shop\Orders\{Page as Paged, Row};
+
+// A file of another namespace imports an alias with `use`, as it imports a
+// class: alone, under another name, in a group, or by a qualified name.
+final class Controller
+{
+    __construct(private Orders\Orders $orders) {}
+
+    show(int $id): Row => $this->orders->find($id) ?? [];
+
+    index(): Paged<Row> => $this->orders->page(0);
+
+    first(): Orders\Row => $this->index()[0][0];
+
+    count(\Shop\Orders\Page<int> $page): int => $page[1];
+
+    buyer(): Buyer => new Customer('b');
+
+    name(Buyer $b): string => $b->name;
+
+    /**
+     * @param list<Row> $rows
+     * @return array{rows: list<Row>, page: Paged<Row>, buyer?: Buyer}
+     */
+    summary(array $rows): array => ['rows' => $rows, 'page' => [$rows, count($rows)]];
+
+    // An alias of another namespace is not found without its import: a name
+    // never falls back to another namespace.
+    lost(Page<int> $p): void {} // want P2001
+
+    // An imported alias is still a type and no class.
+    make(): object => new Buyer('c'); // want P2001 "Buyer is a type alias"
+}

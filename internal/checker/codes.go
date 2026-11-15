@@ -66,6 +66,9 @@ var (
 	P2012 = Code{"P2012", Error, "self or static outside a class"}
 	P2013 = Code{"P2013", Warning, "unused import"}
 	P2014 = Code{"P2014", Error, "unknown enum case"}
+	// P2015: a `type` alias whose right-hand side names the alias itself,
+	// directly or through another alias (design/generics.md §11.6).
+	P2015 = Code{"P2015", Error, "type alias mentions itself"}
 
 	// P2 — calls
 	P2101 = Code{"P2101", Error, "too few arguments"}

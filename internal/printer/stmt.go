@@ -371,7 +371,6 @@ func (p *Printer) stmt(s ast.Stmt) {
 		p.nl()
 	case *ast.TypeAlias:
 		p.doc(s.Doc)
-		p.attrsLines(s.Attrs)
 		p.w("type ")
 		p.ident(s.Name)
 		p.typeParams(s.TypeParams)

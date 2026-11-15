@@ -1,0 +1,342 @@
+package emit
+
+import (
+	"bytes"
+	"strings"
+
+	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
+)
+
+// An import the compiled file would not use is left out of it. An import
+// of a name nothing in the output mentions is not PHP a person wrote, and
+// a fixer that removes unused imports would take it out of the output and,
+// through phn fix, out of the source, where it is used.
+//
+// Two kinds of import end up so (design/generics.md §11.6):
+//
+//   - the import of a type alias. An alias never reaches PHP: nothing in
+//     the compiled file names it;
+//   - an import that only erased names use: a namespace through which
+//     aliases alone are named (`use App\Orders;` for `Orders\Row`), a class
+//     named only among the type arguments of an alias (`Page<Customer>`,
+//     whose expansion writes the class by its qualified name), in a `type`
+//     declaration, which leaves no trace, or among the type arguments of a
+//     call, which are erased. A docblock's mention is erased too where
+//     the emitter expands the alias it names.
+//
+// What only spells the import's name is no use of it: a function's or a
+// constant's unqualified name, which PHP resolves in tables of their own,
+// and a name in another namespace block of the file.
+//
+// An import the output still uses anywhere stays: in a signature, a `new`,
+// an attribute, a docblock the emitter leaves or writes with the name, a
+// `{@see}`. So does one nothing uses at all, which is the checker's to
+// report (P2013), not the emitter's to remove.
+
+// dropErasedImports removes those imports from the file's use statements:
+// the statement when nothing is left of it, else the items.
+func (e *emitter) dropErasedImports(f *ast.File) {
+	var uses []*ast.Use
+	var statements []ast.Span
+	var collect func(stmts []ast.Stmt)
+	collect = func(stmts []ast.Stmt) {
+		for _, s := range stmts {
+			switch s := s.(type) {
+			case *ast.Namespace:
+				collect(s.Body)
+			case *ast.Use:
+				uses = append(uses, s)
+				statements = append(statements, s.S)
+			}
+		}
+	}
+	collect(f.Stmts)
+	if len(uses) == 0 {
+		return
+	}
+	p := e.opts.Program
+	drop := map[*ast.UseItem]bool{}
+	// The class imports that are no alias's, by the name each gives, in
+	// the namespace each belongs to: an import is its namespace block's,
+	// and a use in another block of the file is another name's.
+	file := e.opts.File
+	named := map[*program.Scope]map[string][]*ast.UseItem{}
+	var scopes []*program.Scope
+	for _, u := range uses {
+		if u.Kind != ast.UseClass {
+			continue // `use function`, `use const`
+		}
+		scope := file.ScopeAt(u.S.Start)
+		for _, it := range u.Items {
+			if it.Kind != ast.UseClass {
+				continue
+			}
+			if p.TypeAlias(importTarget(u, it)) != nil {
+				drop[it] = true
+				continue
+			}
+			if named[scope] == nil {
+				named[scope] = map[string][]*ast.UseItem{}
+				scopes = append(scopes, scope)
+			}
+			name := strings.ToLower(importName(it))
+			named[scope][name] = append(named[scope][name], it)
+		}
+	}
+	if len(scopes) > 0 && (p.HasTypeAliases() || hasCallTypeArgs(f)) {
+		erased, other := e.erasedSpans(f)
+		for _, scope := range scopes {
+			for name := range e.erasedOnly(f, statements, named[scope], scope, erased, other) {
+				for _, it := range named[scope][name] {
+					drop[it] = true
+				}
+			}
+		}
+	}
+	if len(drop) == 0 {
+		return
+	}
+	for _, u := range uses {
+		e.dropImports(u, drop)
+	}
+}
+
+// importTarget is the qualified name an import item names.
+func importTarget(u *ast.Use, it *ast.UseItem) string {
+	name := strings.Join(it.Name.Parts, "\\")
+	if u.Prefix != nil {
+		name = strings.Join(u.Prefix.Parts, "\\") + "\\" + name
+	}
+	return name
+}
+
+// importName is the name an import item gives its target in the file.
+func importName(it *ast.UseItem) string {
+	if it.Alias != nil {
+		return it.Alias.Name
+	}
+	return it.Name.Parts[len(it.Name.Parts)-1]
+}
+
+// hasCallTypeArgs reports whether a call of the file passes type
+// arguments, which are erased with the names in them.
+func hasCallTypeArgs(f *ast.File) bool {
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		found = found || len(callTypeArgs(n)) > 0
+		return !found
+	})
+	return found
+}
+
+func callTypeArgs(n ast.Node) []ast.TypeExpr {
+	switch n := n.(type) {
+	case *ast.Call:
+		return n.TypeArgs
+	case *ast.MethodCall:
+		return n.TypeArgs
+	case *ast.StaticCall:
+		return n.TypeArgs
+	case *ast.New:
+		return n.TypeArgs
+	}
+	return nil
+}
+
+// erasedSpans reads the file once for what the uses of its imports are
+// judged by. erased are the spans whose text the output does not have: a
+// `type` declaration with its docblock, the mention of an alias in a type
+// position with its type arguments, the type arguments of a call. other
+// are the starts of the unqualified names that stand where PHP looks for
+// a function or a constant, a call's callee and a bare constant: PHP
+// resolves those in tables of their own, so a class import is not what
+// they use, whatever they spell.
+func (e *emitter) erasedSpans(f *ast.File) (erased []ast.Span, other map[int]bool) {
+	// A name is a class's where the tree holds it as one; every other
+	// name of an expression is a function's or a constant's.
+	class := map[*ast.Name]bool{}
+	hold := func(x ast.Expr) {
+		if n, ok := x.(*ast.Name); ok {
+			class[n] = true
+		}
+	}
+	var names []*ast.Name
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.TypeAlias:
+			erased = append(erased, e.aliasDeclaration(n))
+			return false
+		case *ast.NamedType:
+			class[n.Name] = true
+			if e.docResolver(n.S.Start).TypeAlias(n.Name) != nil {
+				erased = append(erased, n.S)
+				return false
+			}
+		case *ast.New:
+			hold(n.Class)
+		case *ast.StaticCall:
+			hold(n.Class)
+		case *ast.ClassConstFetch:
+			hold(n.Class)
+		case *ast.StaticPropertyFetch:
+			hold(n.Class)
+		case *ast.Instanceof:
+			hold(n.Class)
+		case *ast.Attribute:
+			class[n.Name] = true
+		case *ast.TraitUse:
+			for _, name := range n.Names {
+				class[name] = true
+			}
+			for _, a := range n.Adaptations {
+				if a.Trait != nil {
+					class[a.Trait] = true
+				}
+				for _, name := range a.InsteadOf {
+					class[name] = true
+				}
+			}
+		case *ast.Catch:
+			for _, name := range n.Types {
+				class[name] = true
+			}
+		case *ast.Use:
+			return false // an import's own name is no use
+		case *ast.Namespace:
+			if n.Name != nil {
+				class[n.Name] = true // nor is the namespace's
+			}
+		case *ast.Name:
+			names = append(names, n)
+		}
+		if args := callTypeArgs(n); len(args) > 0 {
+			erased = append(erased, ast.Span{Start: args[0].Span().Start, End: args[len(args)-1].Span().End})
+		}
+		return true
+	})
+	other = map[int]bool{}
+	for _, n := range names {
+		if !class[n] && len(n.Parts) == 1 && n.Kind == ast.NameUnqualified {
+			other[n.S.Start] = true
+		}
+	}
+	return erased, other
+}
+
+// erasedOnly returns, among the lower-cased names the class imports of one
+// namespace give, those that erased names alone use: used somewhere in the
+// namespace, and nowhere the output keeps. The uses are the ones the
+// checker counts (program.ImportUses), but for a function's or a
+// constant's name, which is no use of a class import, and for a use in
+// another namespace block of the file.
+func (e *emitter) erasedOnly(f *ast.File, statements []ast.Span, named map[string][]*ast.UseItem, scope *program.Scope, erased []ast.Span, other map[int]bool) map[string]bool {
+	within := func(s ast.Span) bool {
+		for _, span := range erased {
+			if span.Start <= s.Start && s.End <= span.End {
+				return true
+			}
+		}
+		return false
+	}
+	idents := map[int]bool{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok {
+			idents[id.S.Start] = true
+		}
+		return true
+	})
+	wanted := make(map[string]bool, len(named))
+	for name := range named {
+		wanted[name] = true
+	}
+	file := e.opts.File
+	gone := map[string]bool{}
+	program.ImportUses(e.src, e.tokens(), statements, idents, wanted, func(name string, at ast.Span, comment bool) bool {
+		if file.ScopeAt(at.Start) != scope || !comment && other[at.Start] {
+			return true // no use of this import
+		}
+		kept := !within(at)
+		if kept && comment && bytes.HasPrefix(e.src[at.Start:at.End], []byte("/**")) {
+			// A docblock keeps the name unless the emitter expands every
+			// alias that mentions it.
+			written := translateDocWith(string(e.src[at.Start:at.End]), e.aliasExpander(at.Start))
+			kept = program.Mentions(strings.ToLower(written), name)
+		}
+		if kept {
+			delete(gone, name)
+			return false // the output uses the import: nothing more to ask
+		}
+		gone[name] = true
+		return true
+	})
+	return gone
+}
+
+// aliasDeclaration is the span a `type` declaration is removed with: the
+// statement, and the docblock that documents it with whatever comments
+// stand between the two. PHP attaches a doc comment to the declaration
+// after it across other comments, so a docblock left behind a `// note`
+// would be the next class's.
+func (e *emitter) aliasDeclaration(a *ast.TypeAlias) ast.Span {
+	s := a.S
+	if a.Doc == "" {
+		return s
+	}
+	at := bytes.LastIndex(e.src[:s.Start], []byte(a.Doc))
+	if at < 0 {
+		return s
+	}
+	for _, t := range lexer.Tokenize(e.src[at+len(a.Doc):s.Start], lexer.ModePhaenon) {
+		if t.Kind != token.EOF && !t.Kind.IsTrivia() {
+			return s // the same text, above an earlier declaration
+		}
+	}
+	s.Start = at
+	return s
+}
+
+// dropImports removes the items of a use statement that drop holds.
+func (e *emitter) dropImports(u *ast.Use, drop map[*ast.UseItem]bool) {
+	var kept []string
+	for _, it := range u.Items {
+		if drop[it] {
+			if e.droppedImports == nil {
+				e.droppedImports = map[string]bool{}
+			}
+			e.droppedImports[strings.ToLower(importName(it))+"\x00"+strings.ToLower(importTarget(u, it))] = true
+			continue
+		}
+		kept = append(kept, string(e.src[it.S.Start:it.S.End]))
+	}
+	switch {
+	case len(kept) == len(u.Items):
+		return
+	case len(kept) == 0:
+		if e.aliasUses == nil {
+			e.aliasUses = map[*ast.Use]bool{}
+		}
+		e.aliasUses[u] = true
+		e.drop = append(e.drop, u.S)
+		return
+	}
+	// What is left is written anew, on one line: the statement's own
+	// layout was for the list it had.
+	text := "use " + strings.Join(kept, ", ") + ";"
+	if u.Prefix != nil {
+		text = "use " + string(e.src[u.Prefix.S.Start:u.Prefix.S.End]) + "\\{" + strings.Join(kept, ", ") + "};"
+	}
+	if bytes.IndexByte(e.src[u.S.Start:u.S.End], '\n') >= 0 {
+		e.replaceFree(u.S, text)
+		return
+	}
+	e.replace(u.S, text)
+}
+
+// importDropped reports whether the file's import of target under name
+// was left out of the output.
+func (e *emitter) importDropped(name, target string) bool {
+	return e.droppedImports[strings.ToLower(name)+"\x00"+strings.ToLower(target)]
+}

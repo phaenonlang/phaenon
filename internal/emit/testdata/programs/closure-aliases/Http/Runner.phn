@@ -1,0 +1,30 @@
+namespace Shop\Http;
+
+use Shop\Orders\Chooser;
+use Shop\Orders\Handler;
+use Shop\Orders\MaybeStep;
+use Shop\Orders\Packet;
+use Shop\Orders\Step;
+
+// This namespace does not import Closure: a bare `Closure` in the output
+// would be Shop\Http\Closure, a class that does not exist.
+final class Runner
+{
+    run(Handler $h, int $x): int => ($h['then'] ?? $h['run'])($x);
+
+    step(Step $s, int $x): int => $s($x);
+
+    maybe(MaybeStep $s, int $x): int => $s === null ? $x : $s($x);
+
+    make(int $by): Step => fn(int $x): int => $x + $by;
+
+    choose(Chooser $choose, Step ...$steps): MaybeStep => count($steps) < 2 ? null : $choose($steps[0], $steps[1]);
+
+    encode(Packet $packet): string => $packet['encode']($packet['body']) . bin2hex($packet['checksum'] ?? (bytes) '');
+
+    /**
+     * @param list<Step> $steps
+     * @return array{first?: Step, count: int}
+     */
+    summary(array $steps): array => $steps === [] ? ['count' => 0] : ['first' => $steps[0], 'count' => count($steps)];
+}

@@ -808,6 +808,7 @@ func migrateCmd(args []string) {
 	// found through Composer. Files phn generated stay out of it; their
 	// .phn declares the same classes.
 	var prog *program.Program
+	importersUnknown := false
 	if !*keepDoc {
 		var model []string
 		for _, in := range files {
@@ -821,7 +822,18 @@ func migrateCmd(args []string) {
 			}
 			model = append(model, in)
 		}
+		importers, known := aliasImporters(proj, files)
+		importersUnknown = !known
+		model = append(model, importers...)
 		prog, _ = loadProgram(model, target, false)
+	}
+	// The files this run rewrites, as the model holds them: an alias one
+	// of them declares is lifted, and so is what imports it.
+	migrating := map[*program.File]bool{}
+	for _, in := range files {
+		if f := modelFile(prog, in); f != nil {
+			migrating[f] = true
+		}
 	}
 	// Each file is prepared — tags stripped, docblocks lifted — then all of
 	// them go through the pipes codemod together, which type-checks them
@@ -842,7 +854,7 @@ func migrateCmd(args []string) {
 			fail("%v", err)
 		}
 		j := &job{in: in, dst: in, src: src}
-		j.opts = migrate.Options{Generics: !*keepDoc, KeepPublic: *keepPublic, Layout: !*keepLayout, Stats: &stats, Program: prog, File: modelFile(prog, in)}
+		j.opts = migrate.Options{Generics: !*keepDoc, KeepPublic: *keepPublic, Layout: !*keepLayout, Stats: &stats, Program: prog, File: modelFile(prog, in), Migrating: migrating, ImportersUnknown: importersUnknown}
 		if strings.HasSuffix(in, ".phn") {
 			j.phn = src
 			j.opts.KeepLines = true // a .phn keeps its first lines

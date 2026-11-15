@@ -386,9 +386,9 @@ func (b *testBuilder) named(t *ast.NamedType, path []int) *check {
 			}
 			return fn("is_iterable", path, types.TIterable)
 		}
-		if x.res.FileAlias(name) != nil {
-			return b.typed(x.res.Native(t), path, t.S, b.src(t.S))
-		}
+	}
+	if x.res.TypeAlias(t.Name) != nil {
+		return b.typed(x.res.Native(t), path, t.S, b.src(t.S))
 	}
 	// A class, an interface, an enum, self, static or parent, as written.
 	resolved := x.res.Native(t)
@@ -445,7 +445,7 @@ func (b *testBuilder) classString(t *ast.NamedType, path []int) *check {
 		return b.cannot(t.S, quoted(b.src(t.S)), whyClass)
 	}
 	name := b.src(n.Name.S)
-	if len(n.Name.Parts) == 1 && n.Name.Kind == ast.NameUnqualified && x.res.FileAlias(n.Name.Parts[0]) != nil {
+	if x.res.TypeAlias(n.Name) != nil {
 		name = "" // an alias of a class: named as PHP knows it below
 	}
 	switch o := of.(type) {

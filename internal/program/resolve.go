@@ -3,7 +3,6 @@ package program
 import (
 	"math"
 	"path"
-	"strconv"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -98,15 +97,6 @@ func (r *Resolver) NativeArgs(ts []ast.TypeExpr) []types.Type {
 	return out
 }
 
-// FileAlias returns the file-level alias visible under name, resolved.
-func (r *Resolver) FileAlias(name string) *FileAlias {
-	a := r.scope.Alias(name)
-	if a != nil && a.state != 2 {
-		r.fileAlias(name, nil)
-	}
-	return a
-}
-
 // Class returns the resolver's current class (nil outside a class).
 func (r *Resolver) Class() *Class { return r.class }
 
@@ -164,11 +154,12 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 			if a, ok := r.alias(t.Name.Parts[0]); ok {
 				return a
 			}
-			if a, ok := r.fileAlias(t.Name.Parts[0], args); ok {
-				return a
-			}
 		}
-		return r.classType(r.scope.ResolveClass(t.Name), args)
+		name := r.scope.ResolveClass(t.Name)
+		if a, ok := r.typeAlias(name, args); ok {
+			return a
+		}
+		return r.classType(name, args)
 	case *ast.NullableType:
 		return types.Nullable(r.native(t.Type))
 	case *ast.UnionType:
@@ -194,6 +185,22 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 		sh := types.Shape{List: true}
 		for i, el := range t.Elems {
 			sh.Entries = append(sh.Entries, types.ShapeEntry{IsInt: true, IntKey: int64(i), Type: r.native(el)})
+		}
+		return sh
+	case *ast.ShapeType:
+		// array{id: int, name?: string} is the lattice's shape, the one a
+		// docblock's shape is (docType): the two spell one type.
+		sh := types.Shape{Unsealed: t.Unsealed}
+		for _, e := range t.Entries {
+			se := types.ShapeEntry{Type: r.native(e.Type), Optional: e.Optional}
+			if v, ok := types.IntKey(e.Name); e.IsInt {
+				se.IsInt, se.IntKey = true, e.Int
+			} else if ok {
+				se.IsInt, se.IntKey = true, v // a quoted key PHP stores as an int is that int's
+			} else {
+				se.Key = e.Name
+			}
+			sh.Entries = append(sh.Entries, se)
 		}
 		return sh
 	}
@@ -449,7 +456,11 @@ func (r *resolver) docType(n *docblock.TypeNode) types.Type {
 		if strings.EqualFold(strings.TrimPrefix(n.Name, "\\"), "Closure") {
 			return types.TClosure
 		}
-		return r.classType(r.special(r.scope.ResolveClassString(n.Name)), args)
+		name := r.special(r.scope.ResolveClassString(n.Name))
+		if a, ok := r.typeAlias(name, args); ok {
+			return a // a .phn docblock names an alias as a signature does
+		}
+		return r.classType(name, args)
 	case docblock.KindNullable:
 		return types.Nullable(r.docType(n.Args[0]))
 	case docblock.KindUnion:
@@ -503,7 +514,9 @@ func (r *resolver) docType(n *docblock.TypeNode) types.Type {
 					next = e.IntKey + 1
 				}
 			default:
-				if v, err := strconv.ParseInt(e.Key, 10, 64); err == nil {
+				// Only what PHP itself stores as an int: '7', not '07',
+				// '-0' or '+1', which PHPStan keeps as strings too.
+				if v, ok := types.IntKey(e.Key); ok {
 					se.IsInt, se.IntKey = true, v
 				} else {
 					se.Key = e.Key
@@ -778,43 +791,6 @@ func typeParamsOf(native []*ast.TypeParam, doc *docblock.Doc, r *resolver) []*Ty
 		return nativeTypeParams(native, r)
 	}
 	return templatesOf(doc, r)
-}
-
-// fileAlias resolves a file-level `type` alias, instantiating a generic
-// one with args (missing arguments fall back to defaults, then bounds).
-func (r *resolver) fileAlias(name string, args []types.Type) (types.Type, bool) {
-	a := r.scope.Alias(name)
-	if a == nil {
-		return nil, false
-	}
-	switch a.state {
-	case 1:
-		return types.TMixed, true // cyclic alias
-	case 0:
-		a.state = 1
-		ar := r.p.newResolver(a.File, a.Scope, nil, a.Decl.S)
-		a.Params = nativeTypeParams(a.Decl.TypeParams, ar)
-		ImplyMapKeyBounds(a.Params, a.Decl)
-		a.Type = ar.withParams(a.Params).native(a.Decl.Type)
-		a.state = 2
-	}
-	if len(a.Params) == 0 {
-		return a.Type, true
-	}
-	subst := make(map[string]types.Type, len(a.Params))
-	for i, tp := range a.Params {
-		switch {
-		case i < len(args) && args[i] != nil:
-			subst[tp.Name] = args[i]
-		case tp.Default != nil:
-			subst[tp.Name] = tp.Default
-		case tp.Bound != nil:
-			subst[tp.Name] = tp.Bound
-		default:
-			subst[tp.Name] = types.TMixed
-		}
-	}
-	return types.Substitute(a.Type, subst), true
 }
 
 func templatesOf(doc *docblock.Doc, r *resolver) []*TypeParam {

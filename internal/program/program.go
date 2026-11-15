@@ -58,6 +58,8 @@ type Program struct {
 	// Parses, when set, keeps the trees of the files this program parses
 	// for the next program of the same process (ParseCache).
 	Parses *ParseCache
+	// aliases are the type aliases, by qualified name (typealias.go).
+	aliases aliasTable
 }
 
 // Problem is a finding attached to a declaration site.
@@ -811,30 +813,10 @@ type Scope struct {
 	classes   map[string]string // lower alias → FQN
 	functions map[string]string // lower alias → FQN
 	consts    map[string]string // alias → FQN (case-sensitive)
-	aliases   map[string]*FileAlias
 }
 
 func newScope(ns string) *Scope {
 	return &Scope{Namespace: ns, classes: map[string]string{}, functions: map[string]string{}, consts: map[string]string{}}
-}
-
-// Alias returns the file-level type alias declared under name in this
-// scope (case-sensitive, like PHPStan's @phpstan-type), or nil.
-func (s *Scope) Alias(name string) *FileAlias {
-	if s == nil || s.aliases == nil {
-		return nil
-	}
-	return s.aliases[name]
-}
-
-// Aliases lists the scope's type aliases in declaration order.
-func (s *Scope) Aliases() []*FileAlias {
-	out := make([]*FileAlias, 0, len(s.aliases))
-	for _, a := range s.aliases {
-		out = append(out, a)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Decl.S.Start < out[j].Decl.S.Start })
-	return out
 }
 
 // Special class names that never resolve through the namespace.

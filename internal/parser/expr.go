@@ -975,7 +975,7 @@ func (p *Parser) closure() ast.Expr {
 		p.expect(token.Kind(')'))
 	}
 	if p.accept(token.Kind(':')) {
-		c.ReturnType = p.typeExpr()
+		c.ReturnType = p.typeBeforeBody(false)
 	}
 	c.Body = p.block()
 	c.S = p.span(start)

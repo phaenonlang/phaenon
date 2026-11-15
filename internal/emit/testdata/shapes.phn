@@ -1,0 +1,91 @@
+namespace App\Orders;
+
+// A shape with a name (design/collections.md §6): `array` in the
+// signature, the shape in the docblock PHPStan reads, and nothing that
+// runs. The `type` declarations leave no trace in the output.
+
+type Row = array{id: int, name?: string};
+type Order = array{id: int, lines: list<array{sku: string, qty: int}>, buyer: ?Customer};
+type Page<T> = array{items: list<T>, total: int, next?: string};
+type Open = array{id: int, ...};
+type Keys = array{
+    class: string,
+    'a-b': int,
+    '$set'?: bool,
+    0: int,
+    -1: string,
+    '7': float,
+};
+type None = array{};
+type Any = array{...};
+
+/**
+ * What the orders are sorted by. The docblock of a `type` declaration goes
+ * with it: left behind, this one would document the class below.
+ *
+ * @deprecated sort by Row
+ */
+type Rank = array{by: string, down?: bool};
+
+/**
+ * A docblock is the declaration's across the comments between them, as PHP
+ * attaches it: this one goes with its `type` too, and the notes with it.
+ *
+ * @internal
+ */
+// a note on the alias
+# and another
+type Mark = array{at: int};
+final class Customer
+{
+    __construct(public readonly string $name) {}
+}
+
+final class Orders
+{
+    /** @var map<int, Row> */
+    private array $rows = [];
+
+    find(int $id): ?Row => $this->rows[$id] ?? null;
+
+    add(Row $row): void
+    {
+        $this->rows[$row['id']] = $row;
+    }
+
+    page(int $offset): Page<Row> => ['items' => array_slice(array_values($this->rows), $offset), 'total' => count($this->rows)];
+
+    first<T>(Page<T> $page): ?T => $page['items'][0] ?? null;
+
+    quantity(Order $order): int
+    {
+        $qty = 0;
+        foreach ($order['lines'] as $line) {
+            $qty += $line['qty'];
+        }
+        return $qty + ($order['buyer'] === null ? 0 : strlen($order['buyer']->name));
+    }
+
+    open(Open $open): mixed => $open['more'] ?? $open['id'];
+
+    keys(Keys $k): string => $k['class'] . $k[-1] . ($k['a-b'] + $k[0] + (int) $k[7]);
+
+    none(): None => [];
+
+    any(Any $any): int => count($any);
+
+    rank(Rank $rank): string => $rank['by'];
+
+    mark(Mark $mark): int => $mark['at'];
+
+    /**
+     * A docblock's shape may hold a named one.
+     *
+     * @return array{total: int, rows: list<Row>}
+     */
+    totals(): array => ['total' => count($this->rows), 'rows' => array_values($this->rows)];
+}
+
+function rows(Row ...$rows): list<Row> => array_values($rows);
+
+$byId = fn(Row $a, Row $b): int => $a['id'] <=> $b['id'];

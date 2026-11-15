@@ -663,10 +663,15 @@ func (p *Parser) typeAlias(attrs []*ast.AttrGroup) ast.Stmt {
 	start := p.tok().Start
 	doc := p.takeDoc()
 	p.expect(token.T_TYPE)
-	t := &ast.TypeAlias{Doc: doc, Attrs: attrs, Name: p.stringIdent()}
+	if len(attrs) > 0 {
+		// An alias is erased: nothing in the compiled PHP could carry the
+		// attribute, which would land on whatever declaration comes next.
+		p.errorAt(p.toks[p.indexOfOffset(attrs[0].S.Start)], "a `type` declaration takes no attribute: an alias is erased, and nothing in the compiled PHP could carry one")
+	}
+	t := &ast.TypeAlias{Doc: doc, Name: p.stringIdent()}
 	t.TypeParams = p.typeParams()
 	p.expect(token.Kind('='))
-	t.Type = p.typeExpr()
+	t.Type = p.aliasedType()
 	p.semi()
 	t.S = p.span(start)
 	return t
@@ -833,7 +838,7 @@ func (p *Parser) functionDecl(attrs []*ast.AttrGroup) ast.Stmt {
 	f.TypeParams = p.typeParams()
 	f.Params = p.params()
 	if p.accept(token.Kind(':')) {
-		f.ReturnType = p.typeExpr()
+		f.ReturnType = p.typeBeforeBody(false)
 	}
 	f.Throws = p.throwsClause()
 	if f.Arrow = p.exprBody(); f.Arrow != nil {
@@ -964,7 +969,7 @@ func (p *Parser) anonymousClass() *ast.ClassDecl {
 
 func (p *Parser) classHeader(c *ast.ClassDecl) {
 	if c.Kind == ast.KindEnum && p.accept(token.Kind(':')) {
-		c.BackingType = p.typeExpr()
+		c.BackingType = p.typeBeforeBody(false)
 	}
 	if p.accept(token.T_EXTENDS) {
 		for {
@@ -1081,7 +1086,7 @@ func (p *Parser) classMember() ast.ClassMember {
 		m.TypeParams = p.typeParams()
 		m.Params = p.params()
 		if p.accept(token.Kind(':')) {
-			m.ReturnType = p.typeExpr()
+			m.ReturnType = p.typeBeforeBody(true)
 		}
 		m.Throws = p.throwsClause()
 		switch {

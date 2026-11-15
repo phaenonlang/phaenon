@@ -40,6 +40,14 @@ type Parser struct {
 	// expression instead of starting Phaenon's `x as T`. Nested contexts
 	// (parentheses, argument lists, closures) clear it through expr().
 	noAs bool
+	// shapes and bodyType say where a type being parsed stands, for the
+	// brace after `array` (shape.go).
+	shapes     bool
+	bodyType   int
+	memberBody bool
+	// misplaced is the first shape written outside a `type` declaration:
+	// it is read, and reported when the parse ends.
+	misplaced *Error
 }
 
 // Parse parses a whole file.
@@ -50,7 +58,7 @@ func Parse(src []byte, mode lexer.Mode) (file *ast.File, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if b, ok := r.(bailout); ok {
-				file, err = nil, b.err
+				file, err = nil, p.firstError(b.err)
 				return
 			}
 			panic(r)
@@ -59,7 +67,19 @@ func Parse(src []byte, mode lexer.Mode) (file *ast.File, err error) {
 	f := &ast.File{}
 	f.Stmts = p.statementList(token.EOF)
 	f.S = ast.Span{Start: 0, End: len(src)}
+	if p.misplaced != nil {
+		return nil, p.misplaced
+	}
 	return f, nil
+}
+
+// firstError is the error a parse that stopped at err reports: err, or the
+// misplaced shape read before it (shape.go).
+func (p *Parser) firstError(err *Error) *Error {
+	if p.misplaced != nil && p.misplaced.Offset <= err.Offset {
+		return p.misplaced
+	}
+	return err
 }
 
 // ParseExpr parses a standalone expression (used by tests and tooling).
@@ -70,7 +90,7 @@ func ParseExpr(src []byte, mode lexer.Mode) (expr ast.Expr, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if b, ok := r.(bailout); ok {
-				expr, err = nil, b.err
+				expr, err = nil, p.firstError(b.err)
 				return
 			}
 			panic(r)
@@ -78,6 +98,9 @@ func ParseExpr(src []byte, mode lexer.Mode) (expr ast.Expr, err error) {
 	}()
 	e := p.expr()
 	p.expect(token.EOF)
+	if p.misplaced != nil {
+		return nil, p.misplaced
+	}
 	return e, nil
 }
 
@@ -424,6 +447,12 @@ func (p *Parser) singleType() ast.TypeExpr {
 	if p.mode == lexer.ModePhaenon {
 		if len(name.Parts) == 1 && name.Parts[0] == "Closure" && (p.at(token.Kind('(')) || p.atCast()) {
 			return p.closureType(start)
+		}
+		if p.at(token.Kind('{')) && p.shapeAhead(name) {
+			return p.shapeType(start)
+		}
+		if p.at(token.Kind('-')) {
+			p.hyphenatedShape(name)
 		}
 		if p.at(token.Kind('<')) {
 			nt.TypeArgs = p.typeArgs()

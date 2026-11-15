@@ -1,0 +1,20 @@
+namespace Shop\Http;
+
+use Shop\Model\Customer;
+use Shop\Model\Money;
+use Shop\Model\Receipt;
+use Shop\Orders\Page;
+use Shop\Orders\Row;
+
+// The same classes, each used once more where the output keeps the name:
+// a signature, a `new`, a docblock type the emitter does not expand. Their
+// imports stay; the aliases' go.
+
+function buyer(Page<Customer> $page): ?Customer => $page['items'][0] ?? null;
+
+function paid(Row $row): Money => $row['paid'] ?? new Money(0);
+
+/**
+ * @param list<Receipt> $receipts
+ */
+function receipts(array $receipts, Page<Receipt> $page): int => count($receipts) + $page['total'];

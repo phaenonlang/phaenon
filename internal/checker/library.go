@@ -131,9 +131,12 @@ func (x *fnCtx) declaredTypes(t ast.TypeExpr, erased bool) {
 				}
 				return
 			}
-			if x.res.TypeParam(t.Name.Parts[0]) != nil || x.res.FileAlias(t.Name.Parts[0]) != nil {
+			if x.res.TypeParam(t.Name.Parts[0]) != nil {
 				return
 			}
+		}
+		if x.res.TypeAlias(t.Name) != nil {
+			return // a type alias: the classes it names are judged at its declaration
 		}
 		// What the name denotes: a class, or an alias a class docblock
 		// declares or imports (@phpstan-type, @phpstan-import-type), self,
@@ -166,6 +169,10 @@ func (x *fnCtx) declaredTypes(t ast.TypeExpr, erased bool) {
 	case *ast.TupleType:
 		for _, m := range t.Elems {
 			x.declaredTypes(m, true)
+		}
+	case *ast.ShapeType:
+		for _, e := range t.Entries {
+			x.declaredTypes(e.Type, true)
 		}
 	}
 }

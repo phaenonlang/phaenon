@@ -1,0 +1,10 @@
+namespace Acme;
+
+// A project file already in Phaenon: an earlier migration lifted its
+// @phpstan-type, so the alias is the namespace's.
+type Price = array{amount: int, currency: string};
+
+final class Prices
+{
+    of(Item $item): Price => ['amount' => 1, 'currency' => 'EUR'];
+}

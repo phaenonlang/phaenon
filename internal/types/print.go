@@ -21,10 +21,86 @@ func Print(t Type) string {
 // PrintQualified prints t for a docblock in emitted code: like Print, but
 // class names carry a leading backslash so they resolve regardless of the
 // file's imports.
+//
+// The text is PHPStan's to read, in a file of any namespace, so it holds no
+// word PHPStan would take for a class of that namespace: Closure is
+// \Closure, and bytes, which PHPStan has no type for, is string
+// (design/strings.md §5), as the emitter writes both for a type spelled in
+// a signature.
 func PrintQualified(t Type) string {
 	var b strings.Builder
-	(&printer{b: &b, qualified: true}).print(t, false)
+	(&printer{b: &b, qualified: true}).print(forPHPStan(t), false)
 	return b.String()
+}
+
+// PrintQualifiedMember is PrintQualified for a type that is written among
+// the members of a union, or of an intersection: the text an alias expands
+// to where the source wrote `Alias|null` or `A&Alias`. What would merge
+// with its neighbours is bracketed: an intersection in a union
+// (`(\A&\B)|null`), a union in an intersection, a callable's signature in
+// either. A union stays bare among the members of a union, and an
+// intersection among those of an intersection.
+func PrintQualifiedMember(t Type, intersection bool) string {
+	t = forPHPStan(t)
+	nested := true
+	switch t.(type) {
+	case Union:
+		nested = intersection
+	case Intersection:
+		nested = !intersection
+	}
+	var b strings.Builder
+	(&printer{b: &b, qualified: true}).print(t, nested)
+	return b.String()
+}
+
+// PrintQualifiedNullable is PrintQualified for the nullable of t, the text
+// an alias expands to where the source wrote `?Alias`: `?` before a type
+// that takes it (`?array{id: int}`, `?\App\Row`), and the union with null
+// where `?` would bind to less than the type or meet another `?`: a
+// union (`int|string|null`), a nullable type (`int|null`), an
+// intersection (`(\A&\B)|null`), a callable's signature
+// (`(\Closure(int): int)|null`).
+func PrintQualifiedNullable(t Type) string {
+	switch v := t.(type) {
+	case Union, Intersection, Null, Mixed:
+	case Callable:
+		if !v.HasSig {
+			return "?" + PrintQualified(t)
+		}
+	default:
+		return "?" + PrintQualified(t)
+	}
+	return PrintQualified(Nullable(t))
+}
+
+// forPHPStan rewrites what PHPStan has no type for: bytes is string.
+func forPHPStan(t Type) Type {
+	return MapDeep(t, func(m Type) Type {
+		switch v := m.(type) {
+		case Bytes:
+			return TString
+		case Intersection:
+			// string&bytes, text known to be both, is string twice now.
+			var kept []Type
+			text := false
+			for _, member := range v.Types {
+				if member == TString {
+					if text {
+						continue
+					}
+					text = true
+				}
+				kept = append(kept, member)
+			}
+			if len(kept) == 1 {
+				return kept[0]
+			}
+			v.Types = kept
+			return v
+		}
+		return m
+	})
 }
 
 // PrintPhaenon prints t as a .phn would write it (design/generics.md §11's
@@ -179,6 +255,14 @@ func (pr *printer) print(t Type, nested bool) {
 			b.WriteString(")")
 			return
 		}
+		if pr.qualified && !t.List && t.Unsealed && len(t.Entries) == 0 {
+			// `array{...}` names no key and admits every one: any array.
+			// PHPStan reads the shape so and then asks for the value type
+			// it does not state (missingType.iterableValue); array<mixed>
+			// is the same type with it stated.
+			b.WriteString("array<mixed>")
+			return
+		}
 		if t.List {
 			b.WriteString("list{")
 		} else {
@@ -266,10 +350,24 @@ func (pr *printer) print(t Type, nested bool) {
 		b.WriteString("::")
 		b.WriteString(t.Case)
 	case Callable:
+		// A signature's return type takes what follows it. In the text
+		// PHPStan reads, a callable among the members of a union or an
+		// intersection stands in parentheses, `(\Closure(int): int)|null`,
+		// and so does a return type that is one.
+		if nested && t.HasSig && pr.qualified {
+			b.WriteString("(")
+			defer b.WriteString(")")
+		}
 		if t.Pure {
 			b.WriteString("pure-")
 		}
 		if t.Closure {
+			// Closure is a class: where class names are qualified it is
+			// \Closure, which a file of any namespace reads as PHP's.
+			// pure-Closure is PHPStan's word for one, and no name.
+			if pr.qualified && !t.Pure {
+				b.WriteByte('\\')
+			}
 			b.WriteString("Closure")
 		} else {
 			b.WriteString("callable")
@@ -302,7 +400,8 @@ func (pr *printer) print(t Type, nested bool) {
 			if t.Return == nil {
 				b.WriteString("mixed")
 			} else {
-				pr.print(t.Return, false)
+				// `Closure(U): (A|B)`, not `(Closure(U): A)|B`.
+				pr.print(t.Return, pr.qualified)
 			}
 		}
 	case Iterable:
@@ -424,6 +523,9 @@ func Native(t Type) (string, bool) {
 			if !ok {
 				return "", false
 			}
+			if _, intersection := m.(Intersection); intersection {
+				s = "(" + s + ")" // PHP's DNF: an intersection in a union is bracketed
+			}
 			parts = append(parts, s)
 		}
 		if hasNull && len(parts) == 1 && !strings.ContainsAny(parts[0], "|&") && parts[0] != "mixed" {
@@ -453,6 +555,10 @@ func Native(t Type) (string, bool) {
 		return "\\" + t.Class, true
 	case Unknown:
 		return "\\" + t.Name, true
+	case Callable:
+		if t.Closure {
+			return "\\Closure", true // a class, named as PHP knows it from any namespace
+		}
 	}
 	return Print(t), true
 }

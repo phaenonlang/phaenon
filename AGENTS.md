@@ -204,12 +204,17 @@ from the package by hand.
   `// want P2103` on the offending line (several codes comma-separated, optional `"message
   substring"`); the set of (line, code) pairs must match exactly. Vendor fixtures live under
   `testdata/vendor/` (PSR-4 root `Acme\`). The file's opening comment lines may say `// target: 8.6`
-  (the floor, 8.5, otherwise) and `// deprecations: on`.
+  (the floor, 8.5, otherwise) and `// deprecations: on`. A rule that takes several files, as a type
+  alias found from another file does, has a directory under `testdata/programs/`: every `.phn` in
+  it is checked as one program (`TestGoldenPrograms`), each with its own `// want` comments.
 - **PHPStan parity:** the checker may be stricter than PHPStan, never more lenient. A PHPStan rule
   Phaenon deliberately lacks goes into the allow-list in `internal/checker/phpstan_test.go` with its
   reason.
 - **Emitter goldens** `internal/emit/testdata/X.phn` → `X.php`: regenerate with `PHAENON_UPDATE=1`,
-  never edit by hand, and read the diff before committing it, the map line included.
+  never edit by hand, and read the diff before committing it, the map line included. A directory
+  under `testdata/programs/` is one program of several files, each `X.phn` compiled to the `X.php`
+  beside it (`TestPrograms`), and PHPStan analyses its outputs together; a `run.php` in the
+  directory is run under php and held to `run.out`, for what PHP checks only when code runs.
 - **Line map vectors** `internal/linemap/testdata/vectors.json` are the reference of the format's
   three readers; the PhpStorm plugin and `phaenon/debug` keep copies, which
   `TestVectorCopiesFresh` compares.

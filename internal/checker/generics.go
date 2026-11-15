@@ -74,6 +74,8 @@ func (x *fnCtx) checkTypeExpr(t ast.TypeExpr) {
 		for _, m := range t.Elems {
 			x.checkTypeExpr(m)
 		}
+	case *ast.ShapeType:
+		x.checkShape(t)
 	}
 }
 
@@ -125,10 +127,10 @@ func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 			}
 			return
 		}
-		if a := x.res.FileAlias(name); a != nil {
-			x.checkArity(t, name, a.Params, given)
-			return
-		}
+	}
+	if a := x.res.TypeAlias(t.Name); a != nil {
+		x.checkArity(t, a.Decl.Name.Name, a.Params, given)
+		return
 	}
 	name := x.res.ClassName(t.Name)
 	switch name {
@@ -495,20 +497,6 @@ func (x *fnCtx) checkSignatureTypes(tps []*ast.TypeParam, params []*ast.Param, r
 		x.checkTypeExpr(p.Type)
 	}
 	x.checkTypeExpr(ret)
-}
-
-// checkTypeAlias validates a `type` statement.
-func (x *fnCtx) checkTypeAlias(a *ast.TypeAlias) {
-	decl := x.res.FileAlias(a.Name.Name)
-	if decl == nil || decl.Decl != a {
-		x.report(a.Name.S, P2511, "type alias %s is already declared", a.Name.Name)
-		return
-	}
-	saved := x.res
-	x.res = x.res.WithParams(decl.Params)
-	x.checkTypeParams(a.TypeParams)
-	x.checkTypeExpr(a.Type)
-	x.res = saved
 }
 
 // ------------------------------------------------------------------ is / as

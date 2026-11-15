@@ -1,0 +1,15 @@
+namespace Shop\Orders;
+
+// Aliases that hold a closure type. Closure is a class, so the files that
+// use them, of whatever namespace and with whatever imports, get it by
+// its qualified name: in the signature and in the docblock.
+
+type Step = Closure(int): int;
+type MaybeStep = ?Step;
+type Handler = array{name: string, run: Closure(int): int, then?: Step};
+type Chooser = Closure(Step, Step): ?Step;
+
+// bytes is Phaenon's word for a string of binary data: PHPStan has no
+// type for it, and would read the word as a class of the using file's
+// namespace too.
+type Packet = array{body: bytes, checksum?: ?bytes, encode: Closure(bytes): string};

@@ -1,0 +1,168 @@
+namespace Shp;
+
+// A shape gets syntax with a name: `array{…}` in the right-hand side of a
+// `type` declaration (design/collections.md §6). The type is the
+// lattice's shape, the one a docblock's shape and an array literal are,
+// with the rules a docblock shape has.
+
+final class Customer
+{
+    public string $name = '';
+}
+
+type Row = array{id: int, name?: string};
+type Order = array{id: int, lines: list<array{sku: string, qty: int}>, buyer: ?Customer};
+type Page<T> = array{items: list<T>, total: int, next?: string};
+type Open = array{id: int, ...};
+type Keys = array{class: string, 'a-b': int, '$set'?: bool, 0: int, -1: string, '7': float};
+type None = array{};
+
+function row(Row $row): string
+{
+    $id = $row['id'] + 1;
+    // An optional key may be absent: reading it is a read of what may not
+    // be there, as with a docblock's shape.
+    $name = $row['name'] ?? 'nobody';
+    return $name . $id;
+}
+
+function build(int $id): Row
+{
+    return ['id' => $id];
+}
+
+function named(int $id): Row
+{
+    return ['id' => $id, 'name' => 'a'];
+}
+
+function wrongValue(): Row
+{
+    return ['id' => 'one']; // want P2202
+}
+
+function missingKey(): Row
+{
+    return ['name' => 'a']; // want P2202
+}
+
+// A literal with a key the shape does not name is accepted where the shape
+// is expected, as it is for a docblock's shape (design/checker.md §10
+// keeps the stricter rule an open question).
+function excess(): Row
+{
+    return ['id' => 1, 'age' => 30];
+}
+
+// `name?: string` and `name: ?string` differ: an absent key against a
+// present null.
+type Nullable = array{name: ?string};
+
+function absent(): Nullable
+{
+    return []; // want P2202
+}
+
+function present(): Nullable
+{
+    return ['name' => null];
+}
+
+// A sealed shape names its keys: another one does not exist. An unsealed
+// one admits keys it does not name, which read as mixed.
+function sealed(Row $row): mixed
+{
+    return $row['age']; // want P2313
+}
+
+function unsealed(Open $open): mixed
+{
+    return $open['age'];
+}
+
+function nested(Order $order): int
+{
+    $qty = 0;
+    foreach ($order['lines'] as $line) {
+        $qty += $line['qty'];
+    }
+    return $qty + ($order['buyer'] === null ? 0 : strlen($order['buyer']->name));
+}
+
+function page(Page<Row> $page): int
+{
+    $first = $page['items'][0]['id'] ?? 0;
+    return $first + $page['total'];
+}
+
+function generic<T>(Page<T> $page): ?T
+{
+    return $page['items'][0] ?? null;
+}
+
+// The keys are the docblock grammar's: a name, reserved words included, a
+// quoted string for what is no name, an integer. A quoted decimal integer
+// is that integer's key.
+function keys(Keys $k): string
+{
+    $n = $k['a-b'] + $k[0] + (int) $k[7];
+    return $k['class'] . $k[-1] . $n;
+}
+
+function none(): None
+{
+    return [];
+}
+
+// An alias names a type and makes no new one: the shape a docblock spells
+// is the same type, and two aliases with one right-hand side are
+// interchangeable.
+type Line = array{id: int, name?: string};
+
+/**
+ * @param array{id: int, name?: string} $row
+ */
+function structural(array $row, Line $line): Row
+{
+    return $row['id'] > 0 ? $row : $line;
+}
+
+/**
+ * A docblock's shape may hold a named one.
+ *
+ * @return array{total: int, rows: list<Row>}
+ */
+function totals(Row $row): array
+{
+    return ['total' => 1, 'rows' => [$row]];
+}
+
+// A key is written once, in whichever spelling.
+type Twice = array{id: int, id: string}; // want P2511 "shape key id is written twice"
+type Quoted = array{id: int, 'id'?: int}; // want P2511
+type Numbered = array{1: int, '1': int}; // want P2511 "'1' is written twice"
+
+// Only a string PHP itself stores as an integer key is one: '7' is the key
+// 7, while '07', '-0' and '+1' stay strings, in the syntax and in a
+// docblock's shape alike, as PHPStan reads them.
+type Padded = array{1: int, '01': string, 0: int, '-0': string, '+1': string};
+
+/**
+ * @param array{'01': string, '7': int} $doc
+ */
+function padded(Padded $p, array $doc): string
+{
+    $n = $p[1] + $p[0] + $doc[7];
+    $s = $p['01'] . $p['-0'] . $p['+1'] . $doc['01'];
+    return $s . $n . $doc[1]; // want P2313
+}
+
+// The types of the entries are judged as any type is.
+type Lost = array{who: Missing}; // want P2001
+type Wide = array{ids: list<int, int>}; // want P3001
+
+// A shape is a type and no class, like the alias that names it.
+function value(): object
+{
+    return new Row(); // want P2001 "Row is a type alias"
+}

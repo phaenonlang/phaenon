@@ -156,6 +156,16 @@ func (s *spacer) node(n ast.Node) {
 		s.tight(n.S)
 	case *ast.TupleType:
 		s.tight(n.S)
+	case *ast.ShapeType:
+		// A shape stands in a type alias, which spaces it with the rest of
+		// its type: nothing inside the braces, a space after a colon and a
+		// comma, `?` against its key. A trailing comma is the exception to
+		// the comma's space: the brace closes against it.
+		if end := s.last(n.S.End); end > 0 && s.text(end) == "}" && s.text(end-1) == "," {
+			if _, spaced := s.want[end-1]; spaced {
+				s.set(end-1, "")
+			}
+		}
 	case *ast.Call:
 		s.typeArgs(n.TypeArgs)
 	case *ast.MethodCall:

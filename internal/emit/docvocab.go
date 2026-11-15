@@ -29,16 +29,27 @@ import (
 // generated text and is left to it.
 func (e *emitter) translateWrittenDocs() {
 	for _, t := range lexer.Tokenize(e.src, lexer.ModePhaenon) {
-		if t.Kind != token.T_DOC_COMMENT {
-			continue
+		if t.Kind != token.T_DOC_COMMENT || e.dropped(t.Start) {
+			continue // no docblock, or one that goes with its declaration
 		}
-		for _, ed := range docTranslations(string(e.src[t.Start:t.End])) {
+		for _, ed := range docTranslations(string(e.src[t.Start:t.End]), e.aliasExpander(t.Start)) {
 			span := ast.Span{Start: t.Start + ed.Start, End: t.Start + ed.End}
 			if !e.edited(span) {
 				e.replace(span, ed.text)
 			}
 		}
 	}
+}
+
+// dropped reports whether offset off lies in a statement the compiler
+// removes.
+func (e *emitter) dropped(off int) bool {
+	for _, s := range e.drop {
+		if s.Start <= off && off < s.End {
+			return true
+		}
+	}
+	return false
 }
 
 // edited reports whether an edit already touches s.
@@ -53,8 +64,27 @@ func (e *emitter) edited(s ast.Span) bool {
 
 // translateDoc is docTranslations applied to a docblock's text (or to the
 // content of a one-line docblock, which addDoc copies into a new one).
-func translateDoc(doc string) string {
-	eds := docTranslations(doc)
+func translateDoc(doc string) string { return translateDocWith(doc, nil) }
+
+// aliasExpand gives the text a mention of an alias stands for in a
+// docblock: the alias's name with the type arguments written after it
+// (`Page<Row>`), where in says it stands. ok is false for a name that is
+// no alias.
+type aliasExpand func(mention string, in mentionContext) (text string, ok bool)
+
+// mentionContext is where a docblock's type mentions an alias: after a `?`,
+// which the expansion takes with it, and among the members of a union or
+// of an intersection. What the alias stands for is spelled for that place
+// (types.PrintQualifiedMember): `?Value` over `int|string` is
+// `int|string|null`, and `AB|null` over `A&B` is `(\A&\B)|null`.
+type mentionContext struct {
+	nullable, union, intersection bool
+}
+
+// translateDocWith is translateDoc with the aliases expand knows written
+// out (aliasExpander).
+func translateDocWith(doc string, expand aliasExpand) string {
+	eds := docTranslations(doc, expand)
 	if len(eds) == 0 {
 		return doc
 	}
@@ -77,20 +107,69 @@ type docEdit struct {
 }
 
 // docTranslations finds the tag types of a docblock that are spelled in
-// Phaenon's vocabulary, as offsets into doc, in order.
-func docTranslations(doc string) []docEdit {
+// Phaenon's vocabulary, as offsets into doc, in order. expand, when set,
+// gives what the name of a type alias stands for.
+func docTranslations(doc string, expand aliasExpand) []docEdit {
 	blank := blankDecorations(doc)
 	var out []docEdit
 	off := 0
 	for _, line := range strings.SplitAfter(blank, "\n") {
+		moved := false // one mention's lines per tag line: a second would need the same place
 		for _, r := range tagTypeRegions(blank, off, off+len(line)) {
-			if text := translateType(doc[r.Start:r.End], blank[r.Start:r.End]); text != doc[r.Start:r.End] {
+			text, lines := translateType(doc[r.Start:r.End], blank[r.Start:r.End], expand)
+			if len(lines) > 0 {
+				if moved {
+					text, _ = translateType(doc[r.Start:r.End], blank[r.Start:r.End], nil)
+				} else {
+					moved = true
+					out = append(out, movedLines(doc, blank, off, r, text, lines))
+					continue
+				}
+			}
+			if text != doc[r.Start:r.End] {
 				out = append(out, docEdit{r, text})
 			}
 		}
 		off += len(line)
 	}
 	return out
+}
+
+// movedLines is the edit of a tag's type, the region r of the line that
+// begins at off, whose translation text lost line breaks: an alias written
+// with its type arguments over several lines is expanded on one, and an
+// edit in place keeps the docblock's lines. The lines the mention gave up,
+// lines being their decorations, go before the tag as bare ` *` lines:
+//
+//   - @param Page<            *
+//   - Customer            *
+//   - > $p                    * @param array{items: list<\Customer>, total: int} $p
+//
+// Nothing PHPStan reads changes by a bare line above a tag, and what
+// follows the type on its last line, the parameter's name, stays beside
+// the type.
+func movedLines(doc, blank string, off int, r ast.Span, text string, lines []string) docEdit {
+	// p is where the tag line's own decoration, `/**` or ` *`, ends.
+	p := off
+	for i := off; i < r.Start; i++ {
+		if doc[i] != blank[i] {
+			p = i + 1
+		}
+	}
+	var b strings.Builder
+	if p == off {
+		// A line without a decoration: the bare lines stand before it.
+		for _, deco := range lines {
+			b.WriteString(deco + "\n")
+		}
+	} else {
+		for _, deco := range lines {
+			b.WriteString("\n" + deco)
+		}
+	}
+	b.WriteString(doc[p:r.Start])
+	b.WriteString(text)
+	return docEdit{ast.Span{Start: p, End: r.End}, b.String()}
 }
 
 // blankDecorations is doc with the comment's own marks — `/**`, `*/` and
@@ -233,8 +312,13 @@ func tagTypeRegions(blank string, start, end int) []ast.Span {
 // translateType spells a piece of type syntax for PHPStan. orig is the
 // text as written, blank the same text with the comment's marks blanked
 // (blankDecorations): the words and brackets are read from blank and
-// replaced in orig, so every other byte stays.
-func translateType(orig, blank string) string {
+// replaced in orig, so every other byte stays. expand gives the type the
+// name of a type alias stands for, with its type arguments when it has
+// them (`Page<Row>`), in PHPStan's spelling: PHPStan knows no alias of a
+// namespace (design/collections.md §4, §6.5). A mention that runs over
+// several lines is expanded on its first: lines are the decorations of the
+// lines it gave up, which the caller owes the docblock (movedLines).
+func translateType(orig, blank string, expand aliasExpand) (text string, lines []string) {
 	type repl struct {
 		start, end int
 		text       string
@@ -288,12 +372,51 @@ func translateType(orig, blank string) string {
 				rs = append(rs, repl{i, j, "class-string"})
 			case w == "closure" && next(j) == '(':
 				rs = append(rs, repl{i, i, "\\"})
+			case expand != nil && s[i] != '$' && !strings.HasPrefix(s[j:], "::"):
+				// The mention is the name and the type arguments that
+				// follow it.
+				end := j
+				if next(j) == '<' {
+					if close, ok := angleEnd(s, j); ok {
+						end = close
+					}
+				}
+				// `?` binds to the mention, and `|` and `&` join it to its
+				// neighbours: the expansion is spelled for where it stands.
+				start, in := i, mentionContext{}
+				if i > 0 && s[i-1] == '?' {
+					start, in.nullable = i-1, true
+				}
+				before := strings.TrimRight(s[:start], " \t\r\n")
+				for _, c := range []byte{next(end), lastByte(before)} {
+					in.union = in.union || c == '|'
+					in.intersection = in.intersection || c == '&'
+				}
+				if text, ok := expand(s[i:end], in); ok {
+					rs = append(rs, repl{start, end, text})
+					// The expansion has no line break: the lines the
+					// mention ran over are given up, their decorations kept.
+					for q := i; q < end; q++ {
+						if orig[q] != '\n' {
+							continue
+						}
+						deco := q + 1
+						for deco < end && (orig[deco] == ' ' || orig[deco] == '\t') {
+							deco++
+						}
+						if deco < end && orig[deco] == '*' {
+							deco++
+						}
+						lines = append(lines, strings.TrimRight(orig[q+1:deco], " \t"))
+					}
+					j = end
+				}
 			}
 		}
 		i = j
 	}
 	if len(rs) == 0 {
-		return orig
+		return orig, nil
 	}
 	sort.Slice(rs, func(a, b int) bool { return rs[a].start < rs[b].start })
 	var b strings.Builder
@@ -304,7 +427,38 @@ func translateType(orig, blank string) string {
 		pos = r.end
 	}
 	b.WriteString(orig[pos:])
-	return b.String()
+	return b.String(), lines
+}
+
+func lastByte(s string) byte {
+	if s == "" {
+		return 0
+	}
+	return s[len(s)-1]
+}
+
+// angleEnd is the offset after the `>` that closes the type arguments
+// opening at or after s[from], blanks apart.
+func angleEnd(s string, from int) (int, bool) {
+	depth := 0
+	for k := from; k < len(s); k++ {
+		switch c := s[k]; c {
+		case '\'', '"':
+			q := strings.IndexByte(s[k+1:], c)
+			if q < 0 {
+				return 0, false
+			}
+			k += q + 1
+		case '<', '(', '{', '[':
+			depth++
+		case '>', ')', '}', ']':
+			depth--
+			if depth == 0 {
+				return k + 1, c == '>'
+			}
+		}
+	}
+	return 0, false
 }
 
 // tupleAt reports whether the `(` at s[i] opens a tuple, `(A, B)`, and

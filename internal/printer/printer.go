@@ -234,6 +234,26 @@ func (p *Printer) typ(t ast.TypeExpr) {
 			p.typ(m)
 		}
 		p.w(")")
+	case *ast.ShapeType:
+		p.w("array{")
+		for i, e := range t.Entries {
+			if i > 0 {
+				p.w(", ")
+			}
+			p.w(e.Raw)
+			if e.Optional {
+				p.w("?")
+			}
+			p.w(": ")
+			p.typ(e.Type)
+		}
+		if t.Unsealed {
+			if len(t.Entries) > 0 {
+				p.w(", ")
+			}
+			p.w("...")
+		}
+		p.w("}")
 	case *ast.ClosureType:
 		p.w("Closure(")
 		for i, m := range t.Params {

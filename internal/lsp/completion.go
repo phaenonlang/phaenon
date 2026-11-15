@@ -159,6 +159,9 @@ func (s *Server) completion(p TextDocumentPositionParams) (any, error) {
 		for _, it := range s.classItems(r, scope, prefix, inserted) {
 			add(it)
 		}
+		for _, it := range s.aliasItems(r, scope, prefix) {
+			add(it)
+		}
 	}
 	sort.SliceStable(list.Items, func(i, j int) bool {
 		return list.Items[i].SortText+list.Items[i].Label < list.Items[j].SortText+list.Items[j].Label

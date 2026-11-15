@@ -263,6 +263,15 @@ type emitter struct {
 	// toks is the source's token stream, read when an edit needs a
 	// position the tree does not keep (layout.go).
 	toks []token.Token
+	// docs are the declarations whose docblocks may name a type alias,
+	// each with its resolver (docalias.go); built on first use.
+	docs []docScope
+	// aliasUses are the use statements the output leaves out whole, and
+	// droppedImports the imports it leaves out, by the name each gave and
+	// its target: those of type aliases, and those only erased names use
+	// (aliasuse.go).
+	aliasUses      map[*ast.Use]bool
+	droppedImports map[string]bool
 }
 
 // replace is an in-place edit: text keeps the span's line breaks.
@@ -606,7 +615,7 @@ func (e *emitter) importSites(f *ast.File) []importSite {
 	at := func(off int) ast.Span { return ast.Span{Start: off, End: off} }
 	var classes, others []*ast.Use
 	for _, st := range f.Stmts {
-		if u, ok := st.(*ast.Use); ok {
+		if u, ok := st.(*ast.Use); ok && !e.aliasUses[u] {
 			if u.Kind == ast.UseClass {
 				classes = append(classes, u)
 			} else {
@@ -806,6 +815,9 @@ func (e *emitter) importShort(fqcn string, res *program.Resolver) string {
 	}
 	taken := namespaceEnd(e.opts.File.AST) == -2
 	for alias, target := range res.Scope().Imports() {
+		if e.importDropped(alias, target) {
+			continue // left out of the output: neither the class's import nor a name taken
+		}
 		if strings.EqualFold(target, fqcn) {
 			// The file imports the class itself: use its name, add nothing.
 			if written := importAlias(e.opts.File.AST, fqcn); written != "" {

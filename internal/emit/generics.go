@@ -37,6 +37,18 @@ type scope struct {
 	params map[string]*ast.TypeParam
 }
 
+// alias is the type alias a named type stands for, nil for a class, a
+// keyword or a type parameter. The name may be imported or qualified: an
+// alias is a name of its namespace (design/generics.md §11.6).
+func (s *scope) alias(t *ast.NamedType) *program.TypeAlias {
+	if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
+		if _, ok := s.params[t.Name.Parts[0]]; ok {
+			return nil
+		}
+	}
+	return s.res.TypeAlias(t.Name)
+}
+
 func (s *scope) child() *scope {
 	c := &scope{res: s.res, class: s.class, static: s.static, params: map[string]*ast.TypeParam{}}
 	for k, v := range s.params {
@@ -53,7 +65,7 @@ func hasGenerics(f *ast.File) bool {
 			return false
 		}
 		switch n := n.(type) {
-		case *ast.TypeParam, *ast.TypeAlias, *ast.IsExpr, *ast.AsExpr, *ast.ClosureType, *ast.TupleType:
+		case *ast.TypeParam, *ast.TypeAlias, *ast.IsExpr, *ast.AsExpr, *ast.ClosureType, *ast.TupleType, *ast.ShapeType:
 			found = true
 		case *ast.Cast:
 			found = found || n.Op == token.T_BYTES_CAST
@@ -99,6 +111,7 @@ func (e *emitter) lowerGenerics(f *ast.File) error {
 		return nil
 	}
 	l := &lowering{e: e, p: e.opts.Program, f: e.opts.File}
+	e.dropErasedImports(f)
 	return l.stmts(f.Stmts)
 }
 
@@ -128,7 +141,10 @@ func (l *lowering) stmt(s ast.Stmt) error {
 		}
 		return nil
 	case *ast.TypeAlias:
-		l.blank(s.S)
+		// With its docblock: left behind, the comment would document
+		// whatever declaration comes next, a @deprecated of the alias
+		// deprecating the class after it.
+		l.blank(l.e.aliasDeclaration(s))
 		return nil
 	case *ast.ClassDecl:
 		return l.classDecl(s, nil)
@@ -233,21 +249,21 @@ func (l *lowering) erase(t ast.TypeExpr, sc *scope) string {
 			case "iterable":
 				return "iterable"
 			}
-			if sc.res.FileAlias(name) != nil {
-				// A file-level alias: the resolved type knows its native spelling.
-				return nativeOf(sc.res.Native(t))
-			}
+		}
+		if sc.alias(t) != nil {
+			// A type alias: the resolved type knows its native spelling.
+			return nativeOf(sc.res.Native(t))
 		}
 		return l.text(t.Name.S)
 	case *ast.NullableType:
 		inner := l.erase(t.Type, sc)
-		switch {
-		case inner == "mixed" || inner == "null":
+		if inner == "mixed" || inner == "null" {
 			return "mixed"
-		case strings.Contains(inner, "|"):
-			return inner + "|null"
 		}
-		return "?" + inner
+		// The inner type may be an alias's, of any form: a union gains
+		// null, a nullable type stays what it is, an intersection is
+		// bracketed, as PHP writes each.
+		return joinUnion([]string{inner, "null"})
 	case *ast.UnionType:
 		var parts []string
 		for _, m := range t.Types {
@@ -266,7 +282,7 @@ func (l *lowering) erase(t ast.TypeExpr, sc *scope) string {
 		return s
 	case *ast.ClosureType:
 		return "\\Closure"
-	case *ast.TupleType:
+	case *ast.TupleType, *ast.ShapeType:
 		return "array"
 	}
 	return "mixed"
@@ -284,11 +300,14 @@ func joinUnion(parts []string) string {
 			add("null")
 			return
 		}
-		if strings.Contains(p, "|") && !strings.HasPrefix(p, "(") {
-			for _, q := range strings.Split(p, "|") {
+		if members := splitTop(p, '|'); len(members) > 1 {
+			for _, q := range members {
 				add(q)
 			}
 			return
+		}
+		if strings.Contains(p, "&") && !strings.HasPrefix(p, "(") {
+			p = "(" + p + ")" // PHP's DNF: an intersection in a union is bracketed
 		}
 		key := strings.ToLower(p)
 		if !seen[key] {
@@ -310,6 +329,27 @@ func joinUnion(parts []string) string {
 		}
 	}
 	return strings.Join(out, "|")
+}
+
+// splitTop splits a type's text at the separators that stand outside its
+// brackets.
+func splitTop(s string, sep byte) []string {
+	var out []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(', '<', '{', '[':
+			depth++
+		case ')', '>', '}', ']':
+			depth--
+		case sep:
+			if depth == 0 {
+				out = append(out, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(out, s[start:])
 }
 
 // nativeOf is the native spelling of a resolved type (mixed when it has
@@ -344,12 +384,14 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 					name = "class-string"
 				case "closure":
 					name = "\\Closure"
-				default:
-					if a := sc.res.FileAlias(t.Name.Parts[0]); a != nil {
-						return types.PrintQualified(sc.res.Native(t))
-					}
 				}
 			}
+		}
+		if sc.alias(t) != nil {
+			// PHPStan knows no alias of a namespace: the docblock holds what
+			// the alias stands for, its class names fully qualified, so the
+			// text is right in whichever file names the alias.
+			return types.PrintQualified(sc.res.Native(t))
 		}
 		if len(t.TypeArgs) == 0 {
 			return name
@@ -360,17 +402,23 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 		}
 		return name + "<" + strings.Join(args, ", ") + ">"
 	case *ast.NullableType:
+		if nt, ok := t.Type.(*ast.NamedType); ok && sc.alias(nt) != nil {
+			// `?` before what the alias stands for would bind to its first
+			// member (`?int|string`), or meet another `?`: the nullable of
+			// the expansion is printed as the type it is.
+			return types.PrintQualifiedNullable(sc.res.Native(t.Type))
+		}
 		return "?" + l.docType(t.Type, sc)
 	case *ast.UnionType:
 		var parts []string
 		for _, m := range t.Types {
-			parts = append(parts, l.docType(m, sc))
+			parts = append(parts, l.docMember(m, sc, false))
 		}
 		return strings.Join(parts, "|")
 	case *ast.IntersectionType:
 		var parts []string
 		for _, m := range t.Types {
-			parts = append(parts, l.docType(m, sc))
+			parts = append(parts, l.docMember(m, sc, true))
 		}
 		s := strings.Join(parts, "&")
 		if t.Parenthesised {
@@ -383,6 +431,11 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 			parts = append(parts, l.docType(m, sc))
 		}
 		return "array{" + strings.Join(parts, ", ") + "}"
+	case *ast.ShapeType:
+		// A shape stands in a `type` declaration alone, which leaves no
+		// trace in the output: its uses print the alias expanded. Printed
+		// here it is the lattice's text, which is the one they get.
+		return types.PrintQualified(sc.res.Native(t))
 	case *ast.ClosureType:
 		var parts []string
 		for _, m := range t.Params {
@@ -400,14 +453,27 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 		s := "\\Closure(" + strings.Join(parts, ", ") + ")"
 		if t.Return != nil {
 			ret := l.docType(t.Return, sc)
-			if _, union := t.Return.(*ast.UnionType); union {
-				ret = "(" + ret + ")" // `Closure(U): (A|B)`: without the parentheses PHPStan reads `(Closure(U): A)|B`
+			if len(splitTop(ret, '|')) > 1 || len(splitTop(ret, '&')) > 1 {
+				// `Closure(U): (A|B)`: without the parentheses PHPStan reads
+				// `(Closure(U): A)|B`. The union may be written, or be what
+				// an alias in the return type stands for.
+				ret = "(" + ret + ")"
 			}
 			s += ": " + ret
 		}
 		return s
 	}
 	return "mixed"
+}
+
+// docMember is docType for a member of a union, or of an intersection:
+// what an alias stands for there is bracketed where it would merge with
+// its neighbours (types.PrintQualifiedMember).
+func (l *lowering) docMember(t ast.TypeExpr, sc *scope, intersection bool) string {
+	if nt, ok := t.(*ast.NamedType); ok && sc.alias(nt) != nil {
+		return types.PrintQualifiedMember(sc.res.Native(t), intersection)
+	}
+	return l.docType(t, sc)
 }
 
 // needsDoc reports whether erasing t loses information a docblock must
@@ -432,11 +498,11 @@ func (l *lowering) needsDoc(t ast.TypeExpr, sc *scope) bool {
 					}
 				}
 			}
-			if isAliasCandidate(t) || sc.res.FileAlias(name) != nil || strings.Contains(name, "-") {
+			if isAliasCandidate(t) || strings.Contains(name, "-") {
 				return true
 			}
 		}
-		return false
+		return sc.alias(t) != nil
 	case *ast.NullableType:
 		return l.needsDoc(t.Type, sc)
 	case *ast.UnionType:
@@ -453,7 +519,7 @@ func (l *lowering) needsDoc(t ast.TypeExpr, sc *scope) bool {
 			}
 		}
 		return false
-	case *ast.ClosureType, *ast.TupleType:
+	case *ast.ClosureType, *ast.TupleType, *ast.ShapeType:
 		return true
 	}
 	return false
@@ -578,7 +644,7 @@ func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra st
 	if oneLine {
 		// The content moves into a new docblock: its written types erase
 		// as translateWrittenDocs would have translated them in place.
-		content := translateDoc(oneLineContent(filled))
+		content := translateDocWith(oneLineContent(filled), l.e.aliasExpander(idx))
 		if len(tags) == 1 && strings.HasPrefix(tags[0], "@var ") && content != "" {
 			// A property's `/** what it holds */` gets its type back on the
 			// tag's line: `@var list<string> what it holds`, the PHP it

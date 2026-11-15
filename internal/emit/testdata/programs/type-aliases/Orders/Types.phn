@@ -1,0 +1,9 @@
+namespace Shop\Orders;
+
+// A file that holds only `type` declarations compiles to an output with
+// nothing in it: no class is declared here, so no autoloader includes it.
+
+type Row = map<string, int|string>;
+type Page<T> = (list<T>, int);
+type Buyer = Customer;
+type Listing = map<string, list<Buyer>>;
