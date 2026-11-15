@@ -257,13 +257,7 @@ func (m *Method) erasureAt(decls []signature, slot int, own types.Type) (types.T
 			if types.IsSubtype(cur, pe, h) {
 				continue
 			}
-			if types.IsSubtype(pe, cur, h) {
-				cur = pe
-			} else if both := types.Intersect(cur, pe, h); isNative(both) {
-				cur = both
-			} else {
-				cur = pe
-			}
+			cur = narrowReturn(cur, pe, h)
 			changed = true
 			continue
 		}
@@ -297,6 +291,29 @@ func widenParam(own, pe types.Type, h types.Hierarchy) types.Type {
 	return pe
 }
 
+// narrowReturn is the return type within both own, a return's type, and
+// pe, an overridden declaration's that own exceeds: pe when it is within
+// own, else what the two have in common. Where that is no PHP type, an
+// intersection the two only may share (iterable&object), or void or never
+// under a demand for a value (a type argument void for an R the parent
+// returns), it is pe: the checker does not refuse such an override yet,
+// and pe at least loads.
+func narrowReturn(own, pe types.Type, h types.Hierarchy) types.Type {
+	if types.IsSubtype(pe, own, h) {
+		return pe
+	}
+	both := phpUnion(h, types.Intersect(own, pe, h))
+	if !isNative(both) || noValue(both) {
+		return pe
+	}
+	for _, m := range types.Members(both) {
+		if _, shared := m.(types.Intersection); shared {
+			return pe
+		}
+	}
+	return both
+}
+
 // phpUnion is the union of ts as a PHP declaration may write it: mixed
 // alone, and without a member that another member accepts, since PHP
 // refuses a union it can see is redundant (`Foo|object`,
@@ -328,6 +345,24 @@ func phpUnion(h types.Hierarchy, ts ...types.Type) types.Type {
 		}
 	}
 	return types.MakeUnion(keep...)
+}
+
+// noValue reports a type that mentions void or never, which no value is
+// of, a member of a union or an intersection's included.
+func noValue(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.Void, types.Never:
+			return true
+		case types.Intersection:
+			for _, p := range m.Types {
+				if noValue(p) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func isNative(t types.Type) bool {

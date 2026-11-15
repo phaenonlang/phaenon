@@ -203,3 +203,19 @@ final class BelowNeedsTake extends MidNeedsTake
     {
     }
 }
+
+// Not supported yet: a type argument void for a return type R. The
+// override is compiled with the parent's mixed, which loads; a call
+// fails, as it returns none. The checker is to refuse the shape.
+interface Handler<R>
+{
+    handle(string $command): R;
+}
+
+final class Logs implements Handler<void>
+{
+    handle(string $command): void
+    {
+        echo $command;
+    }
+}

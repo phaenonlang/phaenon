@@ -147,10 +147,11 @@ final class IntSource extends Source<int> implements Ints { get(): int => 1; }
 }
 
 // TestErasedUnionsLoad: the parameter the rule widens to accepts both
-// types it is made of, and php compiles it as written, whatever pair of
-// types meets: none of the unions PHP refuses as redundant (iterable is
-// Traversable|array to PHP; object beside a class; mixed beside anything;
-// bool beside true or false; a type twice).
+// types it is made of, the return it narrows to is within both, and php
+// compiles each as written, whatever pair of types meets: none of the
+// unions PHP refuses as redundant (iterable is Traversable|array to PHP;
+// object beside a class; mixed beside anything; bool beside true or
+// false; a type twice) and no void or never under a demand for a value.
 func TestErasedUnionsLoad(t *testing.T) {
 	php, err := exec.LookPath("php")
 	if err != nil {
@@ -180,6 +181,7 @@ final class Name implements \Stringable { __toString(): string => 'name'; }
 		types.MakeUnion(types.TIterable, types.TInt), types.MakeUnion(types.TBool, types.TNull),
 		types.MakeUnion(types.TFalse, types.TInt), types.MakeUnion(types.TObject, types.TInt),
 	}
+	returns := append([]types.Type{types.TVoid, types.TNever, types.TMixed}, values...)
 	var src strings.Builder
 	src.WriteString("<?php\nnamespace X;\nclass Foo {}\nclass Sub extends Foo {}\ninterface Iface {}\nfinal class Name implements \\Stringable { public function __toString(): string { return 'name'; } }\n")
 	var lines []string
@@ -204,6 +206,31 @@ final class Name implements \Stringable { __toString(): string => 'name'; }
 			}
 			n++
 			emit(types.Print(a)+" widened for "+types.Print(b), fmt.Sprintf("function p%d(%s $x): void {}", n, s))
+		}
+	}
+	for _, a := range returns {
+		for _, b := range returns {
+			if types.IsSubtype(a, b, p) {
+				continue // a return within b stays
+			}
+			r := narrowReturn(a, b, p)
+			s, ok := types.Native(r)
+			if !ok {
+				t.Errorf("return %s narrowed for %s to %s, which PHP cannot spell", types.Print(a), types.Print(b), types.Print(r))
+				continue
+			}
+			if !noValue(b) && noValue(r) {
+				t.Errorf("return %s narrowed for %s to %s, which returns no value", types.Print(a), types.Print(b), types.Print(r))
+			}
+			if !types.IsSubtype(r, b, p) {
+				t.Errorf("return %s narrowed for %s to %s, which is not within it", types.Print(a), types.Print(b), types.Print(r))
+			}
+			body := "{ throw new \\LogicException(); }"
+			if _, void := r.(types.Void); void {
+				body = "{}"
+			}
+			n++
+			emit(types.Print(a)+" narrowed for "+types.Print(b), fmt.Sprintf("function r%d(): %s %s", n, s, body))
 		}
 	}
 	src.WriteString("echo 'loaded';\n")
