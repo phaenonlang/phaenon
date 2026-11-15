@@ -2780,6 +2780,37 @@ func unify(param, arg types.Type, subst map[string]types.Type, inferable map[str
 				unify(p.Value, shapeValues(a), subst, inferable, h)
 			}
 		}
+	case types.Shape:
+		// A shape binds entry by entry, by key, as PHPStan infers it:
+		// `array{items: list<T>}` against `array{items: list<Row>,
+		// total: int}` binds T to Row, and a tuple binds by position. The
+		// keys the argument has beyond the parameter's are passed over.
+		// An entry a sealed argument lacks binds nothing, so an optional
+		// one that is absent leaves its parameter to the other entries;
+		// an unsealed argument may hold it, with any value, and binds
+		// mixed.
+		for _, a := range types.Members(arg) {
+			switch a := a.(type) {
+			case types.Shape:
+				for _, pe := range p.Entries {
+					if ae, ok := shapeEntry(a, pe); ok {
+						unify(pe.Type, ae.Type, subst, inferable, h)
+					} else if a.Unsealed {
+						unify(pe.Type, types.TMixed, subst, inferable, h)
+					}
+				}
+			case types.Array:
+				// A general array binds from its values the entries as one
+				// union, whatever their keys: `array<string, string>` makes
+				// T of `array{value?: T, n?: int}` a string. An unsealed
+				// shape's values take in whatever its rest holds, mixed,
+				// and bind nothing. Whether the array is accepted for the
+				// shape is the argument's check.
+				if !p.Unsealed && len(p.Entries) > 0 {
+					unify(shapeValues(p), a.Value, subst, inferable, h)
+				}
+			}
+		}
 	case types.Iterable:
 		k, v, ok := types.IterableKV(arg, h)
 		if ok {

@@ -166,3 +166,421 @@ function value(): object
 {
     return new Row(); // want P2001 "Row is a type alias"
 }
+
+function takesInt(int $n): void {}
+
+function takesText(string $s): void {}
+
+function takesRow(Row $row): void {}
+
+function takesPair((int, string) $pair): void {}
+
+// A shape unpacked into an array literal keeps its entries: PHP numbers
+// the integer keys anew and keeps the string ones, a later key replacing
+// an earlier one, and an entry that may be absent leaves what was there.
+// shapes-held.phn has the cases of this file that are about what a shape
+// accepts in the docblock spelling, which the parity run holds to PHPStan.
+type Named = array{id: int, name: string};
+type NameAsInt = array{name?: int};
+
+function unpacked((int, string) $pair, Named $named, Row $row, NameAsInt $wrong, list<int> $ints): void
+{
+    takesPair([...$pair]);
+    takesPair([1, ...['a']]);
+    takesPair(['a', ...$pair]); // want P2103
+    takesInt([...$pair, 2][2]);
+    takesText([...$pair, 2][1]);
+    takesText([...$pair, 2][0]); // want P2103
+    takesRow([...$named]);
+    takesRow([...$row]);
+    takesRow([...$row, 'name' => 'a']);
+    takesRow([...$named, 'id' => 'x']); // want P2103
+    takesRow(['id' => 'x', ...$named]);
+    takesRow(['id' => 1, 'name' => 'a', ...$wrong]); // want P2103
+    takesRow(['id' => 1, ...$wrong]); // want P2103
+    // A general array unpacks into a general array.
+    takesPair([...$ints]); // want P2103
+}
+
+// A general array is no shape that requires a key: the array might not
+// have it. It passes where every entry its keys can reach is optional and
+// takes its values, the one case where it may well be the shape.
+type A = array{a: int};
+type OptionalA = array{a?: int};
+type OptionalAB = array{a?: int, b?: string};
+type OpenOptionalA = array{a?: int, ...};
+type First = array{0: int};
+
+function takesA(A $a): void {}
+
+function takesOptionalA(OptionalA $a): void {}
+
+function takesOptionalAB(OptionalAB $ab): void {}
+
+function takesOpenOptionalA(OpenOptionalA $open): void {}
+
+function takesOpen(Open $open): void {}
+
+function takesNone(None $none): void {}
+
+function takesFirst(First $first): void {}
+
+function takesRows(list<A> $rows): void {}
+
+/**
+ * @param non-empty-array<string, int> $some
+ * @param non-empty-list<int> $someList
+ */
+function general(
+    map<string, mixed> $bag,
+    map<string, int> $ints,
+    map<string, string> $strings,
+    map<int, int> $byNumber,
+    map<string, int|string> $mixed,
+    map<string, int> $some,
+    list<int> $list,
+    list<int> $someList,
+    list<int|string> $pairs,
+    array<mixed> $anything,
+    list<map<string, int>> $rows,
+    A|map<string, int> $either,
+): A {
+    takesRow($bag); // want P2103
+    takesA($ints); // want P2103
+    takesA($strings); // want P2103
+    takesA($byNumber); // want P2103
+    takesA($some); // want P2103
+    takesA($anything); // want P2103
+    takesA($either); // want P2103
+    takesOpen($ints); // want P2103
+    // Every entry optional: the array may be the shape, and its values fit.
+    takesOptionalA($ints);
+    takesOpenOptionalA($ints);
+    takesOptionalA($byNumber);
+    takesOptionalA($strings); // want P2103
+    takesOptionalA($mixed); // want P2103
+    takesOptionalA($bag); // want P2103
+    takesOpenOptionalA($bag); // want P2103
+    takesOptionalAB($ints); // want P2103
+    takesNone($ints);
+    takesOptionalA([]);
+    takesRow([]); // want P2103
+    // A list that is not empty has its first offset, and no other.
+    takesFirst($list); // want P2103
+    takesFirst($someList);
+    takesPair($pairs); // want P2103
+    takesRows($rows); // want P2103
+    takesRows([['a' => 1]]);
+
+    return $ints; // want P2202
+}
+
+final class GeneralHolder
+{
+    public A $a = ['a' => 0];
+
+    set(map<string, int> $ints): void
+    {
+        $this->a = ['a' => 1];
+        $this->a = $ints; // want P2201
+    }
+}
+
+// An unsealed shape may hold, under a key it does not name, a value of any
+// type: it is no shape that gives that key a type, and it has no key for
+// certain but the ones it names.
+type OpenNamed = array{id: int, name: string, ...};
+type OpenRow = array{id: int, name?: string, ...};
+type OpenWrongName = array{id: int, name?: int, ...};
+type OpenA = array{a: int, ...};
+type OpenB = array{b: int, ...};
+type AB = array{a: int, b?: int};
+type LooseRow = array{id: int, name?: mixed};
+type Sealed = array{id: int};
+type More = array{id: int, age: int};
+
+function takesAB(AB $ab): void {}
+
+function takesLooseRow(LooseRow $row): void {}
+
+function takesOpenRow(OpenRow $open): void {}
+
+function takesNumbers(iterable<string, int> $numbers): void {}
+
+function takesNumberMap(map<string, int> $numbers): void {}
+
+function opened(
+    Open $open,
+    OpenNamed $named,
+    OpenRow $optional,
+    OpenWrongName $wrongName,
+    OpenA $a,
+    OpenB $b,
+    Sealed $sealed,
+    More $more,
+): Row {
+    takesRow($open); // want P2103
+    // Named, the key has its type; the keys beyond the shape's are passed
+    // over, as a sealed shape's are.
+    takesRow($named);
+    takesRow($optional);
+    takesRow($wrongName); // want P2103
+    takesA($open); // want P2103
+    takesA($a);
+    takesOptionalA($a);
+    takesOptionalA($b); // want P2103
+    takesAB($a); // want P2103
+    takesLooseRow($open);
+    // An unsealed shape takes what it does not name.
+    takesOpen($open);
+    takesOpen($named);
+    takesOpen($sealed);
+    takesOpen($more);
+    takesOpen($a); // want P2103
+    takesOpenOptionalA($a);
+    takesOpenOptionalA($b); // want P2103
+    takesOpenRow($open); // want P2103
+    takesOpenRow($optional);
+    takesOpenRow($sealed);
+    takesOpenRow($more);
+    takesOpenRow($wrongName); // want P2103
+    // Against an iterable what the shape does not name is iterated too;
+    // against an array PHPStan compares the named entries alone.
+    takesNumbers($a); // want P2103
+    takesNumbers(['a' => 1]);
+    takesNumberMap($a);
+
+    return $open; // want P2202
+}
+
+final class OpenHolder
+{
+    public Row $row = ['id' => 0];
+
+    set(Open $open, OpenNamed $named): void
+    {
+        $this->row = $named;
+        $this->row = $open; // want P2201
+    }
+}
+
+// A type argument is inferred through a shape, entry by entry and by key,
+// and from a general array's values.
+type Maybe<T> = array{value?: T};
+type Boxed<T> = array{value: T, ...};
+type Outer<T> = array{inner: array{value: T}};
+type Cell<T> = array{value: T};
+type Spec<T of object> = array{class: class<T>, shared?: bool};
+type Both<T> = array{a: T, b: T};
+type WideValue = array{value: int, n: int, extra: string};
+type OneOf = array{value: int}|array{value: string};
+type OpenOther = array{other: int, ...};
+
+function unbox<T>(Maybe<T> $box): list<T>
+{
+    return isset($box['value']) ? [$box['value']] : [];
+}
+
+function valueOf<T>(Boxed<T> $box): T
+{
+    return $box['value'];
+}
+
+function swap<T, U>((T, U) $pair): (U, T)
+{
+    return [$pair[1], $pair[0]];
+}
+
+function inner<T>(Outer<T> $outer): T
+{
+    return $outer['inner']['value'];
+}
+
+function column<T>(list<Cell<T>> $rows): list<T>
+{
+    return array_map(fn (Cell<T> $row): T => $row['value'], $rows);
+}
+
+function make<T of object>(Spec<T> $spec): T
+{
+    return new $spec['class']();
+}
+
+function either<T>(Both<T> $both): T
+{
+    return $both['a'];
+}
+
+function orNull<T>(?Cell<T> $box): ?T
+{
+    return $box === null ? null : $box['value'];
+}
+
+function inferred(
+    Page<Row> $page,
+    WideValue $wide,
+    Maybe<string> $maybe,
+    OneOf $oneOf,
+    list<Cell<Customer>> $rows,
+    (int, string) $pair,
+    ?Cell<int> $nullable,
+    OpenOther $openOther,
+    map<string, string> $general,
+    map<int, string> $byNumber,
+    list<string> $strings,
+): void {
+    $row = generic($page);
+    if ($row !== null) {
+        takesRow($row);
+        takesInt($row['id']);
+        takesText($row['id']); // want P2103
+    }
+    // An array literal's shape binds as a named one does.
+    $n = generic(['items' => [1, 2], 'total' => 2]);
+    takesInt($n ?? 0);
+    takesText($n ?? ''); // want P2103
+    // An optional entry binds where the argument has it.
+    foreach (unbox($maybe) as $s) {
+        takesText($s);
+        takesInt($s); // want P2103
+    }
+    foreach (unbox(['value' => 1]) as $i) {
+        takesInt($i);
+    }
+    // The keys an argument has beyond the parameter's are passed over.
+    takesInt(valueOf($wide));
+    takesText(valueOf($wide)); // want P2103
+    takesText(valueOf(['value' => new Customer(), 'x' => 1])->name);
+    // A tuple binds by position.
+    $swapped = swap($pair);
+    takesText($swapped[0]);
+    takesInt($swapped[1]);
+    takesInt($swapped[0]); // want P2103
+    takesText(swap([1, 'a'])[0]);
+    // Shapes inside shapes, and inside generics.
+    takesInt(inner(['inner' => ['value' => 1]]));
+    takesText(inner(['inner' => ['value' => 1]])); // want P2103
+    foreach (column($rows) as $customer) {
+        takesText($customer->name);
+        takesInt($customer); // want P2103
+    }
+    takesText(make(['class' => Customer::class])->name);
+    // Every entry that names the parameter binds it.
+    $both = either(['a' => 1, 'b' => 'x']);
+    takesInt($both); // want P2103
+    // A union of shapes binds from each member.
+    $one = valueOf($oneOf);
+    takesInt($one); // want P2103
+    takesText($one); // want P2103
+    $v = orNull($nullable);
+    takesInt($v ?? 0);
+    takesText($v ?? ''); // want P2103
+    // An unsealed argument may hold the entry it does not name, with any
+    // value, and is accepted where that entry is optional.
+    foreach (unbox($openOther) as $m) {
+        takesInt($m); // want P2103
+    }
+    // A general array binds from its values, whatever its keys; it is
+    // still no shape that requires a key.
+    foreach (unbox($general) as $g) {
+        takesText($g);
+    }
+    foreach (unbox($byNumber) as $g) {
+        takesText($g);
+    }
+    takesText(swap($strings)[0]); // want P2103
+}
+
+// What a shape accepts, beyond the returns above: shapes-held.phn holds
+// each case to PHPStan in the docblock spelling.
+type MaybeId = array{id?: int};
+type WideId = array{id: int|string};
+type NullableName = array{id: int, name: ?string};
+type IntKeys = array{0: int, 1: string};
+type ShortPair = array{0: int, 1?: string};
+
+function takesNullable(Nullable $n): void {}
+
+function takesOrder(Order $order): void {}
+
+function takesIntKeys(IntKeys $keys): void {}
+
+function takesShortPair(ShortPair $pair): void {}
+
+function literals(Customer $c): void
+{
+    takesRow(['id' => 1]);
+    takesRow(['id' => 1, 'name' => 'a']);
+    takesRow(['name' => 'a']); // want P2103
+    takesRow(['id' => 'one']); // want P2103
+    takesRow(['id' => 1, 'name' => 2]); // want P2103
+    takesRow(['id' => 1, 'age' => 30]);
+    takesA(['a' => 1, 'b' => 2]);
+    takesNullable(['name' => null]);
+    takesNullable([]); // want P2103
+    takesOptionalA(['a' => null]); // want P2103
+    takesNone([]);
+    takesNone(['a' => 1]); // want P2103
+    takesOrder(['id' => 1, 'lines' => [['sku' => 'a', 'qty' => 2]], 'buyer' => $c]);
+    takesOrder(['id' => 1, 'lines' => [], 'buyer' => null]);
+    takesOrder(['id' => 1, 'lines' => [['sku' => 'a']], 'buyer' => null]); // want P2103
+    takesOrder(['id' => 1, 'lines' => [['sku' => 'a', 'qty' => '2']], 'buyer' => null]); // want P2103
+    takesOrder(['id' => 1, 'lines' => [], 'buyer' => 'nobody']); // want P2103
+}
+
+function shapes(
+    Row $row,
+    Sealed $bare,
+    Named $named,
+    MaybeId $maybe,
+    WideId $wide,
+    NullableName $nullable,
+    More $more,
+    OptionalA $optionalA,
+): void {
+    takesRow($row);
+    takesRow($bare);
+    takesRow($named);
+    takesRow($more);
+    // An optional key where the shape requires it.
+    takesRow($maybe); // want P2103
+    takesRow($wide); // want P2103
+    // A key that may hold null where the shape has it optional.
+    takesRow($nullable); // want P2103
+    takesNullable($named);
+    takesNullable($row); // want P2103
+    takesNone($optionalA); // want P2103
+    takesOptionalA($optionalA);
+    takesA($optionalA); // want P2103
+}
+
+function positions(IntKeys $keys, (int, string) $pair, (int, string, bool) $triple, (string, int) $swapped): void
+{
+    takesIntKeys($keys);
+    takesIntKeys($pair);
+    // A tuple is exact (design/collections.md §2.4), and the shape of
+    // positions 0 and 1 is the tuple's: stricter than PHPStan, which
+    // accepts the longer list.
+    takesIntKeys($triple); // want P2103
+    takesIntKeys([1, 'a']);
+    takesIntKeys($swapped); // want P2103
+    takesPair($pair);
+    takesPair([1, 'a']);
+    takesPair($triple); // want P2103
+    takesPair($swapped); // want P2103
+    takesPair(['a', 1]); // want P2103
+    takesShortPair($pair);
+    takesShortPair([1]);
+    takesShortPair($swapped); // want P2103
+}
+
+final class Holder
+{
+    public Row $row = ['id' => 0];
+
+    set(MaybeId $maybe): void
+    {
+        $this->row = ['id' => 1, 'name' => 'a'];
+        $this->row = $maybe; // want P2201
+    }
+}

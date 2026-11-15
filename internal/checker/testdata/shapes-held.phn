@@ -1,0 +1,538 @@
+namespace ShpHeld;
+
+// What is accepted where a shape is declared, in the docblock spelling,
+// which PHPStan reads as it stands: the parity run holds every line here to
+// what PHPStan reports at level max. shapes.phn has the same cases in the
+// syntax of a named shape, a `type` declaration, which keeps that file out
+// of the parity run.
+
+final class Customer
+{
+    public string $name = '';
+}
+
+function takeInt(int $n): void {}
+
+function takeString(string $s): void {}
+
+/** @param array{id: int, name?: string} $row */
+function takeRow(array $row): void {}
+
+/** @param list{int, string} $pair */
+function takePair(array $pair): void {}
+
+/** @param array{0: int, 1: string} $keys */
+function takeIntKeys(array $keys): void {}
+
+// A shape unpacked into an array literal keeps its entries. PHP numbers
+// the integer keys anew and keeps the string ones, a later key replacing
+// an earlier one; an entry that may be absent leaves what was there.
+
+/**
+ * @param list{int, string} $pair
+ * @param array{id: int, name: string} $named
+ * @param array{id: int, name?: string} $row
+ * @param array{name?: int} $wrong
+ * @param list<int> $ints
+ */
+function unpacked(array $pair, array $named, array $row, array $wrong, array $ints): void
+{
+    takePair([...$pair]);
+    takeIntKeys([...$pair]);
+    takePair([1, ...['a']]);
+    takePair(['a', ...$pair]); // want P2103
+    takeInt([...$pair, 2][2]);
+    takeString([...$pair, 2][1]);
+    takeString([...$pair, 2][0]); // want P2103
+    takeRow([...$named]);
+    takeRow([...$row]);
+    takeRow([...$row, 'name' => 'a']);
+    takeRow([...$named, 'id' => 'x']); // want P2103
+    takeRow(['id' => 'x', ...$named]);
+    takeRow(['id' => 1, 'name' => 'a', ...$wrong]); // want P2103
+    takeRow(['id' => 1, ...$wrong]); // want P2103
+    // A general array unpacks into a general array.
+    takePair([...$ints]); // want P2103
+}
+
+// A general array is no shape that requires a key: the array might not
+// have it. It passes where every entry its keys can reach is optional and
+// takes its values, the one case where it may well be the shape.
+
+/** @param array{a: int} $a */
+function takeA(array $a): void {}
+
+/** @param array{a?: int} $a */
+function takeOptionalA(array $a): void {}
+
+/** @param array{a?: int, b?: string} $ab */
+function takeOptionalAB(array $ab): void {}
+
+/** @param array{a?: int, ...} $open */
+function takeOpenOptionalA(array $open): void {}
+
+/** @param array{id: int, ...} $open */
+function takeOpen(array $open): void {}
+
+/** @param array{} $none */
+function takeNone(array $none): void {}
+
+/** @param array{0: int} $first */
+function takeFirst(array $first): void {}
+
+/** @param list{int} $single */
+function takeSingle(array $single): void {}
+
+/** @param list{0?: int} $first */
+function takeOptionalFirst(array $first): void {}
+
+/** @param list<array{a: int}> $rows */
+function takeRows(array $rows): void {}
+
+/**
+ * @param array<string, mixed> $bag
+ * @param array<string, int> $ints
+ * @param array<string, string> $strings
+ * @param array<int, int> $byNumber
+ * @param array<string, int|string> $mixed
+ * @param non-empty-array<string, int> $some
+ * @param list<int> $list
+ * @param non-empty-list<int> $someList
+ * @param list<int|string> $pairs
+ * @param mixed[] $anything
+ * @param list<array<string, int>> $rows
+ * @param array{a: int}|array<string, int> $either
+ * @return array{a: int}
+ */
+function general(array $bag, array $ints, array $strings, array $byNumber, array $mixed, array $some, array $list, array $someList, array $pairs, array $anything, array $rows, array $either): array
+{
+    takeRow($bag); // want P2103
+    takeA($ints); // want P2103
+    takeA($strings); // want P2103
+    takeA($byNumber); // want P2103
+    takeA($some); // want P2103
+    takeA($anything); // want P2103
+    takeA($either); // want P2103
+    takeOpen($ints); // want P2103
+    // Every entry optional: the array may be the shape, and its values fit.
+    takeOptionalA($ints);
+    takeOpenOptionalA($ints);
+    takeOptionalA($byNumber);
+    takeOptionalA($strings); // want P2103
+    takeOptionalA($mixed); // want P2103
+    takeOptionalA($bag); // want P2103
+    takeOpenOptionalA($bag); // want P2103
+    takeOptionalAB($ints); // want P2103
+    takeNone($ints);
+    takeOptionalA([]);
+    takeRow([]); // want P2103
+    // A list that is not empty has its first offset, and no other.
+    takeFirst($list); // want P2103
+    takeFirst($someList);
+    takeSingle($someList);
+    takeSingle($list); // want P2103
+    // A list shape takes a list, and only a list: stricter than PHPStan,
+    // which holds a general array to the entries alone.
+    takeOptionalFirst($list);
+    takeOptionalFirst($byNumber); // want P2103
+    takePair($pairs); // want P2103
+    takeRows($rows); // want P2103
+    takeRows([['a' => 1]]);
+
+    return $ints; // want P2202
+}
+
+function bareArray(array $bare): void // want P2516
+{
+    takeA($bare); // want P2103
+    takeOptionalA($bare); // want P2103
+    takeNone($bare);
+}
+
+final class GeneralHolder
+{
+    /** @var array{a: int} */
+    public array $a = ['a' => 0];
+
+    /** @param array<string, int> $ints */
+    public function set(array $ints): void
+    {
+        $this->a = ['a' => 1];
+        $this->a = $ints; // want P2201
+    }
+}
+
+// An unsealed shape may hold, under a key it does not name, a value of any
+// type: it is no shape that gives that key a type, and it has no key for
+// certain but the ones it names.
+
+/** @param array{a: int, b?: int} $ab */
+function takeAB(array $ab): void {}
+
+/** @param array{id: int, name?: mixed} $row */
+function takeLooseRow(array $row): void {}
+
+/** @param array{id: int, name?: string, ...} $open */
+function takeOpenRow(array $open): void {}
+
+/** @param iterable<string, int> $numbers */
+function takeNumbers(iterable $numbers): void {}
+
+/** @param array<string, int> $numbers */
+function takeNumberMap(array $numbers): void {}
+
+/**
+ * @param array{id: int, ...} $open
+ * @param array{id: int, name: string, ...} $named
+ * @param array{id: int, name?: string, ...} $optional
+ * @param array{id: int, name?: int, ...} $wrongName
+ * @param array{a: int, ...} $a
+ * @param array{b: int, ...} $b
+ * @param array{id: int} $sealed
+ * @param array{id: int, age: int} $more
+ * @return array{id: int, name?: string}
+ */
+function unsealed(array $open, array $named, array $optional, array $wrongName, array $a, array $b, array $sealed, array $more): array
+{
+    takeRow($open); // want P2103
+    // Named, the key has its type; the keys beyond the shape's are passed
+    // over, as a sealed shape's are.
+    takeRow($named);
+    takeRow($optional);
+    takeRow($wrongName); // want P2103
+    takeA($open); // want P2103
+    takeA($a);
+    takeOptionalA($a);
+    takeOptionalA($b); // want P2103
+    takeAB($a); // want P2103
+    takeLooseRow($open);
+    // An unsealed shape takes what it does not name.
+    takeOpen($open);
+    takeOpen($named);
+    takeOpen($sealed);
+    takeOpen($more);
+    takeOpen($a); // want P2103
+    takeOpenOptionalA($a);
+    takeOpenOptionalA($b); // want P2103
+    takeOpenRow($open); // want P2103
+    takeOpenRow($optional);
+    takeOpenRow($sealed);
+    takeOpenRow($more);
+    takeOpenRow($wrongName); // want P2103
+    // Against an iterable what the shape does not name is iterated too;
+    // against an array PHPStan compares the named entries alone.
+    takeNumbers($a); // want P2103
+    takeNumbers(['a' => 1]);
+    takeNumberMap($a);
+
+    return $open; // want P2202
+}
+
+final class OpenHolder
+{
+    /** @var array{id: int, name?: string} */
+    public array $row = ['id' => 0];
+
+    /**
+     * @param array{id: int, ...} $open
+     * @param array{id: int, name: string, ...} $named
+     */
+    public function set(array $open, array $named): void
+    {
+        $this->row = $named;
+        $this->row = $open; // want P2201
+    }
+}
+
+// A type argument is inferred through a shape, entry by entry and by key,
+// and from a general array's values.
+
+/**
+ * @template T
+ * @param array{items: list<T>, total: int} $page
+ * @return T|null
+ */
+function first(array $page): mixed
+{
+    return $page['items'][0] ?? null;
+}
+
+/**
+ * @template T
+ * @param array{value?: T} $box
+ * @return list<T>
+ */
+function unbox(array $box): array
+{
+    return isset($box['value']) ? [$box['value']] : [];
+}
+
+/**
+ * @template T
+ * @param array{value: T, ...} $box
+ * @return T
+ */
+function valueOf(array $box): mixed
+{
+    return $box['value'];
+}
+
+/**
+ * @template T
+ * @template U
+ * @param array{T, U} $pair
+ * @return array{U, T}
+ */
+function swap(array $pair): array
+{
+    return [$pair[1], $pair[0]];
+}
+
+/**
+ * @template T
+ * @param array{inner: array{value: T}} $outer
+ * @return T
+ */
+function inner(array $outer): mixed
+{
+    return $outer['inner']['value'];
+}
+
+/**
+ * @template T
+ * @param list<array{value: T}> $rows
+ * @return list<T>
+ */
+function column(array $rows): array
+{
+    $values = [];
+    foreach ($rows as $row) {
+        $values[] = $row['value'];
+    }
+    return $values;
+}
+
+/**
+ * @template T of object
+ * @param array{class: class-string<T>, shared?: bool} $spec
+ * @return T
+ */
+function make(array $spec): object
+{
+    return new $spec['class']();
+}
+
+/**
+ * @template T
+ * @param array{a: T, b: T} $both
+ * @return T
+ */
+function either(array $both): mixed
+{
+    return $both['a'];
+}
+
+/**
+ * @template T
+ * @param array{value: T}|null $box
+ * @return T|null
+ */
+function orNull(?array $box): mixed
+{
+    return $box === null ? null : $box['value'];
+}
+
+/**
+ * @param array{items: list<array{id: int, name?: string}>, total: int} $page
+ * @param array{value: int, n: int, extra: string} $wide
+ * @param array{value?: string} $maybe
+ * @param array{value: int}|array{value: string} $oneOf
+ * @param list<array{value: Customer}> $rows
+ * @param array{int, string} $pair
+ * @param array{value: int}|null $nullable
+ * @param array{other: int, ...} $openOther
+ * @param array<string, string> $general
+ * @param array<int, string> $byNumber
+ * @param list<string> $strings
+ */
+function inferred(array $page, array $wide, array $maybe, array $oneOf, array $rows, array $pair, ?array $nullable, array $openOther, array $general, array $byNumber, array $strings): void
+{
+    $row = first($page);
+    if ($row !== null) {
+        takeRow($row);
+        takeInt($row['id']);
+        takeString($row['id']); // want P2103
+    }
+    // An array literal's shape binds as a declared one does.
+    $n = first(['items' => [1, 2], 'total' => 2]);
+    takeInt($n ?? 0);
+    takeString($n ?? ''); // want P2103
+    // An optional entry binds where the argument has it.
+    foreach (unbox($maybe) as $s) {
+        takeString($s);
+        takeInt($s); // want P2103
+    }
+    foreach (unbox(['value' => 1]) as $i) {
+        takeInt($i);
+    }
+    // The keys an argument has beyond the parameter's are passed over.
+    takeInt(valueOf($wide));
+    takeString(valueOf($wide)); // want P2103
+    takeString(valueOf(['value' => new Customer(), 'x' => 1])->name);
+    // A tuple binds by position.
+    $swapped = swap($pair);
+    takeString($swapped[0]);
+    takeInt($swapped[1]);
+    takeInt($swapped[0]); // want P2103
+    takeString(swap([1, 'a'])[0]);
+    // Shapes inside shapes, and inside generics.
+    takeInt(inner(['inner' => ['value' => 1]]));
+    takeString(inner(['inner' => ['value' => 1]])); // want P2103
+    foreach (column($rows) as $customer) {
+        takeString($customer->name);
+        takeInt($customer); // want P2103
+    }
+    takeString(make(['class' => Customer::class])->name);
+    // Every entry that names the parameter binds it.
+    $both = either(['a' => 1, 'b' => 'x']);
+    takeInt($both); // want P2103
+    // A union of shapes binds from each member.
+    $one = valueOf($oneOf);
+    takeInt($one); // want P2103
+    takeString($one); // want P2103
+    $v = orNull($nullable);
+    takeInt($v ?? 0);
+    takeString($v ?? ''); // want P2103
+    // An unsealed argument may hold the entry it does not name, with any
+    // value, and is accepted where that entry is optional.
+    foreach (unbox($openOther) as $m) {
+        takeInt($m); // want P2103
+    }
+    // A general array binds from its values, whatever its keys; it is
+    // still no shape that requires a key.
+    foreach (unbox($general) as $g) {
+        takeString($g);
+    }
+    foreach (unbox($byNumber) as $g) {
+        takeString($g);
+    }
+    takeString(swap($strings)[0]); // want P2103
+}
+
+// A key the shape requires is there, with a value of its type; a key
+// more than the shape names is accepted, as PHPStan has it.
+
+/** @param array{name: ?string} $n */
+function takeNullable(array $n): void {}
+
+/** @param array{id: int, lines: list<array{sku: string, qty: int}>, buyer: ?Customer} $order */
+function takeOrder(array $order): void {}
+
+/** @param list{int, 1?: string} $pair */
+function takeShortPair(array $pair): void {}
+
+function literals(Customer $c): void
+{
+    takeRow(['id' => 1]);
+    takeRow(['id' => 1, 'name' => 'a']);
+    takeRow(['name' => 'a']); // want P2103
+    takeRow(['id' => 'one']); // want P2103
+    takeRow(['id' => 1, 'name' => 2]); // want P2103
+    takeRow(['id' => 1, 'age' => 30]);
+    takeA(['a' => 1, 'b' => 2]);
+    // An absent key against a present null.
+    takeNullable(['name' => null]);
+    takeNullable([]); // want P2103
+    takeOptionalA(['a' => null]); // want P2103
+    // Only the empty array is array{}.
+    takeNone([]);
+    takeNone(['a' => 1]); // want P2103
+    takeOrder(['id' => 1, 'lines' => [['sku' => 'a', 'qty' => 2]], 'buyer' => $c]);
+    takeOrder(['id' => 1, 'lines' => [], 'buyer' => null]);
+    takeOrder(['id' => 1, 'lines' => [['sku' => 'a']], 'buyer' => null]); // want P2103
+    takeOrder(['id' => 1, 'lines' => [['sku' => 'a', 'qty' => '2']], 'buyer' => null]); // want P2103
+    takeOrder(['id' => 1, 'lines' => [], 'buyer' => 'nobody']); // want P2103
+}
+
+/**
+ * @param array{id: int, name?: string} $row
+ * @param array{id: int} $bare
+ * @param array{id: int, name: string} $named
+ * @param array{id?: int} $maybe
+ * @param array{id: int|string} $wide
+ * @param array{id: int, name: ?string} $nullable
+ * @param array{id: int, name: string, age: int} $more
+ * @param array{a?: int} $optionalA
+ */
+function shapes(array $row, array $bare, array $named, array $maybe, array $wide, array $nullable, array $more, array $optionalA): void
+{
+    takeRow($row);
+    takeRow($bare);
+    takeRow($named);
+    takeRow($more);
+    // An optional key where the shape requires it.
+    takeRow($maybe); // want P2103
+    takeRow($wide); // want P2103
+    // A key that may hold null where the shape has it optional.
+    takeRow($nullable); // want P2103
+    takeNullable($named);
+    takeNullable($row); // want P2103
+    takeNone($optionalA); // want P2103
+    takeOptionalA($optionalA);
+    takeA($optionalA); // want P2103
+}
+
+/**
+ * @param array{0: int, 1: string} $keys
+ * @param list{int, string} $pair
+ * @param list{int, string, bool} $triple
+ * @param list{int} $single
+ * @param list{string, int} $swapped
+ */
+function positions(array $keys, array $pair, array $triple, array $single, array $swapped): void
+{
+    takeIntKeys($keys);
+    takeIntKeys($pair);
+    // A tuple is exact (design/collections.md §2.4), and the shape of
+    // positions 0 and 1 is the tuple's: stricter than PHPStan, which
+    // accepts the longer list.
+    takeIntKeys($triple); // want P2103
+    takeIntKeys([1, 'a']);
+    takeIntKeys($swapped); // want P2103
+    takeIntKeys($single); // want P2103
+    takePair($pair);
+    takePair([1, 'a']);
+    takePair($triple); // want P2103
+    takePair($swapped); // want P2103
+    takePair($single); // want P2103
+    takePair(['a', 1]); // want P2103
+    takeShortPair($pair);
+    takeShortPair($single);
+    takeShortPair([1]);
+    takeShortPair($swapped); // want P2103
+}
+
+/**
+ * @param array{id: int, name?: string} $row
+ * @return array{id: int, name?: string}
+ */
+function returned(array $row, bool $flag): array
+{
+    if ($flag) {
+        return ['name' => 'a']; // want P2202
+    }
+    return $row;
+}
+
+final class Holder
+{
+    /** @var array{id: int, name?: string} */
+    public array $row = ['id' => 0];
+
+    /** @param array{id?: int} $maybe */
+    public function set(array $maybe): void
+    {
+        $this->row = ['id' => 1, 'name' => 'a'];
+        $this->row = $maybe; // want P2201
+    }
+}

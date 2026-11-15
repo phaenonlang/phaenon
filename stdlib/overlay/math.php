@@ -1,7 +1,8 @@
 <?php
 
 /**
- * Phaenon overlay: arithmetic whose result is one of its arguments.
+ * Phaenon overlay: arithmetic whose result is one of its arguments, or a
+ * range its argument's type decides.
  */
 
 /**
@@ -17,3 +18,11 @@
  * @return T
  */
 function clamp(mixed $value, mixed $min, mixed $max): mixed {}
+
+/**
+ * A bool is 0 or 1, and null is 0, as PHPStan has it: the int of a flag
+ * indexes a pair.
+ *
+ * @return ($value is bool|null ? int<0, 1> : int)
+ */
+function intval(mixed $value, int $base = 10): int {}
