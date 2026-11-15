@@ -37,7 +37,7 @@ interface Iterator extends Traversable
 interface IteratorAggregate extends Traversable
 {
     /** @return Traversable<TKey, TValue> */
-    public function getIterator(): Iterator {}
+    public function getIterator(): Traversable {}
 }
 
 /**

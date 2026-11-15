@@ -89,6 +89,19 @@ class Pile implements \IteratorAggregate
     }
 }
 
+// PHP declares IteratorAggregate::getIterator() Traversable, and so does
+// PHPStan's stub: any Traversable is an implementation.
+/**
+ * @implements \IteratorAggregate<int, Open>
+ */
+class Stream implements \IteratorAggregate
+{
+    public function getIterator(): \Traversable
+    {
+        yield new Open();
+    }
+}
+
 enum Suit
 {
     case Hearts;
