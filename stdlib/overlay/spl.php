@@ -78,7 +78,7 @@ interface ArrayAccess
 
     /**
      * @param TKey $offset
-     * @return TValue
+     * @return TValue|null
      */
     public function offsetGet(mixed $offset): mixed {}
 
@@ -402,6 +402,13 @@ class RecursiveRegexIterator extends RegexIterator implements RecursiveIterator
  */
 class SplDoublyLinkedList implements Iterator, Countable, ArrayAccess, Serializable
 {
+    // An index outside the list throws: TValue, not ArrayAccess's
+    // TValue|null, as PHPStan's stub says.
+    /**
+     * @param int $index
+     * @return TValue
+     */
+    public function offsetGet($index): mixed {}
 }
 
 /**
@@ -444,6 +451,14 @@ class SplObjectStorage implements Countable, SeekableIterator, Serializable, Arr
     // subclass that repeats PHP's `current(): object` is compared with it.
     /** @return TObject */
     public function current(): object {}
+
+    // An object not in the storage throws: TData, not ArrayAccess's
+    // TData|null, as PHPStan's stub says.
+    /**
+     * @param object $object
+     * @return TData
+     */
+    public function offsetGet($object): mixed {}
 }
 
 /**

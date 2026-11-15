@@ -908,3 +908,16 @@ class OpenStorage extends \SplObjectStorage
         return parent::current();
     }
 }
+
+// ArrayAccess::offsetGet() returns TValue|null, as PHPStan's stub has it:
+// an implementation that says it may find nothing narrows nothing.
+/**
+ * @implements \ArrayAccess<string, Open>
+ */
+abstract class OpenMap implements \ArrayAccess
+{
+    public function offsetGet(mixed $offset): ?Open
+    {
+        return null;
+    }
+}

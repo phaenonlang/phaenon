@@ -176,9 +176,11 @@ function tagged<T of int|string>(T $x): T
  * the SPL. WeakMap is WeakMap<TKey of object, TValue>. An ArrayIterator's
  * current() and key() are Iterator's TValue and TKey, past its end too, as
  * PHPStan reads them. A priority queue gives the value, its priority or
- * both, as its extract flags say.
+ * both, as its extract flags say. ArrayAccess::offsetGet() may find
+ * nothing at the offset: TValue|null, unless the class says otherwise, as
+ * the SPL's lists and SplObjectStorage do, which throw instead.
  */
-function spl(\Iterator<string> $values, \Traversable<int, string> $pairs, \Generator<string, int> $gen, \IteratorAggregate<string> $agg, \WeakMap<\stdClass, float> $weights, \ArrayIterator<string, int> $rows, \SplPriorityQueue<int, string> $queue): void
+function spl(\Iterator<string> $values, \Traversable<int, string> $pairs, \Generator<string, int> $gen, \IteratorAggregate<string> $agg, \WeakMap<\stdClass, float> $weights, \ArrayIterator<string, int> $rows, \SplPriorityQueue<int, string> $queue, \ArrayAccess<string, int> $map, \CachingIterator<int, string, \Iterator<int, string>> $cache, \SplQueue<string> $line, \SplObjectStorage<\stdClass, int> $store): void
 {
     foreach ($values as $v) {
         takesString($v);
@@ -207,6 +209,10 @@ function spl(\Iterator<string> $values, \Traversable<int, string> $pairs, \Gener
     foreach ($queue as $item) {
         takesString($item);
     }
+    takesInt($map['missing']); // want P2103 "int|null given"
+    takesString($cache[0]); // want P2103 "string|null given"
+    takesString($line[0]);
+    takesInt($store[new \stdClass()]);
 }
 
 function splArity(
