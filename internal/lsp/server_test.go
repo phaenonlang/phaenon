@@ -685,6 +685,31 @@ func TestFormattingAndTabFix(t *testing.T) {
 	}
 }
 
+// A word of Phaenon's in another letter case (P1006) has a quick-fix that
+// writes it as phn fmt does, at the word alone (design/roadmap.md D30).
+func TestLowerCaseFix(t *testing.T) {
+	src := "namespace App;\n\nfinal class Box\n{\n    get(): int NoThrow => 1;\n}\n"
+	c := start(t, map[string]string{"src/Box.phn": src}, nil)
+	c.open("src/Box.phn", src)
+	d := c.diagnostics("src/Box.phn", 1)
+	if got := codes(d); len(got) != 1 || got[0] != "P1006" {
+		t.Fatalf("diagnostics: %s", jsonOf(d))
+	}
+	actions := c.call("textDocument/codeAction", map[string]any{"textDocument": map[string]any{"uri": c.uri("src/Box.phn")},
+		"range": d[0].(map[string]any)["range"], "context": map[string]any{"diagnostics": d}}).([]any)
+	if len(actions) != 1 {
+		t.Fatalf("actions: %s", jsonOf(actions))
+	}
+	action := actions[0].(map[string]any)
+	edit := action["edit"].(map[string]any)["changes"].(map[string]any)[c.uri("src/Box.phn")].([]any)[0].(map[string]any)
+	r := edit["range"].(map[string]any)
+	start, end := r["start"].(map[string]any), r["end"].(map[string]any)
+	if action["title"] != "Write `nothrow`" || edit["newText"] != "nothrow" ||
+		start["line"] != 4.0 || start["character"] != 15.0 || end["line"] != 4.0 || end["character"] != 22.0 {
+		t.Errorf("the fix: %s", jsonOf(actions))
+	}
+}
+
 func TestPositions(t *testing.T) {
 	tx := newText([]byte("a\n€é😀x\n"))
 	for _, c := range []struct {
