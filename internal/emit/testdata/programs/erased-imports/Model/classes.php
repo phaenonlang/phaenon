@@ -22,4 +22,35 @@ final class Receipt {}
 
 #[Attribute]
 final class Tag {}
-// phaenon-map v1 classes.phn 1-6=1 7:1
+
+final class Failure extends \RuntimeException {}
+
+interface Priced
+{
+    public const int FREE = 0;
+}
+
+abstract class Base
+{
+    public static int $made = 0;
+
+    final public function __construct() {}
+
+    public static function make(): static
+    {
+        return new static();
+    }
+}
+
+trait Counts
+{
+    public int $count = 0;
+}
+
+function customer(): string
+{
+    return 'a function of the classes\' namespace';
+}
+
+const Receipt = 'a constant of the classes\' namespace';
+// phaenon-map v1 classes.phn 1-6=1 7:1 40-42=33 43:34 51-53=41 54:42

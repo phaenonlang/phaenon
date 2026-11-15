@@ -1,0 +1,20 @@
+namespace Shop\Http;
+
+use Shop\Model\Customer;
+use Shop\Model\Money;
+use Shop\Model\Receipt;
+use Shop\Orders\Page;
+
+// A function's or a constant's name is no use of a class import, whatever
+// it spells: PHP resolves them in tables of their own. `Customer` and
+// `Receipt` are used by erased names alone, so their imports go, though a
+// function `customer()` is called here and a constant `Receipt` read.
+// `Money` is called as a function too, and stays for the `new`.
+
+function customer(): int => 2;
+
+function money(): int => 3;
+
+const Receipt = 5;
+
+function spelled(Page<Customer> $customers, Page<Receipt> $receipts): Money => new Money($customers['total'] + $receipts['total'] + customer() + money() + Receipt);

@@ -16,3 +16,28 @@ final class Receipt {}
 
 #[Attribute]
 final class Tag {}
+
+final class Failure extends \RuntimeException {}
+
+interface Priced
+{
+    const int FREE = 0;
+}
+
+abstract class Base
+{
+    public static int $made = 0;
+
+    final __construct() {}
+
+    static make(): static => new static();
+}
+
+trait Counts
+{
+    public int $count = 0;
+}
+
+function customer(): string => 'a function of the classes\' namespace';
+
+const Receipt = 'a constant of the classes\' namespace';

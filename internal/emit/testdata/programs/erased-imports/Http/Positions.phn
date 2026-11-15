@@ -1,0 +1,46 @@
+namespace Shop\Http;
+
+use Shop\Model\Base;
+use Shop\Model\Counts;
+use Shop\Model\Customer;
+use Shop\Model\Failure;
+use Shop\Model\Money;
+use Shop\Model\Priced;
+use Shop\Model\Receipt;
+use Shop\Model\Tag;
+use Shop\Orders\Page;
+
+// Every import here but the trait's is named once as an alias's type
+// argument, which is erased, and once where PHP looks for a class: a `new`
+// without parentheses, a static call, a class constant, a static property,
+// `::class`, `instanceof`, a `catch`, an attribute, `extends`. Each stays.
+
+final class Made extends Base
+{
+    use Counts;
+}
+
+function positions(
+    Page<Customer> $a,
+    Page<Money> $b,
+    Page<Receipt> $c,
+    Page<Failure> $d,
+    Page<Priced> $e,
+    Page<Base> $f,
+    Page<Tag> $g,
+    mixed $x,
+): int {
+    try {
+        $made = Made::make();
+        $new = new Receipt;
+        if ($x instanceof Customer) {
+            return Priced::FREE;
+        }
+        return Base::$made + $made->count + (int) ($new === $x) + strlen(Money::class) + strlen(tagged());
+    } catch (Failure $failure) {
+        return $failure->getCode();
+    }
+}
+
+#[Tag]
+function tagged(): string => 'tagged';

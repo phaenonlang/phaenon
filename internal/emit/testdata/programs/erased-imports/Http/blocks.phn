@@ -1,0 +1,15 @@
+namespace Shop\Http\First {
+    use Shop\Model\Customer;
+    use Shop\Orders\Page;
+
+    // An import is its namespace block's: the next block's use of the
+    // name keeps its own import, not this one, which erased names alone
+    // use.
+    function total(Page<Customer> $page): int => $page['total'];
+}
+
+namespace Shop\Http\Second {
+    use Shop\Model\Customer;
+
+    function make(): Customer => new Customer('second');
+}

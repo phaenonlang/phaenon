@@ -25,6 +25,10 @@ import (
 //     call, which are erased. A docblock's mention is erased too where
 //     the emitter expands the alias it names.
 //
+// What only spells the import's name is no use of it: a function's or a
+// constant's unqualified name, which PHP resolves in tables of their own,
+// and a name in another namespace block of the file.
+//
 // An import the output still uses anywhere stays: in a signature, a `new`,
 // an attribute, a docblock the emitter leaves or writes with the name, a
 // `{@see}`. So does one nothing uses at all, which is the checker's to
@@ -53,12 +57,17 @@ func (e *emitter) dropErasedImports(f *ast.File) {
 	}
 	p := e.opts.Program
 	drop := map[*ast.UseItem]bool{}
-	// The class imports that are no alias's, by the name each gives.
-	named := map[string][]*ast.UseItem{}
+	// The class imports that are no alias's, by the name each gives, in
+	// the namespace each belongs to: an import is its namespace block's,
+	// and a use in another block of the file is another name's.
+	file := e.opts.File
+	named := map[*program.Scope]map[string][]*ast.UseItem{}
+	var scopes []*program.Scope
 	for _, u := range uses {
 		if u.Kind != ast.UseClass {
 			continue // `use function`, `use const`
 		}
+		scope := file.ScopeAt(u.S.Start)
 		for _, it := range u.Items {
 			if it.Kind != ast.UseClass {
 				continue
@@ -67,14 +76,21 @@ func (e *emitter) dropErasedImports(f *ast.File) {
 				drop[it] = true
 				continue
 			}
+			if named[scope] == nil {
+				named[scope] = map[string][]*ast.UseItem{}
+				scopes = append(scopes, scope)
+			}
 			name := strings.ToLower(importName(it))
-			named[name] = append(named[name], it)
+			named[scope][name] = append(named[scope][name], it)
 		}
 	}
-	if len(named) > 0 && p.HasTypeAliases() || len(named) > 0 && hasCallTypeArgs(f) {
-		for name := range e.erasedOnly(f, statements, named) {
-			for _, it := range named[name] {
-				drop[it] = true
+	if len(scopes) > 0 && (p.HasTypeAliases() || hasCallTypeArgs(f)) {
+		erased, other := e.erasedSpans(f)
+		for _, scope := range scopes {
+			for name := range e.erasedOnly(f, statements, named[scope], scope, erased, other) {
+				for _, it := range named[scope][name] {
+					drop[it] = true
+				}
 			}
 		}
 	}
@@ -128,32 +144,93 @@ func callTypeArgs(n ast.Node) []ast.TypeExpr {
 	return nil
 }
 
-// erasedOnly returns, among the lower-cased names the file's imports give,
-// those that erased names alone use: used somewhere, and nowhere the
-// output keeps. The uses are the ones the checker counts
-// (program.ImportUses).
-func (e *emitter) erasedOnly(f *ast.File, statements []ast.Span, named map[string][]*ast.UseItem) map[string]bool {
-	// The spans whose text the output does not have: a `type` declaration
-	// with its docblock, the mention of an alias in a type position with
-	// its type arguments, the type arguments of a call.
-	var erased []ast.Span
+// erasedSpans reads the file once for what the uses of its imports are
+// judged by. erased are the spans whose text the output does not have: a
+// `type` declaration with its docblock, the mention of an alias in a type
+// position with its type arguments, the type arguments of a call. other
+// are the starts of the unqualified names that stand where PHP looks for
+// a function or a constant, a call's callee and a bare constant: PHP
+// resolves those in tables of their own, so a class import is not what
+// they use, whatever they spell.
+func (e *emitter) erasedSpans(f *ast.File) (erased []ast.Span, other map[int]bool) {
+	// A name is a class's where the tree holds it as one; every other
+	// name of an expression is a function's or a constant's.
+	class := map[*ast.Name]bool{}
+	hold := func(x ast.Expr) {
+		if n, ok := x.(*ast.Name); ok {
+			class[n] = true
+		}
+	}
+	var names []*ast.Name
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.TypeAlias:
 			erased = append(erased, e.aliasDeclaration(n))
 			return false
 		case *ast.NamedType:
+			class[n.Name] = true
 			if e.docResolver(n.S.Start).TypeAlias(n.Name) != nil {
 				erased = append(erased, n.S)
 				return false
 			}
-		default:
-			if args := callTypeArgs(n); len(args) > 0 {
-				erased = append(erased, ast.Span{Start: args[0].Span().Start, End: args[len(args)-1].Span().End})
+		case *ast.New:
+			hold(n.Class)
+		case *ast.StaticCall:
+			hold(n.Class)
+		case *ast.ClassConstFetch:
+			hold(n.Class)
+		case *ast.StaticPropertyFetch:
+			hold(n.Class)
+		case *ast.Instanceof:
+			hold(n.Class)
+		case *ast.Attribute:
+			class[n.Name] = true
+		case *ast.TraitUse:
+			for _, name := range n.Names {
+				class[name] = true
 			}
+			for _, a := range n.Adaptations {
+				if a.Trait != nil {
+					class[a.Trait] = true
+				}
+				for _, name := range a.InsteadOf {
+					class[name] = true
+				}
+			}
+		case *ast.Catch:
+			for _, name := range n.Types {
+				class[name] = true
+			}
+		case *ast.Use:
+			return false // an import's own name is no use
+		case *ast.Namespace:
+			if n.Name != nil {
+				class[n.Name] = true // nor is the namespace's
+			}
+		case *ast.Name:
+			names = append(names, n)
+		}
+		if args := callTypeArgs(n); len(args) > 0 {
+			erased = append(erased, ast.Span{Start: args[0].Span().Start, End: args[len(args)-1].Span().End})
 		}
 		return true
 	})
+	other = map[int]bool{}
+	for _, n := range names {
+		if !class[n] && len(n.Parts) == 1 && n.Kind == ast.NameUnqualified {
+			other[n.S.Start] = true
+		}
+	}
+	return erased, other
+}
+
+// erasedOnly returns, among the lower-cased names the class imports of one
+// namespace give, those that erased names alone use: used somewhere in the
+// namespace, and nowhere the output keeps. The uses are the ones the
+// checker counts (program.ImportUses), but for a function's or a
+// constant's name, which is no use of a class import, and for a use in
+// another namespace block of the file.
+func (e *emitter) erasedOnly(f *ast.File, statements []ast.Span, named map[string][]*ast.UseItem, scope *program.Scope, erased []ast.Span, other map[int]bool) map[string]bool {
 	within := func(s ast.Span) bool {
 		for _, span := range erased {
 			if span.Start <= s.Start && s.End <= span.End {
@@ -173,8 +250,12 @@ func (e *emitter) erasedOnly(f *ast.File, statements []ast.Span, named map[strin
 	for name := range named {
 		wanted[name] = true
 	}
+	file := e.opts.File
 	gone := map[string]bool{}
 	program.ImportUses(e.src, e.tokens(), statements, idents, wanted, func(name string, at ast.Span, comment bool) bool {
+		if file.ScopeAt(at.Start) != scope || !comment && other[at.Start] {
+			return true // no use of this import
+		}
 		kept := !within(at)
 		if kept && comment && bytes.HasPrefix(e.src[at.Start:at.End], []byte("/**")) {
 			// A docblock keeps the name unless the emitter expands every
