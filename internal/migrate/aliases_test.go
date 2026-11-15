@@ -153,4 +153,27 @@ final class Show
 		t.Errorf("notes: %v", notes)
 	}
 	checkLifted(t, map[string][]byte{ordersPath: []byte(orders), showPath: alone})
+
+	// And the other way: the declaring file migrated alone keeps the
+	// aliases the other file still imports, and what names them, so that
+	// the tags it leaves there still find their aliases.
+	p, files = model()
+	alone, notes, err = Lift([]byte(orders), Options{Generics: true, Program: p, File: files[ordersPath]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(alone), "\ntype Row") || strings.Contains(string(alone), "\ntype Page") ||
+		!strings.Contains(string(alone), "@phpstan-type Row array{id: int, name?: string}") {
+		t.Errorf("Orders, migrated alone, lost an alias Show imports:\n%s", alone)
+	}
+	kept = 0
+	for _, n := range notes {
+		if strings.Contains(n.Msg, "kept @phpstan-type") && strings.Contains(n.Msg, "App\\Http\\Show imports it and is not among the files being migrated") {
+			kept++
+		}
+	}
+	if kept != 2 {
+		t.Errorf("notes: %v", notes)
+	}
+	checkLifted(t, map[string][]byte{ordersPath: alone, showPath: []byte(show)})
 }

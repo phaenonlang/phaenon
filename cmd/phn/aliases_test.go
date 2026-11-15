@@ -149,3 +149,66 @@ func TestMigrateLiftsAliases(t *testing.T) {
 		}
 	}
 }
+
+// A run over part of a project does not lift an alias from under a file it
+// leaves alone: the @phpstan-type stays, with a note naming the importer,
+// and so does what names it. The importer is found though nothing in the
+// run names its class.
+func TestMigrateKeepsAnAliasImportedOutsideTheRun(t *testing.T) {
+	bin := phnBinary(t)
+	root := formatTree(t)
+	if err := os.Remove(filepath.Join(root, "src", "Bad.phn")); err != nil {
+		t.Fatal(err)
+	}
+	writeTree(t, root, map[string]string{
+		"vendor/composer/autoload_psr4.php": "<?php\n\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\n\nreturn array(\n    'App\\\\' => array($baseDir . '/.src'),\n);\n",
+		"src/Orders/OrderBook.php": "<?php\n\ndeclare(strict_types=1);\n\nnamespace App\\Orders;\n\n/**\n * @phpstan-type Order array{id: int, total: int}\n * @phpstan-type Orders list<Order>\n * @phpstan-type Local array{x: int}\n */\nfinal class OrderBook\n{\n" +
+			"    /**\n     * @return Order\n     */\n    public function find(int $id): array\n    {\n        return ['id' => $id, 'total' => 0];\n    }\n\n" +
+			"    /**\n     * @param Local $l\n     */\n    public function local(array $l): int\n    {\n        return $l['x'];\n    }\n}\n",
+		"src/Http/Controller.php": "<?php\n\ndeclare(strict_types=1);\n\nnamespace App\\Http;\n\nuse App\\Orders\\OrderBook;\n\n/**\n * @phpstan-import-type Order from OrderBook\n */\nfinal class Controller\n{\n" +
+			"    /**\n     * @return Order\n     */\n    public function show(OrderBook $orders): array\n    {\n        return $orders->find(1);\n    }\n}\n",
+	})
+	stdout, stderr, err := run(t, root, bin, "migrate", "src/Orders")
+	if err != nil || !strings.Contains(stdout, "1 files migrated") {
+		t.Fatalf("phn migrate src/Orders (%v):\n%s%s", err, stdout, stderr)
+	}
+	book, _ := os.ReadFile(filepath.Join(root, "src/Orders/OrderBook.phn"))
+	for _, want := range []string{
+		"type Local = array{x: int};",
+		" * @phpstan-type Order array{id: int, total: int}\n",
+		" * @phpstan-type Orders list<Order>\n",
+		"local(Local $l): int",
+	} {
+		if !strings.Contains(string(book), want) {
+			t.Errorf("OrderBook.phn lacks %q:\n%s", want, book)
+		}
+	}
+	if strings.Contains(string(book), "\ntype Order =") {
+		t.Errorf("the alias a file outside the run imports was lifted:\n%s", book)
+	}
+	for _, want := range []string{
+		`kept @phpstan-type Order: App\Http\Controller imports it and is not among the files being migrated`,
+		"kept @phpstan-type Orders: it names Order, which stays a tag",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("the notes lack %q:\n%s", want, stderr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "src/Http/Controller.php")); err != nil {
+		t.Errorf("the file outside the run was touched: %v", err)
+	}
+	// Migrating the rest lifts what was kept for it.
+	stdout, stderr, err = run(t, root, bin, "migrate", "src")
+	if err != nil {
+		t.Fatalf("phn migrate src (%v):\n%s%s", err, stdout, stderr)
+	}
+	book, _ = os.ReadFile(filepath.Join(root, "src/Orders/OrderBook.phn"))
+	controller, _ := os.ReadFile(filepath.Join(root, "src/Http/Controller.phn"))
+	if !strings.Contains(string(book), "type Order = array{id: int, total: int};\ntype Orders = list<Order>;") || strings.Contains(string(book)+string(controller), "@phpstan-") ||
+		!strings.Contains(string(controller), "use App\\Orders\\Order;") {
+		t.Errorf("after migrating the whole tree:\n%s\n%s", book, controller)
+	}
+	if stdout, stderr, err := run(t, root, bin, "check"); err != nil {
+		t.Errorf("phn check on the migrated tree (%v):\n%s%s", err, stdout, stderr)
+	}
+}

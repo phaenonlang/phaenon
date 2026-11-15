@@ -108,6 +108,9 @@ func (l *lifter) decideAlias(c *program.Class, name string, visiting map[string]
 	if why := l.nameTaken(c, name); why != "" {
 		return aliasDecision{why: why}
 	}
+	if importer := l.importerOutside(c, name); importer != nil {
+		return aliasDecision{why: fmt.Sprintf("%s imports it and is not among the files being migrated", importer.Name)}
+	}
 	visiting[key] = true
 	defer delete(visiting, key)
 	for _, n := range typeNames(tag.Type) {
@@ -175,6 +178,28 @@ func (l *lifter) nameTaken(c *program.Class, name string) string {
 		}
 	}
 	return ""
+}
+
+// importerOutside is a class the run does not rewrite whose docblock
+// imports the alias a class declares under name, nil without one. Its
+// @phpstan-import-type would name an alias the class no longer declares,
+// so the alias stays a tag, as an import stays one whose alias did.
+func (l *lifter) importerOutside(c *program.Class, name string) *program.Class {
+	for _, other := range l.prog.Classes() {
+		if other == c || other.File.IsStub() || l.migrating(other.File) {
+			continue
+		}
+		other.Signature()
+		if other.Doc == nil {
+			continue
+		}
+		for _, it := range other.Doc.ImportTypes {
+			if it.Name == name && l.prog.Class(other.Scope.ResolveClassString(it.From.Name)) == c {
+				return other
+			}
+		}
+	}
+	return nil
 }
 
 func kindOf(c *program.Class) string {
