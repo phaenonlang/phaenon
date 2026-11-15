@@ -199,6 +199,13 @@ abstract class C {
 		"$f = function () nothrow {};":           "",
 		"$f = fn () nothrow => 1;":               "",
 	}
+	// The other word before a parameter list names the next member, and
+	// the member before it lacks its `;`, which the message says as it
+	// does after any member.
+	refused["interface I {\n    a(): int throws A\n    nothrow(): int;\n}"] = `unexpected token "nothrow"`
+	refused["interface I {\n    a(): int nothrow\n    throws(): int;\n}"] = `unexpected token "throws"`
+	refused["interface I {\n    a(): int throws A\n    nothrow<T>(T $x): T;\n}"] = `unexpected token "nothrow"`
+	refused["abstract class C {\n    abstract a(): int nothrow\n    throws() {}\n}"] = `unexpected token "throws"`
 	for src, msg := range refused {
 		_, err := Parse([]byte(src), lexer.ModePhaenon)
 		if err == nil {
@@ -227,9 +234,17 @@ func TestNothrowStaysAName(t *testing.T) {
 			t.Errorf("mode %v: %v", mode, err)
 		}
 	}
-	// A method named nothrow, declared without a keyword, with the clause.
-	if _, err := Parse([]byte("class C { nothrow(): nothrow nothrow {} static nothrow() nothrow => 1; }"), lexer.ModePhaenon); err != nil {
-		t.Error(err)
+	// A method named nothrow, declared without a keyword, with the clause;
+	// and methods named nothrow and throws after a member that ends in a
+	// clause.
+	for _, src := range []string{
+		"class C { nothrow(): nothrow nothrow {} static nothrow() nothrow => 1; }",
+		"interface I {\n    a(): int throws A;\n    nothrow(): int;\n    b(): int nothrow;\n    throws(): int throws A;\n    c(): int nothrow;\n    nothrow<T>(T $x): T nothrow;\n}",
+		"class C {\n    a(): int throws A {}\n    nothrow(): int nothrow => 1;\n    b(): int nothrow {}\n    throws(): int throws A => 1;\n}",
+	} {
+		if _, err := Parse([]byte(src), lexer.ModePhaenon); err != nil {
+			t.Errorf("%q: %v", src, err)
+		}
 	}
 }
 

@@ -852,7 +852,10 @@ func (p *Parser) functionDecl(attrs []*ast.AttrGroup) ast.Stmt {
 // every name `throws` PHP code declares keeps parsing. `nothrow` stands in
 // the same place, contextual in the same way (§4.5); with `throws` beside
 // it, one saying that nothing escapes and the other naming what does, it
-// is a syntax error.
+// is a syntax error. The other word followed by a parameter list is not a
+// clause but the name of what comes next, `nothrow(): int;` after a
+// member that lacks its `;`: the caller reports the missing `;` or body,
+// as after any other clause.
 func (p *Parser) throwsClause() *ast.Throws {
 	var t *ast.Throws
 	switch {
@@ -874,7 +877,8 @@ func (p *Parser) throwsClause() *ast.Throws {
 	default:
 		return nil
 	}
-	if t.Nothrow && p.clauseWord("throws") || !t.Nothrow && p.clauseWord("nothrow") {
+	other := t.Nothrow && p.clauseWord("throws") || !t.Nothrow && p.clauseWord("nothrow")
+	if other && !p.methodAt(0, func(token.Token) bool { return true }) {
 		p.errorf("`nothrow` and `throws` together: one says that nothing escapes, the other names what does (design/functions.md §4.5)")
 	}
 	return t
