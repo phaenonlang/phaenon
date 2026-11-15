@@ -126,3 +126,51 @@ function viaOverride(Cache $c): string {
         return '';
     }
 }
+
+// An override that declares nothing inherits nothrow from any method it
+// overrides, read in PHPStan's order: the parent's method, with what it
+// inherits, then the class's own interfaces in the order declared. The
+// parent's method saying nothing does not stop the interface's nothrow,
+// nor does an interface written first that says nothing.
+class PlainBase
+{
+    find(int $id): ?string => null;
+}
+
+final class Gap extends PlainBase implements Lookup
+{
+    find(int $id): ?string {
+        if ($id < 0) {
+            throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\Lookup::find()"
+        }
+        return null;
+    }
+}
+
+function viaGap(Gap $g): ?string {
+    try {
+        return $g->find(1);
+    } catch (NotFound $e) { // want P2403
+        return null;
+    }
+}
+
+interface Plain
+{
+    name(): string;
+}
+
+interface Quiet
+{
+    name(): string nothrow;
+}
+
+final class PlainFirst implements Plain, Quiet
+{
+    name(): string => throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\Quiet::name()"
+}
+
+final class QuietFirst implements Quiet, Plain
+{
+    name(): string => throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\Quiet::name()"
+}
