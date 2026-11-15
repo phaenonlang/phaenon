@@ -182,8 +182,10 @@ func (r *Resolver) TypeAlias(n *ast.Name) *TypeAlias {
 		if _, param := r.params[n.Parts[0]]; param {
 			return nil
 		}
-		if _, keyword := r.keyword(strings.ToLower(n.Parts[0]), nil, nil); keyword {
-			return nil
+		if lower, otherCase := OtherCaseTypeName(n.Parts[0]); !otherCase {
+			if _, keyword := r.keyword(lower, nil, nil); keyword {
+				return nil
+			}
 		}
 		if _, own := r.alias(n.Parts[0]); own {
 			return nil
@@ -207,8 +209,10 @@ func (r *Resolver) DocAlias(name string) *TypeAlias {
 		if _, param := r.params[name]; param {
 			return nil
 		}
-		if _, keyword := r.keyword(strings.ToLower(name), nil, nil); keyword {
-			return nil
+		if lower, otherCase := OtherCaseTypeName(name); !otherCase {
+			if _, keyword := r.keyword(lower, nil, nil); keyword {
+				return nil
+			}
 		}
 		if _, own := r.alias(name); own {
 			return nil

@@ -108,7 +108,7 @@ func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 			}
 			return
 		}
-		lower := strings.ToLower(name)
+		lower, otherCase := program.OtherCaseTypeName(name)
 		if (lower == "self" || lower == "static") && given > 0 {
 			if cl := x.res.Class(); cl != nil {
 				cl.Signature()
@@ -116,7 +116,7 @@ func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 				return
 			}
 		}
-		if ar, ok := keywordArity[lower]; ok {
+		if ar, ok := keywordArity[lower]; ok && !otherCase {
 			if lower == "list" && given == 0 && x.testedNames[t] {
 				return // `is list`: list<mixed> (design/generics.md §11.4)
 			}
@@ -147,10 +147,29 @@ func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 	}
 	cl := x.p().Class(name)
 	if cl == nil {
-		return // reported by the resolver
+		x.otherCaseTypeName(t.Name, name)
+		return // otherwise reported where the declared types are judged
 	}
 	cl.Signature()
 	x.checkArity(t, cl.Name, cl.TypeParams, given)
+}
+
+// otherCaseTypeName reports, in a .phn, `Map` or `Bytes` where no class of
+// the name resolves (resolved): one of Phaenon's own type names written in
+// another letter case, which is a class name like any other
+// (design/roadmap.md D30). The resolver read it as Phaenon's type, so this
+// is the one finding; the author may have meant a class, so it is P2001,
+// with the lower-case spelling in its message. It reports nothing else.
+func (x *fnCtx) otherCaseTypeName(n *ast.Name, resolved string) bool {
+	if x.file.Mode != lexer.ModePhaenon || n.Kind != ast.NameUnqualified || len(n.Parts) != 1 {
+		return false
+	}
+	word, otherCase := program.OtherCaseTypeName(n.Parts[0])
+	if !otherCase || x.res.ClassAlias(n.Parts[0]) {
+		return false
+	}
+	x.report(n.S, P2001, "unknown class %s: Phaenon's type is written in lower case, `%s`", resolved, word)
+	return true
 }
 
 // checkMapKey enforces map's key bound (design/collections.md §2): a key

@@ -1,0 +1,12 @@
+namespace Words\Use;
+
+use Words\Kinds\Bytes;
+use Words\Kinds\Map;
+
+// An enum `Map` and an alias `Bytes`, imported.
+final class Routes
+{
+    name(Map $m): string => $m->value;
+
+    size(Bytes $b): int => $b['size'];
+}

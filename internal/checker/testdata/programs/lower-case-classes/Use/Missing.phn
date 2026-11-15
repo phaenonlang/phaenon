@@ -1,0 +1,21 @@
+namespace Words\Use\Missing;
+
+// No class, enum or alias named Map or Bytes is seen here: each is P2001,
+// whose message gives Phaenon's spelling, and is read as Phaenon's type, so
+// nothing else is reported. In a docblock the name is the class PHPStan
+// reads, which disagrees with the native type.
+final class Missing
+{
+    private Map<int, string> $names = []; // want P2001 "unknown class Words\Use\Missing\Map: Phaenon's type is written in lower case, `map`"
+
+    a(Map<string, int> $m): int => \count($m) + \count($this->names); // want P2001 "`map`"
+
+    b(?Bytes $b): int => $b === null ? 0 : \strlen((string) $b); // want P2001 "unknown class Words\Use\Missing\Bytes: Phaenon's type is written in lower case, `bytes`"
+
+    c(Closure(BYTES): int $f): int => $f((bytes) ''); // want P2001 "unknown class Words\Use\Missing\BYTES: Phaenon's type is written in lower case, `bytes`"
+
+    /**
+     * @param Bytes $b
+     */
+    d(string $b): int => \strlen($b); // want P4002 "docblock type Words\Use\Missing\Bytes is not a subtype of the declared type string"
+}

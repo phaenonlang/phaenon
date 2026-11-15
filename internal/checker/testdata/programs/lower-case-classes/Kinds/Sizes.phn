@@ -1,0 +1,11 @@
+namespace Words\Kinds;
+
+/**
+ * A class's own alias named like Phaenon's type is read before any class.
+ *
+ * @phpstan-type Bytes array{n: int}
+ */
+final class Sizes
+{
+    size(Bytes $b): int => $b['n'];
+}

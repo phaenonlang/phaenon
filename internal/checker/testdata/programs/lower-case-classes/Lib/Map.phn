@@ -1,0 +1,13 @@
+namespace Words\Lib;
+
+// A project's class named like Phaenon's map, and generic as it is. PHP
+// leaves the name free; `Map` names this class wherever a file sees it
+// (design/roadmap.md D30).
+final class Map<K of int|string, V>
+{
+    __construct(private map<K, V> $items = []) {}
+
+    get(K $key): ?V => $this->items[$key] ?? null;
+
+    with(K $key, V $value): Map<K, V> => new Map([...$this->items, $key => $value]);
+}

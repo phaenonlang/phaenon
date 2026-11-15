@@ -7,6 +7,7 @@ import (
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/docblock"
+	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -79,6 +80,14 @@ func (r *Resolver) Scope() *Scope { return r.scope }
 // TypeParam returns the type parameter visible under name, or nil.
 func (r *Resolver) TypeParam(name string) *TypeParam { return r.params[name] }
 
+// ClassAlias reports an alias the resolver's class declares or imports
+// in its docblock (@phpstan-type, @phpstan-import-type) under name, which a
+// type position reads before a class of that name.
+func (r *Resolver) ClassAlias(name string) bool {
+	_, ok := r.alias(name)
+	return ok
+}
+
 // ParamType is the type a reference to the type parameter name denotes.
 func (r *Resolver) ParamType(tp *TypeParam) types.Type {
 	return types.Param{Name: tp.Name, Bound: tp.Bound, Owner: r.owner()}
@@ -135,6 +144,7 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 		for _, a := range t.TypeArgs {
 			args = append(args, r.native(a))
 		}
+		word, otherCase := "", false
 		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
 			lower := strings.ToLower(t.Name.Parts[0])
 			if lower == "class" {
@@ -145,8 +155,10 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 				}
 				return types.ClassString{}
 			}
-			if ty, ok := r.keyword(lower, args, nil); ok {
-				return ty
+			if word, otherCase = OtherCaseTypeName(t.Name.Parts[0]); !otherCase {
+				if ty, ok := r.keyword(lower, args, nil); ok {
+					return ty
+				}
 			}
 			if tp, ok := r.params[t.Name.Parts[0]]; ok {
 				return types.Param{Name: tp.Name, Bound: tp.Bound, Owner: r.owner()}
@@ -158,6 +170,15 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 		name := r.scope.ResolveClass(t.Name)
 		if a, ok := r.typeAlias(name, args); ok {
 			return a
+		}
+		if otherCase && r.f != nil && r.f.Mode == lexer.ModePhaenon && r.p.Class(name) == nil {
+			// `Map` where no class of that name resolves: the checker
+			// reports it (P2001), saying that Phaenon's type is written
+			// `map`, and the type is read as that one, so that nothing
+			// else is reported.
+			if ty, ok := r.keyword(word, args, nil); ok {
+				return ty
+			}
 		}
 		return r.classType(name, args)
 	case *ast.NullableType:
@@ -275,6 +296,25 @@ func (r *resolver) selfArgs() []types.Type {
 		out[i] = types.Param{Name: tp.Name, Bound: tp.Bound, Owner: r.class.Name}
 	}
 	return out
+}
+
+// phaenonTypeNames are the type names Phaenon adds that neither PHP nor
+// PHPStan has: `map` and `bytes` in a type position, and in a docblock of a
+// .phn also `non-empty-map` and `class<T>`, which the emitter translates
+// for PHPStan.
+var phaenonTypeNames = map[string]bool{"map": true, "non-empty-map": true, "bytes": true, "class": true}
+
+// OtherCaseTypeName reports a name that spells one of Phaenon's own type
+// names in another letter case than lower case, and returns that type name.
+// The words Phaenon adds are written in lower case (design/roadmap.md D30),
+// and these are names PHP leaves free: `Map` and `Bytes` are class names
+// like any other, resolved as such. PHP's type names and PHPStan's
+// vocabulary keep their own rule, any case (`Int`, `List<int>` in a
+// docblock). `class` in a type position is no name PHP allows, and the
+// parser reads it in any case: the checker reports the case (P1006).
+func OtherCaseTypeName(name string) (string, bool) {
+	lower := strings.ToLower(name)
+	return lower, phaenonTypeNames[lower] && name != lower
 }
 
 // keyword resolves a native or docblock type keyword.
@@ -446,8 +486,11 @@ func (r *resolver) docType(n *docblock.TypeNode) types.Type {
 			if tp, ok := r.params[n.Name]; ok {
 				return types.Param{Name: tp.Name, Bound: tp.Bound, Owner: r.owner()}
 			}
-			if ty, ok := r.keyword(lower, args, n); ok {
-				return ty
+			// `Map` and `Bytes` are class names, as PHPStan reads them.
+			if _, otherCase := OtherCaseTypeName(n.Name); !otherCase {
+				if ty, ok := r.keyword(lower, args, n); ok {
+					return ty
+				}
 			}
 			if a, ok := r.alias(n.Name); ok {
 				return a
