@@ -88,14 +88,15 @@ func hasGenerics(f *ast.File) bool {
 }
 
 // isAliasCandidate: a bare `list` / `map` is Phaenon syntax even without
-// arguments (PHP has no such types); aliases are found by the lowering.
+// arguments (PHP has no such types); aliases are found by the lowering. A
+// `Map` is a class name (design/roadmap.md D30).
 func isAliasCandidate(n *ast.NamedType) bool {
 	if len(n.Name.Parts) != 1 {
 		return false
 	}
-	switch strings.ToLower(n.Name.Parts[0]) {
+	switch lower, otherCase := program.OtherCaseTypeName(n.Name.Parts[0]); lower {
 	case "list", "map", "class":
-		return true
+		return !otherCase
 	}
 	return false
 }
@@ -241,13 +242,16 @@ func (l *lowering) erase(t ast.TypeExpr, sc *scope) string {
 					}
 				}
 			}
-			switch strings.ToLower(name) {
-			case "list", "map", "array":
-				return "array"
-			case "class", "bytes":
-				return "string"
-			case "iterable":
-				return "iterable"
+			// `Map` and `Bytes` are class names (design/roadmap.md D30).
+			if lower, otherCase := program.OtherCaseTypeName(name); !otherCase {
+				switch lower {
+				case "list", "map", "array":
+					return "array"
+				case "class", "bytes":
+					return "string"
+				case "iterable":
+					return "iterable"
+				}
 			}
 		}
 		if sc.alias(t) != nil {
@@ -373,8 +377,9 @@ func (l *lowering) docType(t ast.TypeExpr, sc *scope) string {
 	case *ast.NamedType:
 		name := l.text(t.Name.S)
 		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
-			if _, ok := sc.params[t.Name.Parts[0]]; !ok {
-				switch strings.ToLower(t.Name.Parts[0]) {
+			_, param := sc.params[t.Name.Parts[0]]
+			if lower, otherCase := program.OtherCaseTypeName(t.Name.Parts[0]); !param && !otherCase {
+				switch lower {
 				case "map":
 					name = "array"
 				case "bytes":
@@ -560,9 +565,10 @@ func mentionsBytes(t ast.TypeExpr) bool {
 
 // isBytes: the type bytes, which PHP would read as a class of that name.
 // It is Phaenon syntax (hasGenerics) and no alias candidate: its erasure,
-// string, says all a docblock could.
+// string, says all a docblock could. `Bytes` is a class name
+// (design/roadmap.md D30).
 func isBytes(n *ast.NamedType) bool {
-	return len(n.Name.Parts) == 1 && strings.EqualFold(n.Name.Parts[0], "bytes")
+	return len(n.Name.Parts) == 1 && n.Name.Kind == ast.NameUnqualified && n.Name.Parts[0] == "bytes"
 }
 
 // ------------------------------------------------------------------ docblocks

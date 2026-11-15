@@ -22,8 +22,10 @@
 // D27 withdrew (design/tooling.md §5.6, respell.go): `fun`, `function` on
 // a method whose name needs no keyword, and the type tests `is`, `as` and
 // `as?`, those the checked program gives the PHP of (Options.Tests) and,
-// without one, `$x is Foo` with a class name. These are the layer's only
-// changes of tokens.
+// without one, `$x is Foo` with a class name. Then it writes in lower case
+// the words Phaenon adds where the source writes them in another case
+// (§5.7, roadmap D30): `THROWS`, `TYPE`, `(BYTES)`. These are the layer's
+// only changes of tokens.
 //
 // Everything else is the project's PHP style, which the second layer, the
 // project's fixer run through phn fix, writes. The spacing changes only
@@ -60,6 +62,9 @@ func SourceWith(src []byte, opts Options) (out []byte, left []Left, err error) {
 	// then the tabs: every later step lays out spaces.
 	out, left, err = respell(src, opts)
 	if err != nil {
+		return nil, nil, err
+	}
+	if out, err = lowerCase(out); err != nil {
 		return nil, nil, err
 	}
 	out = trimLeadingBlankLines(tabs.Expand(out))

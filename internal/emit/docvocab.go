@@ -8,6 +8,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/docblock"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/token"
 )
 
@@ -360,7 +361,12 @@ func translateType(orig, blank string, expand aliasExpand) (text string, lines [
 			j++
 		}
 		if !strings.HasSuffix(s[:i], "::") && !shapeKey(s, i, j) {
-			w := strings.ToLower(s[i:j])
+			// Phaenon's words in lower case only: `Map` and `Bytes` are the
+			// classes PHPStan reads (design/roadmap.md D30).
+			w, otherCase := program.OtherCaseTypeName(s[i:j])
+			if otherCase {
+				w = ""
+			}
 			switch {
 			case w == "bytes":
 				rs = append(rs, repl{i, j, "string"})

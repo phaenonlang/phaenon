@@ -231,8 +231,8 @@ func noElementDoc(n *docblock.TypeNode) string {
 	}
 	switch n.Kind {
 	case docblock.KindNamed:
-		if len(n.Args) == 0 {
-			switch l := strings.ToLower(n.Name); l {
+		if l, otherCase := program.OtherCaseTypeName(n.Name); len(n.Args) == 0 && !otherCase {
+			switch l {
 			case "array", "iterable", "list", "map", "non-empty-array", "non-empty-list", "non-empty-map":
 				return l
 			}

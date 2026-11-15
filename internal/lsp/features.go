@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/docblock"
 	"github.com/phaenonlang/phaenon/internal/format"
+	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/tabs"
 	"github.com/phaenonlang/phaenon/internal/types"
@@ -821,7 +824,8 @@ func (s *Server) formatting(uri string) (any, error) {
 }
 
 // codeActions offers the fixes of the diagnostics in the range: spaces for
-// the tabs of P1005.
+// the tabs of P1005, and the lower case of a word P1006 found in another
+// (design/tooling.md §6.1, roadmap D30).
 func (s *Server) codeActions(p CodeActionParams) (any, error) {
 	out := []CodeAction{}
 	path, ok := s.path(p.TextDocument.URI)
@@ -836,6 +840,12 @@ func (s *Server) codeActions(p CodeActionParams) (any, error) {
 	}
 	s.mu.Unlock()
 	for _, diag := range p.Context.Diagnostics {
+		if diag.Code == "P1006" && src != nil {
+			if a, ok := lowerCaseFix(p.TextDocument.URI, src, diag); ok {
+				out = append(out, a)
+			}
+			continue
+		}
 		if diag.Code != "P1005" || src == nil {
 			continue
 		}
@@ -852,4 +862,30 @@ func (s *Server) codeActions(p CodeActionParams) (any, error) {
 		})
 	}
 	return out, nil
+}
+
+// lowerCaseFix is the quick-fix of P1006: the word at the diagnostic's
+// range written as phn fmt writes it. The buffer is parsed again, so that
+// the word is the one the parser reads there now; a buffer that no longer
+// parses, or holds another text there, gets no fix.
+func lowerCaseFix(uri string, src []byte, diag Diagnostic) (CodeAction, bool) {
+	f, err := parser.Parse(src, lexer.ModePhaenon)
+	if err != nil {
+		return CodeAction{}, false
+	}
+	tx := newText(src)
+	start, end := tx.offset(diag.Range.Start), tx.offset(diag.Range.End)
+	for _, w := range parser.Words(f, src) {
+		if w.S.Start != start || w.S.End != end {
+			continue
+		}
+		return CodeAction{
+			Title: fmt.Sprintf("Write `%s`", w.Want), Kind: "quickfix", IsPreferred: true,
+			Diagnostics: []Diagnostic{diag},
+			Edit: &WorkspaceEdit{Changes: map[string][]TextEdit{
+				uri: {{Range: diag.Range, NewText: w.Want}},
+			}},
+		}, true
+	}
+	return CodeAction{}, false
 }

@@ -1,0 +1,10 @@
+namespace Words\Kinds;
+
+// An enum and a type alias named like Phaenon's types.
+enum Map: string
+{
+    case Road = 'road';
+    case Sea = 'sea';
+}
+
+type Bytes = array{size: int};

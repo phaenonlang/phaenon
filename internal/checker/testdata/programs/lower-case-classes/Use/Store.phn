@@ -1,0 +1,32 @@
+namespace Words\Use;
+
+use Words\Lib\{Bytes, Map};
+
+// The imported classes in another case than lower case, and Phaenon's
+// types in lower case beside them, in one file: one name each.
+final class Store
+{
+    private Map<string, Bytes> $blobs;
+
+    __construct() {
+        $this->blobs = new Map<string, Bytes>();
+    }
+
+    put(string $key, bytes $raw): Map<string, Bytes> => $this->blobs->with($key, new Bytes($raw));
+
+    blob(string $key): ?Bytes => $this->blobs->get($key);
+
+    raw(Bytes $b): bytes => $b->raw;
+
+    count(map<string, int> $m): int => \count($m);
+
+    /**
+     * @param MAP<int, Bytes> $m
+     */
+    first(MAP $m): ?Bytes => $m->get(0);
+
+    /**
+     * @return list<Bytes>
+     */
+    all(Bytes ...$b): array => \array_values($b);
+}

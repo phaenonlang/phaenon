@@ -1,0 +1,7 @@
+namespace Words\Lib;
+
+// A class named like Phaenon's bytes, holding Phaenon's bytes.
+final class Bytes
+{
+    __construct(public bytes $raw) {}
+}

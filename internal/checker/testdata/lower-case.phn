@@ -1,0 +1,116 @@
+// The words Phaenon adds to PHP are written in lower case
+// (design/roadmap.md D30). Where only the word can stand, another case is
+// still read as the word, so that the declaration draws no other finding,
+// and is P1006 at the word. A name of that spelling stays a name, by the
+// position rules that decided it before: a class `Throws` as a return
+// type, a method or a function `nothrow`, a constant `TYPE`, an enum case
+// `Type`, a type parameter `In`. PHP's own words keep PHP's rule. `Map` and
+// `Bytes` are class names (programs/lower-case-classes).
+namespace App\LowerCase;
+
+// `type` before an alias.
+type Row = int;
+TYPE Upper = string; // want P1006 "`TYPE` is Phaenon's `type`, written in lower case; phn fmt rewrites it"
+Type Title = bool; // want P1006 "`Type` is Phaenon's `type`"
+type Pairs = List<(int, string)>; // want P1006 "`List` is Phaenon's `list`"
+type Shape = ARRAY{id: int, name?: STRING}; // PHP's word: `array`, `string` in any case
+
+final class Throws extends \RuntimeException {}
+final class NoThrow {}
+const NOTHROW = 1;
+const TYPE = 'type';
+
+function nothrow(): int { return NOTHROW; }
+function Throws(): Throws { return new Throws(); }
+function wrap<T>(T $x): T { return $x; }
+
+enum Kind
+{
+    case Type;
+    case Throws;
+    case Nothrow;
+    case Of;
+    case In;
+}
+
+// `of`, `in` and `out` in a type parameter list.
+final class Box<T OF \Countable> // want P1006 "`OF` is Phaenon's `of`"
+{
+    __construct(public T $item) {}
+}
+
+interface Source<OUT T> // want P1006 "`OUT` is Phaenon's `out`"
+{
+    get(): T;
+}
+
+interface Sink<In T> // want P1006 "`In` is Phaenon's `in`"
+{
+    put(T $x): void;
+}
+
+final class Pair<K Of int|string = string, V = mixed> // want P1006 "`Of` is Phaenon's `of`"
+{
+}
+
+// Type parameters named `In`, `Out` and `Of`: names, as before.
+interface Named<In, Out, Of of \Countable>
+{
+    name(In $a, Out $b, Of $c): void;
+}
+
+// `throws` and `nothrow` after a signature.
+final class Clauses
+{
+    a(): int THROWS Throws => throw new Throws(); // want P1006 "`THROWS` is Phaenon's `throws`"
+    b(): int Throws \LogicException => throw new \LogicException(); // want P1006 "`Throws` is Phaenon's `throws`"
+    c(): int NoThrow => 1; // want P1006 "`NoThrow` is Phaenon's `nothrow`"
+    d(): int NOTHROW => 2; // want P1006 "`NOTHROW` is Phaenon's `nothrow`"
+    abstractless(): void
+        Nothrow {} // want P1006 "`Nothrow` is Phaenon's `nothrow`"
+
+    // Names of the same spelling.
+    make(): Throws => new Throws();
+    other(): NoThrow => new NoThrow();
+    nothrow(): int => nothrow();
+    throws(): Throws => Throws();
+    type(): string => TYPE;
+    kind(): Kind => Kind::Type;
+    both(): Throws throws Throws => throw new Throws();
+    none(): int nothrow => NOTHROW;
+}
+
+function clause(): int THROWS Throws { throw new Throws(); } // want P1006 "`THROWS` is Phaenon's `throws`"
+
+// `list` and `class` in a type position: PHP reserves both, so neither can
+// be a class's name, and the word in another case is Phaenon's.
+final class Types
+{
+    private LIST<int> $ids = []; // want P1006 "`LIST` is Phaenon's `list`"
+
+    a(List<int> $xs): int => \count($xs) + \count($this->ids); // want P1006 "`List` is Phaenon's `list`"
+    b(): ?List<string> => null; // want P1006 "`List` is Phaenon's `list`"
+    c(Class<\Countable> $c): string => $c; // want P1006 "`Class` is Phaenon's `class`"
+    d(CLASS $c): string => $c; // want P1006 "`CLASS` is Phaenon's `class`"
+    e(): int => \count(wrap<List<int>>([1])); // want P1006 "`List` is Phaenon's `list`"
+    f(Closure(LIST<int>): int $f): int => $f([]); // want P1006 "`LIST` is Phaenon's `list`"
+    g(list<int> $xs, class<\Countable> $c): int => \count($xs) + \strlen($c);
+}
+
+// The cast `(bytes)`.
+final class Casts
+{
+    a(string $s): bytes => (bytes) $s;
+    b(string $s): bytes => (Bytes) $s; // want P1006 "`(Bytes)` is Phaenon's `(bytes)`"
+    c(string $s): bytes => ( BYTES ) $s; // want P1006 "`( BYTES )` is Phaenon's `( bytes )`"
+}
+
+// PHP's own words keep PHP's rule.
+final class PhpWords
+{
+    a(Int $i, STRING $s, Iterable<int> $it, Array<int> $a): MIXED => $i . $s . \count($a) . \iterator_count($it);
+    static make(): Self => new SELF();
+}
+
+// A withdrawn test is reported whole, its type with it.
+function withdrawn(mixed $x): bool { return $x IS List; } // want P1001

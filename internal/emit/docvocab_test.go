@@ -9,7 +9,10 @@ func TestTranslateDocBytes(t *testing.T) {
 		{"/** @param bytes $bytes the bytes */", "/** @param string $bytes the bytes */"},
 		{"/** @param $bytes the bytes */", "/** @param $bytes the bytes */"},
 		{"/** @var list<bytes> */", "/** @var list<string> */"},
-		{"/** @var array<string, Bytes> $m */", "/** @var array<string, string> $m */"},
+		// A class, as PHPStan reads it: Phaenon's words are lower case
+		// (design/roadmap.md D30).
+		{"/** @var array<string, Bytes> $m */", "/** @var array<string, Bytes> $m */"},
+		{"/** @return BYTES */", "/** @return BYTES */"},
 		{"/** @phpstan-param ?bytes $x */", "/** @phpstan-param ?string $x */"},
 		{"/** @psalm-return bytes|false */", "/** @psalm-return string|false */"},
 		{"/** @return array{bytes: int, data: bytes} */", "/** @return array{bytes: int, data: string} */"},
@@ -68,6 +71,12 @@ func TestTranslateDocVocabulary(t *testing.T) {
 		{"/** @param array<string, int> $m */", ""},
 		{"/** A map<string, int> of names (keys, values). */", ""},
 		{"/** @see map<string, int> */", ""},
+		// Another letter case is a class's name, as PHPStan reads it
+		// (design/roadmap.md D30); PHPStan's own words keep its rule.
+		{"/** @param Map<string, int> $m */", ""},
+		{"/** @return NON-EMPTY-MAP<string, int> */", ""},
+		{"/** @var Class<\\Countable> */", ""},
+		{"/** @return List<int> */", ""},
 	}
 	for _, c := range cases {
 		want := c.want

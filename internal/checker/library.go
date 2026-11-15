@@ -124,8 +124,8 @@ func (x *fnCtx) declaredTypes(t ast.TypeExpr, erased bool) {
 			x.declaredTypes(a, true)
 		}
 		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
-			lower := strings.ToLower(t.Name.Parts[0])
-			if _, builtin := keywordArity[lower]; builtin {
+			lower, otherCase := program.OtherCaseTypeName(t.Name.Parts[0])
+			if _, builtin := keywordArity[lower]; builtin && !otherCase {
 				if lower == "closure" && !erased {
 					x.bareClosure(t.Name)
 				}
@@ -137,6 +137,9 @@ func (x *fnCtx) declaredTypes(t ast.TypeExpr, erased bool) {
 		}
 		if x.res.TypeAlias(t.Name) != nil {
 			return // a type alias: the classes it names are judged at its declaration
+		}
+		if name := x.res.ClassName(t.Name); x.p().Class(name) == nil && x.otherCaseTypeName(t.Name, name) {
+			return // `Map` that names no class, read as Phaenon's map
 		}
 		// What the name denotes: a class, or an alias a class docblock
 		// declares or imports (@phpstan-type, @phpstan-import-type), self,

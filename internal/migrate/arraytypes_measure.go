@@ -12,6 +12,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/program"
 )
 
 // StrippedType is a declaration StripListTypes gave its bare array back.
@@ -57,9 +58,8 @@ func StripListTypes(src []byte) ([]byte, []StrippedType, error) {
 		if !ok || len(nt.TypeArgs) == 0 || len(nt.Name.Parts) != 1 {
 			return
 		}
-		switch strings.ToLower(nt.Name.Parts[0]) {
-		case "list", "map", "array":
-		default:
+		// `Map<K, V>` is a class (design/roadmap.md D30).
+		if lower, otherCase := program.OtherCaseTypeName(nt.Name.Parts[0]); otherCase || lower != "list" && lower != "map" && lower != "array" {
 			return
 		}
 		spans = append(spans, nt.S)

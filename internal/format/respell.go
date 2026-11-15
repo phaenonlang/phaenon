@@ -105,6 +105,26 @@ func respell(src []byte, opts Options) ([]byte, []Left, error) {
 	return apply(src, edits), left, nil
 }
 
+// lowerCase writes in lower case each word Phaenon adds that src writes in
+// another spelling where only the word can stand (design/tooling.md §5.7,
+// roadmap D30): the words the checker reports as P1006, `THROWS` after a
+// signature, `TYPE` before an alias, `(BYTES)`. The rewrite is certain,
+// since the parser read each as the word: a name of that spelling, which
+// it reads as a name, is none of them, and neither are `Map` and `Bytes`,
+// which may be a class's. It runs after respell, whose rewrites of the
+// withdrawn tests carry their operands' text as written.
+func lowerCase(src []byte) ([]byte, error) {
+	f, err := parser.Parse(src, lexer.ModePhaenon)
+	if err != nil {
+		return nil, fmt.Errorf("parse: %w", err)
+	}
+	var edits []migrate.HeadEdit
+	for _, w := range parser.Words(f, src) {
+		edits = append(edits, migrate.HeadEdit{Span: w.S, Text: w.Want})
+	}
+	return apply(src, edits), nil
+}
+
 // instanceOf writes `$x is Foo` as `$x instanceof Foo`, in parentheses
 // where the expression around it binds tighter than instanceof.
 func instanceOf(is *ast.IsExpr, class string, slots *program.Slots) []migrate.HeadEdit {

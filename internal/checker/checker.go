@@ -303,6 +303,7 @@ func (c *Checker) checkFile(f *program.File) {
 	c.ignored[f.Path] = ignoredLines(f.Src, toks)
 	if phaenon {
 		c.checkTabs(f)
+		c.checkWords(f)
 	}
 	// Top-level code runs in a context without a class.
 	scope := f.ScopeAt(0)

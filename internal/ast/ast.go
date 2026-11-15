@@ -650,9 +650,11 @@ const (
 )
 
 // TypeParam is one Phaenon generic parameter: [in|out] T [of Bound] [= Default].
+// A variance word, when written, begins S; Of is the `of` before Bound.
 type TypeParam struct {
 	S        Span
 	Name     *Ident
+	Of       Span
 	Bound    TypeExpr
 	Default  TypeExpr
 	Variance Variance

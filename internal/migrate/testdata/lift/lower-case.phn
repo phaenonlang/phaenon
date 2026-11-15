@@ -1,0 +1,22 @@
+namespace App;
+
+/**
+ * PHPStan reads its own words in any letter case; what the lift writes is
+ * Phaenon's, which are lower case (design/roadmap.md D30). `Map` and `Class`
+ * in another case are class names to PHPStan, and to Phaenon: they erase to
+ * no array and no string, and stay in the docblock.
+ */
+interface Words<out T of \Countable>
+{
+    all(): list<T> throws \RuntimeException;
+
+    ints(): list<int> nothrow;
+
+    put(map<string, int> $m, class<T> $c): void;
+
+    /**
+     * @param Map<string, int> $m
+     * @param Class<T> $c
+     */
+    classes(array $m, string $c): void;
+}

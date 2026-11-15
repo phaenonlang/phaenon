@@ -541,7 +541,10 @@ func (l *Lexer) word(i int) token.Token {
 // in Phaenon mode and re-interpreted as identifiers by the parser where the
 // grammar allows a name. `is` and `fun` are not among them since roadmap
 // D26 and D27 (2026-11-09): both are names, and the parser recognises their
-// withdrawn uses by position (internal/parser/withdrawn.go).
+// withdrawn uses by position (internal/parser/withdrawn.go). They are lexed
+// in any letter case, and so is the cast `(bytes)`: the words are written
+// in lower case (roadmap D30), and the checker reports another case where
+// the parser takes the word (P1006, parser.Words).
 var phaenonKeywords = map[string]token.Kind{
 	"type": token.T_TYPE, "of": token.T_OF, "in": token.T_IN, "out": token.T_OUT,
 }
