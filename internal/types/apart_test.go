@@ -34,6 +34,7 @@ func TestNeverSubtype(t *testing.T) {
 		return c
 	}
 	user, admin, order, foo, json := NewClass("User"), NewClass("Admin"), NewClass("Order"), NewClass("Foo"), NewClass("JsonSerializable")
+	hearts, spades, clubs := EnumCase{"Suit", "Hearts"}, EnumCase{"Suit", "Spades"}, EnumCase{"Suit", "Clubs"}
 	object := Param{Name: "T", Bound: TObject}
 	renamed := Param{Name: "TObject", Bound: TObject}
 	narrower := Param{Name: "TUser", Bound: user}
@@ -66,6 +67,10 @@ func TestNeverSubtype(t *testing.T) {
 		{StringLit{"abc"}, String{Numeric: true}},
 		{Int{20, 30}, Int{0, 10}},
 		{TFalse, TTrue},
+		{spades, hearts}, // one case is never another
+		{clubs, MakeUnion(hearts, spades)},
+		{EnumCase{"Color", "Red"}, hearts},
+		{list(spades), list(hearts)},
 		{TInt, TString},
 		{MakeUnion(TInt, TFloat), MakeUnion(TString, TNull)},
 		{of("Box", order), of("Box", user)},
@@ -115,6 +120,10 @@ func TestNeverSubtype(t *testing.T) {
 		{TBytes, TString},
 		{TString, TBytes},
 		{TFloat, FloatLit{1.5}},
+		{hearts, hearts},
+		{MakeUnion(hearts, spades), hearts},
+		{MakeUnion(spades, clubs), MakeUnion(hearts, spades)},
+		{NewClass("Suit"), hearts},              // the enum may be the case
 		{of("Box", object), of("Box", renamed)}, // a type parameter is its bound
 		{object, renamed},
 		{list(Param{Name: "T"}), list(TInt)},

@@ -63,6 +63,11 @@ func apart(a, b Type, h Hierarchy, depth int) bool {
 		}
 		return true
 	}
+	if _, ok := a.(EnumCase); ok {
+		if _, ok := b.(EnumCase); ok {
+			return true // one case is never another, of its enum or of any other
+		}
+	}
 	a, b = classOfCase(a), classOfCase(b)
 	if !decidable(a) || !decidable(b) {
 		return false
@@ -100,7 +105,7 @@ func decidable(t Type) bool {
 	return kindOf(t) != kindAny
 }
 
-// classOfCase widens an enum case to its enum.
+// classOfCase widens an enum case to its enum, where it meets a class.
 func classOfCase(t Type) Type {
 	if c, ok := t.(EnumCase); ok {
 		return Class{Name: c.Class}

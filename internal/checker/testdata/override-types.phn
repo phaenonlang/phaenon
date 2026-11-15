@@ -49,6 +49,13 @@ interface Slot
 {
 }
 
+enum Suit
+{
+    case Hearts;
+    case Spades;
+    case Clubs;
+}
+
 abstract class Base
 {
     /** @param list<int> $x */
@@ -138,6 +145,12 @@ abstract class Base
     /** @return true */
     abstract public function boolean(): bool;
 
+    /** @return Suit::Hearts */
+    abstract public function enumCase(): Suit;
+
+    /** @param Suit::Hearts|Suit::Spades $x */
+    abstract public function enumCaseParam(Suit $x): void;
+
     /**
      * @template T of object
      * @param class-string<T> $x
@@ -179,6 +192,9 @@ abstract class Base
 
     /** @return Slot<Open|Other> */
     abstract public function sameUnion(): Slot;
+
+    /** @return Suit::Hearts|Suit::Spades */
+    abstract public function sharedCase(): Suit;
 
     /** @return string|array<string> */
     abstract public function sharedMember(): string|array;
@@ -363,6 +379,17 @@ abstract class Child extends Base
         return false;
     }
 
+    /** @return Suit::Spades */
+    public function enumCase(): Suit // want P2502 "return type App\OverrideTypes\Suit::Spades of App\OverrideTypes\Child::enumCase() is not covariant with App\OverrideTypes\Base::enumCase() (App\OverrideTypes\Suit::Hearts)"
+    {
+        return Suit::Spades;
+    }
+
+    /** @param Suit::Clubs $x */
+    public function enumCaseParam(Suit $x): void // want P2502
+    {
+    }
+
     /**
      * @template TOpen of Open
      * @param class-string<TOpen> $x
@@ -437,6 +464,12 @@ abstract class Child extends Base
     public function sameUnion(): Slot
     {
         throw new \LogicException();
+    }
+
+    /** @return Suit::Spades|Suit::Clubs */
+    public function sharedCase(): Suit
+    {
+        return Suit::Spades;
     }
 
     /** @return string|array<int> */
