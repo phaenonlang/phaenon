@@ -91,8 +91,8 @@ usage:
   phn fmt [--check] [<path>...] | --stdin                  lay .phn files out: Phaenon's layout (the withdrawn fun,
                                                            is and as rewritten, function lifted off methods, spaces
                                                            for tabs, braces, {}, one-line docblocks, the spacing of
-                                                           type parameters and arguments, throws), then the
-                                                           project's fixer through phn fix
+                                                           type parameters and arguments, throws, nothrow), then
+                                                           the project's fixer through phn fix
                                                            (phaenon.json "fmt", or tools/php-cs-fixer or
                                                            vendor/bin/php-cs-fixer); a directory: its .phn, the
                                                            outputs left out; no paths: the roots; --check writes

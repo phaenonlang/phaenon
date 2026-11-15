@@ -1,0 +1,221 @@
+// Comparing count($x) with an integer literal narrows $x to an empty or a
+// non-empty array, whichever side of the comparison the call is written
+// on: `0 < count($a)` narrows as `count($a) > 0` does, as PHPStan reads
+// both. sizeof() is count()'s alias; the counted value is the first
+// argument, positional or named $value. A method named count, a
+// namespace's own count() and a comparison that leaves the count either 0
+// or more narrow nothing. current() shows the narrowing: it is the first
+// element of a non-empty list, false for an empty array, and either for a
+// list.
+
+namespace App\Counts {
+    final class Box implements \Countable
+    {
+        public function count(): int
+        {
+            return 0;
+        }
+    }
+
+    function takesInt(int $i): void
+    {
+    }
+
+    function takesFalse(false $f): void
+    {
+    }
+
+    /** @param list<int> $a */
+    function callOnTheRight(array $a): void
+    {
+        if (0 < \count($a)) {
+            takesInt(current($a));
+        } else {
+            takesFalse(current($a));
+        }
+        if (1 <= count($a)) {
+            takesInt(current($a));
+        } else {
+            takesFalse(current($a));
+        }
+        if (1 > count($a)) {
+            takesFalse(current($a));
+        } else {
+            takesInt(current($a));
+        }
+        if (0 >= count($a)) {
+            takesFalse(current($a));
+        } else {
+            takesInt(current($a));
+        }
+        if (0 === count($a)) {
+            takesFalse(current($a));
+        } else {
+            takesInt(current($a));
+        }
+        if (0 != count($a)) {
+            takesInt(current($a));
+        } else {
+            takesFalse(current($a));
+        }
+    }
+
+    /** @param list<int> $a */
+    function callOnTheLeft(array $a): void
+    {
+        if (\count($a) > 0) {
+            takesInt(current($a));
+        } else {
+            takesFalse(current($a));
+        }
+        if (count($a) >= 1) {
+            takesInt(current($a));
+        } else {
+            takesFalse(current($a));
+        }
+        if (count($a) < 1) {
+            takesFalse(current($a));
+        } else {
+            takesInt(current($a));
+        }
+        if (count($a) <= 0) {
+            takesFalse(current($a));
+        } else {
+            takesInt(current($a));
+        }
+        if (count($a) !== 0) {
+            takesInt(current($a));
+        } else {
+            takesFalse(current($a));
+        }
+        if ((count($a)) > 0) {
+            takesInt(current($a));
+        } else {
+            takesFalse(current($a));
+        }
+    }
+
+    /** @param list<int> $a */
+    function spellings(array $a): void
+    {
+        if (sizeof($a) > 0) {
+            takesInt(current($a));
+        } else {
+            takesFalse(current($a));
+        }
+        if (0 < \sizeof($a)) {
+            takesInt(current($a));
+        } else {
+            takesFalse(current($a));
+        }
+        if (0 < count(value: $a)) {
+            takesInt(current($a));
+        } else {
+            takesFalse(current($a));
+        }
+        if (count(value: $a, mode: COUNT_NORMAL) > 0) {
+            takesInt(current($a));
+        } else {
+            takesFalse(current($a));
+        }
+        if (count($a, COUNT_RECURSIVE) === 0) {
+            takesFalse(current($a));
+        } else {
+            takesInt(current($a));
+        }
+        // The first argument is the mode: what it counts is not narrowed,
+        // as PHPStan, which narrows the first argument, leaves it.
+        if (0 < count(mode: COUNT_NORMAL, value: $a)) {
+            takesInt(current($a)); // want P2103
+        }
+    }
+
+    /** @param list<int> $a */
+    function bounds(array $a): void
+    {
+        // More than 5 is not empty; at most 5 may be either.
+        if (5 < count($a)) {
+            takesInt(current($a));
+        } else {
+            takesInt(current($a)); // want P2103
+        }
+        if (count($a) > 5) {
+            takesInt(current($a));
+        } else {
+            takesInt(current($a)); // want P2103
+        }
+        // Fewer than 3 may be empty; 3 or more is not.
+        if (count($a) < 3) {
+            takesInt(current($a)); // want P2103
+        } else {
+            takesInt(current($a));
+        }
+        if (3 > count($a)) {
+            takesInt(current($a)); // want P2103
+        } else {
+            takesInt(current($a));
+        }
+        if (count($a) <= 2) {
+            takesFalse(current($a)); // want P2103
+        } else {
+            takesInt(current($a));
+        }
+        if (2 >= count($a)) {
+            takesFalse(current($a)); // want P2103
+        } else {
+            takesInt(current($a));
+        }
+        if (count($a) === 2) {
+            takesInt(current($a));
+        } else {
+            takesInt(current($a)); // want P2103
+        }
+    }
+
+    /** @param list<int> $a */
+    function notCount(array $a, Box $box): void
+    {
+        if (0 < $box->count()) {
+            takesInt(current($a)); // want P2103
+        }
+        if ($box->count() > 0) {
+            takesInt(current($a)); // want P2103
+        }
+    }
+
+    /** @param list<int>|Box $u */
+    function countable(array|Box $u): void
+    {
+        if (0 < count($u)) {
+            if ($u instanceof Box) {
+                return;
+            }
+            takesInt(current($u));
+        }
+    }
+}
+
+// A namespace's own count() is the one an unqualified call reaches: what
+// it returns says nothing of its argument. PHPStan, which goes by the
+// name, narrows.
+namespace App\OwnCount {
+    function count(mixed $value): int
+    {
+        return 1;
+    }
+
+    function takesInt(int $i): void
+    {
+    }
+
+    /** @param list<int> $a */
+    function own(array $a): void
+    {
+        if (0 < count($a)) {
+            takesInt(current($a)); // want P2103
+        }
+        if (0 < \count($a)) {
+            takesInt(current($a));
+        }
+    }
+}

@@ -31,6 +31,11 @@ touches.
 
 ## What a pull request must satisfy
 
+A pull request targets `main`, never the branch of another open pull request: CI and the PR
+semantics gate run only on pull requests into `main`, and GitHub closes a stacked pull request
+when the branch under it is deleted. A change that depends on an unmerged one goes into the same
+pull request, or waits for its merge.
+
 Pull requests are squash-merged: the PR title becomes the commit on `main` from which
 release-please versions the next release and writes the changelog. The PR semantics gate
 (`.github/scripts/pr-semantics.sh`) checks that

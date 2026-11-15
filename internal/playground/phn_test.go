@@ -31,6 +31,7 @@ func TestMatchesPhn(t *testing.T) {
 		"support":    "namespace App;\n\nfunction run(): string => (new Greeter())->hello('x');\n",
 		"deprecated": "namespace App;\n\nfunction latin(string $s): string => utf8_encode($s);\n",
 		"generic":    "namespace App;\n\nfinal class Box<T>\n{\n    __construct(private T $value) {}\n\n    get(): T => $this->value;\n}\n\nfunction unbox(Box<int> $b): string => $b->get();\n",
+		"nothrow":    "namespace App;\n\nfunction share(int $total, int $n): int nothrow => $total % $n;\n",
 	}
 	for name, main := range cases {
 		for _, emitOnError := range []bool{false, true} {

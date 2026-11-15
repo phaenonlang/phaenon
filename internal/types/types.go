@@ -49,6 +49,18 @@ type Hierarchy interface {
 	IteratorArgs(c Class) (key, value Type, ok bool)
 	// IsInvokable reports a class with an __invoke() method: a callable.
 	IsInvokable(name string) bool
+	// IsInterface reports whether the name is an interface's. Two classes
+	// neither of which extends the other share no instance; a class and an
+	// interface it does not implement may, in a subclass.
+	IsInterface(name string) bool
+	// SuperArgs is the type arguments a class passes the named ancestor,
+	// through its @extends and @implements (`ArrayIterator<int, Cat>` gives
+	// `Iterator` int and Cat); ok is false when either class is unknown or
+	// the second is no ancestor of the first. ok can be true with no
+	// arguments, or fewer than the ancestor takes: a class on the way that
+	// names the ancestor without arguments passes it none, and a caller
+	// reads that as nothing decided.
+	SuperArgs(c Class, super string) (args []Type, ok bool)
 }
 
 // Variance of a class type parameter.

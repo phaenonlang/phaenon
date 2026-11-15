@@ -57,7 +57,11 @@ var (
 	P2007 = Code{"P2007", Error, "unknown static property"}
 	P2008 = Code{"P2008", Error, "undefined variable"}
 	P2009 = Code{"P2009", Error, "variable might not be defined"}
-	P2010 = Code{"P2010", Error, "unknown named argument"}
+	// P2010: a name no parameter has, or one that overwrites an argument or
+	// a placeholder before it, PHP's "Named parameter $x overwrites
+	// previous argument", in every call (design/php-versions.md §9,
+	// "Overwriting names").
+	P2010 = Code{"P2010", Error, "unknown or overwriting named argument"}
 	P2011 = Code{"P2011", Error, "parent without a parent class"}
 	P2012 = Code{"P2012", Error, "self or static outside a class"}
 	P2013 = Code{"P2013", Warning, "unused import"}
@@ -120,6 +124,12 @@ var (
 	// P2319: a `throws` clause names a class, an interface or a type
 	// parameter that is not a Throwable (design/functions.md §4).
 	P2319 = Code{"P2319", Error, "throws names a non-Throwable"}
+	// P2320: a declaration that says that nothing escapes, with `nothrow`
+	// or `@throws void`, and also that something does, with a `throws`
+	// clause or another @throws tag (design/functions.md §4.5): the
+	// contradiction of `nothrow` beside `throws`, a syntax error, written
+	// in two places.
+	P2320 = Code{"P2320", Error, "nothrow or @throws void beside a thrown type"}
 
 	// P2 — flow
 	P2401 = Code{"P2401", Warning, "unreachable code"}

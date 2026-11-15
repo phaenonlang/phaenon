@@ -47,3 +47,16 @@ class DateTimeImmutable implements DateTimeInterface
      */
     public static function getLastErrors(): array|false {}
 }
+
+/**
+ * DatePeriod yields the class of its start date, as PHPStan declares it.
+ *
+ * @template-covariant TDate of DateTimeInterface
+ * @template-covariant TEnd of ?DateTimeInterface
+ * @template-covariant TRecurrences of ?int
+ * @implements IteratorAggregate<int, TDate>
+ * @implements Traversable<int, TDate>
+ */
+class DatePeriod implements IteratorAggregate
+{
+}

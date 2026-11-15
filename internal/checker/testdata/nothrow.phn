@@ -1,0 +1,226 @@
+namespace Nothrow;
+
+// `nothrow` (design/functions.md §4.5) is the clause spelling of `@throws
+// void`, and means what the tag means to the throw analysis
+// (design/tooling.md §9.1): the body is held to its explicit throw points
+// (P2405, the message naming the clause), a call to a function that
+// declares nothing does not break it, and a call to a `nothrow` function
+// is no throw point, which leaves a catch around it dead (P2403). An
+// override that declares nothing inherits it. A @throws tag that says
+// something escapes, beside it, is P2320, and so are a `throws` clause and
+// another @throws tag beside `@throws void`: one finding for the
+// declaration, however many tags take part.
+
+final class NotFound extends \RuntimeException {}
+
+interface Lookup
+{
+    find(int $id): ?string nothrow;
+}
+
+class Memory implements Lookup
+{
+    /** @var array<int, string> */
+    private array $items = [];
+
+    find(int $id): ?string nothrow => $this->items[$id] ?? null;
+
+    load(int $id): string nothrow {
+        return $this->items[$id] ?? throw new NotFound(); // want P2405 "declares nothrow but throws Nothrow\NotFound"
+    }
+
+    ratio(int $n): int NoThrow => 10 % $n; // want P2405 "DivisionByZeroError"
+
+    calls(): string nothrow => undeclared();
+
+    /** @throws NotFound */
+    tagged(): void nothrow {} // want P2320 "nothrow says that nothing escapes, and the docblock's @throws NotFound that something does"
+
+    /** @throws void */
+    stated(): void nothrow {}
+
+    /**
+     * @throws void
+     * @throws \LogicException|NotFound
+     */
+    mixed(): void nothrow {} // want P2320 "@throws \LogicException|NotFound"
+
+    /**
+     * @throws NotFound
+     * @throws \LogicException
+     */
+    twoTags(): void nothrow {} // want P2320 "the docblock's @throws NotFound and @throws \LogicException that"
+
+    /** @throws void */
+    clause(): int throws NotFound => throw new NotFound(); // want P2320 "the docblock's @throws void says that nothing escapes, and throws NotFound that something does"
+
+    /**
+     * @throws void
+     * @throws NotFound
+     */
+    docOnly(): int => throw new NotFound(); // want P2320 "@throws void says that nothing escapes, and @throws NotFound that something does"
+}
+
+final class Cache extends Memory
+{
+    find(int $id): ?string {
+        if ($id < 0) {
+            throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\Memory::find()"
+        }
+        return null;
+    }
+
+    load(int $id): string throws NotFound => throw new NotFound();
+}
+
+function undeclared(): string => 'x';
+
+function pure(int $a): int nothrow => $a + 1;
+
+function raises(): void nothrow => throw new NotFound(); // want P2405 "function Nothrow\raises() declares nothrow"
+
+/** @throws NotFound */
+function tagged(): void nothrow {} // want P2320
+
+/** @throws void */
+function clause(): int throws NotFound => throw new NotFound(); // want P2320 "throws NotFound that"
+
+/**
+ * @throws void
+ * @throws \LogicException
+ */
+function clauseAndTags(): int throws NotFound => throw new NotFound(); // want P2320 "@throws void says"
+
+/**
+ * @throws NotFound
+ * @throws VOID
+ */
+function docOnly(): int => throw new NotFound(); // want P2320 "@throws VOID says that nothing escapes, and @throws NotFound that"
+
+/**
+ * @throws void
+ * @throws void
+ */
+function twice(): int => 1;
+
+function callsPure(int $a): int {
+    try {
+        return pure($a);
+    } catch (\Throwable $e) { // want P2403
+        return 0;
+    }
+}
+
+function viaInterface(Lookup $l, Cache $c): ?string {
+    try {
+        return $l->find(1) . $c->find(2);
+    } catch (NotFound $e) { // want P2403
+        return null;
+    }
+}
+
+function viaOverride(Cache $c): string {
+    try {
+        return $c->load(1);
+    } catch (NotFound $e) {
+        return '';
+    }
+}
+
+// An override that declares nothing inherits nothrow from any method it
+// overrides, read in PHPStan's order: the parent's method, with what it
+// inherits, then the class's own interfaces in the order declared. The
+// parent's method saying nothing does not stop the interface's nothrow,
+// nor does an interface written first that says nothing.
+class PlainBase
+{
+    find(int $id): ?string => null;
+}
+
+final class Gap extends PlainBase implements Lookup
+{
+    find(int $id): ?string {
+        if ($id < 0) {
+            throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\Lookup::find()"
+        }
+        return null;
+    }
+}
+
+function viaGap(Gap $g): ?string {
+    try {
+        return $g->find(1);
+    } catch (NotFound $e) { // want P2403
+        return null;
+    }
+}
+
+interface Plain
+{
+    name(): string;
+}
+
+interface Quiet
+{
+    name(): string nothrow;
+}
+
+final class PlainFirst implements Plain, Quiet
+{
+    name(): string => throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\Quiet::name()"
+}
+
+final class QuietFirst implements Quiet, Plain
+{
+    name(): string => throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\Quiet::name()"
+}
+
+// A constructor inherits nothrow from the parent's constructor, concrete
+// as it is, as PHPStan inherits its docblock, though PHP compares no
+// signature with it; not from a private one.
+class QuietBase
+{
+    __construct() nothrow
+    {
+    }
+}
+
+final class LoudChild extends QuietBase
+{
+    __construct()
+    {
+        throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\QuietBase::__construct()"
+    }
+}
+
+class MidQuiet extends QuietBase
+{
+}
+
+final class BelowMidQuiet extends MidQuiet
+{
+    __construct()
+    {
+        throw new NotFound(); // want P2405 "inherits nothrow from Nothrow\QuietBase::__construct()"
+    }
+}
+
+class QuietHidden
+{
+    private __construct() nothrow
+    {
+    }
+
+    public static function make(): self
+    {
+        return new self();
+    }
+}
+
+final class BelowQuietHidden extends QuietHidden
+{
+    __construct()
+    {
+        throw new NotFound();
+    }
+}

@@ -1,2 +1,5 @@
-59: kept @throws InvalidArgumentException: it has a description
-68: kept @throws void: no Phaenon spelling for it
+64: kept @throws InvalidArgumentException: it has a description
+124: kept @throws void beside @throws NotFound: they say that nothing escapes and that something does (P2320), and the lift does not decide which was meant
+133: kept @throws void beside @throws NotFound and @throws \LogicException: they say that nothing escapes and that something does (P2320), and the lift does not decide which was meant
+143: kept @throws void: the docblock says it 2 times, and only a sole @throws void becomes nothrow
+152: kept @throws void: it has a description

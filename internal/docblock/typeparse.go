@@ -77,6 +77,15 @@ type CallableParam struct {
 	ByRef    bool
 }
 
+// IsVoid says the type is `void`, in any letter case and in parentheses
+// alike. As a @throws tag's type it is PHPStan's "throws nothing", which
+// `nothrow` spells as a clause (design/functions.md §4.5): the checker,
+// the emitter and `phn migrate` read the tag through this one test, so
+// that what one takes for `@throws void` the others do too.
+func (n *TypeNode) IsVoid() bool {
+	return n != nil && n.Kind == KindNamed && len(n.Args) == 0 && strings.EqualFold(n.Name, "void")
+}
+
 func (n *TypeNode) String() string {
 	var b strings.Builder
 	n.print(&b, false)

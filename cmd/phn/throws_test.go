@@ -56,6 +56,11 @@ type throwsDecl struct {
 	decl   map[string]bool
 	prom   map[string]bool
 	hasDoc bool // declares @throws or throws already
+	// nothing: declares that nothing escapes, `nothrow` or `@throws void`.
+	// No clause is written there: extending `nothrow` would write
+	// `nothrow|\X`, a syntax error, and a clause beside `@throws void` is
+	// P2320.
+	nothing bool
 }
 
 func measureThrows(t *testing.T, tree string, unchecked []string) {
@@ -166,6 +171,7 @@ func measureThrows(t *testing.T, tree string, unchecked []string) {
 		td.name = name.Name
 		td.line = lineOf(srcs[f.Path], name.S.Start)
 		td.hasDoc = throws != nil || docThrows(doc)
+		td.nothing = throws != nil && throws.Nothrow || doc != "" && docblock.Parse(doc).ThrowsVoid()
 		td.extend = -1
 		if throws != nil {
 			td.extend = throws.S.End
@@ -195,7 +201,7 @@ func measureThrows(t *testing.T, tree string, unchecked []string) {
 		edits := map[string][]clauseEdit{}
 		for _, td := range order {
 			cs := clauses[key(td)]
-			if len(cs) == 0 {
+			if len(cs) == 0 || td.nothing {
 				continue
 			}
 			edits[td.path] = append(edits[td.path], clauseEdit{td, cs})

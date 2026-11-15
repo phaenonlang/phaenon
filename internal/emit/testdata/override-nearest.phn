@@ -1,0 +1,221 @@
+namespace App\Nearest;
+
+use Stringable;
+
+// The override-erasure rule holds a method to every declaration PHP holds
+// it to: the one in its parent's method table, which is the nearest
+// declaration up the parent chain however far it is, and the interfaces
+// its class implements itself. An interface an ancestor implements is the
+// parent's to keep.
+
+class Base<T>
+{
+    take(T $x): void
+    {
+    }
+}
+
+class Mid extends Base<int>
+{
+}
+
+interface Takes
+{
+    take(int $x): void;
+}
+
+// Impl's table holds Base::take(mixed $x), not Takes::take(int $x): Leaf
+// widens to mixed, as Leaf2 does without the interface.
+abstract class Impl extends Mid implements Takes
+{
+}
+
+class Leaf extends Impl
+{
+    take(int $x): void
+    {
+    }
+}
+
+class Leaf2 extends Mid
+{
+    take(int $x): void
+    {
+    }
+}
+
+// The interface on the class itself demands int, the parent mixed.
+final class TakesItself extends Mid implements Takes
+{
+    take(int $x): void
+    {
+    }
+}
+
+// No class declares put(): the parent's table holds the interface's.
+interface Puts<T>
+{
+    put(T $x): void;
+}
+
+abstract class Holder implements Puts<int>
+{
+}
+
+final class IntHolder extends Holder
+{
+    put(int $x): void
+    {
+    }
+}
+
+// The parent demands a Stringable and the interface an int or a Name:
+// the parameter takes both, Stringable|int, where the parent's alone
+// would refuse the interface's int.
+final class Name implements Stringable
+{
+    __toString(): string
+    {
+        return 'name';
+    }
+}
+
+class Labels<T of Stringable>
+{
+    add(T $label): void
+    {
+    }
+}
+
+interface Counts
+{
+    add(int|Name $label): void;
+}
+
+final class NameCounts extends Labels<Name> implements Counts
+{
+    add(int|Name $label): void
+    {
+    }
+}
+
+// A constructor is held to the nearest abstract one, through the concrete
+// constructor that implements it.
+abstract class Command<T>
+{
+    abstract __construct(T $input);
+}
+
+class Greet extends Command<string>
+{
+    private string $text;
+
+    __construct(string $input)
+    {
+        $this->text = $input;
+    }
+
+    text(): string => $this->text;
+}
+
+final class LoudGreet extends Greet
+{
+    __construct(string $input)
+    {
+        parent::__construct($input);
+    }
+}
+
+// A union the demands meet in is written as PHP accepts it: iterable is
+// Traversable|array to PHP, which refuses Traversable|iterable as
+// redundant, so the parameter takes int|string|iterable.
+interface TakesTwo<V of int|string>
+{
+    take(\Traversable<mixed, mixed>|V $x): void;
+}
+
+final class TakesIterable implements TakesTwo<int>
+{
+    take(iterable<mixed>|int $x): void
+    {
+    }
+}
+
+interface TakesIterables<V of iterable<mixed>|int>
+{
+    take(V $x): void;
+}
+
+interface TakesTraversables<W of \Traversable<mixed, mixed>|string>
+{
+    take(W $x): void;
+}
+
+final class TakesArrayIterator implements TakesIterables<\ArrayIterator<int, int>>, TakesTraversables<\ArrayIterator<int, int>>
+{
+    take(\ArrayIterator<int, int> $x): void
+    {
+    }
+}
+
+// The parent's table holds what the farthest class brought in: Wide's
+// take(mixed), which Narrow's take(int) was checked against.
+interface Wide<T>
+{
+    take(T $x): void;
+}
+
+interface Narrow
+{
+    take(int $x): void;
+}
+
+abstract class ImplementsWide implements Wide<int>
+{
+}
+
+abstract class ImplementsNarrow extends ImplementsWide implements Narrow
+{
+}
+
+final class BelowWideAndNarrow extends ImplementsNarrow
+{
+    take(int $x): void
+    {
+    }
+}
+
+// A trait's abstract method beside an inherited one is checked against
+// it and dropped: the table keeps Base::take(mixed).
+trait NeedsTake
+{
+    abstract take(int $x): void;
+}
+
+abstract class MidNeedsTake extends Mid
+{
+    use NeedsTake;
+}
+
+final class BelowNeedsTake extends MidNeedsTake
+{
+    take(int $x): void
+    {
+    }
+}
+
+// Not supported yet: a type argument void for a return type R. The
+// override is compiled with the parent's mixed, which loads; a call
+// fails, as it returns none. The checker is to refuse the shape.
+interface Handler<R>
+{
+    handle(string $command): R;
+}
+
+final class Logs implements Handler<void>
+{
+    handle(string $command): void
+    {
+        echo $command;
+    }
+}

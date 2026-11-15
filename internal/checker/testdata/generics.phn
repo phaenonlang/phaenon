@@ -173,9 +173,14 @@ function tagged<T of int|string>(T $x): T
 /**
  * PHP's iteration interfaces take their value alone or key and value, and a
  * Generator's send and return types default to mixed: PHPStan's arity for
- * the SPL. WeakMap is WeakMap<TKey of object, TValue>.
+ * the SPL. WeakMap is WeakMap<TKey of object, TValue>. An ArrayIterator's
+ * current() and key() are Iterator's TValue and TKey, past its end too, as
+ * PHPStan reads them. A priority queue gives the value, its priority or
+ * both, as its extract flags say. ArrayAccess::offsetGet() may find
+ * nothing at the offset: TValue|null, unless the class says otherwise, as
+ * the SPL's lists and SplObjectStorage do, which throw instead.
  */
-function spl(\Iterator<string> $values, \Traversable<int, string> $pairs, \Generator<string, int> $gen, \IteratorAggregate<string> $agg, \WeakMap<\stdClass, float> $weights): void
+function spl(\Iterator<string> $values, \Traversable<int, string> $pairs, \Generator<string, int> $gen, \IteratorAggregate<string> $agg, \WeakMap<\stdClass, float> $weights, \ArrayIterator<string, int> $rows, \SplPriorityQueue<int, string> $queue, \ArrayAccess<string, int> $map, \CachingIterator<int, string, \Iterator<int, string>> $cache, \SplQueue<string> $line, \SplObjectStorage<\stdClass, int> $store): void
 {
     foreach ($values as $v) {
         takesString($v);
@@ -197,6 +202,17 @@ function spl(\Iterator<string> $values, \Traversable<int, string> $pairs, \Gener
     $weights[new \stdClass()] = 1.5;
     takesInt($weights[new \stdClass()]); // want P2103
     takesInt(\count($weights));
+    $rows->next();
+    takesInt($rows->current());
+    takesString($rows->key());
+    takesString($queue->extract()); // want P2103 "array{priority: int, data: string} given"
+    foreach ($queue as $item) {
+        takesString($item);
+    }
+    takesInt($map['missing']); // want P2103 "int|null given"
+    takesString($cache[0]); // want P2103 "string|null given"
+    takesString($line[0]);
+    takesInt($store[new \stdClass()]);
 }
 
 function splArity(

@@ -1496,6 +1496,16 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 			args = e.Anon.Args // `new class (...) extends …`
 		}
 		if ctor := cl.FindMethod("__construct"); ctor != nil {
+			// `new class` calls the constructor from where it stands, as
+			// `new Foo` does: its own private one is no more callable from
+			// there than an inherited protected one.
+			if !x.canAccess(ctor.Vis, ctor.Class) {
+				if ctor.Class == cl {
+					x.report(e.S, P2108, "constructor of class@anonymous is %s", ctor.Vis)
+				} else {
+					x.report(e.S, P2108, "constructor of class@anonymous, %s::__construct(), is %s", ctor.Class.Name, ctor.Vis)
+				}
+			}
 			sig := &signature{name: "class@anonymous::__construct()", params: ctor.Params, ret: types.TVoid, decl: ctor.Class, node: e, meth: ctor}
 			x.checkCall(sig, args, env, e.S, nil)
 		} else {
@@ -1585,7 +1595,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 				case tp.Default != nil:
 					full[i] = tp.Default
 				case tp.Bound != nil:
-					full[i] = tp.Bound
+					full[i] = types.Substitute(tp.Bound, argsSoFar(cl.TypeParams, full[:i]))
 				default:
 					full[i] = types.TMixed
 				}
@@ -1613,6 +1623,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 		sig.typeParams = append(append([]*program.TypeParam{}, cl.TypeParams...), ctor.TypeParams...)
 		sig.subst = map[string]types.Type{}
 		x.checkCall(sig, e.Args, env, e.S, nil)
+		inferFromBounds(cl.TypeParams, sig.subst, x.p())
 		args := make([]types.Type, len(cl.TypeParams))
 		var want types.Class
 		if exp, ok := expected.(types.Class); ok && strings.EqualFold(exp.Name, c.Name) && len(exp.Args) == len(cl.TypeParams) {
@@ -1628,7 +1639,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 			} else if tp.Default != nil {
 				args[i] = tp.Default
 			} else if tp.Bound != nil {
-				args[i] = tp.Bound
+				args[i] = types.Substitute(tp.Bound, argsSoFar(cl.TypeParams, args[:i]))
 			} else {
 				args[i] = types.TMixed
 			}
@@ -1655,6 +1666,84 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 	return result
 }
 
+// inferFromBounds gives a class's type parameters that the constructor's
+// arguments left unbound what the bound of a bound one says of them, as
+// PHPStan infers them: `new LimitIterator($rows)`, $rows an
+// ArrayIterator<int, User>, binds TIterator, and its bound
+// Iterator<TKey, TValue> then binds TKey to int and TValue to User.
+func inferFromBounds(tps []*program.TypeParam, subst map[string]types.Type, h types.Hierarchy) {
+	open := map[string]bool{}
+	for _, tp := range tps {
+		if _, ok := subst[tp.Name]; !ok {
+			open[tp.Name] = true
+		}
+	}
+	if len(open) == 0 {
+		return
+	}
+	for _, tp := range tps {
+		if v, ok := subst[tp.Name]; ok && !open[tp.Name] && tp.Bound != nil {
+			unify(tp.Bound, v, subst, open, h)
+		}
+	}
+}
+
+// argsSoFar maps the type parameters before a missing argument to the
+// arguments they took, for a bound that names them.
+func argsSoFar(tps []*program.TypeParam, args []types.Type) map[string]types.Type {
+	m := make(map[string]types.Type, len(args))
+	for i, a := range args {
+		m[tps[i].Name] = a
+	}
+	return m
+}
+
+// mentionsTemplate reports whether a type names the template parameter.
+func mentionsTemplate(t types.Type, name string) bool {
+	found := false
+	types.Walk(t, func(n types.Type) {
+		if p, ok := n.(types.Param); ok && p.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
+// openToBounds replaces in a bound the call's own type parameters that
+// its arguments left unbound by their own bounds, in turn, and by mixed
+// where they have none: `new IteratorIterator($nodes)` binds TIterator
+// before TKey and TValue, which its bound Traversable<TKey, TValue>
+// names, and TIterator is held to what their bounds say of them, no more.
+func openToBounds(bound types.Type, tps []*program.TypeParam, subst map[string]types.Type) types.Type {
+	open := map[string]*program.TypeParam{}
+	for _, tp := range tps {
+		if _, ok := subst[tp.Name]; !ok {
+			open[tp.Name] = tp
+		}
+	}
+	if len(open) == 0 {
+		return bound
+	}
+	var close func(t types.Type, depth int) types.Type
+	close = func(t types.Type, depth int) types.Type {
+		return types.MapDeep(t, func(n types.Type) types.Type {
+			p, ok := n.(types.Param)
+			if !ok {
+				return n
+			}
+			tp, isOpen := open[p.Name]
+			if !isOpen {
+				return n
+			}
+			if tp.Bound == nil || depth > 8 {
+				return types.TMixed
+			}
+			return close(types.Substitute(tp.Bound, subst), depth+1)
+		})
+	}
+	return close(bound, 0)
+}
+
 // namesClass reports a static, $this or class type of the named class.
 func namesClass(t types.Type, name string) bool {
 	switch t := t.(type) {
@@ -1678,13 +1767,164 @@ func (x *fnCtx) checkCall(sig *signature, args *ast.ArgList, env *state, span as
 	return ret
 }
 
+// overwrite is a named argument, or a string key of an unpacked array, that
+// names a parameter an argument or a placeholder before it already fills.
+type overwrite struct {
+	arg, prev *ast.Arg
+	name      string
+}
+
+// findOverwrites lays a call's arguments over the callee's parameters in
+// order and returns each name that overwrites: PHP's Error "Named
+// parameter $x overwrites previous argument" (or "previous placeholder"),
+// thrown when the call is made or when a partial application creates its
+// closure, a pipe stage's `A |> f(?, x: B)` included. A positional
+// argument fills the parameter at its position; one past the declared
+// parameters goes into the variadic parameter under a number, which no
+// name meets. A variadic function collects a name it does not declare
+// under that name, so the same name twice collides. A name no parameter
+// has is P2010 of its own (unknown named argument), and a named
+// placeholder stands only for a declared parameter (partialShape), so
+// neither is counted here.
+//
+// unpacked gives the entries of an unpacked argument, in order, when its
+// type says them all: an integer key fills the next position and a string
+// key a name, as PHP unpacks them. An unpacked list it cannot say fills
+// positions nobody knows, so no later position is counted; the names
+// before it still are.
+func findOverwrites(sig *signature, args *ast.ArgList, unpacked func(*ast.Arg) ([]types.ShapeEntry, bool)) []overwrite {
+	if args == nil {
+		return nil
+	}
+	params, variadic := sig.params, false
+	if n := len(params); n > 0 && params[n-1].Variadic {
+		params, variadic = params[:n-1], true
+	}
+	declared := func(name string) bool {
+		for _, p := range params {
+			if p.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	filled := map[string]*ast.Arg{} // a parameter's name → the argument that fills it
+	var found []overwrite
+	position, lost := 0, false
+	fillPosition := func(a *ast.Arg) {
+		// A positional argument after a named one is P2110, not an
+		// overwrite: the first to fill a parameter keeps it.
+		if !lost && position < len(params) && filled[params[position].Name] == nil {
+			filled[params[position].Name] = a
+		}
+		position++
+	}
+	fillName := func(a *ast.Arg, name string) {
+		if !declared(name) && (!variadic || a.Placeholder != nil) {
+			return
+		}
+		if prev := filled[name]; prev != nil {
+			found = append(found, overwrite{arg: a, prev: prev, name: name})
+			return
+		}
+		filled[name] = a
+	}
+	for _, a := range args.Args {
+		switch {
+		case a.Placeholder != nil && a.Placeholder.Variadic:
+			// `...` comes last and stands for what is left.
+		case a.Unpack:
+			var entries []types.ShapeEntry
+			ok := false
+			if unpacked != nil {
+				entries, ok = unpacked(a)
+			}
+			if !ok {
+				lost = true
+				continue
+			}
+			for _, e := range entries {
+				if e.IsInt {
+					fillPosition(a)
+				} else {
+					fillName(a, e.Key)
+				}
+			}
+		case a.Name == nil:
+			fillPosition(a)
+		default:
+			fillName(a, a.Name.Name)
+		}
+	}
+	return found
+}
+
+// shapeEntries is what unpacking a value of type t passes, when the type
+// says it entry by entry: a sealed array shape with no optional entry.
+func shapeEntries(t types.Type) ([]types.ShapeEntry, bool) {
+	s, ok := t.(types.Shape)
+	if !ok || s.Unsealed {
+		return nil, false
+	}
+	for _, e := range s.Entries {
+		if e.Optional {
+			return nil, false
+		}
+	}
+	return s.Entries, true
+}
+
+// reportOverwrites reports what findOverwrites found as P2010, the code a
+// name no parameter has gets too (design/php-versions.md §9, "Overwriting
+// names"), at the overwriting argument. In a pipe stage pipeCall gives a named placeholder
+// the left side as its value and its span: the finding goes to the name
+// the source wrote, as the placeholder it is.
+func (x *fnCtx) reportOverwrites(sig *signature, found []overwrite) {
+	for _, o := range found {
+		span, kind, before := o.arg.S, "argument", "argument"
+		switch {
+		case o.arg.Placeholder != nil:
+			kind = "placeholder"
+		case o.arg.Name != nil && o.arg.Value != nil && o.arg.Value == x.pipeOperand:
+			span, kind = o.arg.Name.S, "placeholder"
+		}
+		if o.prev.Placeholder != nil {
+			before = "placeholder"
+		}
+		x.report(span, P2010, "named %s $%s of %s overwrites the %s before it", kind, o.name, sig.name, before)
+	}
+}
+
 func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, span ast.Span, expected types.Type) types.Type {
 	// A partial application binds its arguments now and leaves the
 	// placeholders' parameters to the closure it creates.
 	partial := args.Partial()
+	// The names that overwrite an argument before them, found here when no
+	// argument is unpacked and otherwise once the unpacked values are typed
+	// (below). PHP throws the overwrite first, so what follows from it — a
+	// parameter it leaves unbound, the overwriting value against the
+	// parameter's type — is not reported as well, and neither is the
+	// overwrite in a closure PHP's compiler rejects (P1003).
+	hasUnpack := false
+	if args != nil {
+		for _, a := range args.Args {
+			hasUnpack = hasUnpack || a.Unpack
+		}
+	}
+	rejected := rejectedClosure(sig.node, args)
+	over := map[*ast.Arg]bool{}
+	if !hasUnpack {
+		found := findOverwrites(sig, args, nil)
+		if !rejected {
+			x.reportOverwrites(sig, found)
+		}
+		for _, o := range found {
+			over[o.arg] = true
+		}
+	}
 	var shape *pfaShape
 	if partial {
-		shape = x.partialShape(sig, args, span)
+		shape = x.partialShape(sig, args, span, len(over) > 0)
 	}
 	known := func(e ast.Expr) types.Type {
 		if t, ok := sig.known[e]; ok {
@@ -1784,6 +2024,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 	seenNamed := false
 	unpacked := false
 	placeholder := false
+	unpackTypes := map[*ast.Arg]types.Type{}
 	if args != nil {
 		for i, a := range args.Args {
 			if a.Placeholder != nil {
@@ -1799,8 +2040,18 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 					continue
 				}
 				t := x.expr(a.Value, env, nil)
+				unpackTypes[a] = t
 				if _, _, ok := types.IterableKV(t, x.p()); (!ok && !types.IsMixed(t)) || mayNotIterate(t) {
 					x.report(a.S, P2303, "cannot unpack %s", x.typeName(t))
+				}
+				continue
+			}
+			if a.Name != nil && over[a] {
+				// PHP binds nothing to it; its value is typed for what
+				// it holds.
+				seenNamed = true
+				if known(a.Value) == nil {
+					x.expr(a.Value, env, nil)
 				}
 				continue
 			}
@@ -1848,8 +2099,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			x.c.libraryParam(b.arg.S, sig.name, b.param.Name)
 		}
 	}
-	// Required parameters present?
-	if !unpacked && !placeholder {
+	// Required parameters present? Not after an overwrite: PHP throws it
+	// before it counts.
+	if !unpacked && !placeholder && len(over) == 0 {
 		required := 0
 		for _, p := range sig.params {
 			if !p.HasDefault && !p.Variadic {
@@ -2017,6 +2269,27 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			subst[tp.Name] = v
 		}
 	}
+	// An argument that the native type of a parameter written with the
+	// template refuses is the plain mismatch PHP raises, reported before
+	// the type argument it stands for: `new LimitIterator($traversable)`
+	// passes no Iterator, rather than a TIterator outside its bound.
+	nativeMismatch := func(template string) bool {
+		found := false
+		for i, b := range bindings {
+			native := b.param.NativeType
+			if b.param.ByRef || b.arg.Unpack || argTypes[i] == nil || native == nil || mentionsParam(native) || !mentionsTemplate(b.param.Type, template) {
+				continue
+			}
+			at := types.Substitute(argTypes[i], freshOnly(subst))
+			if at == nil || types.IsAcceptable(at, native, x.p()) {
+				continue
+			}
+			found = true
+			x.c.reportRelated(b.arg.S, P2103, related(sig.file, b.param.Span, "parameter $%s of %s declared here", b.param.Name, sig.name),
+				"argument %d ($%s) of %s expects %s, %s given", b.idx+1, b.param.Name, sig.name, x.typeName(native), x.typeName(at))
+		}
+		return found
+	}
 	// An inferred type argument must respect its bound, like a written one
 	// (`repo(Order::class)` against `class<T of User>`): PHPStan reports
 	// the argument, Phaenon the type argument it stands for.
@@ -2028,14 +2301,36 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		if _, unknown := v.(types.Unknown); unknown || types.IsMixed(v) {
 			continue // mixed may still fit; the argument itself is reported where it is passed
 		}
-		bound := types.Substitute(tp.Bound, subst)
+		bound := openToBounds(types.Substitute(tp.Bound, subst), sig.typeParams, subst)
 		if !types.IsSubtype(v, bound, x.p()) {
+			if nativeMismatch(tp.Name) {
+				continue // the argument PHP refuses is the finding
+			}
 			x.report(span, P3002, "type argument %s inferred for %s of %s is not a subtype of its bound %s", x.typeName(v), tp.Name, sig.name, x.typeName(bound))
+		}
+	}
+	// With an unpacked argument the overwrites wait for its type: a sealed
+	// shape says what it fills, `label(...['a'], prefix: 'b')` and
+	// `label('a', ...$args, text: 'b')` with `$args` an array{text: …}.
+	if hasUnpack && !rejected {
+		for i, b := range bindings {
+			if b.arg.Unpack {
+				unpackTypes[b.arg] = argTypes[i]
+			}
+		}
+		found := findOverwrites(sig, args, func(a *ast.Arg) ([]types.ShapeEntry, bool) {
+			return shapeEntries(unpackTypes[a])
+		})
+		x.reportOverwrites(sig, found)
+		for _, o := range found {
+			if !o.arg.Unpack {
+				over[o.arg] = true
+			}
 		}
 	}
 	// Check acceptability with the final substitution.
 	for i, b := range bindings {
-		if b.param.ByRef {
+		if b.param.ByRef || over[b.arg] {
 			continue
 		}
 		pt := paramType(b.param)

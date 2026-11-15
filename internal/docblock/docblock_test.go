@@ -182,3 +182,25 @@ func TestMultilineAndErrors(t *testing.T) {
 		t.Errorf("one-line var %+v", one.Vars)
 	}
 }
+
+// TestThrowsVoid: `@throws void` is read in any letter case, in
+// parentheses and under the prefixed names; a union holding void, or a
+// class named like it, is not the tag.
+func TestThrowsVoid(t *testing.T) {
+	for doc, want := range map[string]bool{
+		"/** @throws void */":                            true,
+		"/** @throws VOID */":                            true,
+		"/** @throws (void) */":                          true,
+		"/** @phpstan-throws Void */":                    true,
+		"/** @throws void when it is empty */":           true,
+		"/**\n * @throws NotFound\n * @throws void\n */": true,
+		"/** @throws void|NotFound */":                   false,
+		"/** @throws \\void */":                          false,
+		"/** @throws NotFound */":                        false,
+		"/** @return void */":                            false,
+	} {
+		if got := Parse(doc).ThrowsVoid(); got != want {
+			t.Errorf("%q: ThrowsVoid() = %v, want %v", doc, got, want)
+		}
+	}
+}

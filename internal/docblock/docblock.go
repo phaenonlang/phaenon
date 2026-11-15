@@ -144,6 +144,17 @@ func Parse(comment string) *Doc {
 	return d
 }
 
+// ThrowsVoid says the docblock holds a `@throws void` tag (TypeNode.IsVoid),
+// under any of the tag's names (`@phpstan-throws void` too).
+func (d *Doc) ThrowsVoid() bool {
+	for _, t := range d.Throws {
+		if t.IsVoid() {
+			return true
+		}
+	}
+	return false
+}
+
 type tagText struct {
 	name string
 	text string

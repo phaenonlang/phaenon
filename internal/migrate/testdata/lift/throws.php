@@ -24,6 +24,11 @@ interface Store
      * @throws \RuntimeException|\LogicException
      */
     public function remove(int $id): void;
+
+    /**
+     * @throws void
+     */
+    public function size(): int;
 }
 
 /**
@@ -109,6 +114,55 @@ final class MemoryStore implements Store
     {
         return $this->get($id);
     }
+
+    public function size(): int
+    {
+        return \count($this->items);
+    }
+
+    /**
+     * @throws void
+     * @throws NotFound
+     */
+    public function both(int $id): string
+    {
+        return $this->get($id);
+    }
+
+    /**
+     * @throws void when nothing is stored
+     * @throws NotFound
+     * @throws \LogicException
+     */
+    public function describedVoid(int $id): string
+    {
+        return $this->get($id);
+    }
+
+    /**
+     * @throws void
+     * @phpstan-throws void
+     */
+    public function twiceVoid(): int
+    {
+        return 0;
+    }
+
+    /**
+     * @throws void when nothing is stored
+     */
+    public function described(): int
+    {
+        return 0;
+    }
+
+    /**
+     * @phpstan-throws void
+     */
+    public function prefixedVoid(): int
+    {
+        return 1;
+    }
 }
 
 /**
@@ -125,4 +179,14 @@ function load(Store $store, int $id): string
 function untyped($x)
 {
     throw new \LogicException((string) $x);
+}
+
+/**
+ * Counts the entries.
+ *
+ * @throws void
+ */
+function size(Store $store): int
+{
+    return $store->size();
 }

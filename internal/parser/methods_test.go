@@ -83,6 +83,7 @@ func TestWithdrawnFun(t *testing.T) {
 		"fun f(): int { return 1; }":                       1,
 		"fun &f(): array { return []; }":                   1,
 		"fun f() throws X {}":                              1,
+		"fun f() nothrow {}":                               1,
 		"fun f(): int => 1;":                               1,
 		"class A { fun f() {} static fun g() {} }":         2,
 		"class A { fun static() {} fun list() {} }":        2,

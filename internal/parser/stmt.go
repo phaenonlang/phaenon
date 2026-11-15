@@ -854,22 +854,45 @@ func (p *Parser) functionDecl(attrs []*ast.AttrGroup) ast.Stmt {
 // (design/functions.md §4). `throws` is contextual: it is a keyword only
 // here, after the parameter list or the return type, where PHP's grammar
 // admits nothing but `{` or `;`, so the lexer leaves it a T_STRING and
-// every name `throws` PHP code declares keeps parsing.
+// every name `throws` PHP code declares keeps parsing. `nothrow` stands in
+// the same place, contextual in the same way (§4.5); with `throws` beside
+// it, one saying that nothing escapes and the other naming what does, it
+// is a syntax error. The other word followed by a parameter list is not a
+// clause but the name of what comes next, `nothrow(): int;` after a
+// member that lacks its `;`: the caller reports the missing `;` or body,
+// as after any other clause.
 func (p *Parser) throwsClause() *ast.Throws {
-	if p.mode != lexer.ModePhaenon || !p.at(token.T_STRING) || !strings.EqualFold(p.text(), "throws") {
+	var t *ast.Throws
+	switch {
+	case p.clauseWord("nothrow"):
+		kw := p.next()
+		span := ast.Span{Start: kw.Start, End: kw.End}
+		t = &ast.Throws{S: span, Kw: span, Nothrow: true}
+	case p.clauseWord("throws"):
+		kw := p.next()
+		t = &ast.Throws{Kw: ast.Span{Start: kw.Start, End: kw.End}}
+		for {
+			start := p.tok().Start
+			t.Types = append(t.Types, &ast.NamedType{Name: p.name(), S: p.span(start)})
+			if !p.accept(token.Kind('|')) {
+				break
+			}
+		}
+		t.S = p.span(kw.Start)
+	default:
 		return nil
 	}
-	kw := p.next()
-	t := &ast.Throws{Kw: ast.Span{Start: kw.Start, End: kw.End}}
-	for {
-		start := p.tok().Start
-		t.Types = append(t.Types, &ast.NamedType{Name: p.name(), S: p.span(start)})
-		if !p.accept(token.Kind('|')) {
-			break
-		}
+	other := t.Nothrow && p.clauseWord("throws") || !t.Nothrow && p.clauseWord("nothrow")
+	if other && !p.methodAt(0, func(token.Token) bool { return true }) {
+		p.errorf("`nothrow` and `throws` together: one says that nothing escapes, the other names what does (design/functions.md §4.5)")
 	}
-	t.S = p.span(kw.Start)
 	return t
+}
+
+// clauseWord reports the word of a clause after a signature, `throws` or
+// `nothrow` in any case, in Phaenon mode.
+func (p *Parser) clauseWord(word string) bool {
+	return p.mode == lexer.ModePhaenon && p.at(token.T_STRING) && strings.EqualFold(p.text(), word)
 }
 
 // exprBody parses Phaenon's expression body `=> expr;` in place of a
