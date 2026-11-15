@@ -1321,11 +1321,12 @@ func renderType(n *docblock.TypeNode, alias bool) (string, bool) {
 		return "?" + inner, true
 	case docblock.KindUnion:
 		// `X|null` is spelled ?X, as PHP code writes it; a Closure signature
-		// can only be nullable that way.
+		// can only be nullable that way. array-key is spelled as a union,
+		// which `?` cannot prefix: it takes `|null` below.
 		if len(n.Args) == 2 {
 			for i, m := range n.Args {
 				other := n.Args[1-i]
-				if m.Kind == docblock.KindNull && (other.Kind == docblock.KindCallable || other.Kind == docblock.KindNamed) {
+				if m.Kind == docblock.KindNull && (other.Kind == docblock.KindCallable || other.Kind == docblock.KindNamed && !anyKey(other)) {
 					s, ok := render(other)
 					if !ok {
 						return "", false
