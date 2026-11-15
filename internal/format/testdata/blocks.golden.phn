@@ -12,4 +12,8 @@ final class Box
         $x = 2;
         return [$x];
     }
+
+    three(): int nothrow {
+        return 3;
+    }
 }
