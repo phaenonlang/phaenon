@@ -307,9 +307,13 @@ func (p *Printer) returnType(t ast.TypeExpr) {
 	}
 }
 
-// throws writes a declaration's `throws A|B` clause (Phaenon).
+// throws writes a declaration's `throws A|B` clause, or `nothrow` (Phaenon).
 func (p *Printer) throws(t *ast.Throws) {
 	if t == nil {
+		return
+	}
+	if t.Nothrow {
+		p.w(" nothrow")
 		return
 	}
 	p.w(" throws ")

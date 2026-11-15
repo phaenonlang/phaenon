@@ -1,6 +1,10 @@
 package parser
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -126,6 +130,182 @@ interface I {
 	for name, w := range want {
 		if got[name] != w {
 			t.Errorf("%s: throws %q, want %q", name, got[name], w)
+		}
+	}
+}
+
+// TestNothrow covers `nothrow` where a `throws` clause goes
+// (design/functions.md §4.5): a Throws node marked Nothrow, without types,
+// its spans the word's, in any case.
+func TestNothrow(t *testing.T) {
+	src := `
+function find(int $id): ?User nothrow { return null; }
+function bare() NoThrow {}
+function arrow(): string nothrow => 'x';
+interface I {
+    supports(Command $c): bool nothrow;
+    static of(): static
+        nothrow;
+}
+abstract class C {
+    abstract protected name(): string NOTHROW;
+    public function len(): int nothrow => 0;
+    keep(): void throws X {}
+    none(): void {}
+}
+`
+	f, err := Parse([]byte(src), lexer.ModePhaenon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	record := func(name string, th *ast.Throws) {
+		if th == nil || !th.Nothrow {
+			return
+		}
+		got[name] = true
+		if len(th.Types) != 0 {
+			t.Errorf("%s: nothrow with %d types", name, len(th.Types))
+		}
+		if !strings.EqualFold(src[th.Kw.Start:th.Kw.End], "nothrow") || th.S != th.Kw {
+			t.Errorf("%s: spans hold %q and %q", name, src[th.Kw.Start:th.Kw.End], src[th.S.Start:th.S.End])
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FunctionDecl:
+			record(n.Name.Name, n.Throws)
+		case *ast.MethodDecl:
+			record(n.Name.Name, n.Throws)
+		}
+		return true
+	})
+	for _, name := range []string{"find", "bare", "arrow", "supports", "of", "name", "len"} {
+		if !got[name] {
+			t.Errorf("%s: no nothrow", name)
+		}
+	}
+	for _, name := range []string{"keep", "none"} {
+		if got[name] {
+			t.Errorf("%s: nothrow it does not declare", name)
+		}
+	}
+	refused := map[string]string{
+		"function f() nothrow throws X {}":       "together",
+		"function f(): int throws X nothrow {}":  "together",
+		"class C { f(): int nothrow throws X; }": "together",
+		"function f() nothrow nothrow {}":        "",
+		"function f() nothrow X {}":              "",
+		"$f = function () nothrow {};":           "",
+		"$f = fn () nothrow => 1;":               "",
+	}
+	for src, msg := range refused {
+		_, err := Parse([]byte(src), lexer.ModePhaenon)
+		if err == nil {
+			t.Errorf("%q parsed; want a syntax error", src)
+			continue
+		}
+		if !strings.Contains(err.Error(), msg) {
+			t.Errorf("%q: %v; want a message containing %q", src, err, msg)
+		}
+	}
+	if _, err := Parse([]byte("<?php function f() nothrow {}"), lexer.ModePHP); err == nil {
+		t.Errorf("nothrow parsed in PHP mode")
+	}
+}
+
+// TestNothrowStaysAName: PHP code that names something `nothrow` parses
+// as before, in Phaenon mode as in PHP mode; php -l agrees
+// (TestNothrowNamesUnderPHP).
+func TestNothrowStaysAName(t *testing.T) {
+	for _, mode := range []lexer.Mode{lexer.ModePHP, lexer.ModePhaenon} {
+		src := nothrowNames
+		if mode == lexer.ModePhaenon {
+			src = strings.TrimPrefix(src, "<?php\n")
+		}
+		if _, err := Parse([]byte(src), mode); err != nil {
+			t.Errorf("mode %v: %v", mode, err)
+		}
+	}
+	// A method named nothrow, declared without a keyword, with the clause.
+	if _, err := Parse([]byte("class C { nothrow(): nothrow nothrow {} static nothrow() nothrow => 1; }"), lexer.ModePhaenon); err != nil {
+		t.Error(err)
+	}
+}
+
+// nothrowNames is PHP that names a namespace, an import, a constant, a
+// function, a class, its members, an enum case and a label `nothrow`.
+const nothrowNames = `<?php
+namespace nothrow;
+use Foo\nothrow as nothrow2;
+const nothrow = 1;
+function nothrow(nothrow $nothrow): nothrow { return nothrow; }
+class nothrow extends Base implements nothrow\I {
+    const nothrow = nothrow;
+    public nothrow $nothrow;
+    public function nothrow(): nothrow { return $this->nothrow instanceof nothrow ? nothrow::nothrow : nothrow(nothrow); }
+    public static function make(): static { return new static(); }
+}
+interface I { public function nothrow(): void; }
+trait T { public function nothrow() {} }
+class U { use T { nothrow as protected; T::nothrow as nothrow2; } }
+enum E: string implements nothrow\I { case nothrow = 'nothrow'; }
+$x = match (nothrow) { nothrow => nothrow and nothrow };
+foreach (nothrow as $nothrow) {}
+goto nothrow;
+nothrow:
+$f = fn (nothrow $t): nothrow => $t;
+$g = function (nothrow $t): nothrow { return $t; };
+`
+
+// TestNothrowNamesUnderPHP holds the parser to php -l, the oracle, on
+// `nothrow` in PHP's positions: what php accepts parses in both modes, and
+// what it refuses is refused in PHP mode; in Phaenon mode only the clause
+// after a named function's or method's signature is new.
+func TestNothrowNamesUnderPHP(t *testing.T) {
+	php, err := exec.LookPath("php")
+	if err != nil {
+		t.Skip("no php in PATH")
+	}
+	cases := []struct {
+		src     string
+		phaenon bool // the clause: Phaenon accepts what php refuses
+	}{
+		{src: strings.TrimPrefix(nothrowNames, "<?php\n")},
+		{src: "function nothrow() {}\nnothrow();\n"},
+		{src: "class C { public function nothrow(): int { return 1; } }\n(new C)->nothrow();\n"},
+		{src: "class C { const nothrow = 1; public $nothrow; }\necho C::nothrow;\n"},
+		{src: "const NOTHROW = 1;\necho NOTHROW;\n"},
+		{src: "goto nothrow;\nnothrow:\necho 1;\n"},
+		{src: "echo nothrow;\n"},
+		{src: "function f(): nothrow { return new nothrow(); }\n"},
+		{src: "function f() nothrow {}\n", phaenon: true},
+		{src: "function f(): int nothrow { return 1; }\n", phaenon: true},
+		{src: "interface I { public function f(): int nothrow; }\n", phaenon: true},
+		{src: "class C { public function f() nothrow {} }\n", phaenon: true},
+		{src: "$f = function () nothrow {};\n"},
+		{src: "$f = fn () nothrow => 1;\n"},
+		{src: "function f() nothrow throws X {}\n"},
+		{src: "echo 1 nothrow;\n"},
+	}
+	dir := t.TempDir()
+	for i, c := range cases {
+		path := filepath.Join(dir, fmt.Sprintf("case%d.php", i))
+		if err := os.WriteFile(path, []byte("<?php\n"+c.src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		phpOK := exec.Command(php, "-l", path).Run() == nil
+		_, perr := Parse([]byte("<?php\n"+c.src), lexer.ModePHP)
+		_, nerr := Parse([]byte(c.src), lexer.ModePhaenon)
+		phaenonOK := phpOK || c.phaenon
+		if c.phaenon && phpOK {
+			t.Errorf("%q: php accepts what the case says only Phaenon does", c.src)
+		}
+		if (perr == nil) != phpOK {
+			t.Errorf("%q: php -l says %v, the parser in PHP mode %v", c.src, phpOK, perr)
+		}
+		if (nerr == nil) != phaenonOK {
+			t.Errorf("%q: want accepted %v in Phaenon mode, the parser says %v", c.src, phaenonOK, nerr)
 		}
 	}
 }
