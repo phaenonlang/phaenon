@@ -370,6 +370,31 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 			if !ok || mayNotIterate(t) {
 				x.report(item.Value.Span(), P2303, "cannot unpack %s", x.typeName(t))
 			}
+			if sh, ok := t.(types.Shape); ok && isShape && unpacksByEntry(sh) {
+				// A shape unpacks into its entries: `[...$pair, 'x']` of a
+				// `(string, int)` is `list{string, int, 'x'}`, as PHPStan
+				// has it. PHP numbers the integer keys anew and keeps the
+				// string ones; an entry that may be absent leaves what the
+				// literal already has under its key, or nothing.
+				for _, se := range sh.Entries {
+					entry := types.ShapeEntry{Key: se.Key, Type: se.Type, Optional: se.Optional}
+					if se.IsInt {
+						entry = types.ShapeEntry{IsInt: true, IntKey: nextInt, Type: se.Type}
+						nextInt++
+					} else {
+						isList = false
+						if before, ok := shapeEntry(shape, entry); ok && se.Optional {
+							entry.Type = types.MakeUnion(before.Type, se.Type)
+							entry.Optional = before.Optional
+						}
+					}
+					keys = append(keys, shapeEntryKey(entry))
+					shape.Entries = upsert(shape.Entries, entry)
+					values = append(values, se.Type)
+					nonEmpty = nonEmpty || !entry.Optional
+				}
+				continue
+			}
 			isShape = false
 			// An unpacked iterable may yield nothing, and what it yields lands
 			// under the keys an array can have: PHP throws on any other key,
@@ -458,6 +483,21 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 		return shape
 	}
 	return types.Array{Key: types.MakeUnion(keys...), Value: types.MakeUnion(values...), List: isList, NonEmpty: nonEmpty}
+}
+
+// unpacksByEntry reports whether unpacking s into an array literal can be
+// followed entry by entry: it is sealed, and its integer keys, which PHP
+// numbers anew, are all certain, so that each has one place.
+func unpacksByEntry(s types.Shape) bool {
+	if s.Unsealed || s.Callable {
+		return false
+	}
+	for _, e := range s.Entries {
+		if e.Optional && e.IsInt {
+			return false
+		}
+	}
+	return true
 }
 
 func expectedShapeEntry(expected types.Type, key types.Type) (types.Type, bool) {
@@ -2685,6 +2725,24 @@ func hasShapeEntry(s types.Shape, e types.ShapeEntry) bool {
 		}
 	}
 	return false
+}
+
+// shapeEntry is the entry of s under key's key.
+func shapeEntry(s types.Shape, key types.ShapeEntry) (types.ShapeEntry, bool) {
+	for _, e := range s.Entries {
+		if e.IsInt == key.IsInt && e.IntKey == key.IntKey && e.Key == key.Key {
+			return e, true
+		}
+	}
+	return types.ShapeEntry{}, false
+}
+
+// shapeEntryKey is the type of an entry's key: the literal it is.
+func shapeEntryKey(e types.ShapeEntry) types.Type {
+	if e.IsInt {
+		return types.IntLit(e.IntKey)
+	}
+	return types.StringLit{V: e.Key}
 }
 
 // arrayKV is an array-like member's key and value types, never for an
