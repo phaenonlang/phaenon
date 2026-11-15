@@ -64,6 +64,16 @@ function forest(Forest $f): int
     return count($f);
 }
 
+// The classes an alias names are judged at its declaration, where they
+// are written; its uses carry no finding of theirs.
+type Lost = map<string, Missing>; // want P2001 "unknown class Ali\Types\Missing"
+type Found<T of Item> = list<T|Item|\Closure>;
+
+function lost(Lost $l, Found<Item> $f): int
+{
+    return count($l) + count($f);
+}
+
 // A type, not a class: where PHP would look for a class, an alias is none.
 function values(mixed $x): void
 {

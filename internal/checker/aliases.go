@@ -36,6 +36,10 @@ func (x *fnCtx) checkTypeAlias(a *ast.TypeAlias) {
 	x.res = x.res.WithParams(decl.Params)
 	x.checkTypeParams(a.TypeParams)
 	x.checkTypeExpr(a.Type)
+	// The classes the right-hand side names are judged here, once: the
+	// expansion carries them into every docblock that uses the alias,
+	// where PHPStan would meet a class that does not exist.
+	x.declaredTypes(a.Type, true)
 	x.res = saved
 }
 
