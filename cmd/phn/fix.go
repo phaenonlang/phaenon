@@ -420,10 +420,19 @@ func (r *fixReport) print(all bool, command []string) {
 	}
 }
 
-// clip quotes a change's text, cut to a readable length.
+// clip quotes a change's text, cut to a readable length: 60 characters,
+// counted and cut as characters, not bytes, so that none is split. A byte
+// that is no UTF-8 counts as one and stays as it is, quoted.
 func clip(s string) string {
-	if len(s) > 60 {
-		s = s[:57] + "…"
+	n, cut := 0, 0
+	for i := range s {
+		if n == 57 {
+			cut = i
+		}
+		n++
+	}
+	if n > 60 {
+		s = s[:cut] + "…"
 	}
 	return fmt.Sprintf("%q", s)
 }

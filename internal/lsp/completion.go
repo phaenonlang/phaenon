@@ -591,12 +591,12 @@ func (s *Server) signatureHelp(p TextDocumentPositionParams) (any, error) {
 	off := newText(src).offset(p.Position)
 	var r *fileCheck
 	for _, ins := range []string{"", probe, probe + ")", probe + ");", ")", ");", probe + "));", "));"} {
-		cand := string(src[:off]) + ins + string(src[off:])
-		if _, err := parser.Parse([]byte(cand), lexer.ModePhaenon); err != nil {
+		cand := []byte(string(src[:off]) + ins + string(src[off:]))
+		if _, err := parser.Parse(cand, lexer.ModePhaenon); err != nil {
 			continue
 		}
 		var err error
-		if r, err = s.checkText(path, []byte(cand), -1); err != nil {
+		if r, err = s.checkText(path, cand, -1); err != nil {
 			return nil, err
 		}
 		break
@@ -666,7 +666,7 @@ func (s *Server) signatureHelp(p TextDocumentPositionParams) (any, error) {
 		for _, o := range offs {
 			info.Parameters = append(info.Parameters, ParameterInformation{Label: [2]int{utf16Count(label[:o[0]]), utf16Count(label[:o[1]])}})
 		}
-		active := activeParameter(src, args.S.Start+1, off)
+		active := activeParameter(r.text.src, args, off)
 		if n := len(params); n > 0 && active >= n && params[n-1].Variadic {
 			active = n - 1
 		}
@@ -675,23 +675,26 @@ func (s *Server) signatureHelp(p TextDocumentPositionParams) (any, error) {
 	return nil, nil
 }
 
-// activeParameter counts the commas at the argument list's own depth
-// between its opening parenthesis and the cursor.
-func activeParameter(src []byte, start, off int) int {
-	if start > off || off > len(src) {
-		return 0
-	}
-	depth, n := 0, 0
-	for _, t := range lexer.Tokenize(src[start:off], lexer.ModePhaenon) {
-		switch t.Kind {
-		case '(', '[', '{', token.T_CURLY_OPEN, token.T_DOLLAR_OPEN_CURLY_BRACES:
-			depth++
-		case ')', ']', '}':
-			depth--
-		case ',':
-			if depth == 0 {
+// activeParameter counts the argument list's own commas before the cursor
+// at off, in src, the text args was parsed from. They are the commas after
+// the arguments the parser read, so that what an argument holds counts for
+// nothing: a comma between explicit type arguments, which the parser takes
+// for such before a `(` (`f<int, string>($x)`), is the argument's own, and
+// `$a < $b, $c > $d` stays two arguments.
+func activeParameter(src []byte, args *ast.ArgList, off int) int {
+	n := 0
+	for _, a := range args.Args {
+		if a.S.End >= off || off > len(src) {
+			break
+		}
+		for _, t := range lexer.Tokenize(src[a.S.End:off], lexer.ModePhaenon) {
+			if t.Kind == token.T_WHITESPACE || t.Kind == token.T_COMMENT || t.Kind == token.T_DOC_COMMENT {
+				continue
+			}
+			if t.Kind == ',' {
 				n++
 			}
+			break
 		}
 	}
 	return n

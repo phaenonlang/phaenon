@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -344,6 +346,98 @@ func TestFmtNamesAFixerThatUndoesTheLayout(t *testing.T) {
 	}
 	if _, stderr, err := run(t, root, bin, "build", "--check"); err != nil {
 		t.Errorf("the outputs are not the sources' build: %s", stderr)
+	}
+}
+
+// phn fmt takes directories as build and check take them: the .phn under
+// them, the outputs left out as phn fmt without paths leaves them.
+func TestFmtDirectories(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	odd := "namespace App;\n\nfinal class Odd {\n    get(): list < int > => [];\n}\n"
+	writeTree(t, root, map[string]string{
+		"phaenon.json":     `{"roots": {"src": ".src"}, "fmt": []}`,
+		"src/Deep/Odd.phn": odd,
+		".src/Stray.phn":   odd,
+	})
+	stdout, stderr, err := run(t, root, bin, "fmt", "src/")
+	if err != nil || !strings.Contains(stdout, "2 files formatted, 2 changed") {
+		t.Fatalf("phn fmt src/ (%v):\n%s%s", err, stdout, stderr)
+	}
+	want := "namespace App;\n\nfinal class Odd\n{\n    get(): list<int> => [];\n}\n"
+	if got, _ := os.ReadFile(filepath.Join(root, "src/Deep/Odd.phn")); string(got) != want {
+		t.Errorf("Odd.phn:\n%s\nwant\n%s", got, want)
+	}
+	stdout, stderr, err = run(t, root, bin, "fmt", "--check", ".")
+	if err != nil || !strings.Contains(stdout, "2 files checked, 0 not in Phaenon's layout") || strings.Contains(stderr, "Stray") {
+		t.Errorf("phn fmt --check . (%v):\n%s%s", err, stdout, stderr)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, ".src/Stray.phn")); string(got) != odd {
+		t.Errorf("a file of an output directory was formatted:\n%s", got)
+	}
+
+	// A directory with no .phn hands the fixer nothing, and the fixer is
+	// not run on the files its configuration names instead.
+	tool := fakeToolCommand(t, fakeSpec{Replace: [][2]string{{"int $a,int $b", "int $a, int $b"}}})
+	writeTree(t, root, map[string]string{
+		"phaenon.json":       `{"roots": {"src": ".src"}, "fmt": [` + strconvQuote(tool) + `, "fix"]}`,
+		"src/Fixture/a.json": "{}\n",
+	})
+	if stdout, stderr, err := run(t, root, bin, "fmt", "src/Fixture"); err != nil || !strings.Contains(stdout, "0 files formatted") {
+		t.Errorf("phn fmt src/Fixture (%v):\n%s%s", err, stdout, stderr)
+	}
+	if box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn")); !strings.Contains(string(box), "int $a,int $b") {
+		t.Errorf("the fixer ran on a file outside the paths given:\n%s", box)
+	}
+}
+
+// A file that does not parse is reported and left as it is, the others
+// are formatted, and phn fmt fails, with --check too.
+func TestFmtFailsOnAFileThatDoesNotParse(t *testing.T) {
+	bin := phnBinary(t)
+	root := fixTree(t)
+	broken := "namespace App;\n\nfunction broken( {\n"
+	writeTree(t, root, map[string]string{
+		"phaenon.json":   `{"roots": {"src": ".src"}, "fmt": []}`,
+		"src/Broken.phn": broken,
+	})
+	exitStatus := func(err error) int {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return exit.ExitCode()
+		}
+		return 0
+	}
+	stdout, stderr, err := run(t, root, bin, "fmt")
+	if exitStatus(err) != 1 || !strings.Contains(stderr, "src/Broken.phn:") || !strings.Contains(stdout, "1 that do not parse") {
+		t.Errorf("phn fmt should fail on Broken.phn (%v):\n%s%s", err, stdout, stderr)
+	}
+	if box, _ := os.ReadFile(filepath.Join(root, "src/Box.phn")); !strings.Contains(string(box), "final class Box\n{") {
+		t.Errorf("the file that parses was not formatted:\n%s", box)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "src/Broken.phn")); string(got) != broken {
+		t.Errorf("Broken.phn was written:\n%s", got)
+	}
+	stdout, stderr, err = run(t, root, bin, "fmt", "--check")
+	if exitStatus(err) != 1 || !strings.Contains(stderr, "src/Broken.phn:") {
+		t.Errorf("phn fmt --check should fail on Broken.phn (%v):\n%s%s", err, stdout, stderr)
+	}
+}
+
+// A change's text in the report is cut between characters, never inside
+// one: a string of PHP, a comment, holds any text.
+func TestClipCutsBetweenCharacters(t *testing.T) {
+	head := strings.Repeat("a", 56) + "€"
+	if got, want := clip(head+strings.Repeat("b", 10)), strconv.Quote(head+"…"); got != want {
+		t.Errorf("clip = %s, want %s", got, want)
+	}
+	short := strings.Repeat("é", 40) // 80 bytes, 40 characters
+	if got, want := clip(short), strconv.Quote(short); got != want {
+		t.Errorf("clip = %s, want %s", got, want)
+	}
+	raw := strings.Repeat("\xff", 70) // a PHP string of bytes keeps them
+	if got, want := clip(raw), strconv.Quote(strings.Repeat("\xff", 57)+"…"); got != want {
+		t.Errorf("clip = %s, want %s", got, want)
 	}
 }
 

@@ -75,6 +75,21 @@ func (s *programShare) composer(dir string) (*program.ComposerLoader, error) {
 	return l, nil
 }
 
+// setProjectSources replaces projectSources, the project's outputs and the
+// roots behind them, as a project file read again states them. The loaders
+// read since mapped the old ones and are read afresh; a program that holds
+// one keeps it as it is.
+func (s *programShare) setProjectSources(sources map[string]string) {
+	if s == nil {
+		projectSources = sources
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projectSources = sources
+	s.loaders = map[string]sharedLoader{}
+}
+
 // setSources maps a loader's output directories to the sources behind them:
 // the project's roots and the installed Phaenon packages' (newProgram).
 func setSources(l *program.ComposerLoader) {
