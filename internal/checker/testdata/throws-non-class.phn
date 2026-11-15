@@ -1,0 +1,111 @@
+namespace Throwing\Keywords;
+
+use RuntimeException;
+
+// A `throws` clause names Throwable classes and type parameters bounded by
+// one (design/functions.md §4, §8), as `catch` names classes. A type
+// keyword in it is no class: P2319, the one finding, and the declaration
+// leaves it out, so no P2404 claims the body never throws it and a clause
+// of nothing else declares nothing. `throws void` is not `nothrow`.
+
+function text(): void throws string {} // want P2319 "string is a type and not a class, so throws cannot name it"
+
+function number(): void throws int {} // want P2319
+
+function anything(): void throws mixed {} // want P2319
+
+function nothing(): void throws null {} // want P2319
+
+function some(): void throws object {} // want P2319
+
+function each(): void throws iterable {} // want P2319
+
+function stops(): void throws never {} // want P2319
+
+function flag(): void throws bool {} // want P2319
+
+function pair(): void throws map {} // want P2319
+
+function raw(): void throws bytes {} // want P2319
+
+// PHP reserves its type names in any letter case.
+function shouted(): void throws String {} // want P2319
+
+// `throws void` says nothing: the body is held to nothing.
+function quiet(): void throws void { // want P2319 "`nothrow` says that nothing escapes"
+    throw new RuntimeException('loud');
+}
+
+/**
+ * @throws void
+ */
+function quietTwice(): void throws void {} // want P2319
+
+// A class beside a keyword: the class is the declaration. `void` there is
+// no `nothrow` either, and the hint is not given.
+function mixedUp(): void throws RuntimeException|int {} // want P2404, P2319
+
+function voidBeside(): void throws void|RuntimeException { // want P2319 "void is a type and not a class, so throws cannot name it; throws names Throwable classes"
+    throw new RuntimeException('x');
+}
+
+function mixedUpThrows(): void throws RuntimeException|int { // want P2319
+    throw new RuntimeException('x');
+}
+
+// An alias is no class either, where PHP would look for one: P2001, as in
+// `catch` (design/generics.md §11.6), and nothing else.
+type Label = string;
+
+type Failure = RuntimeException;
+
+function labelled(): void throws Label {} // want P2001 "Label is a type alias, which is erased and names no class"
+
+function failing(): void throws Failure {} // want P2001
+
+// A Phaenon word in another case is a class name (roadmap D30), and so are
+// the names PHP does not reserve, `resource`, `numeric`, `scalar` or
+// `number`: a class of that name is that class.
+function mapped(): void throws Map {} // want P2001
+
+final class Resource extends RuntimeException
+{
+}
+
+final class Number extends RuntimeException
+{
+}
+
+function load(): void throws Resource {
+    throw new Resource('missing');
+}
+
+function parse(): void throws Number {
+    throw new Number('bad');
+}
+
+function numeric(): void throws numeric {} // want P2001
+
+// Outside a class, `self` names none.
+function selfish(): void throws self {} // want P2012
+
+// A class that is no Throwable, as before.
+function closing(): void throws \Closure {} // want P2319 "Closure is not a Throwable"
+
+// A caller of a declaration that names nothing calls what declares
+// nothing: an implicit throw point, no explicit one.
+function caller(): void nothrow {
+    text();
+    quiet();
+}
+
+namespace Throwing\Named;
+
+// Where a class of that name resolves, `bytes` in lower case is the class.
+final class bytes extends \RuntimeException
+{
+}
+
+function binary(): void throws bytes {
+    throw new bytes('x');
+}

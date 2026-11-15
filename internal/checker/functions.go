@@ -5,6 +5,7 @@ import (
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/docblock"
+	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -35,6 +36,19 @@ func (x *fnCtx) throwsClause(t *ast.Throws, doc *docblock.Doc, name ast.Span) {
 			}
 			continue
 		}
+		if x.throwsKeyword(nt) {
+			// A type keyword names no class: no Throwable, and nothing for
+			// PHP to look up. The declaration leaves it out (program's
+			// throwsMember), so nothing else follows from it. `throws void`
+			// alone meant `nothrow`; beside a class it says nothing.
+			word := nt.Name.Parts[0]
+			if strings.EqualFold(word, "void") && len(t.Types) == 1 {
+				x.report(nt.S, P2319, "%s is a type and not a class, so throws cannot name it; `nothrow` says that nothing escapes", word)
+			} else {
+				x.report(nt.S, P2319, "%s is a type and not a class, so throws cannot name it; throws names Throwable classes", word)
+			}
+			continue
+		}
 		saved := x.nameOnly
 		x.nameOnly = true
 		name, ok := x.resolveClassName(nt.Name, nt.S)
@@ -46,6 +60,16 @@ func (x *fnCtx) throwsClause(t *ast.Throws, doc *docblock.Doc, name ast.Span) {
 			x.report(nt.S, P2319, "%s is not a Throwable, so throws cannot name it", name)
 		}
 	}
+}
+
+// throwsKeyword reports a member of a `throws` clause that names a type
+// and no class: a type keyword (program.NonClassTypeName) for which no
+// class of that name resolves.
+func (x *fnCtx) throwsKeyword(nt *ast.NamedType) bool {
+	if len(nt.Name.Parts) != 1 || nt.Name.Kind != ast.NameUnqualified || !program.NonClassTypeName(nt.Name.Parts[0]) {
+		return false
+	}
+	return x.p().Class(x.res.ClassName(nt.Name)) == nil
 }
 
 // throwsContradiction reports a declaration that says that nothing
@@ -74,11 +98,16 @@ func (x *fnCtx) throwsContradiction(t *ast.Throws, doc *docblock.Doc, name ast.S
 			x.report(t.Kw, P2320, "nothrow says that nothing escapes, and the docblock's %s that something does", strings.Join(other, " and "))
 		}
 	case t != nil:
-		if len(void) > 0 {
-			names := make([]string, len(t.Types))
-			for i, nt := range t.Types {
-				names[i] = string(x.file.Src[nt.S.Start:nt.S.End])
+		// A type keyword in the clause names nothing that escapes: it is
+		// P2319, and the declaration leaves it out.
+		var names []string
+		for _, nt := range t.Types {
+			if x.throwsKeyword(nt) {
+				continue
 			}
+			names = append(names, string(x.file.Src[nt.S.Start:nt.S.End]))
+		}
+		if len(void) > 0 && len(names) > 0 {
 			x.report(t.Kw, P2320, "the docblock's %s says that nothing escapes, and throws %s that something does", void[0], strings.Join(names, "|"))
 		}
 	case len(void) > 0 && len(other) > 0:

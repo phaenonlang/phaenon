@@ -130,7 +130,8 @@ var (
 	P2317 = Code{"P2317", Error, "throwing a non-Throwable"}
 	P2318 = Code{"P2318", Error, "catching a non-Throwable"}
 	// P2319: a `throws` clause names a class, an interface or a type
-	// parameter that is not a Throwable (design/functions.md §4).
+	// parameter that is not a Throwable (design/functions.md §4), or a type
+	// keyword such as `string` or `void`, which names no class.
 	P2319 = Code{"P2319", Error, "throws names a non-Throwable"}
 	// P2320: a declaration that says that nothing escapes, with `nothrow`
 	// or `@throws void`, and also that something does, with a `throws`
