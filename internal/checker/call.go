@@ -702,6 +702,53 @@ func minMaxType(isMax bool, ts []types.Type) types.Type {
 	return types.Int{Lo: lo, Hi: hi}
 }
 
+// omittedOnly are the parameters of PHP's functions and methods whose
+// null default stands for the argument left out, and which PHPStan's
+// function map holds to their type without null when the argument is
+// given (argument.type, PHPStan 2.3, every call form it reads):
+// implode()'s $array after a separator, strtr()'s $to, and the others
+// below. typeError says PHP itself throws a TypeError for an explicit null
+// there, as it does for implode(',', null) and strtr($s, 'ab', null);
+// phpversion(null), strtok($s, null), PDO::query($q, null) and new
+// ReflectionMethod('C::m', null) run, and stream_context_set_option() and
+// XSLTProcessor::setParameter() throw a ValueError.
+var omittedOnly = map[string]struct {
+	param     string
+	typeError bool
+}{
+	"implode":                       {"array", true},
+	"join":                          {"array", true},
+	"strtr":                         {"to", true},
+	"phpversion":                    {"extension", false},
+	"strtok":                        {"token", false},
+	"stream_context_set_option":     {"option_name", false},
+	"pdo::query":                    {"fetchMode", false},
+	"xsltprocessor::setparameter":   {"value", false},
+	"reflectionmethod::__construct": {"method", false},
+}
+
+// omittedNull reports a parameter of omittedOnly: an argument given there
+// is held to the parameter's type without null. typeError says PHP throws
+// a TypeError for the null.
+func omittedNull(sig *signature, p *program.Param) (ok, typeError bool) {
+	var key string
+	switch {
+	case sig == nil:
+		return false, false
+	case sig.fn != nil && isStubFile(sig.fn.File):
+		key = strings.ToLower(sig.fn.Name)
+	case sig.meth != nil && sig.meth.Class != nil && isStubFile(sig.meth.Class.File):
+		key = strings.ToLower(sig.meth.Class.Name + "::" + sig.meth.Name)
+	default:
+		return false, false
+	}
+	o, found := omittedOnly[key]
+	if !found || o.param != p.Name {
+		return false, false
+	}
+	return true, o.typeError
+}
+
 // implodeType refines implode(): a sealed array of literals joined by a
 // literal separator is that literal, and a non-empty array of non-empty
 // strings joins into a non-empty string (PHPStan's
@@ -2335,6 +2382,10 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		}
 		pt := paramType(b.param)
 		pt = finalizeParams(pt, tps)
+		if omitted, _ := omittedNull(sig, b.param); omitted {
+			// Its null stands for the argument left out (omittedOnly).
+			pt = types.StripNull(pt)
+		}
 		if x.c.opts.CallableArg != nil && b.arg.Value != nil {
 			x.c.opts.CallableArg(x.file, b.arg.Value, pt)
 		}
