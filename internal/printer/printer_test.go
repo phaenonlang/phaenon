@@ -70,12 +70,12 @@ func TestExprSpacing(t *testing.T) {
 	}
 }
 
-// TestFunctionSyntax pins the printing of expression bodies and `throws`
-// (design/functions.md §3–4): the declaration keeps its arrow and its
-// clause, and printing the printed text again changes nothing.
+// TestFunctionSyntax pins the printing of expression bodies, `throws` and
+// `nothrow` (design/functions.md §3–4): the declaration keeps its arrow
+// and its clause, and printing the printed text again changes nothing.
 func TestFunctionSyntax(t *testing.T) {
-	src := "final class C\n{\n    name(): string\n        => $this->name;\n    abstract protected run(): void throws A|\\B\\C;\n    log(string $m): void => print $m;\n}\n\nfunction f(): int throws X => 1;\n"
-	want := "final class C\n{\n    name(): string => $this->name;\n\n    abstract protected run(): void throws A|\\B\\C;\n\n    log(string $m): void => print $m;\n}\n\nfunction f(): int throws X => 1;\n"
+	src := "final class C\n{\n    name(): string\n        => $this->name;\n    abstract protected run(): void throws A|\\B\\C;\n    log(string $m): void => print $m;\n    size(): int NoThrow => 0;\n    abstract stop() nothrow;\n}\n\nfunction f(): int throws X => 1;\n\nfunction g() nothrow\n{\n}\n"
+	want := "final class C\n{\n    name(): string => $this->name;\n\n    abstract protected run(): void throws A|\\B\\C;\n\n    log(string $m): void => print $m;\n\n    size(): int nothrow => 0;\n\n    abstract stop() nothrow;\n}\n\nfunction f(): int throws X => 1;\n\nfunction g() nothrow\n{\n}\n"
 	f, err := parser.Parse([]byte(src), lexer.ModePhaenon)
 	if err != nil {
 		t.Fatal(err)

@@ -184,7 +184,7 @@ func (p *Parser) bareMethodAhead() bool {
 // parameter list. In a class body any identifier is a name, as it was
 // after `fun`; at statement level, where `fun & f()` is an expression,
 // the name is a function's and the parameter list must be followed by
-// what only a declaration has: `{`, `:`, `=>` or `throws`.
+// what only a declaration has: `{`, `:`, `=>`, `throws` or `nothrow`.
 func (p *Parser) funAhead(member bool) bool {
 	if !p.withdrawnWord("fun") {
 		return false
@@ -222,7 +222,7 @@ func (p *Parser) funAhead(member bool) bool {
 				case token.Kind('{'), token.Kind(':'), token.T_DOUBLE_ARROW:
 					return true
 				case token.T_STRING:
-					return strings.EqualFold(t.Text(p.src), "throws")
+					return strings.EqualFold(t.Text(p.src), "throws") || strings.EqualFold(t.Text(p.src), "nothrow")
 				}
 				return false
 			}

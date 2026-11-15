@@ -441,26 +441,54 @@ func orMixed(t types.Type) types.Type {
 
 // DeclaredThrows is what a call of m is known to throw: m's own
 // declaration, else the one it inherits from the methods it overrides, as
-// PHPStan inherits @throws with the rest of a docblock: the parent's
-// method first, with what that one inherits, then the methods of the
-// class's immediate interfaces in the order declared (Overridden). nil
-// when nothing declares it (design/tooling.md §9.1).
+// PHPStan inherits @throws with the rest of a docblock (ThrowsDeclarer).
+// nil when nothing declares it (design/tooling.md §9.1).
 func (m *Method) DeclaredThrows() types.Type {
-	return m.declaredThrows(map[*Method]bool{})
+	if d := m.ThrowsDeclarer(); d != nil {
+		return d.Throws
+	}
+	return nil
 }
 
-func (m *Method) declaredThrows(seen map[*Method]bool) types.Type {
+// ThrowsDeclarer is the method whose declaration DeclaredThrows reads: m
+// when it declares what it throws, else the first method that does among
+// those m overrides, in the order PHPStan inherits a docblock: the
+// parent's method first, with what that one inherits, then the methods of
+// the class's immediate interfaces in the order declared, each with what
+// it inherits (Overridden). A constructor reads the parent's constructor
+// too, concrete as it may be, as PHPStan does; PHP compares no signature
+// with it, which is why Overridden leaves it out. nil when none does.
+func (m *Method) ThrowsDeclarer() *Method {
+	return m.throwsDeclarer(map[*Method]bool{})
+}
+
+func (m *Method) throwsDeclarer(seen map[*Method]bool) *Method {
 	if m.Throws != nil {
-		return m.Throws
+		return m
 	}
 	if seen[m] || len(seen) > maxOverrideDepth {
 		return nil
 	}
 	seen[m] = true
-	for _, d := range m.Overridden() {
-		if t := d.declaredThrows(seen); t != nil {
+	for _, d := range m.inheritsThrowsFrom() {
+		if t := d.throwsDeclarer(seen); t != nil {
 			return t
 		}
 	}
 	return nil
+}
+
+// inheritsThrowsFrom is Overridden, with a constructor's parent
+// constructor first: the one the parent's table holds, unless it is
+// private, which PHPStan inherits nothing from.
+func (m *Method) inheritsThrowsFrom() []*Method {
+	over := m.Overridden()
+	if m.Class == nil || !strings.EqualFold(m.Name, "__construct") {
+		return over
+	}
+	entry, _ := tableEntry(m.Class.ParentClass(), "__construct", map[*Class]bool{m.Class: true})
+	if entry == nil || entry.Vis == Private && !entry.Abstract {
+		return over
+	}
+	return append([]*Method{entry}, slices.DeleteFunc(slices.Clone(over), func(d *Method) bool { return d == entry })...)
 }

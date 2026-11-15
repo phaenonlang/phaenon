@@ -422,3 +422,31 @@ func TestLiftKeepsParamProseOnLaterLines(t *testing.T) {
 		t.Errorf("unexpected notes: %v", notes)
 	}
 }
+
+// A .phn declaration that says `nothrow` loses a `@throws void` left beside
+// it, which says the same, and keeps a tag that names what escapes, with a
+// note: the contradiction is the checker's to report (P2320), and lifting
+// the tag would write `nothrow|X`. Beside a `throws` clause, `@throws void`
+// stays.
+func TestLiftBesideNothrow(t *testing.T) {
+	src := "final class A\n{\n    /** @throws void */\n    one(): int nothrow => 1;\n\n    /** @throws \\LogicException */\n    two(): int nothrow => 2;\n\n    /** @throws void */\n    three(): int throws \\LogicException => throw new \\LogicException();\n}\n"
+	want := "final class A\n{\n    one(): int nothrow => 1;\n\n    /** @throws \\LogicException */\n    two(): int nothrow => 2;\n\n    /** @throws void */\n    three(): int throws \\LogicException => throw new \\LogicException();\n}\n"
+	got, notes, err := Lift([]byte(src), Options{Generics: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	var msgs []string
+	for _, n := range notes {
+		msgs = append(msgs, fmt.Sprintf("%d: %s", n.Line, n.Msg))
+	}
+	wantNotes := []string{
+		`6: kept @throws \LogicException: the declaration says nothrow`,
+		"9: kept @throws void: the declaration has a throws clause",
+	}
+	if strings.Join(msgs, "\n") != strings.Join(wantNotes, "\n") {
+		t.Errorf("notes:\n%s\nwant:\n%s", strings.Join(msgs, "\n"), strings.Join(wantNotes, "\n"))
+	}
+}

@@ -758,11 +758,14 @@ func (*FunctionDecl) stmtNode()    {}
 
 // Throws is the clause `throws A|B` after a signature: the exceptions a
 // named function or method lets escape (design/functions.md §4). It
-// compiles to a @throws tag.
+// compiles to a @throws tag. Nothrow marks `nothrow`, which stands in the
+// clause's place and says that nothing escapes (§4.5): it has no Types,
+// and its spans are the word's. It compiles to `@throws void`.
 type Throws struct {
-	S     Span // from the keyword to the last type
-	Kw    Span // the keyword
-	Types []*NamedType
+	S       Span // from the keyword to the last type
+	Kw      Span // the keyword
+	Types   []*NamedType
+	Nothrow bool
 }
 
 func (n *Throws) Span() Span { return n.S }

@@ -19,8 +19,8 @@ import (
 // implicit, which is lenient, never stricter.
 //
 // Three findings read the points: a catch no point reaches (P2403), a
-// throws member the body never throws (P2404), and `@throws void` on a
-// body that throws (P2405).
+// throws member the body never throws (P2404), and `@throws void`, or
+// `nothrow`, its clause spelling, on a body that throws (P2405).
 
 // ThrowPoint is a throw point as Options.Thrown reports it: the classes
 // it may raise (less what earlier catches took; "Throwable" for any), and
@@ -429,12 +429,51 @@ func mayBeZero(t types.Type) bool {
 	return false
 }
 
-// bodyThrows checks a body's escaping throw points against its own
+// heldThrows is the declaration a method's body is held to, and how the
+// P2405 message names it: the method's own, or, when it declares nothing,
+// a `@throws void` or `nothrow` it inherits from the method it overrides,
+// which PHPStan holds the body to as well (throws.void). An inherited list
+// of classes is not the body's: P2404 counts only the members a
+// declaration writes.
+func heldThrows(m *program.Method) (types.Type, string) {
+	if m.Throws != nil {
+		return m.Throws, "declares " + voidSpelling(declThrows(m))
+	}
+	d := m.ThrowsDeclarer()
+	if d == nil || !isVoidThrows(d.Throws) {
+		return nil, ""
+	}
+	from := d.Name
+	if d.Class != nil {
+		from = d.Class.Name + "::" + d.Name
+	}
+	return d.Throws, "inherits " + voidSpelling(declThrows(d)) + " from " + from + "()"
+}
+
+// declThrows is the clause a method's declaration writes, nil without one.
+func declThrows(m *program.Method) *ast.Throws {
+	if m.Decl == nil {
+		return nil
+	}
+	return m.Decl.Throws
+}
+
+// voidSpelling names a declaration of "throws nothing" as it is written:
+// `nothrow` (design/functions.md §4.5), or the docblock's `@throws void`.
+func voidSpelling(clause *ast.Throws) string {
+	if clause != nil && clause.Nothrow {
+		return "nothrow"
+	}
+	return "@throws void"
+}
+
+// bodyThrows checks a body's escaping throw points against its
 // declaration: P2405 at each explicit point under `@throws void`, where
-// PHPStan reports it, and P2404 at the declaration for a member nothing
-// throws. overridable methods keep their members: their
+// PHPStan reports it, its message saying how the body came by the
+// declaration (voidSays), and P2404 at the declaration for a member
+// nothing throws. overridable methods keep their members: their
 // declaration is the contract their overrides are held to.
-func (x *fnCtx) bodyThrows(declared types.Type, overridable bool, what string, at ast.Span, points []throwPoint) {
+func (x *fnCtx) bodyThrows(declared types.Type, voidSays string, overridable bool, what string, at ast.Span, points []throwPoint) {
 	if declared == nil {
 		return
 	}
@@ -444,7 +483,7 @@ func (x *fnCtx) bodyThrows(declared types.Type, overridable bool, what string, a
 				continue
 			}
 			for _, e := range tp.excs {
-				x.report(tp.at, P2405, "%s declares @throws void but throws %s here", what, e.name)
+				x.report(tp.at, P2405, "%s %s but throws %s here", what, voidSays, e.name)
 			}
 		}
 		return

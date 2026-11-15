@@ -941,10 +941,13 @@ func (r *resolver) buildReturn(native ast.TypeExpr, doc *docblock.Doc) types.Typ
 // buildThrows reads what a declaration says it lets escape
 // (design/functions.md §4, tooling.md §9.1): the `throws` clause, else the
 // docblock's @throws tags joined into one union. nil when neither is
-// written; `@throws void`, "throws nothing", is types.TVoid.
+// written; `@throws void`, "throws nothing", is types.TVoid, and so is
+// `nothrow`, its clause spelling (§4.5).
 func (r *resolver) buildThrows(clause *ast.Throws, doc *docblock.Doc) types.Type {
 	var ms []types.Type
 	switch {
+	case clause != nil && clause.Nothrow:
+		return types.TVoid
 	case clause != nil:
 		for _, t := range clause.Types {
 			ms = append(ms, r.native(t))

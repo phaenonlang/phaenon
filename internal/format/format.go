@@ -15,7 +15,8 @@
 //   - the spacing of Phaenon's own syntax: type parameters and type
 //     arguments (`class Box<T of Item>`, `map<string, list<int>>`), tuple
 //     and closure types (`(int, string)`, `Closure(int, string...): bool`),
-//     `throws A|B`, `=>` of an expression body, and type aliases.
+//     `throws A|B` and `nothrow`, `=>` of an expression body, and type
+//     aliases.
 //
 // Before all of it, the first layer rewrites the spellings roadmap D26 and
 // D27 withdrew (design/tooling.md §5.6, respell.go): `fun`, `function` on
@@ -187,7 +188,13 @@ func (s *spacer) node(n ast.Node) {
 		s.tight(n.Type.Span())
 	case *ast.Throws:
 		kw := s.at(n.Kw.Start)
-		if kw >= 0 && s.tight(n.S) {
+		switch {
+		case kw < 0:
+		case n.Nothrow:
+			// One space before the word, as before `throws`; what follows
+			// it is the body's, the arrow's or the `;`'s.
+			s.set(kw-1, " ")
+		case s.tight(n.S):
 			s.set(kw-1, " ")
 			s.set(kw, " ")
 		}

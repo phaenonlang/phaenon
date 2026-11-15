@@ -21,3 +21,14 @@ final class Box < out T of Item , U = int > extends Base < T >
      */
     keep(map<string, /* why */ int> $m): void {}
 }
+
+interface Stops
+{
+    stop()nothrow;
+
+    size(): int  NoThrow  =>  0;
+}
+
+function find(int $id): ?int   nothrow {
+    return null;
+}
