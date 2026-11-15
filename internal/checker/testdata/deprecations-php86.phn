@@ -4,13 +4,13 @@
 // again since roadmap D26 withdrew the type test, and is reported as
 // `let` is, declared, imported or through define() and class_alias().
 namespace App\Names {
-    use ArrayObject as let; // want P1101 "`let` as the name of an imported class"
-    use ArrayObject as _; // want P1101 "`_` as the name of an imported class"
-    use function strlen as let; // want P1101 "imported function"
-    use function strtoupper as _;
-    use const PHP_EOL as _; // want P1101 "imported constant"
-    use const PHP_INT_MAX as LET; // want P1101
-    use ArrayObject as is; // want P1101 "`is` as the name of an imported class"
+    use ArrayObject as let; // want P1101 "`let` as the name of an imported class", P2013
+    use ArrayObject as _; // want P1101 "`_` as the name of an imported class", P2013
+    use function strlen as let; // want P1101 "imported function", P2013
+    use function strtoupper as _; // want P2013
+    use const PHP_EOL as _; // want P1101 "imported constant", P2013
+    use const PHP_INT_MAX as LET; // want P1101, P2013
+    use ArrayObject as is; // want P1101 "`is` as the name of an imported class", P2013
 }
 
 namespace App\Declared {

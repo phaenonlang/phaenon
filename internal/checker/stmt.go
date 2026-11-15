@@ -1592,7 +1592,21 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 	bt := c.expr(e.Body, cenv, expectedRet)
 	ret := c.returnType
 	if ret != nil {
-		if _, isVoid := ret.(types.Void); !isVoid && !types.IsAcceptable(bt, ret, x.p()) {
+		// An arrow function is `return expr;` to PHP, whatever its return
+		// type, unlike the expression body of a method or a function
+		// (design/functions.md §3): the compiler refuses the return under
+		// void. Under never it compiles, and fails when the expression
+		// returns, unless the arrow function stands in a constant
+		// expression: there it is written as a closure whose body is
+		// `return expr;`, which the compiler refuses under never as well.
+		_, isVoid := ret.(types.Void)
+		_, isNever := ret.(types.Never)
+		switch {
+		case isVoid:
+			x.report(e.Body.Span(), P2204, "arrow function is void and cannot return a value: an arrow function returns its expression")
+		case isNever && c.constClosure:
+			x.report(e.Body.Span(), P2209, "arrow function is declared never and cannot return: in a constant expression it compiles to a closure that returns its expression")
+		case !types.IsAcceptable(bt, ret, x.p()):
 			x.report(e.Body.Span(), P2202, "arrow function should return %s but returns %s", x.typeName(ret), x.typeName(bt))
 		}
 		ret = refinedReturn(ret, []types.Type{bt}, false, false, x.p())

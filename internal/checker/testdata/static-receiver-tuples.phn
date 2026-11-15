@@ -1,0 +1,27 @@
+namespace StaticReceiverTuples;
+
+// `static` as a tuple's member is the receiver's class, as it is where a
+// method returns it alone (static-receiver.phn has the docblock forms).
+
+class Node
+{
+    pair(): (static, int) => [$this, 1];
+
+    pairs(): list<(static, string)> => [[$this, 'self']];
+}
+
+class Leaf extends Node
+{
+    leafOnly(): int => 1;
+}
+
+function onLeaf(Leaf $leaf): int
+{
+    [$first] = $leaf->pair();
+    return $leaf->pair()[0]->leafOnly() + $first->leafOnly() + $leaf->pairs()[0][0]->leafOnly();
+}
+
+function onNode(Node $node): int
+{
+    return $node->pair()[0]->leafOnly(); // want P2006
+}

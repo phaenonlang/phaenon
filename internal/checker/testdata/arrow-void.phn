@@ -1,0 +1,67 @@
+namespace ArrowVoid;
+
+// An arrow function returns its expression, so PHP refuses one declared
+// void at compile time ("A void function must not return a value"),
+// wherever it stands. One declared never compiles and fails when its
+// expression returns; in a constant expression it compiles to a closure
+// that returns the expression, which PHP refuses as well ("A
+// never-returning function must not return"). The expression body of a
+// method or a function is Phaenon's: under void and never it is evaluated,
+// not returned.
+
+function record(int $x): void
+{
+}
+
+function fail(): never
+{
+    throw new \LogicException('failed');
+}
+
+#[\Attribute]
+final class Hook
+{
+    public function __construct(public \Closure $run)
+    {
+    }
+}
+
+#[Hook(fn (int $x): void => record($x))] // want P2204 "arrow function is void"
+final class Hooks
+{
+    const \Closure RECORD = fn (int $x): void => record($x); // want P2204
+    const \Closure FAIL = fn (): never => fail(); // want P2209 "constant expression"
+    const \Closure THROW = fn (): never => throw new \LogicException('failed'); // want P2209
+    const \Closure BLOCK = function (int $x): void {
+        record($x);
+    };
+    const \Closure NEVER = function (): never {
+        fail();
+    };
+    const \Closure COUNT = fn (int $x): int => $x + 1;
+
+    public function __construct(
+        private \Closure $run = fn (int $x): void => record($x), // want P2204
+    ) {
+    }
+
+    record(int $x): void => record($x);
+
+    fail(): never => fail();
+
+    run(int $x): mixed => ($this->run)($x);
+}
+
+function arrows(): void
+{
+    $void = fn (int $x): void => record($x); // want P2204 "arrow function is void"
+    $static = static fn (): void => null; // want P2204
+    $nested = fn (): \Closure => fn (int $x): void => record($x); // want P2204
+    $never = fn (): never => fail();
+    $throws = fn (): never => throw new \LogicException('failed');
+    $returns = fn (): never => 1; // want P2202 "should return never"
+    $block = function (int $x): void {
+        record($x);
+    };
+    echo $void::class, $static::class, $nested::class, $never::class, $throws::class, $returns::class, $block::class;
+}

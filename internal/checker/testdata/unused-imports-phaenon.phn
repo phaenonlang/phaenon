@@ -1,0 +1,39 @@
+namespace UnusedImportsPhaenon;
+
+// unused-imports.phn in Phaenon's spelling: a method declared without a
+// keyword, a named argument and an enum case give or pick a name and use
+// no import; a type argument, a tuple's member, a `throws` clause and an
+// alias spelled like one of Phaenon's contextual keywords do.
+
+use ArrayObject as Request; // want P2013 "ArrayObject"
+use ArrayIterator as Items; // want P2013 "ArrayIterator"
+use SplStack as Type;
+use SplQueue as In;
+use Countable as Out;
+use DateTimeZone as Zone;
+use RuntimeException as Failure;
+
+enum Kind
+{
+    case Items;
+    case Other;
+}
+
+final class Handler
+{
+    request(int $request): Kind => $request > 0 ? Kind::Items : Kind::Other;
+
+    handle(): Kind => $this->request(request: 1);
+
+    /** @return Type<int> */
+    stack(): Type => new Type();
+
+    queues(Out $counted, list<In> $queues): list<In> => count($counted) > 0 ? $queues : [];
+
+    zone(Zone $zone): (Zone, int) => [$zone, 0];
+
+    fail(): never throws Failure
+    {
+        throw new Failure('failed');
+    }
+}
