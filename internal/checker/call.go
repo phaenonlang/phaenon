@@ -3,6 +3,7 @@ package checker
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -426,33 +427,45 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 			return types.Array{Key: types.TInt, Value: shapeKeys(sh), List: true, NonEmpty: len(sh.Entries) > 0}
 		}
 	case "array_merge":
-		var out []types.Type
-		allShapes := true
-		for i := range args.Args {
+		if len(args.Args) == 0 {
+			return ret // the stub's array: PHPStan types no merge of nothing
+		}
+		if t, ok := mergedShapes(args, argType); ok {
+			return t
+		}
+		// PHP numbers integer keys anew: the result is a list where every
+		// array merged has integer keys alone, as PHPStan has it, and is
+		// none where one may have a string key. The stub's conditional,
+		// unsure of either, gives both.
+		intKeys, nonEmpty := true, false
+		var values []types.Type
+		for i, a := range args.Args {
 			t := argType(i)
-			if _, ok := t.(types.Shape); !ok {
-				allShapes = false
+			if a.Unpack {
+				_, t, _ = types.IterableKV(t, x.p())
 			}
-			out = append(out, t)
-		}
-		if allShapes && len(out) > 0 {
-			merged := types.Shape{}
-			for _, t := range out {
-				for _, en := range t.(types.Shape).Entries {
-					if en.IsInt {
-						merged = arrayWithEntry(merged, nil, en.Type).(types.Shape)
-						continue
-					}
-					if have, found := shapeEntry(merged, en); found && en.Optional {
-						// A later optional entry may be missing, and the
-						// earlier one's value then stays.
-						en.Type, en.Optional = types.MakeUnion(have.Type, en.Type), have.Optional
-					}
-					merged.Entries = upsert(merged.Entries, en)
-				}
+			k, v, ok := types.IterableKV(t, x.p())
+			if !ok {
+				return ret
 			}
-			return merged
+			intKeys = intKeys && types.IsSubtype(k, types.TInt, x.p())
+			nonEmpty = nonEmpty || !a.Unpack && certainlyHolds(t)
+			values = append(values, v)
 		}
+		if intKeys {
+			return types.Array{Key: types.TInt, Value: types.MakeUnion(values...), List: true, NonEmpty: nonEmpty}
+		}
+		return types.Map(ret, func(m types.Type) types.Type {
+			a, ok := m.(types.Array)
+			switch {
+			case !ok:
+				return m
+			case a.List:
+				return types.TNever
+			}
+			a.NonEmpty = a.NonEmpty || nonEmpty
+			return a
+		})
 	case "sprintf", "vsprintf":
 		// A format with text around its conversions never gives an empty
 		// string (PHPStan says non-falsy-string).
@@ -1983,6 +1996,153 @@ func (x *fnCtx) reportOverwrites(sig *signature, found []overwrite) {
 		}
 		x.report(span, P2010, "named %s $%s of %s overwrites the %s before it", kind, o.name, sig.name, before)
 	}
+}
+
+// mergedShapes types array_merge() of shapes as PHPStan does: each
+// argument that is a union of shapes, `array{b: 2}|array{}`, collapses into
+// one whose keys are optional where a shape lacks them, and the arguments
+// merge entry by entry into one shape. One unpacked from a tuple of
+// shapes, `...$parts` with `$parts` a `list{array{a: 1}, array{b: 2}}` (or
+// a union of such), merges its shapes in order, each tuple's result
+// collapsing into one. False where an argument is no shape, an unpacked
+// one is no tuple of shapes, or an integer key is optional, which leaves
+// the keys after it unnumbered.
+func mergedShapes(args *ast.ArgList, argType func(int) types.Type) (types.Type, bool) {
+	if args == nil || len(args.Args) == 0 {
+		return nil, false
+	}
+	acc := types.Shape{}
+	for i, a := range args.Args {
+		var members []types.Shape
+		for _, m := range types.Members(argType(i)) {
+			sh, ok := m.(types.Shape)
+			if !ok {
+				return nil, false
+			}
+			members = append(members, sh)
+		}
+		if !a.Unpack {
+			merged, ok := mergeShapes([]types.Shape{acc, collapseShapes(members)})
+			if !ok {
+				return nil, false
+			}
+			acc = merged
+			continue
+		}
+		// An unpacked tuple of shapes is its shapes, in order.
+		var results []types.Shape
+		for _, tuple := range members {
+			if tuple.Unsealed {
+				return nil, false
+			}
+			seq := []types.Shape{acc}
+			for j, e := range tuple.Entries {
+				inner, isShape := e.Type.(types.Shape)
+				if !isShape || e.Optional || !e.IsInt || e.IntKey != int64(j) {
+					return nil, false
+				}
+				seq = append(seq, inner)
+			}
+			merged, ok := mergeShapes(seq)
+			if !ok {
+				return nil, false
+			}
+			results = append(results, merged)
+		}
+		acc = collapseShapes(results)
+	}
+	return acc, true
+}
+
+// certainlyHolds reports an array type every value of which has an entry:
+// a non-empty array, a shape with a required entry.
+func certainlyHolds(t types.Type) bool {
+	members := types.Members(t)
+	for _, m := range members {
+		switch m := m.(type) {
+		case types.Array:
+			if !m.NonEmpty {
+				return false
+			}
+		case types.Shape:
+			required := false
+			for _, e := range m.Entries {
+				required = required || !e.Optional
+			}
+			if !required {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return len(members) > 0
+}
+
+// mergeShapes is array_merge() of shapes: integer keys numbered anew, a
+// later string key replacing an earlier one, which stays where the later
+// one is optional; unsealed where one of them is. An optional integer
+// entry leaves the number of the next one open, as PHPStan's builder
+// keeps it: the next value goes under each number it may have, optional
+// unless it is certain (`[1, 2]|[3]` then `[4]|[]` is `list{0: 1|3, 1?:
+// 2|4, 2?: 4}`). False where an unsealed shape has integer keys, whose
+// further ones shift the numbers.
+func mergeShapes(shapes []types.Shape) (types.Shape, bool) {
+	unsealed, ints := false, false
+	for _, s := range shapes {
+		unsealed = unsealed || s.Unsealed
+		for _, en := range s.Entries {
+			ints = ints || en.IsInt
+		}
+	}
+	if unsealed && ints {
+		return types.Shape{}, false
+	}
+	merged := types.Shape{}
+	at := map[string]int{}      // string key → entry
+	byNumber := map[int64]int{} // integer key → entry
+	next := []int64{0}          // the numbers the next integer entry may have
+	for _, s := range shapes {
+		for _, en := range s.Entries {
+			if en.IsInt {
+				last := next[len(next)-1]
+				var after []int64
+				if en.Optional {
+					after = append(after, next...)
+				}
+				for j, n := range next[:len(next)-1] {
+					i := byNumber[n]
+					merged.Entries[i].Type = types.MakeUnion(merged.Entries[i].Type, en.Type)
+					if j == 0 && !en.Optional {
+						// A certain value fills the first open number.
+						merged.Entries[i].Optional = false
+					}
+					after = append(after, n+1)
+				}
+				byNumber[last] = len(merged.Entries)
+				merged.Entries = append(merged.Entries, types.ShapeEntry{IsInt: true, IntKey: last, Type: en.Type, Optional: en.Optional || len(next) > 1})
+				after = append(after, last+1)
+				slices.Sort(after)
+				next = slices.Compact(after)
+				continue
+			}
+			i, found := at[en.Key]
+			if !found {
+				at[en.Key] = len(merged.Entries)
+				merged.Entries = append(merged.Entries, en)
+				continue
+			}
+			if en.Optional {
+				// A later optional entry may be missing, and the earlier
+				// one's value then stays.
+				en.Type, en.Optional = types.MakeUnion(merged.Entries[i].Type, en.Type), merged.Entries[i].Optional
+			}
+			merged.Entries[i] = en
+		}
+	}
+	merged.Unsealed = unsealed
+	merged.List = !unsealed && len(at) == 0 && len(merged.Entries) > 0
+	return merged, true
 }
 
 // byRefReads names, by function or Class::method, the by-reference

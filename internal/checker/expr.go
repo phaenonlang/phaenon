@@ -2,6 +2,7 @@ package checker
 
 import (
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -386,7 +387,7 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 	nextInt := int64(0)
 	isList := true
 	hasItems, nonEmpty := false, false
-	for _, item := range e.Items {
+	for i, item := range e.Items {
 		if item == nil {
 			continue
 		}
@@ -397,7 +398,7 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 			if !ok || mayNotIterate(t) {
 				x.report(item.Value.Span(), P2303, "cannot unpack %s", x.typeName(t))
 			}
-			if sh, ok := t.(types.Shape); ok && isShape && unpacksByEntry(sh) {
+			if sh, ok := unpackedShape(t); ok && isShape && (unpacksByEntry(sh) || !sh.Unsealed && namedOnly(e.Items[i+1:]) && trailingOptional(sh)) {
 				// A shape unpacks into its entries: `[...$pair, 'x']` of a
 				// `(string, int)` is `list{string, int, 'x'}`, as PHPStan
 				// has it. PHP numbers the integer keys anew and keeps the
@@ -406,7 +407,11 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 				for _, se := range sh.Entries {
 					entry := types.ShapeEntry{Key: se.Key, Type: se.Type, Optional: se.Optional}
 					if se.IsInt {
-						entry = types.ShapeEntry{IsInt: true, IntKey: nextInt, Type: se.Type}
+						// PHP numbers them anew, whatever the operand's keys:
+						// they continue a list, the optional ones last, and
+						// nothing after an optional one is numbered
+						// (namedOnly).
+						entry = types.ShapeEntry{IsInt: true, IntKey: nextInt, Type: se.Type, Optional: se.Optional}
 						nextInt++
 					} else {
 						isList = false
@@ -432,6 +437,14 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 			if !types.IsSubtype(k, types.TArrayKey, nil) {
 				k = types.TArrayKey
 			}
+			// PHP numbers integer keys anew from where the literal is,
+			// as many as the value has: any position from there on.
+			k = types.Map(k, func(m types.Type) types.Type {
+				if _, isInt := m.(types.Int); isInt {
+					return types.Int{Lo: nextInt, Hi: math.MaxInt64}
+				}
+				return m
+			})
 			keys = append(keys, k)
 			values = append(values, v)
 			if !types.IsSubtype(k, types.TInt, nil) {
@@ -510,6 +523,74 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 		return shape
 	}
 	return types.Array{Key: types.MakeUnion(keys...), Value: types.MakeUnion(values...), List: isList, NonEmpty: nonEmpty}
+}
+
+// unpackedShape is the shape an unpacked value spreads as: itself, or for
+// a union of sealed shapes that are all lists or all keyed by strings, one
+// shape of their keys, optional where a shape lacks them, as PHPStan
+// spreads each and joins the results: `['a' => 1, ...$base]` with `$base`
+// either `['b' => 2]` or `[]` is `array{a: 1, b?: 2}`, and `[0, ...$base]`
+// with `[1, 2]` or `[3]` is `array{0: 0, 1: 1|3, 2?: 2}`.
+func unpackedShape(t types.Type) (types.Shape, bool) {
+	if sh, ok := t.(types.Shape); ok {
+		return sh, true
+	}
+	var shapes []types.Shape
+	ints, strs := false, false
+	for _, m := range types.Members(t) {
+		sh, ok := m.(types.Shape)
+		if !ok || sh.Unsealed || sh.Callable {
+			return types.Shape{}, false
+		}
+		for j, e := range sh.Entries {
+			switch {
+			case !e.IsInt:
+				strs = true
+			case e.Optional || e.IntKey != int64(j):
+				return types.Shape{}, false // not a list
+			default:
+				ints = true
+			}
+		}
+		shapes = append(shapes, sh)
+	}
+	if len(shapes) < 2 || ints && strs {
+		return types.Shape{}, false
+	}
+	return collapseShapes(shapes), true
+}
+
+// trailingOptional reports a shape whose optional integer keys come after
+// all its certain ones, as a union of lists of several lengths gives them.
+func trailingOptional(s types.Shape) bool {
+	optional := false
+	for _, e := range s.Entries {
+		if !e.IsInt {
+			continue
+		}
+		if !e.Optional && optional {
+			return false
+		}
+		optional = optional || e.Optional
+	}
+	return true
+}
+
+// namedOnly reports items of an array literal that number nothing: each a
+// value under a string key, written as a string literal.
+func namedOnly(items []*ast.ArrayItem) bool {
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if item.Unpack || item.Key == nil {
+			return false
+		}
+		if _, ok := item.Key.(*ast.StringLit); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // unpacksByEntry reports whether unpacking s into an array literal can be
@@ -2906,14 +2987,15 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 			}
 		}
 	}
+	base = boundedShapes(base)
 	var out []types.Type
+	var shapes []types.Shape
 	for _, m := range types.Members(base) {
 		switch m := m.(type) {
 		case types.Null:
-			m2 := types.Shape{}
-			out = append(out, arrayWithEntry(m2, keyT, vt))
+			shapes = append(shapes, types.Shape{})
 		case types.Shape:
-			out = append(out, arrayWithEntry(m, keyT, vt))
+			shapes = append(shapes, m)
 		case types.Array:
 			k := m.Key
 			list := m.List && (keyT == nil)
@@ -2965,6 +3047,9 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 			out = append(out, m)
 		}
 	}
+	if len(shapes) > 0 {
+		out = append(out, writeShapes(shapes, keyT, vt, x.loopDepth == 0)...)
+	}
 	newT := types.MakeUnion(out...)
 	if len(out) == 0 {
 		newT = arrayWithEntry(types.Shape{}, keyT, vt)
@@ -2973,6 +3058,410 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 	if key, ok := x.pathKey(t); ok {
 		env.setPath(key, vt)
 	}
+}
+
+// writeShapes writes key => vt into the shapes an array may be. A key that
+// is a union of a few literals, `$o[$c ? 'b' : 'c'] = 2` on `array{a: 1}`,
+// writes each literal as an optional entry, `array{a: 1, b?: 2, c?: 2}`,
+// and adds vt to an entry the shape has, as PHPStan writes it, shape by
+// shape. Not in a loop (byLiteral false): there the key may be each
+// literal in turn, as in a foreach over `['b', 'c']`, which PHPStan runs
+// once for each entry and the checker does not, and the write stays a
+// general one. Any other key goes to arrayWithEntry, shape by shape.
+func writeShapes(shapes []types.Shape, key, vt types.Type, byLiteral bool) []types.Type {
+	var lits []types.Type
+	if key != nil && byLiteral {
+		if l := keyLiterals(key); len(l) > 1 {
+			lits = l
+		}
+	}
+	out := make([]types.Type, 0, len(shapes))
+	for _, s := range shapes {
+		if lits == nil {
+			out = append(out, arrayWithEntry(s, key, vt))
+			continue
+		}
+		entries := append([]types.ShapeEntry{}, s.Entries...)
+		at := map[types.ShapeEntry]int{}
+		for i, e := range entries {
+			at[types.ShapeEntry{Key: e.Key, IntKey: e.IntKey, IsInt: e.IsInt}] = i
+		}
+		for _, k := range lits {
+			entry := arrayWithEntryKey(k, vt)
+			if i, ok := at[types.ShapeEntry{Key: entry.Key, IntKey: entry.IntKey, IsInt: entry.IsInt}]; ok {
+				entries[i].Type = types.MakeUnion(entries[i].Type, vt)
+				continue
+			}
+			entry.Optional = true
+			entries = append(entries, entry)
+			s.List = false
+		}
+		s.Entries = entries
+		out = append(out, s)
+	}
+	return out
+}
+
+// maxShapeValues is how many entries the shapes of a union may hold in all
+// before boundedShapes gives up on them: sixteen times PHPStan's
+// ConstantArrayTypeBuilder::ARRAY_COUNT_LIMIT, so that what a function
+// writes in a few branches stays exact, as it was before the bound.
+const maxShapeValues = 16 * 256
+
+// boundedShapes is t, an array written to, with its shapes bounded: joins
+// of if/else multiply the shapes, two for each, and the checker paid for
+// each write in each of them. Below maxShapeValues entries in all t is
+// what it was, every shape as it is, so that a write, an append included,
+// is exact in each. Past it, in steps, each taken while the last left the
+// shapes past the limit:
+//   - shapes one key tells apart merge, the key optional, which loses
+//     nothing (reduceShapes): ten independent `if ($c) { $o['k'] = …; }`
+//     become the one shape PHPStan's joins make of them as they go;
+//   - shapes with the same keys and the same tags merge, their values
+//     united key by key, as PHPStan's optimizeConstantArrays() merges
+//     shapes with the same keys at 256 entries;
+//   - the shapes of each tag collapse into one, its keys optional where a
+//     shape lacks them;
+//   - all of them collapse into one;
+//   - and only where that one shape is past the limit too, a general
+//     array of their keys and values, whose offsets PHPStan reads as
+//     benevolent unions and the checker cannot.
+//
+// A tag is a key every shape has for certain, a constant in each, as
+// `kind` of `{kind: 'a', v: int}` and `{kind: 'b', v: string}`: shapes
+// of different tags are kept apart as PHPStan's joins keep them
+// (TypeCombinator::reduceArrays), so that a test of the tag still tells
+// them apart, up to the last two steps. Every step after the first loses
+// what values of different keys said together otherwise: ten if/else,
+// each writing one of two keys, reach the third, where a key of one
+// branch is optional beside that of the other.
+func boundedShapes(t types.Type) types.Type {
+	members := types.Members(t)
+	var shapes []types.Shape
+	var out []types.Type
+	for _, m := range members {
+		if s, ok := m.(types.Shape); ok {
+			shapes = append(shapes, s)
+		} else {
+			out = append(out, m)
+		}
+	}
+	within := func(groups ...[]types.Shape) (types.Type, bool) {
+		count := 0
+		for _, g := range groups {
+			for _, s := range g {
+				count += len(s.Entries)
+			}
+		}
+		if count > maxShapeValues {
+			return nil, false
+		}
+		all := append([]types.Type{}, out...)
+		for _, g := range groups {
+			for _, s := range g {
+				all = append(all, s)
+			}
+		}
+		return types.MakeUnion(all...), true
+	}
+	if _, ok := within(shapes); ok {
+		return t
+	}
+	shapes = reduceShapes(shapes)
+	if r, ok := within(shapes); ok {
+		return r
+	}
+	tags := tagGroups(shapes)
+	for i, g := range tags {
+		tags[i] = mergeBySignature(g)
+	}
+	if r, ok := within(tags...); ok {
+		return r
+	}
+	var perTag []types.Shape
+	for _, g := range tags {
+		perTag = append(perTag, collapseShapes(g))
+	}
+	if r, ok := within(perTag); ok {
+		return r
+	}
+	if r, ok := within([]types.Shape{collapseShapes(perTag)}); ok {
+		return r
+	}
+	general := types.Array{List: true, NonEmpty: true}
+	var keys, values []types.Type
+	for _, s := range perTag {
+		required := false
+		for _, e := range s.Entries {
+			if e.IsInt {
+				keys = append(keys, types.TInt)
+			} else {
+				keys = append(keys, types.TString)
+			}
+			values = append(values, e.Type)
+			required = required || !e.Optional
+		}
+		if s.Unsealed {
+			keys, values = append(keys, types.TArrayKey), append(values, types.TMixed)
+		}
+		general.List = general.List && listLike(s)
+		general.NonEmpty = general.NonEmpty && required
+	}
+	general.Key, general.Value = types.MakeUnion(keys...), types.MakeUnion(values...)
+	if general.List {
+		general.Key = types.TInt
+	}
+	return types.MakeUnion(append(out, general)...)
+}
+
+// tagGroups splits shapes by their tags, the keys every one of them has
+// for certain as one constant each (`kind: 'a'`), in the order the shapes
+// come: the shapes of a group share the value of every tag.
+func tagGroups(shapes []types.Shape) [][]types.Shape {
+	type key = types.ShapeEntry
+	tagged := map[key]bool{}
+	for i, s := range shapes {
+		here := map[key]bool{}
+		for _, e := range s.Entries {
+			if !e.Optional && constantScalar(e.Type) {
+				k := key{Key: e.Key, IntKey: e.IntKey, IsInt: e.IsInt}
+				if i == 0 || tagged[k] {
+					here[k] = true
+				}
+			}
+		}
+		tagged = here
+	}
+	var order []string
+	groups := map[string][]types.Shape{}
+	for _, s := range shapes {
+		var b strings.Builder
+		for _, e := range s.Entries {
+			if tagged[key{Key: e.Key, IntKey: e.IntKey, IsInt: e.IsInt}] {
+				b.WriteString(types.PrintQualified(e.Type) + "|")
+			}
+		}
+		g := b.String()
+		if _, seen := groups[g]; !seen {
+			order = append(order, g)
+		}
+		groups[g] = append(groups[g], s)
+	}
+	out := make([][]types.Shape, 0, len(order))
+	for _, g := range order {
+		out = append(out, groups[g])
+	}
+	return out
+}
+
+// constantScalar reports a type that is one constant: a string, an int,
+// a bool, a float or null.
+func constantScalar(t types.Type) bool {
+	switch t := t.(type) {
+	case types.StringLit, types.BoolLit, types.FloatLit, types.Null:
+		return true
+	case types.Int:
+		return t.Lo == t.Hi
+	}
+	return false
+}
+
+// mergeBySignature merges the shapes with the same keys into one each,
+// their values united key by key (boundedShapes).
+func mergeBySignature(shapes []types.Shape) []types.Shape {
+	var signatures []string
+	groups := map[string][]types.Shape{}
+	for _, s := range shapes {
+		sig := shapeSignature(s)
+		if _, seen := groups[sig]; !seen {
+			signatures = append(signatures, sig)
+		}
+		groups[sig] = append(groups[sig], s)
+	}
+	merged := make([]types.Shape, 0, len(signatures))
+	for _, sig := range signatures {
+		merged = append(merged, collapseShapes(groups[sig]))
+	}
+	return merged
+}
+
+// reduceShapes merges two shapes one key tells apart, the one without it
+// and the one with it, all else alike, into one where the key is optional,
+// as PHPStan's joins merge them as they go (TypeCombinator::reduceArrays):
+// their union is that shape exactly, so nothing is lost, and the shapes of
+// a tag, `{kind: 'a', …}` and `{kind: 'b', …}`, stay apart. Ten
+// independent `if ($c) { $o['k'] = …; }` make 1024 shapes, and one again.
+// Each pass merges pairs of shapes untouched in it, until none is left.
+func reduceShapes(shapes []types.Shape) []types.Shape {
+	for {
+		index := make(map[string]int, len(shapes))
+		for i, s := range shapes {
+			index[shapeSpelling(s, -1)] = i
+		}
+		touched := make([]bool, len(shapes))
+		gone := make([]bool, len(shapes))
+		merged := false
+		for i, t := range shapes {
+			if touched[i] {
+				continue
+			}
+			for j := range t.Entries {
+				k, ok := index[shapeSpelling(t, j)]
+				if !ok || k == i || touched[k] {
+					continue
+				}
+				entries := append([]types.ShapeEntry{}, t.Entries...)
+				entries[j].Optional = true
+				t.Entries = entries
+				shapes[i] = t
+				touched[i], touched[k], gone[k], merged = true, true, true, true
+				break
+			}
+		}
+		if !merged {
+			return shapes
+		}
+		kept := shapes[:0:0]
+		for i, s := range shapes {
+			if !gone[i] {
+				kept = append(kept, s)
+			}
+		}
+		shapes = kept
+	}
+}
+
+// shapeSpelling spells a shape whole, without its entry skip (-1 for
+// none), for reduceShapes to find the shape that lacks that entry: its kind
+// and every entry's key, whether it is optional, and its type.
+func shapeSpelling(s types.Shape, skip int) string {
+	var b strings.Builder
+	switch {
+	case s.Unsealed:
+		b.WriteByte('U')
+	case s.List:
+		b.WriteByte('L')
+	default:
+		b.WriteByte('A')
+	}
+	for i, e := range s.Entries {
+		if i == skip {
+			continue
+		}
+		if e.IsInt {
+			b.WriteString("|i" + strconv.FormatInt(e.IntKey, 10))
+		} else {
+			b.WriteString("|s" + strconv.Quote(e.Key))
+		}
+		if e.Optional {
+			b.WriteByte('?')
+		}
+		b.WriteString(":" + types.PrintQualified(e.Type))
+	}
+	return b.String()
+}
+
+// shapeSignature spells a shape's keys, in order, with whether each is
+// optional, and whether it is a list or unsealed: shapes with the same one
+// merge into one with the same keys (boundedShapes).
+func shapeSignature(s types.Shape) string {
+	var b strings.Builder
+	switch {
+	case s.Unsealed:
+		b.WriteByte('U')
+	case s.List:
+		b.WriteByte('L')
+	default:
+		b.WriteByte('A')
+	}
+	for _, e := range s.Entries {
+		if e.Optional {
+			b.WriteByte('?')
+		} else {
+			b.WriteByte('!')
+		}
+		if e.IsInt {
+			b.WriteString("i" + strconv.FormatInt(e.IntKey, 10))
+		} else {
+			b.WriteString("s" + strconv.Quote(e.Key))
+		}
+	}
+	return b.String()
+}
+
+// listLike reports a shape whose keys number its entries from 0, those
+// that may be missing last: a list, as one written `list{…}` or built from
+// lists is.
+func listLike(s types.Shape) bool {
+	if s.Unsealed {
+		return false
+	}
+	if s.List {
+		return true
+	}
+	for i, e := range s.Entries {
+		if !e.IsInt || e.IntKey != int64(i) || e.Optional {
+			return false
+		}
+	}
+	return true
+}
+
+// arrayWithEntryKey is the entry of a constant key, string or int, with the
+// value vt.
+func arrayWithEntryKey(k, vt types.Type) types.ShapeEntry {
+	if i, ok := k.(types.Int); ok {
+		return types.ShapeEntry{IsInt: true, IntKey: i.Lo, Type: vt}
+	}
+	return types.ShapeEntry{Key: k.(types.StringLit).V, Type: vt}
+}
+
+// collapseShapes is one shape for the union of shapes, as PHPStan collapses
+// the arguments of array_merge() and a spread: each key, its values
+// united, optional unless every shape has it for certain; unsealed if one
+// is; a list where every shape is one, `list{0: 1|3, 1?: 2}` of `[1, 2]`
+// and `[3]`, whose keys may end earlier and have no gap. The entries are
+// indexed by key, so that it is linear in them.
+func collapseShapes(shapes []types.Shape) types.Shape {
+	if len(shapes) == 1 {
+		return shapes[0]
+	}
+	type acc struct {
+		typ      types.Type
+		seen     int
+		optional bool
+	}
+	var order []types.ShapeEntry
+	byKey := map[types.ShapeEntry]*acc{}
+	for _, s := range shapes {
+		for _, e := range s.Entries {
+			k := types.ShapeEntry{Key: e.Key, IntKey: e.IntKey, IsInt: e.IsInt}
+			a, ok := byKey[k]
+			if !ok {
+				a = &acc{}
+				byKey[k] = a
+				order = append(order, k)
+			}
+			// United one by one: a union counts its literals before it
+			// drops the copies, and widens past 32 (`kind: 'a'` of a
+			// thousand shapes would be string).
+			a.typ = types.MakeUnion(a.typ, e.Type)
+			a.seen++
+			a.optional = a.optional || e.Optional
+		}
+	}
+	c := types.Shape{List: true}
+	for _, k := range order {
+		a := byKey[k]
+		k.Type, k.Optional = a.typ, a.optional || a.seen < len(shapes)
+		c.Entries = append(c.Entries, k)
+	}
+	for _, s := range shapes {
+		c.Unsealed = c.Unsealed || s.Unsealed
+		c.List = c.List && listLike(s)
+	}
+	c.List = c.List && !c.Unsealed && len(c.Entries) > 0
+	return c
 }
 
 func widenKeys(k types.Type) types.Type {
@@ -2985,12 +3474,20 @@ func arrayWithEntry(s types.Shape, key types.Type, vt types.Type) types.Type {
 	if key == nil {
 		next := int64(0)
 		for _, e := range s.Entries {
-			if e.IsInt && e.IntKey >= next {
+			if e.IsInt && !e.Optional && e.IntKey >= next {
 				next = e.IntKey + 1
 			}
 		}
 		if s.Unsealed {
 			return types.Array{Key: types.TArrayKey, Value: types.MakeUnion(shapeValues(s), vt), NonEmpty: true}
+		}
+		if open := openNumbers(s, next); len(open) > 1 {
+			return appendOpen(s, open, vt)
+		}
+		for _, e := range s.Entries {
+			if e.IsInt && e.IntKey >= next {
+				next = e.IntKey + 1
+			}
 		}
 		s.Entries = append(append([]types.ShapeEntry{}, s.Entries...), types.ShapeEntry{IsInt: true, IntKey: next, Type: vt})
 		s.List = s.List || (len(s.Entries) == 1 && next == 0)
@@ -3034,6 +3531,47 @@ func arrayWithEntry(s types.Shape, key types.Type, vt types.Type) types.Type {
 		return types.Array{Key: key, Value: vt, NonEmpty: true}
 	}
 	return types.Array{Key: types.MakeUnion(shapeKeys(s), key), Value: types.MakeUnion(shapeValues(s), vt), NonEmpty: true}
+}
+
+// openNumbers is the numbers an append to s may take: next, one past its
+// last certain integer key, and one past each optional integer key above
+// that, which may or may not be there.
+func openNumbers(s types.Shape, next int64) []int64 {
+	open := []int64{next}
+	for _, e := range s.Entries {
+		if e.IsInt && e.Optional && e.IntKey >= next {
+			open = append(open, e.IntKey+1)
+		}
+	}
+	slices.Sort(open)
+	return slices.Compact(open)
+}
+
+// appendOpen is s with vt appended under each number in open, as PHPStan's
+// builder appends after optional keys: `list{0: 1, 1?: 2}` and 3 is
+// `list{0: 1, 1: 2|3, 2?: 3}`. Each value goes where an entry may be, and
+// a new last one is optional. In a list the first open number holds an
+// entry for certain afterwards: the value went there, or an entry was.
+func appendOpen(s types.Shape, open []int64, vt types.Type) types.Shape {
+	entries := append([]types.ShapeEntry{}, s.Entries...)
+	at := map[int64]int{}
+	for i, e := range entries {
+		if e.IsInt {
+			at[e.IntKey] = i
+		}
+	}
+	for j, n := range open {
+		if i, ok := at[n]; ok {
+			entries[i].Type = types.MakeUnion(entries[i].Type, vt)
+			if j == 0 && s.List {
+				entries[i].Optional = false
+			}
+			continue
+		}
+		entries = append(entries, types.ShapeEntry{IsInt: true, IntKey: n, Type: vt, Optional: !(j == 0 && s.List)})
+	}
+	s.Entries = entries
+	return s
 }
 
 // shapeEntriesForKeys is s's entries with vt joined into every entry a
