@@ -276,6 +276,12 @@ from the package by hand.
   version the next release and write `CHANGELOG.md`: the title is a Conventional Commit header whose
   release impact (`!` or a `BREAKING CHANGE:` footer, then `feat`, then `fix` and `revert`, then the
   rest) equals the highest of the PR's commits, which `pr-semantics.yml` checks.
+- **Every PR targets `main`; none is stacked on another PR's branch.** CI and the semantics gate
+  start only on PRs into `main`, and when the branch under a stacked PR is deleted GitHub closes
+  the PR, which cannot be given another base afterwards and has to be opened anew (2026-11-13:
+  #21, stacked on #20). Work that depends on an unmerged PR goes into that PR, or waits for the
+  merge and then branches from `main`. The same rule holds in `design`, `debug`, `jetbrains` and
+  `vscode`.
 - **`composer.json`'s branch alias of `dev-main`** (`extra.branch-alias`) is the version Composer
   takes the main branch for. The release PR's workflow writes it at each release's minor version
   (`tools/release`), and `release.yml` checks it there, so it is not edited by hand, with one
