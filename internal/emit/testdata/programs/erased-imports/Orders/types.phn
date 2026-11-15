@@ -1,0 +1,10 @@
+namespace Shop\Orders;
+
+use Shop\Model\Customer;
+use Shop\Model\Money;
+
+// Both imports are used by the `type` declarations alone, which leave no
+// trace: the output has neither.
+
+type Page<T> = array{items: list<T>, total: int};
+type Row = array{id: int, buyer?: Customer, paid?: Money};

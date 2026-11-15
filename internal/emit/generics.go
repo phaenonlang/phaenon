@@ -110,7 +110,7 @@ func (e *emitter) lowerGenerics(f *ast.File) error {
 		return nil
 	}
 	l := &lowering{e: e, p: e.opts.Program, f: e.opts.File}
-	e.dropAliasImports(f.Stmts)
+	e.dropErasedImports(f)
 	return l.stmts(f.Stmts)
 }
 

@@ -10,8 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/program"
 )
 
@@ -105,6 +107,9 @@ func TestPrograms(t *testing.T) {
 						t.Errorf("php -l: %s", out)
 					}
 				}
+				for _, name := range unusedImports(t, got) {
+					t.Errorf("%s imports %s and does not use it: a fixer would remove the import, and phn fix carry that into the source", wantPath, name)
+				}
 			}
 			// A program with a run.php is run under php: the script
 			// requires the outputs and calls into them, and prints what
@@ -132,4 +137,41 @@ func TestPrograms(t *testing.T) {
 			}
 		})
 	}
+}
+
+// unusedImports lists the imports of a compiled file that nothing in it
+// uses, by the checker's rule for a use (program.ImportUses): what
+// php-cs-fixer's no_unused_imports would remove.
+func unusedImports(t *testing.T, out []byte) []string {
+	t.Helper()
+	tree, err := parser.Parse(out, lexer.ModePHP)
+	if err != nil {
+		t.Fatalf("the output does not parse: %v", err)
+	}
+	wanted := map[string]bool{}
+	written := map[string]string{}
+	var statements []ast.Span
+	idents := map[int]bool{}
+	ast.Inspect(tree, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.Use:
+			statements = append(statements, n.S)
+			for _, it := range n.Items {
+				name := strings.ToLower(importName(it))
+				wanted[name], written[name] = true, importTarget(n, it)
+			}
+		case *ast.Ident:
+			idents[n.S.Start] = true
+		}
+		return true
+	})
+	program.ImportUses(out, lexer.Tokenize(out, lexer.ModePHP), statements, idents, wanted, func(string, ast.Span, bool) bool { return false })
+	var unused []string
+	for name, still := range wanted {
+		if still {
+			unused = append(unused, written[name])
+		}
+	}
+	sort.Strings(unused)
+	return unused
 }

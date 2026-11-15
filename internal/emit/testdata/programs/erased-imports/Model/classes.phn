@@ -1,0 +1,18 @@
+namespace Shop\Model;
+
+use Attribute;
+
+final class Customer
+{
+    __construct(public readonly string $name) {}
+}
+
+final class Money
+{
+    __construct(public readonly int $cents) {}
+}
+
+final class Receipt {}
+
+#[Attribute]
+final class Tag {}

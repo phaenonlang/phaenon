@@ -74,6 +74,9 @@ func (p *Program) alias(lower string) *TypeAlias {
 	return nil
 }
 
+// HasTypeAliases reports whether the program has read any alias.
+func (p *Program) HasTypeAliases() bool { return len(p.aliases.byName) > 0 }
+
 // TypeAliases returns every declared alias, sorted by name (for tools).
 func (p *Program) TypeAliases() []*TypeAlias {
 	out := make([]*TypeAlias, 0, len(p.aliases.byName))

@@ -266,9 +266,12 @@ type emitter struct {
 	// docs are the declarations whose docblocks may name a type alias,
 	// each with its resolver (docalias.go); built on first use.
 	docs []docScope
-	// aliasUses are the use statements that import type aliases only,
-	// which the output leaves out (aliasuse.go).
-	aliasUses map[*ast.Use]bool
+	// aliasUses are the use statements the output leaves out whole, and
+	// droppedImports the imports it leaves out, by the name each gave and
+	// its target: those of type aliases, and those only erased names use
+	// (aliasuse.go).
+	aliasUses      map[*ast.Use]bool
+	droppedImports map[string]bool
 }
 
 // replace is an in-place edit: text keeps the span's line breaks.
@@ -812,6 +815,9 @@ func (e *emitter) importShort(fqcn string, res *program.Resolver) string {
 	}
 	taken := namespaceEnd(e.opts.File.AST) == -2
 	for alias, target := range res.Scope().Imports() {
+		if e.importDropped(alias, target) {
+			continue // left out of the output: neither the class's import nor a name taken
+		}
 		if strings.EqualFold(target, fqcn) {
 			// The file imports the class itself: use its name, add nothing.
 			if written := importAlias(e.opts.File.AST, fqcn); written != "" {
