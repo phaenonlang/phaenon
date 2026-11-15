@@ -1856,10 +1856,12 @@ func (x *fnCtx) classNameConst(e ast.Expr) (string, bool) {
 // testedArm is env where the subject of a match equals the value of an
 // arm, or the subject of a switch the value of a case, read as PHPStan
 // reads it, `subject === value`: `match (isset($r['k'])) { true => … }`
-// narrows as the test does, and `match (count($p)) { 2 => … }` as the
-// count compared. Only a subject that is such a test (isset(), empty(), a
-// call typed bool) or count() qualifies, against a bool or an int literal,
-// where a switch's loose comparison is the same; nil otherwise.
+// narrows as the test does, `match (count($p)) { 2 => … }` as the count
+// compared and `match (gettype($v)) { 'integer' => … }` as gettype()
+// compared. Only a subject that is such a test (isset(), empty(), a call
+// typed bool), count() or gettype() qualifies, against a bool, an int or
+// a string literal, where a switch's loose comparison is the same (none
+// of gettype()'s names is numeric); nil otherwise.
 func (x *fnCtx) testedArm(env *state, subject, value ast.Expr) *state {
 	cmp := &ast.Binary{S: value.Span(), Op: token.T_IS_IDENTICAL, Left: subject, Right: value}
 	_, isBool := boolConst(value)
@@ -1870,6 +1872,12 @@ func (x *fnCtx) testedArm(env *state, subject, value ast.Expr) *state {
 		}
 	case *ast.Call, *ast.StaticCall, *ast.MethodCall:
 		if _, isCount := x.countCompare(cmp); isCount {
+			break
+		}
+		if _, isGettype := gettypeArg(s); isGettype {
+			if lit, ok := unparen(value).(*ast.StringLit); !ok || gettypeNames[program.StringValue(lit)] == nil {
+				return nil
+			}
 			break
 		}
 		if !isBool || !types.Equal(x.pathType(s, env), types.TBool) {

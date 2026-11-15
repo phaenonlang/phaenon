@@ -766,6 +766,23 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 			x.pregNarrow(c, then)
 		}
 	}
+	// `gettype($x) === 'integer'`: $x is an int, and not one where the
+	// names differ (with !==, the branches swap below), as PHPStan has it.
+	for _, side := range []struct {
+		call  ast.Expr
+		other types.Type
+	}{{e.Left, rt}, {e.Right, lt}} {
+		lit, isLit := side.other.(types.StringLit)
+		arg, isCall := gettypeArg(side.call)
+		if !isLit || !isCall {
+			continue
+		}
+		if t, ok := gettypeNames[lit.V]; ok {
+			at := x.pathType(arg, env)
+			x.narrowPath(then, arg, types.Intersect(at, t, x.p()), true)
+			x.narrowPath(els, arg, x.subtract(at, t, x.p()), false)
+		}
+	}
 	// `$x === []` / `$x !== []`
 	if isEmptyArrayLit(e.Right) {
 		x.narrowPath(then, e.Left, emptyArray(lt), false)
@@ -791,6 +808,43 @@ func isCall(e ast.Expr) bool {
 		return true
 	}
 	return false
+}
+
+// gettypeNames are the names gettype() gives the types it tells apart
+// exactly: the value is of the type when, and only when, the name is
+// this one (PHPStan's TypeSpecifier narrows on the same names).
+var gettypeNames = map[string]types.Type{
+	"boolean": types.TBool,
+	"integer": types.TInt,
+	"double":  types.TFloat,
+	"string":  types.TString,
+	"array":   types.TArray,
+	"object":  types.TObject,
+	"NULL":    types.TNull,
+}
+
+// gettypeArg reports a call to PHP's gettype() and the value it names.
+func gettypeArg(e ast.Expr) (ast.Expr, bool) {
+	for {
+		p, ok := e.(*ast.Paren)
+		if !ok {
+			break
+		}
+		e = p.Expr
+	}
+	c, ok := e.(*ast.Call)
+	if !ok || c.Args == nil || c.Args.FirstClassCallable || c.Args.Partial() || len(c.Args.Args) != 1 {
+		return nil, false
+	}
+	n, ok := c.Callee.(*ast.Name)
+	if !ok || len(n.Parts) != 1 || !strings.EqualFold(n.Parts[0], "gettype") {
+		return nil, false
+	}
+	a := c.Args.Args[0]
+	if a.Unpack || a.Value == nil || a.Name != nil && a.Name.Name != "value" {
+		return nil, false
+	}
+	return a.Value, true
 }
 
 // pregMatchCall reports a call to PHP's preg_match() with a pattern and a
