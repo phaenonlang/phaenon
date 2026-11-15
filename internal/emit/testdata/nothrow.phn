@@ -29,7 +29,7 @@ final class Memory implements Lookup {
     /**
      * The number of entries.
      */
-    size(): int NoThrow
+    size(): int nothrow
         => \count($this->items);
 
     /** @throws void */

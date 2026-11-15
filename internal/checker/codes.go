@@ -42,6 +42,13 @@ var (
 	// P1005: a tab outside a string's content or a comment's text
 	// (design/functions.md §5.5, D21); once per file, at the first.
 	P1005 = Code{"P1005", Error, "tab where Phaenon wants spaces"}
+	// P1006: a word Phaenon adds to PHP written in another letter case than
+	// lower case where only the word can stand, read as the word all the
+	// same (design/roadmap.md D30): `throws`, `nothrow`, `type`, `of`, `in`,
+	// `out`, `class` and `list` in a type position, `(bytes)`. phn fmt
+	// writes it in lower case. `Map` and `Bytes` are class names instead,
+	// P2001 where none resolves.
+	P1006 = Code{"P1006", Error, "Phaenon's word in another letter case"}
 
 	// P11xx — constructs PHP deprecates, reported whatever the target
 	// unless --no-deprecations (design/php-versions.md §4).

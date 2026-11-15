@@ -29,7 +29,7 @@ class Memory implements Lookup
         return $this->items[$id] ?? throw new NotFound(); // want P2405 "declares nothrow but throws Nothrow\NotFound"
     }
 
-    ratio(int $n): int NoThrow => 10 % $n; // want P2405 "DivisionByZeroError"
+    ratio(int $n): int nothrow => 10 % $n; // want P2405 "DivisionByZeroError"
 
     calls(): string nothrow => undeclared();
 

@@ -890,7 +890,9 @@ func (p *Parser) throwsClause() *ast.Throws {
 }
 
 // clauseWord reports the word of a clause after a signature, `throws` or
-// `nothrow` in any case, in Phaenon mode.
+// `nothrow` in any case, in Phaenon mode. The word is written in lower
+// case (design/roadmap.md D30); read in another, it is the one finding of
+// the checker's (P1006, Words).
 func (p *Parser) clauseWord(word string) bool {
 	return p.mode == lexer.ModePhaenon && p.at(token.T_STRING) && strings.EqualFold(p.text(), word)
 }

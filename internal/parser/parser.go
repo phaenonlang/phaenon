@@ -573,7 +573,9 @@ func (p *Parser) typeParams() []*ast.TypeParam {
 			tp.Variance = ast.Covariant
 		}
 		tp.Name = p.stringIdent()
-		if p.accept(token.T_OF) {
+		if p.at(token.T_OF) {
+			of := p.next()
+			tp.Of = ast.Span{Start: of.Start, End: of.End}
 			tp.Bound = p.typeExpr()
 		}
 		if p.accept(token.Kind('=')) {
