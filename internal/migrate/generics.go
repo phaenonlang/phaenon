@@ -43,7 +43,7 @@ func Lift(src []byte, opts Options) ([]byte, []Note, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse: %w", err)
 	}
-	l := &lifter{src: src, keepPublic: opts.KeepPublic, prog: opts.Program, pfile: opts.File, stats: opts.Stats, files: opts.Migrating}
+	l := &lifter{src: src, keepPublic: opts.KeepPublic, prog: opts.Program, pfile: opts.File, stats: opts.Stats, files: opts.Migrating, importersUnknown: opts.ImportersUnknown}
 	if l.prog == nil || l.pfile == nil {
 		l.prog, l.pfile = nil, nil
 	}
@@ -91,10 +91,12 @@ type lifter struct {
 	// files are the model's files this run rewrites besides pfile; lastUse
 	// and nsEnd are where the namespace's last import and its statement
 	// end, and added the imports the lift wrote (aliases.go).
-	files   map[*program.File]bool
-	lastUse int
-	nsEnd   int
-	added   map[string]bool
+	files map[*program.File]bool
+	// importersUnknown: Options.ImportersUnknown.
+	importersUnknown bool
+	lastUse          int
+	nsEnd            int
+	added            map[string]bool
 }
 
 // overrideCtx is what the override-erasure rule needs to know about a

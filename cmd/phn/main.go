@@ -808,6 +808,7 @@ func migrateCmd(args []string) {
 	// found through Composer. Files phn generated stay out of it; their
 	// .phn declares the same classes.
 	var prog *program.Program
+	importersUnknown := false
 	if !*keepDoc {
 		var model []string
 		for _, in := range files {
@@ -821,7 +822,9 @@ func migrateCmd(args []string) {
 			}
 			model = append(model, in)
 		}
-		model = append(model, aliasImporters(proj, files)...)
+		importers, known := aliasImporters(proj, files)
+		importersUnknown = !known
+		model = append(model, importers...)
 		prog, _ = loadProgram(model, target, false)
 	}
 	// The files this run rewrites, as the model holds them: an alias one
@@ -851,7 +854,7 @@ func migrateCmd(args []string) {
 			fail("%v", err)
 		}
 		j := &job{in: in, dst: in, src: src}
-		j.opts = migrate.Options{Generics: !*keepDoc, KeepPublic: *keepPublic, Layout: !*keepLayout, Stats: &stats, Program: prog, File: modelFile(prog, in), Migrating: migrating}
+		j.opts = migrate.Options{Generics: !*keepDoc, KeepPublic: *keepPublic, Layout: !*keepLayout, Stats: &stats, Program: prog, File: modelFile(prog, in), Migrating: migrating, ImportersUnknown: importersUnknown}
 		if strings.HasSuffix(in, ".phn") {
 			j.phn = src
 			j.opts.KeepLines = true // a .phn keeps its first lines
@@ -943,41 +946,6 @@ func migrateCmd(args []string) {
 		}
 		fmt.Println(line)
 	}
-}
-
-// aliasImporters lists the project's files outside the run that import a
-// docblock alias (`@phpstan-import-type`), for the model: an alias such a
-// file imports is not lifted from under it (design/collections.md §6.6).
-// The other files of the project are loaded by name, as their classes are
-// met, and nothing names a class for importing an alias of the run's.
-// Without a project file the roots are not known, and nothing is added.
-func aliasImporters(proj *project, run []string) []string {
-	if proj == nil {
-		return nil
-	}
-	inRun := map[string]bool{}
-	for _, f := range run {
-		if abs, err := filepath.Abs(f); err == nil {
-			inRun[abs] = true
-		}
-	}
-	var out []string
-	for _, f := range collect(proj.roots(), proj.isOutput, ".php", ".phn") {
-		if abs, err := filepath.Abs(f); err != nil || inRun[abs] {
-			continue
-		}
-		src, err := os.ReadFile(f)
-		if err != nil || !bytes.Contains(src, []byte("import-type")) {
-			continue
-		}
-		if strings.HasSuffix(f, ".php") {
-			if _, err := os.Stat(strings.TrimSuffix(f, ".php") + ".phn"); err == nil || emit.IsGenerated(src) {
-				continue // a compiled file: its .phn declares the same classes
-			}
-		}
-		out = append(out, f)
-	}
-	return out
 }
 
 // migratePipes runs the pipes codemod over the prepared files, which

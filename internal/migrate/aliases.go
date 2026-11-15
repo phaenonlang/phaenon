@@ -108,6 +108,9 @@ func (l *lifter) decideAlias(c *program.Class, name string, visiting map[string]
 	if why := l.nameTaken(c, name); why != "" {
 		return aliasDecision{why: why}
 	}
+	if l.importersUnknown {
+		return aliasDecision{why: "the files that may import it are not known: neither a phaenon.json nor a composer.json's autoload says where the project's code is"}
+	}
 	if importer := l.importerOutside(c, name); importer != nil {
 		return aliasDecision{why: fmt.Sprintf("%s imports it and is not among the files being migrated", importer.Name)}
 	}

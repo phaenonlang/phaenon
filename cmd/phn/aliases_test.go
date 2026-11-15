@@ -212,3 +212,49 @@ func TestMigrateKeepsAnAliasImportedOutsideTheRun(t *testing.T) {
 		t.Errorf("phn check on the migrated tree (%v):\n%s%s", err, stdout, stderr)
 	}
 }
+
+// A PHP project migrated for the first time has no phaenon.json: the
+// files that may import an alias are then those composer.json autoloads,
+// and where neither says where the code is, nothing is lifted.
+func TestMigrateFindsImportersWithoutAProjectFile(t *testing.T) {
+	bin := phnBinary(t)
+	tree := func(composer string) string {
+		root := t.TempDir()
+		files := map[string]string{
+			"src/Orders/Repo.php": "<?php\n\ndeclare(strict_types=1);\n\nnamespace App\\Orders;\n\n/**\n * @phpstan-type Order array{id: int, total: int}\n * @phpstan-type Local array{x: int}\n */\nfinal class Repo\n{\n" +
+				"    /**\n     * @return Order\n     */\n    public function find(int $id): array\n    {\n        return ['id' => $id, 'total' => 0];\n    }\n\n" +
+				"    /**\n     * @param Local $l\n     */\n    public function local(array $l): int\n    {\n        return $l['x'];\n    }\n}\n",
+			"lib/Http/Controller.php": "<?php\n\ndeclare(strict_types=1);\n\nnamespace App\\Http;\n\nuse App\\Orders\\Repo;\n\n/**\n * @phpstan-import-type Order from Repo\n */\nfinal class Controller\n{\n" +
+				"    /**\n     * @return Order\n     */\n    public function show(Repo $orders): array\n    {\n        return $orders->find(1);\n    }\n}\n",
+		}
+		if composer != "" {
+			files["composer.json"] = composer
+		}
+		writeTree(t, root, files)
+		return root
+	}
+	// composer.json autoloads the importer's directory, under autoload-dev
+	// and as one of a prefix's several directories.
+	root := tree(`{"name": "acme/app", "require": {"php": ">=8.5"}, "autoload": {"psr-4": {"App\\Orders\\": "src/Orders"}}, "autoload-dev": {"psr-4": {"App\\": ["tests", "lib"]}}}`)
+	_, stderr, err := run(t, root, bin, "migrate", "src/Orders")
+	if err != nil {
+		t.Fatalf("phn migrate src/Orders: %v\n%s", err, stderr)
+	}
+	repo, _ := os.ReadFile(filepath.Join(root, "src/Orders/Repo.phn"))
+	if !strings.Contains(string(repo), "type Local = array{x: int};") || strings.Contains(string(repo), "\ntype Order =") ||
+		!strings.Contains(stderr, `kept @phpstan-type Order: App\Http\Controller imports it and is not among the files being migrated`) {
+		t.Errorf("with composer.json's autoload:\n%s\n%s", repo, stderr)
+	}
+	// Nothing says where the project's code is: every alias stays.
+	for _, composer := range []string{"", `{"name": "acme/app"}`} {
+		root := tree(composer)
+		_, stderr, err := run(t, root, bin, "migrate", "src/Orders")
+		if err != nil {
+			t.Fatalf("phn migrate src/Orders: %v\n%s", err, stderr)
+		}
+		repo, _ := os.ReadFile(filepath.Join(root, "src/Orders/Repo.phn"))
+		if strings.Contains(string(repo), "\ntype ") || strings.Count(stderr, "the files that may import it are not known") != 2 {
+			t.Errorf("composer.json %q:\n%s\n%s", composer, repo, stderr)
+		}
+	}
+}

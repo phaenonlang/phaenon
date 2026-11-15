@@ -62,6 +62,10 @@ type Options struct {
 	// that alias is lifted too (aliases.go); a class of any other file
 	// keeps its @phpstan-type, and so does what imports it.
 	Migrating map[*program.File]bool
+	// ImportersUnknown says the run could not learn where the project's
+	// other files are, so a file that imports an alias of the run's may
+	// exist unseen: no alias is lifted then, and the note says why.
+	ImportersUnknown bool
 }
 
 // File converts PHP source to Phaenon source.
