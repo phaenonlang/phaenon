@@ -119,6 +119,12 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	if lower == "array_push" || lower == "array_unshift" {
 		x.arrayPush(e, env)
 	}
+	if e.Args.Partial() {
+		// A partial application is the closure checkCall built: what a call
+		// returns, refined from its arguments, is not what creating the
+		// closure does (sprintf's format, max's operands).
+		return ret
+	}
 	return x.specialReturn(lower, e, ret, env)
 }
 

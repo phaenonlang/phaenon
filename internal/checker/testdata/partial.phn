@@ -40,6 +40,18 @@ wantsInt($q2); // want P2103 "Closure(int|null $c): int"
 $v = vari(1, ?, ...);
 wantsInt($v); // want P2103 "Closure(string $rest0, string... $rest=): int"
 
+// A bound argument in a built-in's variadic part: still the closure, not
+// what the call would return refined from its arguments.
+$sp = sprintf('%s: %s', 'id', ?);
+wantsInt($sp); // want P2103 "Closure(mixed $values0): string"
+$mx = max(1, ?);
+wantsInt($mx); // want P2103 "Closure(mixed $values0): mixed"
+$mm = max(?, ?);
+wantsInt($mm); // want P2103 "Closure(mixed $value, mixed $values0): mixed"
+$sr = sprintf('%s %s', 'a', 'b', ...);
+wantsInt($sr); // want P2103 "Closure(mixed... $values=): string"
+echo $sp('x'), $sr();
+
 // By reference stays by reference.
 $r = reff(?, 3);
 $xs = [1];
