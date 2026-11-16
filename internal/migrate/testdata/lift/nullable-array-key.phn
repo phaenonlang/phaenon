@@ -1,0 +1,29 @@
+namespace Lift\NullableArrayKey;
+
+/**
+ * array-key is written as the union int|string, which `?` cannot prefix:
+ * array-key|null is int|string|null wherever it stands, as ?array-key is.
+ */
+final class Bag implements \ArrayAccess<int|string, string>
+{
+    private array<string> $items = [];
+
+    offsetExists(int|string $offset): bool => isset($this->items[$offset]);
+
+    offsetGet(int|string $offset): string => $this->items[$offset];
+
+    offsetSet(int|string|null $offset, string $value): void {
+        if ($offset === null) {
+            $this->items[] = $value;
+        } else {
+            $this->items[$offset] = $value;
+        }
+    }
+
+    offsetUnset(int|string $offset): void {
+        unset($this->items[$offset]);
+    }
+}
+
+function last(list<null|int|string> $keys, int|string|null $first): int|string|null
+    => $keys === [] ? $first : $keys[\count($keys) - 1];
