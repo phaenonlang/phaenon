@@ -1,0 +1,89 @@
+namespace GettypeNarrowing;
+
+// gettype() compared with one of the names it gives a type it tells apart
+// exactly narrows its argument, as PHPStan's TypeSpecifier does: ===, ==,
+// either side, and the other branch where the name differs (!==, !=);
+// the arms of a switch or a match on gettype() too. A name kept in a
+// variable first narrows nothing.
+
+final class Point
+{
+    public int $x = 0;
+}
+
+function anInt(mixed $v): int
+{
+    if (gettype($v) === 'integer') {
+        return $v;
+    }
+    return 0;
+}
+
+function aFloat(mixed $v): float
+{
+    return 'double' === gettype($v) ? $v : 0.0;
+}
+
+function text(int|string $v): string
+{
+    if (gettype($v) !== 'integer') {
+        return $v;
+    }
+    return (string) $v;
+}
+
+function flag(mixed $v): bool
+{
+    return gettype($v) == 'boolean' ? $v : false;
+}
+
+/** @return array<mixed> */
+function items(mixed $v): array
+{
+    return gettype($v) === 'array' ? $v : [];
+}
+
+function point(?Point $p): int
+{
+    if (gettype($p) === 'NULL') {
+        return 0;
+    }
+    return $p->x;
+}
+
+function anObject(?Point $p): object
+{
+    if (gettype($p) != 'object') {
+        return new Point();
+    }
+    return $p;
+}
+
+function onSwitch(mixed $v): string
+{
+    switch (gettype($v)) {
+        case 'string':
+            return $v;
+        case 'integer':
+            return (string) $v;
+    }
+    return '';
+}
+
+function onMatch(mixed $v): int
+{
+    return match (gettype($v)) {
+        'integer' => $v,
+        'string' => \strlen($v),
+        default => 0,
+    };
+}
+
+function kept(mixed $v): int
+{
+    $type = gettype($v);
+    if ($type === 'integer') {
+        return $v; // want P2202
+    }
+    return 0;
+}
