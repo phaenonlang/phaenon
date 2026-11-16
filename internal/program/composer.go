@@ -222,8 +222,21 @@ func findCaseInsensitive(dir string, segs []string) (string, bool) {
 	return cur, true
 }
 
-// Preload implements Loader.
-func (l *ComposerLoader) Preload() []string { return l.files }
+// Preload implements Loader. An entry under an output directory is read
+// from its source, as FindClass reads a class's: the .phn it compiles
+// from, or the .php the build copies, when the source root has one.
+func (l *ComposerLoader) Preload() []string {
+	out := make([]string, 0, len(l.files))
+	for _, path := range l.files {
+		if src, ok := l.source(filepath.Dir(path)); ok && filepath.Ext(path) == ".php" {
+			if q, ok := findCaseInsensitive(src, []string{strings.TrimSuffix(filepath.Base(path), ".php")}); ok {
+				path = q
+			}
+		}
+		out = append(out, path)
+	}
+	return out
+}
 
 // Read implements Loader.
 func (l *ComposerLoader) Read(path string) ([]byte, error) { return os.ReadFile(path) }

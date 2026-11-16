@@ -192,7 +192,7 @@ func (h *projectHost) Program(files []string, read func(string) ([]byte, error),
 	} else {
 		anchor = filepath.Join(h.root, "composer.json")
 	}
-	p, diags = newProgram(anchor, h.tgt.Version)
+	p, diags = newProgram(anchor, h.tgt.Version, files)
 	for _, f := range files {
 		src, err := read(f)
 		if err != nil {
