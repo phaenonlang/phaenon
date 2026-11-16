@@ -2311,10 +2311,17 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		if v, ok := e.Value.(*ast.Variable); ok {
 			x.byRef[v.Name] = true
 		}
-		if v, ok := e.Target.(*ast.Variable); ok {
-			x.byRef[v.Name] = true
+		target, isVar := e.Target.(*ast.Variable)
+		if isVar {
+			x.byRef[target.Name] = true
 		}
 		x.assignTo(e.Target, vt, env, e.S)
+		// `$alias = &$r`: one value from here on, which a write to either
+		// writes (env.set). A reference to an offset or a property is
+		// not followed, as PHPStan does not follow it.
+		if v, ok := unparen(e.Value).(*ast.Variable); ok && isVar && v.Name != target.Name && v.Name != "this" && target.Name != "this" {
+			env.link(target.Name, v.Name)
+		}
 		return vt
 	}
 	if e.Op == token.Kind('=') {

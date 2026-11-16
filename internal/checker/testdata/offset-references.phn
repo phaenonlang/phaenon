@@ -1,0 +1,63 @@
+namespace App\References;
+
+// `$alias = &$r` makes the two variables one value: a write to either,
+// an assignment, a write to an offset or an unset() of one, is a write to
+// both, as PHPStan has it, so what a test learnt of `$r` goes where the
+// alias removed it. A reference to an offset, or one a closure takes, is
+// not followed, as PHPStan does not follow it. Plain PHP, so that PHPStan
+// reads this file as written.
+
+/** @param array{id: int, name?: string} $r */
+function unsetThroughAlias(array $r): string
+{
+    if (isset($r['name'])) {
+        $alias = &$r;
+        unset($alias['name']);
+        return $r['name']; // want P2313 "offset 'name' does not exist on array{id: int}"
+    }
+    return '';
+}
+
+/** @param array{id: int, name?: string} $r */
+function writeThroughAlias(array $r): string
+{
+    $alias = &$r;
+    $alias['name'] = 'x';
+    return $r['name'];
+}
+
+/** @param array{id: int, name?: string} $r */
+function assignToOriginal(array $r): string
+{
+    $alias = &$r;
+    $r = ['id' => 2];
+    return $alias['name']; // want P2313
+}
+
+/** @param array{id: int, name?: string} $r */
+function chained(array $r): string
+{
+    if (!isset($r['name'])) {
+        return '';
+    }
+    $a = &$r;
+    $b = &$a;
+    $b = ['id' => 3];
+    return $r['name']; // want P2313
+}
+
+// A reference made on one way in only is not one after the join.
+/** @param array{id: int, name?: string} $r */
+function oneWayIn(array $r, bool $c): string
+{
+    if (!isset($r['name'])) {
+        return '';
+    }
+    if ($c) {
+        $alias = &$r;
+    } else {
+        $alias = [];
+    }
+    $alias = ['id' => 4];
+    return $r['name'];
+}
