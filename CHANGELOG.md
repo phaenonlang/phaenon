@@ -3,6 +3,17 @@
 From 0.3.0 on, release-please writes each entry from the Conventional Commits merged since the
 previous release (`release-please-config.json`). The two releases before were cut by hand.
 
+## [0.7.1](https://github.com/phaenonlang/phaenon/compare/v0.7.0...v0.7.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **checker:** a partial application of sprintf or max is its closure ([#52](https://github.com/phaenonlang/phaenon/issues/52)) ([0dafeff](https://github.com/phaenonlang/phaenon/commit/0dafeff7dd7476b05071d32ffa6843f7e01e09e0))
+* **checker:** a write through a reference to a variable writes both ([#49](https://github.com/phaenonlang/phaenon/issues/49)) ([37e4b8f](https://github.com/phaenonlang/phaenon/commit/37e4b8fcff67769d340d471baf5df8ad568dc591))
+* **checker:** gettype() compared with a type's name narrows its argument ([#53](https://github.com/phaenonlang/phaenon/issues/53)) ([c586c8e](https://github.com/phaenonlang/phaenon/commit/c586c8e34ec8db1151dda2a1b1aa48cf44f2245e))
+* **migrate:** array-key|null is lifted as int|string|null ([#50](https://github.com/phaenonlang/phaenon/issues/50)) ([728290e](https://github.com/phaenonlang/phaenon/commit/728290e38391ac9e544791c890f0694df68af70e))
+* **program:** a Composer files entry is declared once, from its source ([#51](https://github.com/phaenonlang/phaenon/issues/51)) ([3e57db7](https://github.com/phaenonlang/phaenon/commit/3e57db7c6bfcbebfa891ff88d8960986544a3315))
+
 ## [0.7.0](https://github.com/phaenonlang/phaenon/compare/v0.6.0...v0.7.0) (2026-11-15)
 
 
