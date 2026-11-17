@@ -74,6 +74,9 @@ usage:
   phn help                                                 print this usage (also -h, --help)
   phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [<path>...]
                                                            type-check and compile .phn files to .php
+  phn build --no-dev [--check] [--emit-on-error]           the roots but the development ones, whose output
+                                                           composer.json maps under autoload-dev alone, as the
+                                                           plugin builds under composer install --no-dev
   phn build --vendor                                       compile the installed Composer packages that carry a
                                                            phaenon.json, each for its own target, their findings as
                                                            warnings; a package nothing changed in is skipped, and a
@@ -265,10 +268,11 @@ func build(args []string) {
 	check := fs.Bool("check", false, "verify outputs are up to date; write nothing")
 	emitOnError := fs.Bool("emit-on-error", false, "write files that have type errors too; the exit status still reports them")
 	vendor := fs.Bool("vendor", false, "compile the installed Composer packages that carry a phaenon.json")
+	noDev := fs.Bool("no-dev", false, "leave out the development roots, whose output composer.json maps under autoload-dev alone, as composer install --no-dev does")
 	excludeFlag(fs)
 	fs.Parse(args)
 	if *vendor {
-		if fs.NArg() > 0 || *out != "" || *check || *emitOnError || len(excludes) > 0 {
+		if fs.NArg() > 0 || *out != "" || *check || *emitOnError || *noDev || len(excludes) > 0 {
 			fail("phn build --vendor takes no paths and no other options")
 		}
 		buildVendor()
@@ -276,10 +280,19 @@ func build(args []string) {
 	}
 	proj := loadProject()
 	roots := fs.Args()
+	if *noDev && len(roots) > 0 {
+		fail("phn build --no-dev chooses among the roots of %s: give no paths", ProjectFile)
+	}
 	if len(roots) == 0 {
 		proj.requireRoots("build")
 		if roots = proj.roots(); len(roots) == 0 {
 			fail("phn build: none of the roots %s names is in this directory", ProjectFile)
+		}
+		if *noDev {
+			if roots = proj.leaveOutDevRoots(roots); len(roots) == 0 {
+				fmt.Println("0 files compiled: every root is a development root")
+				return
+			}
 		}
 	}
 	tgt := projectTarget(proj, roots)
