@@ -13,7 +13,10 @@ every line does.
 - [`phaenonlang/design`](https://github.com/phaenonlang/design) — the language design documents, a
   repository of their own: a path such as `design/checker.md` below is a file there
 
-Status: pre-alpha; the language and the CLI still change between releases. What works today:
+Status: alpha. The language and the CLI still change, in minor releases only: a change that breaks
+existing programs is marked in the changelog and has a way across (`phn fmt`, `phn migrate`, or a
+diagnostic that says what to write). A patch release may add checker findings (`design/roadmap.md`
+D31). What works today:
 
 - `phn check`, the type checker: PHP plus Phaenon's syntax (generics, `list<T>` and `map<K, V>`,
   tuples, `bytes`, methods without a keyword, `throws` and `nothrow`) and the PHPStan docblock
