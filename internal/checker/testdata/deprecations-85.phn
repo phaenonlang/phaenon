@@ -1,0 +1,55 @@
+// deprecations: on
+// What PHP 8.5, the floor, deprecates in the code itself is P1101, as what
+// 8.6 deprecates is: compiled code that uses it runs with a deprecation on
+// every PHP a project can target. The library's deprecations come from the
+// stubs, P4006; the long casts are P1001.
+namespace Deprecations85;
+
+function shell(): string {
+    $out = `ls`; // want P1101 "the backtick operator is deprecated since PHP 8.5"
+    return \is_string($out) ? $out : '';
+}
+
+/** @param array<string, int> $counts */
+function offsets(array $counts): int {
+    return $counts[null] ?? 0; // want P1101 "null as an array offset is deprecated since PHP 8.5"
+}
+
+/** @param array<string, int> $counts */
+function nullOffsets(array $counts, Box $box, string $text): string {
+    $written = $counts;
+    $written[null] = 2; // want P1101 "null as an array offset"
+    $literal = [null => 1]; // want P1101 "null as an array offset"
+    [null => $first] = $literal; // want P1101 "null as an array offset"
+    $set = isset($counts[null]); // want P1101 "null as an array offset"
+    unset($written[null]);
+    $fromObject = $box[null];
+    return (string) \count($written) . $first . ($set ? 'set' : '') . $fromObject . $text;
+}
+
+final class Box implements \ArrayAccess {
+    public function offsetExists(mixed $offset): bool { return true; }
+    public function offsetGet(mixed $offset): string { return 'got'; }
+    public function offsetSet(mixed $offset, mixed $value): void {}
+    public function offsetUnset(mixed $offset): void {}
+}
+
+// The step of a string that is no number, which PHP deprecates too (++ of
+// an alphanumeric one since 8.5), is refused as PHPStan refuses it, P2301
+// and no P1101 beside it: string-steps.phn.
+function steps(string $any): string {
+    $letters = 'ab';
+    $letters++; // want P2301 "is deprecated since PHP 8.5; call str_increment()"
+    $any++; // want P2301 "whose step is deprecated; call str_increment()"
+    return $any . $letters;
+}
+
+function cases(int $n): string {
+    switch ($n) {
+        case 1; // want P1101 "a case ended by ; is deprecated since PHP 8.5"
+            return 'one';
+        case 2:
+            return 'two';
+    }
+    return 'many';
+}

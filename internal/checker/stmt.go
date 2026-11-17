@@ -923,6 +923,9 @@ func (x *fnCtx) switchStmt(s *ast.Switch, env *state) {
 	switchTrue := isTrueLit(s.Subject)
 	failed := env.clone()
 	for i, c := range s.Cases {
+		if c.Semi.End > c.Semi.Start {
+			x.c.deprecated(c.Semi, "a case ended by ; is deprecated since PHP 8.5: end it with :")
+		}
 		caseEnv := env.clone()
 		if c.Cond == nil {
 			hasDefault = true

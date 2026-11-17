@@ -1025,6 +1025,9 @@ type (
 		S    Span
 		Cond Expr
 		Body []Stmt
+		// Semi is the `;` that ends the case's head in place of `:`, which
+		// PHP 8.5 deprecates; zero after a colon.
+		Semi Span
 	}
 	Break struct {
 		S      Span
