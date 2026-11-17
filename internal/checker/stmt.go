@@ -402,10 +402,14 @@ func (x *fnCtx) unsetIndex(t *ast.Index, base types.Type, env *state, span ast.S
 		return
 	}
 	keyT := normaliseKey(x.pathType(t.Index, env))
+	// The shapes are bounded first, as a write bounds them
+	// (boundedShapes): unset() in a chain of if/else adds them up as
+	// writes do.
+	base = boundedShapes(base)
 	switch a := t.Array.(type) {
 	case *ast.Variable:
 		if info, defined := env.get(a.Name); defined {
-			env.set(a.Name, unsetOffset(info.t, keyT))
+			env.set(a.Name, unsetOffset(boundedShapes(info.t), keyT))
 		}
 	case *ast.PropertyFetch, *ast.StaticPropertyFetch, *ast.Index:
 		// Removing an element writes the property that holds the array,
