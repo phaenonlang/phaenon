@@ -184,7 +184,9 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 	case *ast.EncapsBraced:
 		return x.expr(e.Expr, env, nil)
 	case *ast.StringVarName:
-		x.removed(e.S, "${name} string interpolation", "{$name}")
+		if x.removed(e.S, "${name} string interpolation", "{$name}") {
+			return types.TError // the one finding: the value is not judged as well
+		}
 		return types.TMixed
 	}
 	return types.TMixed
@@ -2932,11 +2934,14 @@ func (x *fnCtx) arrayAccess(m types.Type, span ast.Span) bool {
 
 // ------------------------------------------------------------------ removed constructs
 
-// removed reports a construct Phaenon does not have (P1), in Phaenon files only.
-func (x *fnCtx) removed(span ast.Span, what, instead string) {
-	if x.file.Mode == lexer.ModePhaenon {
-		x.report(span, P1001, "%s is not available in Phaenon; use %s", what, instead)
+// removed reports a construct Phaenon does not have (P1), in Phaenon files
+// only, and says whether it did: the finding is then the construct's one.
+func (x *fnCtx) removed(span ast.Span, what, instead string) bool {
+	if x.file.Mode != lexer.ModePhaenon {
+		return false
 	}
+	x.report(span, P1001, "%s is not available in Phaenon; use %s", what, instead)
+	return true
 }
 
 // withdrawn reports a `concurrently` block or a `spawn`, syntax that left

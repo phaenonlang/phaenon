@@ -139,6 +139,9 @@ type Checker struct {
 	// type it tests against drew a finding of its own (testType).
 	testSeen     map[ast.Expr]testSeen
 	typeFindings map[ast.TypeExpr]bool
+	// targetedLabels says, per file, which labels a goto names
+	// (labelTargeted).
+	targetedLabels map[*program.File]map[*ast.Label]bool
 }
 
 // New creates a checker for the program.

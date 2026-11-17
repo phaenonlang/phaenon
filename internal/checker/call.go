@@ -52,6 +52,11 @@ type signature struct {
 	// throws (throws.go); neither for a callable of unknown origin.
 	fn   *program.Function
 	meth *program.Method
+	// removed marks a call of a function Phaenon does not have, reported
+	// as P1001 (extract()): that the variables it writes need a variable
+	// to come from is part of the finding, not a second one (P2112). Its
+	// other parameters and its return type are checked as any call's.
+	removed bool
 }
 
 // methodFile is the file that declares a method: its trait's when a trait
@@ -79,14 +84,15 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 		return x.dynamicCall(e, env, expected)
 	}
 	lower := strings.ToLower(n.Parts[len(n.Parts)-1])
+	removed := false
 	if len(n.Parts) == 1 {
 		switch lower {
 		case "compact":
-			x.removed(e.S, "compact()", "an explicit array literal")
+			removed = x.removed(e.S, "compact()", "an explicit array literal")
 		case "extract":
-			x.removed(e.S, "extract()", "explicit assignments")
+			removed = x.removed(e.S, "extract()", "explicit assignments")
 		case "get_defined_vars":
-			x.removed(e.S, "get_defined_vars()", "explicit variables")
+			removed = x.removed(e.S, "get_defined_vars()", "explicit variables")
 		}
 	}
 	fn := x.lookupFunction(n)
@@ -105,6 +111,7 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 		x.report(n.S, P4006, "function %s() is deprecated%s", fn.Name, fn.DeprecatedNote)
 	}
 	sig := &signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File), node: e, file: fn.File, fn: fn}
+	sig.removed = removed && fn.File.IsStub()
 	sig.explicit = x.explicitArgs(e.TypeArgs, fn.TypeParams, fn.Name+"()", e.S)
 	if e.Args != nil && e.Args.FirstClassCallable {
 		return x.callableOf(sig)
@@ -2332,7 +2339,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			switch {
 			case b.arg.Value == x.pipeOperand:
 				x.report(b.arg.S, P2114, "parameter $%s of %s is by reference, and |> passes its left side by value: PHP throws an Error", b.param.Name, sig.name)
-			case !isWritable(b.arg.Value):
+			case !isWritable(b.arg.Value) && !sig.removed:
 				x.report(b.arg.S, P2112, "argument %d of %s is by reference and needs a variable", b.idx+1, sig.name)
 			}
 		} else {
