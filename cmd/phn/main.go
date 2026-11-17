@@ -127,6 +127,13 @@ usage:
                                                            positions; reads the arguments, or stdin without them,
                                                            where a Checkstyle, JUnit, Clover or Cobertura report is
                                                            rewritten as that report
+  phn trace [--root PREFIX=LOCAL]... -- <command> [<arg>...]
+                                                           run the command, its output and errors rewritten so, each
+                                                           in its own order (not with the other's), and exit with its
+                                                           status; what reaches phn's process group reaches the
+                                                           command, and phn passes none of it on, but a TERM after a
+                                                           second where the command still runs: one sent to phn
+                                                           alone has not reached it
   phn lex   [--php] <file>                                 dump the token stream
   phn print [--php] <file>                                 parse and pretty-print
   phn version                                              print phn's version
