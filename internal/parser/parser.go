@@ -17,7 +17,8 @@ import (
 
 // Error is a syntax error.
 type Error struct {
-	Offset int
+	Offset int // where the token the parser stopped at starts
+	End    int // and ends
 	Line   int
 	Msg    string
 }
@@ -174,13 +175,41 @@ func (p *Parser) expect(k token.Kind) token.Token {
 }
 
 func (p *Parser) errorf(format string, args ...any) {
-	t := p.tok()
-	panic(bailout{&Error{Offset: t.Start, Line: t.Line, Msg: fmt.Sprintf(format, args...)}})
+	p.errorAt(p.tok(), format, args...)
 }
 
-// errorAt is errorf at the token t.
+// errorAt is errorf at the token t. A `?>` there is PHP's closing tag,
+// which a .phn file never holds: whatever the parser expected, the tag is
+// the mistake to name.
 func (p *Parser) errorAt(t token.Token, format string, args ...any) {
-	panic(bailout{&Error{Offset: t.Start, Line: t.Line, Msg: fmt.Sprintf(format, args...)}})
+	msg := fmt.Sprintf(format, args...)
+	if p.mode == lexer.ModePhaenon && t.Kind == token.Kind('?') && t.End < len(p.src) && p.src[t.End] == '>' {
+		t.End++
+		msg = "Phaenon files have no closing tag ?> — remove it, and any text after it"
+	}
+	if t.Kind == token.EOF {
+		// The end of the file lies past its last line where the file ends
+		// with a line break: the error is put just after the last text, on
+		// a line there is to show.
+		end := len(strings.TrimRight(string(p.src), " \t\r\n"))
+		t.Start, t.End, t.Line = end, end, 1+lineBreaks(p.src[:end])
+	}
+	panic(bailout{&Error{Offset: t.Start, End: t.End, Line: t.Line, Msg: msg}})
+}
+
+// lineBreaks counts the line breaks in src as PHP's scanner does: `\r\n`,
+// `\n` and a `\r` alone.
+func lineBreaks(src []byte) int {
+	n := 0
+	for i := 0; i < len(src); i++ {
+		switch {
+		case src[i] == '\n':
+			n++
+		case src[i] == '\r' && (i+1 == len(src) || src[i+1] != '\n'):
+			n++
+		}
+	}
+	return n
 }
 
 func (p *Parser) describe() string {

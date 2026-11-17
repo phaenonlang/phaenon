@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -174,5 +175,43 @@ func TestConstantObjectWrite(t *testing.T) {
 	src := "<?php\nC->x = 1;\nC->y->z ??= 2;\nC[0]->p++;\nK::O->q .= 'a';\nunset(C->x);\n"
 	if _, err := Parse([]byte(src), lexer.ModePHP); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestErrorSpans: a syntax error carries the span of the token the parser
+// stopped at, so that a caret can underline it; PHP's tags, which a .phn
+// never holds, are named.
+func TestErrorSpans(t *testing.T) {
+	cases := []struct {
+		src, at, msg string
+	}{
+		{"function f(): int {\n    return 1 +;\n}\n", ";", `unexpected token ";"`},
+		{"<?php\nfunction f(): int => 1;\n", "<?php", "do not start with <?php"},
+		{"function f(): int => 1;\n?>\n<p>html</p>\n", "?>", "no closing tag ?>"},
+		{"function f(): int {\n    return 1;\n?>\n", "?>", "no closing tag ?>"},
+	}
+	for _, c := range cases {
+		_, err := Parse([]byte(c.src), lexer.ModePhaenon)
+		pe, ok := err.(*Error)
+		if !ok {
+			t.Errorf("%q: want a syntax error, got %v", c.src, err)
+			continue
+		}
+		if got := c.src[pe.Offset:pe.End]; got != c.at || !strings.Contains(pe.Msg, c.msg) {
+			t.Errorf("%q: error at %q (%s), want at %q containing %q", c.src, got, pe.Msg, c.at, c.msg)
+		}
+	}
+	// In PHP mode `?>` is the closing tag it is.
+	if _, err := Parse([]byte("<?php\necho 1;\n?>\n<p>html</p>\n"), lexer.ModePHP); err != nil {
+		t.Errorf("PHP mode: %v", err)
+	}
+	// The end of a file that ends with line breaks lies past its last line:
+	// an error there is put just after the last text, on the line it ends.
+	for _, src := range []string{"function g(): int {\n    return 1;\n", "function g(): int {\r\n    return 1;\r\n\r\n", "function g(): int {\r    return 1;\r"} {
+		_, err := Parse([]byte(src), lexer.ModePhaenon)
+		pe, ok := err.(*Error)
+		if !ok || pe.Line != 2 || src[:pe.Offset] != strings.TrimRight(src, "\r\n") || pe.End != pe.Offset {
+			t.Errorf("%q: %#v, want the end of `return 1;` on line 2", src, err)
+		}
 	}
 }

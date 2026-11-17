@@ -52,8 +52,7 @@ func (p *Parser) statement() ast.Stmt {
 			return e
 		}
 		if p.mode == lexer.ModePhaenon {
-			p.i-- // report at the tag
-			p.errorf("Phaenon files do not start with <?php — remove the tag")
+			p.errorAt(t, "Phaenon files do not start with <?php — remove the tag")
 		}
 		return &ast.OpenTag{S: p.span(start), Raw: t.Text(p.src)}
 	case token.T_CLOSE_TAG:

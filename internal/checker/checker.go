@@ -9,6 +9,7 @@ import (
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/tabs"
 	"github.com/phaenonlang/phaenon/internal/token"
@@ -88,6 +89,27 @@ type Diagnostic struct {
 	// breaks. phn lsp shows them beside the finding.
 	Related []Related
 	key     string // the dedupe key, so a rollback can forget the diagnostic
+}
+
+// SyntaxError is the P1000 of a file that does not parse (err, from
+// parser.Parse or Program.AddFile): at the token the parser stopped at,
+// which a caret underlines as any finding's span. An error of another
+// kind is the file's, at its start.
+func SyntaxError(path string, src []byte, err error) Diagnostic {
+	d := Diagnostic{File: path, Line: 1, Col: 1, EndLine: 1, EndCol: 1, Severity: P1000.Severity, Code: P1000.ID, Message: err.Error()}
+	pe, ok := err.(*parser.Error)
+	if !ok {
+		return d
+	}
+	f := &program.File{Path: path, Src: src}
+	d.Line, d.Col = f.Position(pe.Offset)
+	d.EndLine, d.EndCol = d.Line, d.Col
+	if end := pe.End - 1; end > pe.Offset {
+		d.EndLine, d.EndCol = f.Position(end)
+	}
+	d.EndCol++
+	d.Message = pe.Msg
+	return d
 }
 
 // Related is a position a finding refers to, in any file of the program

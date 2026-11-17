@@ -50,6 +50,34 @@ func TestBuildCheckEmitOnError(t *testing.T) {
 	}
 }
 
+// TestSyntaxErrorReport: a file that does not parse is P1000 at the token
+// the parser stopped at, with its line and a caret as any finding, and the
+// message is the parser's alone; PHP's closing tag is named.
+func TestSyntaxErrorReport(t *testing.T) {
+	bin := phnBinary(t)
+	root := formatTree(t)
+	writeTree(t, root, map[string]string{
+		"src/Bad.phn":   "namespace App;\n\nfunction bad(): int => 1;\n?>\n<p>html</p>\n",
+		"src/Worse.phn": "namespace App;\n\nfunction worse(): int {\n    return 1 +;\n}\n",
+	})
+	_, stderr, err := run(t, root, bin, "check")
+	if err == nil {
+		t.Fatal("check passed files that do not parse")
+	}
+	for _, want := range []string{
+		"src/Bad.phn:4:1: error P1000: Phaenon files have no closing tag ?> — remove it, and any text after it\n    4 | ?>\n      | ^^\n",
+		"src/Worse.phn:4:15: error P1000: syntax error, unexpected token \";\" (;)\n    4 |     return 1 +;\n      |               ^\n",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, stderr)
+		}
+	}
+	stdout, _, _ := run(t, root, bin, "check", "--format=json")
+	if !strings.Contains(stdout, `"file":"src/Bad.phn","line":4,"col":1,"endLine":4,"endCol":3,"severity":"error","code":"P1000","message":"Phaenon files have no closing tag`) {
+		t.Errorf("json:\n%s", stdout)
+	}
+}
+
 // TestBuildAbsentRoot: a root the project file names but the tree lacks is
 // skipped, not failed on. An image's build context, or a dist archive,
 // leaves tests/ out and is still the same project; a tree with none of the
