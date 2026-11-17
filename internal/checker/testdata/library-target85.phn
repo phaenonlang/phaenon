@@ -27,11 +27,17 @@ function namesOnly(object $value): bool
 {
     echo Duration::class;
     try {
-        echo \get_class($value);
+        echo describe($value);
     } catch (\Time\TimeException $e) {
         echo $e->getMessage();
     }
     return $value instanceof Duration;
+}
+
+// It declares no exceptions: it may throw any, a TimeException as well.
+function describe(object $value): string
+{
+    return \get_class($value);
 }
 
 function declaredType(Duration $length): void // want P4011
