@@ -145,7 +145,7 @@ func TestBuildsAtTheDumpAfterNoAutoloader(t *testing.T) {
 	p.mustComposer("dump-autoload", "--classmap-authoritative", "--no-dev")
 	w.expectRuns(
 		run{p.dir, []string{"build", "--vendor"}},
-		run{p.dir, []string{"build"}},
+		run{p.dir, []string{"build", "--no-dev"}},
 	)
 	classmap, err := os.ReadFile(filepath.Join(p.dir, "vendor", "composer", "autoload_classmap.php"))
 	if err != nil {

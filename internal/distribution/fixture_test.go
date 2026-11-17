@@ -71,7 +71,8 @@ func newWorld(t *testing.T, failOn string) *world {
 // through PHN_EARLIER_BUILDS_CLEARED ("unset" for nothing); it keeps a copy
 // of vendor/composer/autoload_psr4.php as it found it, as log.psr4.N for
 // the Nth run. `version` and `exit N` answer
-// for the launcher's tests; `build` writes an output, as phn would.
+// for the launcher's tests; `build`, with `--no-dev` or without, writes an
+// output, as phn would.
 func fakePhn(log, failOn string) []byte {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
@@ -88,7 +89,7 @@ esac
 	if failOn != "" {
 		fmt.Fprintf(&b, "if [ \"$*\" = %s ]; then echo 'src/Greeter.phn:3:5: error P2103: a finding of the fake' >&2; exit 2; fi\n", shellQuote(failOn))
 	}
-	b.WriteString(`if [ "$*" = build ]; then mkdir -p .src && printf '<?php\n\nnamespace App;\n\nfinal class Greeter\n{\n}\n' > .src/Greeter.php; fi
+	b.WriteString(`if [ "$*" = build ] || [ "$*" = "build --no-dev" ]; then mkdir -p .src && printf '<?php\n\nnamespace App;\n\nfinal class Greeter\n{\n}\n' > .src/Greeter.php; fi
 echo "phn $*: done"
 echo "phn $*: warning" >&2
 `)

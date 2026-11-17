@@ -486,6 +486,10 @@ same classes.
 - `"extra": {"phaenon": {"build": false}}` leaves the project's own build to its workflow.
 - `composer install --no-autoloader` builds nothing; the `dump-autoload` that follows does
   (`--no-scripts` does not skip the plugin).
+- Without dev mode (`composer install --no-dev`, and a `dump-autoload` after it, which keeps that
+  mode until it is given `--dev`) the plugin builds the project's roots but its development ones,
+  those whose output `composer.json` maps under `autoload-dev` alone (`tests/`, which names
+  PHPUnit), and says which it left out: `phn build --no-dev` does the same by hand.
 
 Without Composer, `phn` is one static binary. Each
 [release](https://github.com/phaenonlang/phaenon/releases) carries it for Linux and macOS (amd64,

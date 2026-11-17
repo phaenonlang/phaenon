@@ -189,8 +189,10 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
                 );
             }
             if ($buildsProject) {
+                // Without dev mode Composer loads nothing autoload-dev maps: the roots whose
+                // outputs only it maps (tests/) are left out, and phn says which.
                 $build->run(
-                    ['build'],
+                    $event->isDevMode() ? ['build'] : ['build', '--no-dev'],
                     'the project does not build, as phn\'s messages above say. '
                     . 'extra.phaenon.build: false in composer.json leaves the build to the project\'s own workflow',
                 );
