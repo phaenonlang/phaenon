@@ -218,6 +218,17 @@ func (x *fnCtx) exprLenient(e ast.Expr, env *state) types.Type {
 			return t
 		}
 		base := x.exprLenient(e.Array, env)
+		if inner, ok := unparen(e.Array).(*ast.Index); ok && offsetsOfVariable(inner.Array) {
+			// An offset no value of the array has reads as nothing PHPStan
+			// knows of, even in isset() and ??: an offset of it is one of
+			// mixed, `isset($r['gone']['x'])`, reported once. Only on a
+			// variable's arrays: a call's result the flow narrowed (an
+			// assertSame()) may have changed since, which PHPStan sees.
+			if key := x.literalOffset(inner, env); key != nil && unsetMissing(x.pathType(inner.Array, env), key) {
+				x.indexType(types.TMixed, e, env, true)
+				return types.TError
+			}
+		}
 		return x.indexType(base, e, env, true) // types the key, once
 	case *ast.PropertyFetch:
 		x.quietOffsets++
@@ -1206,6 +1217,7 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 		return types.TMixed
 	}
 	raw, idx := x.keyExpr(e.Index, env)
+	base = arrayBounds(base)
 	if types.IsMixed(base) {
 		if _, unknown := base.(types.Unknown); unknown {
 			return base // an offset of what was already reported stays reported
@@ -1216,7 +1228,7 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 	// A read of an offset the shapes may lack is P2321, once, and reads as
 	// the entry PHPStan reads it as: the finding is the guard missing, not
 	// a null to report again where the value goes.
-	mayLack := !lenient && x.quietOffsets == 0 && !x.writeOffsets[e] && offsetMayBeMissing(base, idx)
+	mayLack := !lenient && x.quietOffsets == 0 && !x.writeOffsets[e] && offsetMayBeMissing(x.arrayMembers(base, idx, e.Array.Span()), idx)
 	if mayLack {
 		x.reportMayLack(e.Index.Span(), raw, base, false)
 	}
@@ -1270,7 +1282,9 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 			// One byte, still binary: `ord($b[$i])` reads it (strings.md §2).
 			out = append(out, types.TBytes)
 		case types.Null:
-			if !lenient {
+			// A reference to an offset of null makes null an array, as
+			// PHP does without a word.
+			if !lenient && !x.writeOffsets[e] {
 				x.report(e.Array.Span(), P2302, "cannot use null as an array")
 			}
 			out = append(out, types.TNull)
@@ -1374,32 +1388,110 @@ func (x *fnCtx) undefinedRoot(e ast.Expr, env *state) bool {
 	}
 }
 
-// markWritten marks the offsets of e, `$a['k']['l']` and the arrays it is
-// in, as written while e is evaluated (writeOffsets); the function it
-// returns unmarks them.
-func (x *fnCtx) markWritten(e ast.Expr) func() {
-	var marked []*ast.Index
+// offsetsOfVariable reports a variable, or an offset of one at any depth.
+func offsetsOfVariable(e ast.Expr) bool {
 	for {
-		switch n := e.(type) {
-		case *ast.Paren:
-			e = n.Expr
-			continue
+		switch n := unparen(e).(type) {
 		case *ast.Index:
-			if x.writeOffsets == nil {
-				x.writeOffsets = map[*ast.Index]bool{}
-			}
-			x.writeOffsets[n] = true
-			marked = append(marked, n)
 			e = n.Array
+		case *ast.Variable:
+			return n.Name != "this"
+		default:
+			return false
+		}
+	}
+}
+
+// arrayBounds is t with each type parameter whose bound is an array read
+// as that bound: an offset of `T of array{id: int, name?: string}` is one of
+// the shape, as PHPStan reads it.
+func arrayBounds(t types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		if p, ok := m.(types.Param); ok {
+			switch p.Bound.(type) {
+			case types.Shape, types.Array:
+				return p.Bound
+			}
+		}
+		return m
+	})
+}
+
+// arrayMembers is t with each ArrayAccess in it read for the offset idx as
+// PHPStan's hasOffsetValueType() reads one: an object whose offsetSet()
+// takes no such key has none, and reads as a sealed empty shape; any other
+// may have it, and reads as a shape that has it, so that it neither says
+// the key might not exist nor lets it not exist anywhere: whether it might
+// comes from the arrays beside it alone (offsetMayBeMissing).
+// `array{name: string}|ArrayAccess<string, string>` has 'name', and
+// `list{int, int}|ArrayAccess<string, int>` might not have 0. Any other
+// object stays: an offset of it is P2302's.
+func (x *fnCtx) arrayMembers(t, idx types.Type, span ast.Span) types.Type {
+	var out []types.Type
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Class, types.Static, types.This, types.Intersection:
+			if keys, ok := x.offsetKeys(m, span); ok {
+				if types.Overlaps(normaliseKey(idx), keys, x.p()) {
+					out = append(out, shapeHaving(idx))
+				} else {
+					out = append(out, types.Shape{})
+				}
+				continue
+			}
+		}
+		out = append(out, m)
+	}
+	return types.MakeUnion(out...)
+}
+
+// offsetKeys is the key type an ArrayAccess takes, the first parameter of
+// its offsetSet() as the object binds it (`ArrayAccess<string, int>`'s
+// string); false for an object that is no ArrayAccess.
+func (x *fnCtx) offsetKeys(m types.Type, span ast.Span) (types.Type, bool) {
+	for _, cl := range x.classesOf(m, span) {
+		if !cl.IsSubclassOf("ArrayAccess") {
 			continue
 		}
-		break
+		if s := cl.FindMethod("offsetSet"); s != nil && len(s.Params) >= 1 && s.Params[0].Type != nil {
+			return x.bindReceiver(s.Params[0].Type, m, s.Class), true
+		}
+		return types.TMixed, true
 	}
-	return func() {
-		for _, n := range marked {
-			delete(x.writeOffsets, n)
+	return nil, false
+}
+
+// shapeHaving is a shape with a certain entry under each literal of the
+// key idx, which a read of idx finds there.
+func shapeHaving(idx types.Type) types.Shape {
+	var s types.Shape
+	for _, k := range types.Members(normaliseKey(idx)) {
+		switch k := k.(type) {
+		case types.StringLit:
+			s.Entries = append(s.Entries, types.ShapeEntry{Key: k.V, Type: types.TMixed})
+		case types.Int:
+			if k.Lo == k.Hi {
+				s.Entries = append(s.Entries, types.ShapeEntry{IsInt: true, IntKey: k.Lo, Type: types.TMixed})
+			}
 		}
 	}
+	return s
+}
+
+// markWritten marks the offset e, `$a['k']['l']`, as written while e is
+// evaluated (writeOffsets): PHP creates it for the reference. The arrays
+// it is in, `$a['k']`, are read, and one that may be missing is P2321, as
+// PHPStan reports it. The function it returns unmarks the offset.
+func (x *fnCtx) markWritten(e ast.Expr) func() {
+	n, ok := unparen(e).(*ast.Index)
+	if !ok {
+		return func() {}
+	}
+	if x.writeOffsets == nil {
+		x.writeOffsets = map[*ast.Index]bool{}
+	}
+	x.writeOffsets[n] = true
+	return func() { delete(x.writeOffsets, n) }
 }
 
 // offsetMayBeMissing reports a constant offset that the array may lack,
@@ -2759,6 +2851,16 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 			if !handled {
 				x.report(t.Array.Span(), P2302, "cannot use %s as an array", x.typeName(m))
 			}
+			out = append(out, m)
+		case types.Param:
+			// `T of array{…}` is written as the shape it is known to be,
+			// and is that shape afterwards, no longer T, as PHPStan has
+			// it.
+			if b, ok := m.Bound.(types.Shape); ok {
+				out = append(out, arrayWithEntry(b, keyT, vt))
+				continue
+			}
+			x.report(t.Array.Span(), P2302, "cannot use %s as an array", x.typeName(m))
 			out = append(out, m)
 		case types.String, types.StringLit:
 			out = append(out, types.TString)

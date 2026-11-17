@@ -1,0 +1,148 @@
+namespace App\OtherReads;
+
+// Reads of an offset a shape may lack that another code, or none, stood
+// for: a type parameter bounded by a shape reads as the shape, an
+// ArrayAccess beside a shape leaves the shape's offsets to it, a reference
+// to an offset reads the arrays the offset is in, and an offset of an
+// offset a variable's array cannot have is one of mixed, in isset() too,
+// as PHPStan reports each. Plain PHP, so that PHPStan reads this file as
+// written.
+
+/**
+ * @template T of array{id: int, name?: string}
+ * @param T $r
+ */
+function bounded(array $r): string
+{
+    return $r['name']; // want P2321 "offset 'name' might not exist on array{id: int, name?: string}"
+}
+
+/**
+ * @template T of array{id: int, name: string}
+ * @param T $r
+ */
+function boundedRequired(array $r): string
+{
+    return $r['name'];
+}
+
+/** @param array{id: int, name?: string}|\ArrayAccess<string, string> $r */
+function besideArrayAccess(array|\ArrayAccess $r): void
+{
+    echo $r['name']; // want P2321
+}
+
+/** @param array{id: int, tags?: list<string>} $r */
+function referenceInside(array $r): void
+{
+    $x = &$r['tags'][0]; // want P2321 "offset 'tags' might not exist"
+    $x = 'a';
+}
+
+/** @param array{id: int, a?: array{b?: int}} $r */
+function referenceDeep(array $r): void
+{
+    $x = &$r['a']['b']; // want P2321 "offset 'a' might not exist"
+    $x = 1;
+    $y = &$r['id'];
+    $y = 2;
+}
+
+/** @param array{id: int} $r */
+function offsetOfNothing(array $r): string
+{
+    echo isset($r['name']['x']) ? 1 : 0; // want P2302 "cannot access offset 'x' on mixed"
+    return $r['name']['x'] ?? 'y'; // want P2302
+}
+
+// A test of a key narrows what the type parameter is known to be.
+/**
+ * @template T of array{id: int, name?: string}
+ * @param T $r
+ */
+function boundTested(array $r): string
+{
+    if (array_key_exists('name', $r)) {
+        return $r['name'];
+    }
+    return '';
+}
+
+/**
+ * @template T of array{id: int, name?: string}
+ * @param T $r
+ */
+function boundTestedFailing(array $r): string
+{
+    if (!array_key_exists('name', $r)) {
+        return '';
+    }
+    return $r['name'];
+}
+
+// A write makes it the shape it is known to be, no longer T.
+/**
+ * @template T of array{id: int, name?: string}
+ * @param T $r
+ * @return T
+ */
+function boundWritten(array $r): array
+{
+    $r['name'] = 'x';
+    echo $r['name'];
+    return $r; // want P2202
+}
+
+final class Plain
+{
+}
+
+// An object that is no ArrayAccess has no offsets: that is the finding.
+/** @param array{id: int, name?: string}|Plain $r */
+function besidePlain(array|Plain $r): mixed
+{
+    return $r['name']; // want P2302 "cannot use App\OtherReads\Plain as an array"
+}
+
+// An ArrayAccess may have any key its offsetSet() takes: one the shape
+// lacks might not exist, one the shape has is there. A key it does not
+// take it has not: beside a shape that has the key, the key might not
+// exist; beside one that lacks it, the key does not exist.
+/** @param array{id: int}|\ArrayAccess<string, string> $r */
+function besideArrayAccessLacking(array|\ArrayAccess $r): void
+{
+    echo $r['name']; // want P2321
+}
+
+/** @param array{name: string}|\ArrayAccess<string, string> $r */
+function besideArrayAccessHaving(array|\ArrayAccess $r): void
+{
+    echo $r['name'];
+}
+
+/** @param array{name: string}|\ArrayObject<string, string> $r */
+function besideArrayObject(array|\ArrayObject $r): void
+{
+    echo $r['name'];
+}
+
+/** @param list{string, string}|\ArrayAccess<string, string> $r */
+function besideArrayAccessOfOtherKeys(array|\ArrayAccess $r): void
+{
+    echo $r[0]; // want P2321 "offset 0 might not exist"
+}
+
+/** @param array{id: int}|\SplObjectStorage<object, int> $r */
+function besideStorage(array|\SplObjectStorage $r): void
+{
+    echo $r['name']; // want P2313 "offset 'name' does not exist on array{id: int}"
+}
+
+// A reference to an offset of null makes null an array.
+/** @param array{a: array{b?: int}|null} $r */
+function referenceIntoNull(array $r): int
+{
+    $x = &$r['a']['b'];
+    $x = 1;
+    return \count($r);
+}
