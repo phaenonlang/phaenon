@@ -578,14 +578,39 @@ func (p *project) missingOutputs(src string) []string {
 
 // requireRoots fails unless the project file names roots: build and check
 // without paths compile them. A project file may state only the target
-// (`phn migrate --php` creates one that does).
+// (`phn migrate --php` creates one that does). Each verb is told what it
+// accepts: check, build and fmt take paths, while watch and fix work on the
+// roots alone.
 func (p *project) requireRoots(cmd string) {
+	if rootsOnly[cmd] {
+		if p == nil {
+			fail(`phn %s: there is no %s: phn %s works on the roots one names, as in {"roots": {"src": ".src"}}`, cmd, ProjectFile, cmd)
+		}
+		if len(p.Roots) == 0 {
+			fail(`phn %s: %s names no roots, and phn %s works on the roots it names: "roots" maps each source directory to its output directory, as in {"roots": {"src": ".src"}}`, cmd, ProjectFile, cmd)
+		}
+		return
+	}
 	if p == nil {
 		fail("phn %s: give paths, or a %s naming the roots", cmd, ProjectFile)
 	}
 	if len(p.Roots) == 0 {
-		fail(`phn %s: give paths, or name the roots in %s: "roots" maps each source directory to its output directory, as in {"roots": {"src": ".src"}}`, cmd, ProjectFile)
+		fail("phn %s: %s", cmd, noRoots("phn "+cmd+" takes", "phn "+cmd+" src"))
 	}
+}
+
+// rootsOnly are the verbs that take no paths: they work on a project's
+// roots alone.
+var rootsOnly = map[string]bool{"watch": true, "fix": true}
+
+// noRoots says what a project whose project file names no roots does
+// (design/php-versions.md §9: the roots are optional, and phn migrate --php
+// writes a file without them): commands, a phrase that names one command
+// or several, take paths until it names them, as example shows, and a root
+// is written as the end says.
+func noRoots(commands, example string) string {
+	return fmt.Sprintf(`%s names no roots, so %s paths, as in "%s", until it does: "roots" maps each source directory to its output directory, as in {"roots": {"src": ".src"}}`,
+		ProjectFile, commands, example)
 }
 
 // roots lists the source roots present in this tree, in a stable order. A

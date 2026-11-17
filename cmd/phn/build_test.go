@@ -108,6 +108,41 @@ func TestBuildAbsentRoot(t *testing.T) {
 	}
 }
 
+// TestProjectWithoutRoots: phn migrate --php writes a project file without
+// roots (design/php-versions.md §9), and says so as it ends: phn check and
+// phn build take paths until the file names roots, and how a root is
+// written; check and build run without paths in that project say the same.
+func TestProjectWithoutRoots(t *testing.T) {
+	bin := phnBinary(t)
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"src/F.php": "<?php\n\nnamespace App;\n\nfunction f(int $x): int\n{\n    return $x;\n}\n",
+	})
+	const says = `phaenon.json names no roots, so phn check and phn build take paths, as in "phn check src", until it does: "roots" maps each source directory to its output directory, as in {"roots": {"src": ".src"}}`
+	stdout, stderr, err := run(t, root, bin, "migrate", "--php", "8.5", "src")
+	if err != nil || !strings.HasSuffix(strings.TrimSpace(stdout), says) {
+		t.Errorf("migrate --php (%v):\n%s%s", err, stdout, stderr)
+	}
+	for _, cmd := range []string{"check", "build"} {
+		_, stderr, err := run(t, root, bin, cmd)
+		want := "phn " + cmd + `: phaenon.json names no roots, so phn ` + cmd + ` takes paths, as in "phn ` + cmd + ` src", until it does`
+		if err == nil || !strings.Contains(stderr, want) {
+			t.Errorf("%s without paths (%v):\n%s", cmd, err, stderr)
+		}
+		if stdout, stderr, err := run(t, root, bin, cmd, "src"); err != nil {
+			t.Errorf("%s src (%v):\n%s%s", cmd, err, stdout, stderr)
+		}
+	}
+	// phn watch and phn fix take no paths, and are not told to give some.
+	for _, args := range [][]string{{"watch", "--no-build"}, {"fix", "--", "true"}} {
+		_, stderr, err := run(t, root, bin, args...)
+		want := "phn " + args[0] + ": phaenon.json names no roots, and phn " + args[0] + " works on the roots it names"
+		if err == nil || !strings.Contains(stderr, want) || strings.Contains(stderr, "takes paths") {
+			t.Errorf("phn %s (%v):\n%s", strings.Join(args, " "), err, stderr)
+		}
+	}
+}
+
 // TestFilesEntryOfAnOutput: a Composer `files` entry that names one of the
 // project's outputs is read from the source behind it, as a class found
 // through the maps is, and not besides it: every build, the ones after the
