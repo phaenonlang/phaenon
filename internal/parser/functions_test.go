@@ -98,6 +98,10 @@ interface I {
         throws A
         | B;
 }
+class E extends \Exception {
+    again(): never throws static => throw $this;
+    early(): never throws self|parent|Static {}
+}
 `
 	f, err := Parse([]byte(src), lexer.ModePhaenon)
 	if err != nil {
@@ -126,7 +130,8 @@ interface I {
 		}
 		return true
 	})
-	want := map[string]string{"load": "NotFound", "none": `\RuntimeException|Io\Failure`, "handle": "Refusal", "more": "A|B"}
+	want := map[string]string{"load": "NotFound", "none": `\RuntimeException|Io\Failure`, "handle": "Refusal", "more": "A|B",
+		"again": "static", "early": "self|parent|Static"}
 	for name, w := range want {
 		if got[name] != w {
 			t.Errorf("%s: throws %q, want %q", name, got[name], w)

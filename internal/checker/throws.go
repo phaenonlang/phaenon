@@ -291,6 +291,11 @@ func (x *fnCtx) recordCall(sig *signature, args *ast.ArgList, span ast.Span, ret
 	switch {
 	case sig.meth != nil:
 		declared = sig.meth.DeclaredThrows()
+		if declared != nil && sig.recv != nil {
+			// `throws static` is the class called, as a `static` return
+			// type is: Leaf::raise() and $leaf->again() throw a Leaf.
+			declared = replaceStatic(declared, sig.recv)
+		}
 		ctor = strings.EqualFold(sig.meth.Name, "__construct")
 	case sig.fn != nil:
 		declared = sig.fn.Throws

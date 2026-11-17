@@ -1,0 +1,57 @@
+namespace ThrowsStatic;
+
+// A `throws` clause names what `catch` accepts: class names, `self`,
+// `static` and `parent` (design/functions.md §8, "`throws` members").
+
+class Failure extends \RuntimeException
+{
+    rethrow(): never throws static {
+        throw $this;
+    }
+
+    static raiseSelf(): never throws self {
+        throw new self('early');
+    }
+
+    either(bool $late): never throws static|\LogicException {
+        if ($late) {
+            throw $this;
+        }
+        throw new \LogicException('logic');
+    }
+}
+
+final class Timeout extends Failure
+{
+    static raiseParent(): never throws parent {
+        throw new parent('parent');
+    }
+}
+
+final class Plain
+{
+    static raise(): void throws static {} // want P2319 "is not a Throwable"
+}
+
+function outside(): void throws static {} // want P2012
+
+function caller(): void {
+    try {
+        (new Timeout('t'))->rethrow();
+    } catch (Timeout $e) {
+        echo $e->getMessage();
+    }
+}
+
+// At a call, `static` is the class called, as a `static` return type is.
+function quiet(Timeout $t): void nothrow {
+    $t->rethrow(); // want P2405 "throws ThrowsStatic\Timeout here"
+}
+
+function quieter(Failure $f): void nothrow {
+    $f->rethrow(); // want P2405 "throws ThrowsStatic\Failure here"
+}
+
+function declared(Timeout $t): void throws Timeout {
+    $t->rethrow();
+}
