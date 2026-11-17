@@ -799,30 +799,17 @@ func (x *fnCtx) explicitArgs(exprs []ast.TypeExpr, tps []*program.TypeParam, wha
 	return args
 }
 
-// closureTypeParams brings a closure's own `<T>` into scope.
-func (x *fnCtx) closureTypeParams(tps []*ast.TypeParam, decl []*ast.Param, ret ast.TypeExpr) {
+// closureTypeParams reads a closure's own `<T>`. Generic closures are
+// refused until they are designed (P1007, genericClosures): the type
+// parameters are names reported already, so that nothing else follows
+// from them, a P2001 for `T` or a finding about `T` in the body.
+func (x *fnCtx) closureTypeParams(tps []*ast.TypeParam) {
 	if len(tps) == 0 {
 		return
 	}
-	x.checkTypeParams(tps)
-	params := x.res.NativeParams(tps)
-	nodes := make([]ast.Node, 0, len(decl)+1)
-	for _, p := range decl {
-		if p.Type != nil {
-			nodes = append(nodes, p.Type)
-		}
+	names := make([]string, 0, len(tps))
+	for _, tp := range tps {
+		names = append(names, tp.Name.Name)
 	}
-	if ret != nil {
-		nodes = append(nodes, ret)
-	}
-	program.ImplyMapKeyBounds(params, nodes...)
-	x.res = x.res.WithParams(params)
-	scope := make(map[string]bool, len(x.inScope)+len(params))
-	for k, v := range x.inScope {
-		scope[k] = v
-	}
-	for _, tp := range params {
-		scope[tp.Name] = true
-	}
-	x.inScope = scope
+	x.res = x.res.WithReported(names)
 }

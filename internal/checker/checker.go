@@ -347,6 +347,7 @@ func (c *Checker) checkFile(f *program.File) {
 	}
 	visit(f.AST.Stmts)
 	c.withdrawnSpellings(f)
+	c.genericClosures(f)
 	c.partialSyntax(f)
 	c.checkUses(f, uses, toks)
 }
@@ -576,6 +577,9 @@ func (x *fnCtx) p() *program.Program { return x.c.p }
 // resolveClassName resolves a class name written in code, reporting unknown
 // classes; "static"/"self"/"parent" map to the current class.
 func (x *fnCtx) resolveClassName(n *ast.Name, span ast.Span) (string, bool) {
+	if x.reportedName(n) {
+		return "", false // a refused closure's type parameter (P1007)
+	}
 	name := x.res.ClassName(n)
 	switch name {
 	case "self", "static":
@@ -603,9 +607,20 @@ func (x *fnCtx) resolveClassName(n *ast.Name, span ast.Span) (string, bool) {
 	return name, true
 }
 
+// reportedName reports a name written as a class's that is the type
+// parameter of a closure the checker refuses (P1007): it was reported
+// with the closure, and nothing more follows from it, in a type position
+// or a class name's (`new T()`, `T::class`, `instanceof T`, a catch).
+func (x *fnCtx) reportedName(n *ast.Name) bool {
+	return n != nil && len(n.Parts) == 1 && n.Kind == ast.NameUnqualified && x.res.Reported(n.Parts[0])
+}
+
 // classRefType returns the type denoted by a class name in `new`,
 // `instanceof`, `Foo::` positions: static for `static`, the class otherwise.
 func (x *fnCtx) classRefType(n *ast.Name, span ast.Span) (types.Type, *program.Class) {
+	if x.reportedName(n) {
+		return types.TError, nil // a refused closure's type parameter (P1007)
+	}
 	if tp := x.typeParamRef(n); tp != nil {
 		t, cl, _ := x.paramValue(tp, span, "use as a class")
 		return t, cl

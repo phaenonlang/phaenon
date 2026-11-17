@@ -1069,6 +1069,14 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		var names []string // "" where the type is unknown or no Throwable
 		var spans []ast.Span
 		for _, n := range c.Types {
+			if x.reportedName(n) {
+				// A refused closure's type parameter (P1007): its catch
+				// says nothing more.
+				ts = append(ts, types.TError)
+				names = append(names, "")
+				spans = append(spans, n.S)
+				continue
+			}
 			saved := x.nameOnly
 			x.nameOnly = true // a catch of a class PHP lacks never matches, and fails nothing
 			name, ok := x.resolveClassName(n, n.S)
@@ -1693,10 +1701,10 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 			x.report(e.Uses[0].S, P2531, "a closure in a constant expression cannot use variables of the enclosing scope")
 		}
 	}
-	c.closureTypeParams(e.TypeParams, e.Params, e.ReturnType)
+	c.closureTypeParams(e.TypeParams)
 	c.checkSignatureTypes(nil, e.Params, e.ReturnType)
 	params, cps := c.closureParams(e.Params, expected)
-	c.returnType = x.res.Native(e.ReturnType)
+	c.returnType = c.res.Native(e.ReturnType)
 	c.hasReturn = c.returnType != nil
 	cenv := newEnv()
 	for _, p := range params {
@@ -1856,10 +1864,10 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 	c := x.child(e.Static || x.inConst)
 	c.constClosure = x.inConst
 	c.arrow = true
-	c.closureTypeParams(e.TypeParams, e.Params, e.ReturnType)
+	c.closureTypeParams(e.TypeParams)
 	c.checkSignatureTypes(nil, e.Params, e.ReturnType)
 	params, cps := c.closureParams(e.Params, expected)
-	c.returnType = x.res.Native(e.ReturnType)
+	c.returnType = c.res.Native(e.ReturnType)
 	c.hasReturn = c.returnType != nil
 	cenv := env.clone()
 	cenv.dead = false

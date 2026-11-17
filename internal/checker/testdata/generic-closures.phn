@@ -1,0 +1,67 @@
+// A closure that declares type parameters is refused until generic
+// closures are designed (design issue #28): P1007 once, at its type
+// parameters, in every form the parser reads, and nothing else follows
+// from it, no P2001 for T and no finding about T in the body or where the
+// closure is called.
+namespace App\GenericClosures;
+
+#[\Attribute]
+final class Mapper
+{
+    public function __construct(public \Closure $map) {}
+}
+
+final class Holder
+{
+    const MAP = static fn<T>(T $x): T => $x; // want P1007 "generic closures are not available yet: declare a generic function or method, or give the closure the concrete types"
+
+    #[Mapper(static fn<T>(T $x): T => $x)] // want P1007
+    public function attributed(): void {}
+}
+
+function forms(int $n): int
+{
+    $id = fn<T>(T $x): T => $x; // want P1007
+    $first = function<T>(list<T> $xs): ?T { return $xs[0] ?? null; }; // want P1007
+    $static = static fn<T>(T $x): T => $x; // want P1007
+    $used = function<T>(T $x) use ($n): T { return $x; }; // want P1007
+    $bounded = fn<T of object>(T $x): T => $x; // want P1007
+    $defaulted = fn<T = int>(T $x): T => $x; // want P1007
+    $two = fn<K, V>(K $k, V $v): V => $v; // want P1007
+    return $id($n) + $first([1]) + $static(1) + $used(2) + $defaulted(3) + $two('k', 4) + \count([$bounded]);
+}
+
+// Nor where the body names T as a class.
+function classNames(): void
+{
+    $a = fn<T>(mixed $x): bool => $x instanceof T; // want P1007
+    $b = fn<T>(): string => T::class; // want P1007
+    $c = fn<T>(): object => new T(); // want P1007
+    $d = function<T>(): void { // want P1007
+        try {
+            echo 1;
+        } catch (T $e) {
+            echo $e->getMessage();
+        }
+    };
+    $e = fn<T>(): mixed => T::make(); // want P1007
+    $f = fn<T>(): mixed => T::LIMIT; // want P1007
+    $g = fn<T>(): mixed => T::$count; // want P1007
+}
+
+// What to write instead: a generic function, or the concrete types.
+/**
+ * @template T
+ * @param T $x
+ * @return T
+ */
+function identity(mixed $x): mixed
+{
+    return $x;
+}
+
+function concrete(int $n): int
+{
+    $id = fn (int $x): int => $x;
+    return $id(identity($n));
+}

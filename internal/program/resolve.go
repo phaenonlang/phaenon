@@ -58,6 +58,33 @@ func (r *resolver) problem(format string, args ...any) {
 	r.p.problem(r.f, r.span, format, args...)
 }
 
+// WithReported returns a copy that reads each of names as a name already
+// reported (types.Unknown): the type parameters of a construct the checker
+// refuses, whose uses say nothing more. A type parameter of the same name
+// around it is hidden, as the construct's own would hide it.
+func (r *Resolver) WithReported(names []string) *Resolver {
+	c := *r
+	c.aliases = make(map[string]types.Type, len(r.aliases)+len(names))
+	for k, v := range r.aliases {
+		c.aliases[k] = v
+	}
+	c.params = make(map[string]*TypeParam, len(r.params))
+	for k, v := range r.params {
+		c.params[k] = v
+	}
+	for _, n := range names {
+		c.aliases[n] = types.Unknown{Name: n}
+		delete(c.params, n)
+	}
+	return &c
+}
+
+// Reported reports a name WithReported made a name already reported.
+func (r *Resolver) Reported(name string) bool {
+	u, ok := r.aliases[name].(types.Unknown)
+	return ok && u.Name == name
+}
+
 // Resolver exposes type resolution to the checker for in-body syntax
 // (`instanceof Foo`, inline `@var`, closures).
 type Resolver = resolver
