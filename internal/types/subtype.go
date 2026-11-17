@@ -797,12 +797,21 @@ func IsTuple(t Type) bool {
 }
 
 func shapeIsList(s Shape) bool {
+	optional := 0
 	for i, e := range s.Entries {
 		if !e.IsInt || e.IntKey != int64(i) {
 			return false
 		}
+		switch {
+		case e.Optional:
+			optional++
+		case optional > 0:
+			return false
+		}
 	}
-	return true
+	// Two optional keys may leave a gap, `array{0: int, 1?: int, 2?: int}`
+	// without 1; a shape known as a list (s.List) has none.
+	return optional <= 1
 }
 
 func shapeLookup(s Shape, key ShapeEntry) (ShapeEntry, bool) {

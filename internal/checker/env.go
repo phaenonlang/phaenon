@@ -681,9 +681,13 @@ func generalizeInts(a, b []types.Int) []types.Type {
 	return []types.Type{types.Int{Lo: lo, Hi: hi}}
 }
 
-// generalizeShapes: the same keys on both sides generalise entry by entry;
-// otherwise the shapes become one array of their generalised keys and
-// values (a list when every shape is one, non-empty when every shape is).
+// generalizeShapes: the same keys on both sides generalise entry by entry,
+// shape by shape where each shape of one side has the one of the other
+// with its keys (a union built in a loop, `array{a: 0}|array{a: 0, b: int}`,
+// stays one), and otherwise into one shape whose keys are the union's,
+// optional where a shape lacks them (`array{a: 0, b?: int}`, as PHPStan
+// has it); other keys make one array of their generalised keys and values
+// (a list when every shape is one, non-empty when every shape is).
 func generalizeShapes(a, b []types.Shape, depth int) []types.Type {
 	toTypes := func(ms []types.Shape) []types.Type {
 		out := make([]types.Type, len(ms))
@@ -708,9 +712,17 @@ func generalizeShapes(a, b []types.Shape, depth int) []types.Type {
 			}
 		}
 		if same {
+			if pairs := pairShapes(a, b); pairs != nil {
+				var out []types.Type
+				for i, p := range pairs {
+					out = append(out, generalizeShapes([]types.Shape{a[i]}, []types.Shape{p}, depth)...)
+				}
+				return out
+			}
 			merged := types.Shape{List: shapesAreLists(a) && shapesAreLists(b)}
-			// Entries in the first shape's order, so the result is stable.
-			for _, e := range a[0].Entries {
+			// Entries in the order the shapes first name them, so the
+			// result is stable.
+			for _, e := range shapesKeyOrder(append(append([]types.Shape{}, a...), b...)) {
 				ta, oa := shapesOffset(a, e)
 				tb, ob := shapesOffset(b, e)
 				merged.Entries = append(merged.Entries, types.ShapeEntry{Key: e.Key, IntKey: e.IntKey, IsInt: e.IsInt, Optional: oa || ob, Type: generalize(ta, tb, depth+1)})
@@ -728,6 +740,60 @@ func generalizeShapes(a, b []types.Shape, depth int) []types.Type {
 		arr.Key = generalize(keysA, keysB, depth+1)
 	}
 	return []types.Type{arr}
+}
+
+// pairShapes gives each shape of a the shape of b with the same keys,
+// where a and b are unions of as many shapes whose key sets match one to
+// one; nil otherwise, and for a single shape on each side.
+func pairShapes(a, b []types.Shape) []types.Shape {
+	if len(a) < 2 || len(a) != len(b) {
+		return nil
+	}
+	pairs := make([]types.Shape, len(a))
+	used := make([]bool, len(b))
+	for i, sa := range a {
+		ka := shapesKeySet([]types.Shape{sa})
+		found := false
+		for j, sb := range b {
+			if used[j] {
+				continue
+			}
+			if kb := shapesKeySet([]types.Shape{sb}); len(kb) == len(ka) && sameKeys(ka, kb) {
+				pairs[i], used[j], found = sb, true, true
+				break
+			}
+		}
+		if !found {
+			return nil
+		}
+	}
+	return pairs
+}
+
+func sameKeys(a, b map[types.ShapeEntry]bool) bool {
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
+}
+
+// shapesKeyOrder lists the keys of the shapes once each, in the order they
+// are first named.
+func shapesKeyOrder(ms []types.Shape) []types.ShapeEntry {
+	seen := map[types.ShapeEntry]bool{}
+	var keys []types.ShapeEntry
+	for _, m := range ms {
+		for _, e := range m.Entries {
+			k := types.ShapeEntry{Key: e.Key, IntKey: e.IntKey, IsInt: e.IsInt}
+			if !seen[k] {
+				seen[k] = true
+				keys = append(keys, k)
+			}
+		}
+	}
+	return keys
 }
 
 func shapesKeySet(ms []types.Shape) map[types.ShapeEntry]bool {

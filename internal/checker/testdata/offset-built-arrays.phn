@@ -1,0 +1,355 @@
+namespace App\BuiltArrays;
+
+// An array built in a loop, by a spread, by a write under a key that is one
+// of a few literals or by array_merge() is typed as PHPStan types it: a
+// shape, or shapes, whose keys may be missing, so that reading one is
+// P2321 where PHPStan reports "might not exist". Plain PHP, so that PHPStan
+// reads this file as written.
+
+function forLoop(int $n): int
+{
+    $o = ['a' => 0];
+    for ($i = 0; $i < $n; $i++) {
+        $o['b'] = $i;
+    }
+    return $o['b']; // want P2321 "offset 'b' might not exist"
+}
+
+function whileLoop(int $n): int
+{
+    $o = ['a' => 0];
+    $i = 0;
+    while ($i < $n) {
+        $o['b'] = $i;
+        $o['c'] = $i;
+        $i++;
+    }
+    if (isset($o['b'])) {
+        return $o['c'];
+    }
+    return $o['a'];
+}
+
+function grown(int $n): int
+{
+    $o = [];
+    for ($i = 0; $i < $n; $i++) {
+        $o[] = $i;
+    }
+    return \count($o);
+}
+
+function spread(bool $c): int
+{
+    $base = $c ? ['b' => 2] : [];
+    $o = ['a' => 1, ...$base];
+    return $o['a'] + $o['b']; // want P2321 "offset 'b' might not exist on array{a: 1, b?: 2}"
+}
+
+function spreadOver(bool $c): int|string
+{
+    $base = $c ? ['a' => 'z'] : [];
+    $o = ['a' => 1, ...$base];
+    return $o['a'];
+}
+
+function keyOfLiterals(bool $c): int
+{
+    $o = ['a' => 1];
+    $o[$c ? 'b' : 'c'] = 2;
+    return $o['a'] + $o['b']; // want P2321
+}
+
+// Each literal is an optional key of one shape: b present says nothing
+// of c.
+function keyOfLiteralsAfterIsset(bool $c): int
+{
+    $o = ['a' => 1];
+    $o[$c ? 'b' : 'c'] = 2;
+    if (isset($o['b'])) {
+        return $o['c']; // want P2321 "offset 'c' might not exist on array{a: 1, b: 2, c?: 2}"
+    }
+    return $o['a'];
+}
+
+/** @param 'a'|'b' $k */
+function existingKeys(string $k): int
+{
+    $o = ['a' => 1, 'b' => 2];
+    $o[$k] = 3;
+    return $o['a'] + $o['b'];
+}
+
+// In a loop the key may be each literal in turn, as in a foreach over a
+// literal list, which PHPStan runs once for each entry: the write stays a
+// general one there.
+function eachLiteral(): int
+{
+    $o = ['a' => 0];
+    foreach (['b', 'c'] as $k) {
+        $o[$k] = 1;
+    }
+    return $o['b'];
+}
+
+/**
+ * @param array{a: int, b?: int} $r
+ */
+function takesShape(array $r): void
+{
+}
+
+function merged(bool $c): int
+{
+    $base = $c ? ['b' => 2] : [];
+    $o = array_merge(['a' => 1], $base);
+    takesShape($o);
+    return $o['b']; // want P2321
+}
+
+// Each argument's shapes collapse into one, whose keys are optional where
+// a shape lacks them, PHPStan's own type: a key every argument may lack
+// might not exist, one that is always there is.
+function mergedOptional(bool $a, bool $b, bool $c, bool $d): int
+{
+    $x = $a ? ['p' => 1] : [];
+    $y = $b ? ['q' => 1] : [];
+    $z = $c ? ['r' => 1] : [];
+    $w = $d ? ['s' => 1] : [];
+    $m = array_merge(['id' => 1], $x, $y, $z, $w);
+    return $m['id'] + $m['p']; // want P2321 "offset 'p' might not exist on array{id: 1, p?: 1, q?: 1, r?: 1, s?: 1}"
+}
+
+// The collapse forgets which keys came together: x present says nothing
+// of y.
+function mergedTogether(bool $c): int
+{
+    $a = $c ? ['x' => 1, 'y' => 2] : [];
+    $m = array_merge(['id' => 1], $a);
+    if (isset($m['x'])) {
+        return $m['y']; // want P2321 "offset 'y' might not exist on array{id: 1, x: 1, y?: 2}"
+    }
+    return $m['id'];
+}
+
+// An optional integer entry leaves the number of the next one open.
+function mergedLists(bool $c, bool $d): int
+{
+    $a = $c ? [1, 2] : [3];
+    $b = $d ? [4] : [];
+    $m = array_merge($a, $b);
+    return $m[0] + $m[1]; // want P2321 "offset 1 might not exist"
+}
+
+/**
+ * @param list<int> $l
+ */
+function takesList(array $l): void
+{
+}
+
+// PHP numbers integer keys anew: arrays with integer keys alone merge
+// into a list.
+/**
+ * @param array<int, int> $a
+ * @param list<int> $b
+ */
+function mergedIntKeys(array $a, array $b): void
+{
+    takesList(array_merge($a, $b));
+    takesList(array_merge($a, array_filter($b)));
+}
+
+/**
+ * @param array{array{a: int}}|array{array{a: int, b: int}} $parts
+ */
+function mergedFromATuple(array $parts): int
+{
+    $m = array_merge(...$parts);
+    return $m['a'] + $m['b']; // want P2321 "offset 'b' might not exist"
+}
+
+/**
+ * @param list<array<string, int>> $parts
+ */
+function mergedFromAList(array $parts): int
+{
+    $m = array_merge(['a' => 1], ...$parts);
+    return $m['a'];
+}
+
+/**
+ * @param array{a: int, ...} $open
+ */
+function mergedUnsealed(array $open): int
+{
+    $m = array_merge(['z' => 1], $open);
+    return $m['z'] + $m['a'];
+}
+
+function spreadOfLists(bool $c): int
+{
+    $base = $c ? [1, 2] : [3];
+    $o = [0, ...$base];
+    return $o[0] + $o[1] + $o[2]; // want P2321 "offset 2 might not exist on list{0, 1|3, 2?: 2}"
+}
+
+// A spread of a list is a list, its last entries optional, and an append
+// to it may land at each number they leave open.
+/**
+ * @param list{0: int, 1?: int, 2?: int} $x
+ */
+function spreadOfAListShape(array $x, int $n): int
+{
+    takesList([...$x]);
+    $y = match ($n) {
+        0 => [1],
+        1 => [1, 2],
+        default => [1, 2, 3],
+    };
+    $z = [0, ...$y];
+    takesList($z);
+    $z[] = 9;
+    takesList($z);
+    return $z[2] + $z[3]; // want P2321 "offset 3 might not exist"
+}
+
+// A spread numbers its integer keys anew, whatever the operand's are: the
+// result is a list, optional entries last.
+/**
+ * @param array{0: int, 1?: int, 2?: int} $x
+ * @param array{1?: int, 3?: int} $sparse
+ * @param array{5: int, 9?: int, 12?: int} $high
+ */
+function spreadRenumbers(array $x, array $sparse, array $high): void
+{
+    takesList([...$x]);
+    takesList([0, ...$x]);
+    takesList([...$sparse]);
+    takesList([...$high]);
+}
+
+// Lists of several lengths that joins made each keep their own: an
+// append lands after each one's last entry.
+/** @param list<bool> $c */
+function appendAfterJoins(array $c): int
+{
+    $l = [];
+    if ($c[1] ?? false) {
+        $l[] = 1;
+    }
+    if ($c[2] ?? false) {
+        $l[] = 2;
+    }
+    if ($c[3] ?? false) {
+        $l[] = 3;
+    }
+    if ($c[4] ?? false) {
+        $l[] = 4;
+    }
+    if ($c[5] ?? false) {
+        $l[] = 5;
+    }
+    $l[] = 0;
+    takesList($l);
+    if ($l[0] === 0) {
+        return 0;
+    }
+    return $l[5]; // want P2321 "offset 5 might not exist"
+}
+
+function manyWrites(bool $a, bool $b, bool $c, bool $d): int
+{
+    $o = ['z' => 0];
+    $o[$a ? 'a1' : 'b1'] = 1;
+    $o[$b ? 'a2' : 'b2'] = 2;
+    $o[$c ? 'a3' : 'b3'] = 3;
+    $o[$d ? 'a4' : 'b4'] = 4;
+    return $o['z'] + $o['a4']; // want P2321
+}
+
+// Independent optional writes, as an options builder makes them: past the
+// bound on the shapes joins make, they collapse into one shape whose keys
+// are optional, the type PHPStan's joins give them, and every other key
+// keeps its own value.
+/** @param list<bool> $c */
+function tenOptions(array $c, string $name): int
+{
+    $o = ['id' => 0, 'name' => $name];
+    if ($c[0] ?? false) {
+        $o['opt0'] = 'v0';
+    }
+    if ($c[1] ?? false) {
+        $o['opt1'] = 'v1';
+    }
+    if ($c[2] ?? false) {
+        $o['opt2'] = 'v2';
+    }
+    if ($c[3] ?? false) {
+        $o['opt3'] = 'v3';
+    }
+    if ($c[4] ?? false) {
+        $o['opt4'] = 'v4';
+    }
+    if ($c[5] ?? false) {
+        $o['opt5'] = 'v5';
+    }
+    if ($c[6] ?? false) {
+        $o['opt6'] = 'v6';
+    }
+    if ($c[7] ?? false) {
+        $o['opt7'] = 'v7';
+    }
+    if ($c[8] ?? false) {
+        $o['opt8'] = 'v8';
+    }
+    if ($c[9] ?? false) {
+        $o['opt9'] = 'v9';
+    }
+    $o['done'] = true;
+    return $o['id'] + \strlen($o['name']) + \strlen($o['opt0']); // want P2321 "offset 'opt0' might not exist"
+}
+
+/** @param list<bool> $c */
+function twelveOptions(array $c, string $name): int
+{
+    $o = ['id' => 0, 'name' => $name];
+    if ($c[0] ?? false) {
+        $o['opt0'] = 'v0';
+    }
+    if ($c[1] ?? false) {
+        $o['opt1'] = 'v1';
+    }
+    if ($c[2] ?? false) {
+        $o['opt2'] = 'v2';
+    }
+    if ($c[3] ?? false) {
+        $o['opt3'] = 'v3';
+    }
+    if ($c[4] ?? false) {
+        $o['opt4'] = 'v4';
+    }
+    if ($c[5] ?? false) {
+        $o['opt5'] = 'v5';
+    }
+    if ($c[6] ?? false) {
+        $o['opt6'] = 'v6';
+    }
+    if ($c[7] ?? false) {
+        $o['opt7'] = 'v7';
+    }
+    if ($c[8] ?? false) {
+        $o['opt8'] = 'v8';
+    }
+    if ($c[9] ?? false) {
+        $o['opt9'] = 'v9';
+    }
+    if ($c[10] ?? false) {
+        $o['opt10'] = 'v10';
+    }
+    if ($c[11] ?? false) {
+        $o['opt11'] = 'v11';
+    }
+    $o['done'] = true;
+    return $o['id'] + \strlen($o['name']) + \strlen($o['opt0']); // want P2321 "offset 'opt0' might not exist"
+}
