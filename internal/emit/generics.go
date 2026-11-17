@@ -660,28 +660,69 @@ func (l *lowering) addDocWith(declStart int, doc string, tags []string, extra st
 		l.e.rewriteDoc(idx, doc, content, tags)
 		return wroteExtra
 	}
+	// A docblock written with \r\n keeps its line ends in the lines added.
+	nl := "\n"
+	if strings.Contains(doc, "\r\n") {
+		nl = "\r\n"
+	}
 	lastNL := strings.LastIndexByte(doc, '\n')
 	closeIndent := l.indentAt(idx)
-	if ws := strings.TrimRight(doc[lastNL+1:], "*/ "); ws != "" {
+	// The closing line's own indentation, where it is only that and the
+	// `*/`: a tag or text may stand on the line too.
+	if ws := strings.TrimRight(doc[lastNL+1:], "*/ "); ws != "" && strings.TrimSpace(ws) == "" {
 		closeIndent = ws
+	}
+	var b strings.Builder
+	for _, t := range tags {
+		b.WriteString(closeIndent + " * " + t + nl)
 	}
 	// The generated tags go before the first tag already there, so that
 	// `@throws`, `@see` and the like keep their place after the signature
 	// tags; with no tags they go at the end, after the prose.
-	at := idx + lastNL + 1
 	off := 0
-	for _, line := range strings.SplitAfter(doc, "\n") {
-		if strings.HasPrefix(strings.TrimLeft(strings.TrimSpace(line), "/* "), "@") {
-			at = idx + off
-			break
+	for i, line := range strings.SplitAfter(doc, "\n") {
+		if !strings.HasPrefix(strings.TrimLeft(strings.TrimSpace(line), "/* "), "@") {
+			off += len(line)
+			continue
 		}
-		off += len(line)
+		if i > 0 {
+			l.e.insertFree(idx+off, b.String())
+			return wroteExtra
+		}
+		// The first tag stands on the opening line, `/** @param …`: the
+		// tags take lines of their own after the `/**`, and what the line
+		// held follows them as a line of the block.
+		after := idx + len("/**")
+		text := nl + b.String() + closeIndent + " *"
+		if c := l.e.src[after]; c != ' ' && c != '\t' {
+			text += " "
+		}
+		l.e.insertFree(after, text)
+		return wroteExtra
 	}
-	var b strings.Builder
-	for _, t := range tags {
-		b.WriteString(closeIndent + " * " + t + "\n")
+	end := idx + len(doc)
+	closeAt := end - len("*/")
+	if lineStart := idx + lastNL + 1; len(bytes.TrimSpace(l.e.src[lineStart:closeAt])) == 0 {
+		l.e.insertFree(lineStart, b.String())
+		return wroteExtra
 	}
-	l.e.insertFree(at, b.String())
+	// Prose stands beside the `*/`: the tags go after it, and the `*/` and
+	// the spaces before it move to a line of their own after them, as for
+	// a @throws tag (mergeThrows).
+	from := closeAt
+	for from > idx+len("/**") && (l.e.src[from-1] == ' ' || l.e.src[from-1] == '\t') {
+		from--
+	}
+	text := nl + b.String() + closeIndent + " */"
+	next := end
+	for next < len(l.e.src) && (l.e.src[next] == ' ' || l.e.src[next] == '\t') {
+		next++
+	}
+	if next < len(l.e.src) && l.e.src[next] != '\n' && l.e.src[next] != '\r' {
+		l.e.replaceFree(ast.Span{Start: from, End: next}, text+nl+closeIndent)
+		return wroteExtra
+	}
+	l.e.replaceFree(ast.Span{Start: from, End: end}, text)
 	return wroteExtra
 }
 
