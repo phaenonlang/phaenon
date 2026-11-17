@@ -823,6 +823,16 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 	if len(classes) == 0 {
 		return types.TMixed
 	}
+	// `static::X`, `$this::X` and `$object::X` name the constant of the
+	// class the value has at run time, which a subclass may override:
+	// unless the class is final (an enum is) or the constant is, the
+	// constant is its declared type, and mixed without one, as PHPStan
+	// types it; its value is not. `self::X` and `Name::X` are the
+	// constant written.
+	lateBound := true
+	if n, ok := e.Class.(*ast.Name); ok && specialClassName(n) != "static" {
+		lateBound = false
+	}
 	var out []types.Type
 	for _, cl := range classes {
 		if cs := cl.FindCase(name); cs != nil {
@@ -845,7 +855,14 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 		if k.Deprecated && x.c.opts.Deprecations {
 			x.report(e.Name.Span(), P4006, "constant %s::%s is deprecated%s", k.Class.Name, k.Name, k.DeprecatedNote)
 		}
-		out = append(out, x.bindReceiver(x.p().ConstantType(k), recv, k.Class))
+		t := x.p().ConstantType(k)
+		if lateBound && !cl.Final && !k.Final && cl.Kind != ast.KindEnum {
+			t = k.Type
+			if t == nil {
+				t = types.TMixed
+			}
+		}
+		out = append(out, x.bindReceiver(t, recv, k.Class))
 	}
 	return types.MakeUnion(out...)
 }
