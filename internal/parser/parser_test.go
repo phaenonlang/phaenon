@@ -5,7 +5,28 @@ import (
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/token"
 )
+
+// TestBitwiseAndKind: a binary `&` is the operator token.Kind('&') whichever
+// of its two tokens the lexer saw, the one before a variable included.
+func TestBitwiseAndKind(t *testing.T) {
+	for _, in := range []string{`$a & $b`, `$a & 2`, `1 & $b`, `$a & $b & $c`} {
+		e, err := ParseExpr([]byte(in), lexer.ModePhaenon)
+		if err != nil {
+			t.Errorf("%s: %v", in, err)
+			continue
+		}
+		b, ok := e.(*ast.Binary)
+		if !ok {
+			t.Errorf("%s: parsed as %T", in, e)
+			continue
+		}
+		if b.Op != token.Kind('&') {
+			t.Errorf("%s: operator %v, want &", in, b.Op)
+		}
+	}
+}
 
 // placeholders describes an argument list as a string: one letter per
 // argument — v value, u unpacking, ? placeholder, . variadic placeholder —

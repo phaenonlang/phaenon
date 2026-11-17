@@ -1,0 +1,198 @@
+namespace App\Bitwise;
+
+// The bitwise operators type as PHP computes them and PHPStan types them:
+// an int of ints, a string of two strings, a literal of literals, P2301
+// where PHP throws. Plain PHP, so that PHPStan reads this file as written.
+
+function takesInt(int $i): void
+{
+}
+
+function takesString(string $s): void
+{
+}
+
+/**
+ * @param 6 $six
+ */
+function ints(int $i, int $j, int $six): void
+{
+    takesInt($i & 2);
+    takesInt($i & $j);
+    takesInt($i | $j);
+    takesInt($i ^ $j);
+    takesInt($i << 2);
+    takesInt($i >> 1);
+    takesInt(~$i);
+    $flags = $i;
+    $flags &= 3;
+    takesInt($flags);
+    if (($six & 3) === 2) {
+        takesInt(1 << 3);
+    }
+    if (~$six === -7) {
+        takesInt(-16 >> 2);
+    }
+}
+
+// A constant read through static:: is its declared type, an int here,
+// whatever value a subclass gives it.
+class Flagged
+{
+    public const int FLAGS = 6;
+
+    public function has(): bool
+    {
+        takesInt(static::FLAGS & 4);
+        takesInt(static::FLAGS | self::FLAGS);
+        return (static::FLAGS & 4) === 4;
+    }
+}
+
+function strings(string $a, string $b): void
+{
+    takesString($a & $b);
+    takesString($a | $b);
+    takesString(~$a);
+}
+
+/**
+ * @param array<int> $a
+ */
+function invalid(int $i, string $s, array $a, ?int $n, bool $b): void
+{
+    takesInt($i & $s); // want P2301 "operator & on string"
+    takesInt($a & 1); // want P2301 "operator & on array<int>"
+    takesInt(~$b); // want P2301 "operator ~ on bool"
+    takesInt(~$n); // want P2301 "operator ~ on int|null"
+    takesInt(~$a); // want P2301 "operator ~ on array<int>"
+}
+
+function takesGmp(\GMP $g): void
+{
+}
+
+// GMP overloads the arithmetic, bitwise and shift operators, unary minus,
+// ++ and --, with an int or another GMP, and converts to a string: each
+// gives a GMP, as PHPStan types it. A float or a string beside it is an
+// error.
+function gmp(\GMP $g, \GMP $h, int $i, float $f, string $s): string
+{
+    takesGmp($g + 1);
+    takesGmp(1 - $g);
+    takesGmp($g * $h);
+    takesGmp($g / $i);
+    takesGmp($g % 3);
+    takesGmp($g ** 2);
+    takesGmp($g & 1);
+    takesGmp($g | $h);
+    takesGmp($g ^ $i);
+    takesGmp($g << 2);
+    takesGmp($g >> 1);
+    takesGmp(~$g);
+    takesGmp(-$g);
+    $x = $g;
+    $x += 1;
+    $x &= 3;
+    $x++;
+    takesGmp($x);
+    takesGmp($g + $f); // want P2301 "operator + on float"
+    takesGmp($g & $s); // want P2301 "operator & on string"
+    takesInt((int) $g);
+    echo (float) $g;
+    return $g . '';
+}
+
+// A numeric string is a number beside a GMP.
+/**
+ * @param numeric-string $ns
+ */
+function gmpBeside(\GMP $g, string $ns): void
+{
+    takesGmp($g + '3');
+    takesGmp($g * $ns);
+    takesGmp('10' - $g);
+}
+
+function takesFloat(float $f): void
+{
+}
+
+function takesNumber(int|float $n): void
+{
+}
+
+// A union that holds a GMP beside other types is no GMP to PHPStan: its
+// GMP is the number a GMP converts to, int|float, and the operation is
+// typed as one of numbers is. PHP computes an int or a GMP there; what
+// PHPStan says of the compiled code is what is said here.
+/**
+ * @param int|\GMP $ig
+ * @param float|\GMP $fg
+ * @param string|\GMP $sg
+ * @param array<int>|\GMP $ag
+ * @param array<int>|int $ai
+ */
+function gmpInUnion($ig, ?\GMP $ng, $fg, $sg, $ag, $ai, \GMP $g, int $i, float $f): void
+{
+    takesNumber($ig + 1);
+    takesInt($ig + 1); // want P2103 "expects int, int|float given"
+    takesGmp($ig + 1); // want P2103 "expects GMP, int|float given"
+    takesInt($ig - 1); // want P2103 "int|float given"
+    takesInt($ig * 2); // want P2103 "int|float given"
+    takesInt($ng * 2); // want P2103 "int|float given"
+    takesInt($ng + 1); // want P2103 "int|float given"
+    takesInt($ig / 2); // want P2103 "int|float given"
+    takesInt(2 - $ig); // want P2103 "int|float given"
+    takesInt($ig + $ng); // want P2103 "int|float given"
+    takesInt($ig + '3'); // want P2103 "int|float given"
+    takesFloat($ig + 1.5);
+    takesFloat($ig * $f);
+    takesNumber($fg + $i);
+    takesInt(-$ig); // want P2103 "int|float given"
+    takesInt(+$ng); // want P2103 "int|float given"
+    takesInt($ig % 3);
+    takesInt($ig & 1);
+    takesInt($ng | 1);
+    takesInt($ig ^ $i);
+    takesInt($ig << 1); // want P2103 "int|float given"
+    takesInt($i >> $ig); // want P2103 "int|float given"
+    takesInt($ig << $f);
+    takesInt($ng ** 2); // want P2301 "operator ** on GMP|null"
+    takesInt($ig ** $ig); // want P2301 "operator ** on int|GMP"
+    takesInt(2 ** $ig); // want P2301 "operator ** on int|GMP"
+    takesGmp($ig + $g); // want P2301 "operator + on int|GMP"
+    takesGmp($g & $ng); // want P2301 "operator & on GMP|null"
+    var_dump($sg + 1); // want P2301 "operator + on string|GMP"
+    var_dump(-$sg); // want P2301 "operator unary - on string|GMP"
+    echo ~$ig; // want P2301 "operator ~ on int|GMP"
+    var_dump($ag + $ag); // want P2301 "cannot add array<int>|GMP and array<int>|GMP"
+    var_dump($ag + $ai); // want P2301 "cannot add array<int>|GMP and int|array<int>"
+    var_dump($ag + [1], $ai + $ai);
+}
+
+// Stepped and assigned to, such a union is the same number.
+/**
+ * @param int|\GMP $ig
+ * @param string|\GMP $sg
+ */
+function gmpInUnionStepped($ig, $sg, ?\GMP $ng, \GMP $g): void
+{
+    $a = $ig;
+    $a++;
+    takesInt($a); // want P2103 "int|float given"
+    $b = $ig;
+    takesInt(--$b); // want P2103 "int|float given"
+    $c = $ig;
+    $c += 1;
+    takesInt($c); // want P2103 "int|float given"
+    $d = $ig;
+    $d &= 3;
+    takesInt($d);
+    $e = $ig;
+    $e **= 2; // want P2301 "operator ** on int|GMP"
+    $h = $ig;
+    $h += $g; // want P2301 "operator + on int|GMP"
+    $sg++; // want P2301 "cannot increment or decrement string|GMP"
+    $ng--; // want P2301 "cannot increment or decrement GMP|null"
+}

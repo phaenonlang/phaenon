@@ -355,7 +355,9 @@ func (x *fnCtx) checkStringable(t types.Type, span ast.Span, operand ast.Expr) {
 			x.report(span, P2312, "array cannot be converted to string")
 			return
 		case types.Class:
-			if cl := x.p().Class(m.Name); cl != nil && !cl.IsSubclassOf("Stringable") && cl.FindMethod("__toString") == nil {
+			// GMP has no __toString(), and converts all the same: its
+			// handlers give PHP the number's digits, as PHPStan has it.
+			if cl := x.p().Class(m.Name); cl != nil && !cl.IsSubclassOf("Stringable") && !cl.IsSubclassOf("GMP") && cl.FindMethod("__toString") == nil {
 				x.report(span, P2312, "%s cannot be converted to string: no __toString()", m.Name)
 				return
 			}
@@ -1845,6 +1847,9 @@ func (x *fnCtx) unary(e *ast.Unary, env *state) types.Type {
 		return types.TBool
 	case token.Kind('-'), token.Kind('+'):
 		t := x.expr(e.Expr, env, nil)
+		if isGMP(t) {
+			return t // GMP overloads them
+		}
 		if lit, ok := types.IsIntLit(t); ok && e.Op == token.Kind('-') {
 			if lit == math.MinInt64 {
 				return types.TFloat // -PHP_INT_MIN is past PHP_INT_MAX
@@ -1857,8 +1862,30 @@ func (x *fnCtx) unary(e *ast.Unary, env *state) types.Type {
 		return x.arithResult(t, t, e.S, "unary "+string(rune(e.Op)))
 	case token.Kind('~'):
 		t := x.expr(e.Expr, env, nil)
-		if types.IsSubtype(t, types.TString, x.p()) {
+		if isGMP(t) {
+			return t
+		}
+		if types.IsSubtype(t, types.TString, x.p()) && !hasBytes(t) {
 			return types.TString
+		}
+		if types.IsSubtype(t, types.MakeUnion(types.TString, types.TBytes), x.p()) {
+			return types.TBytes // the bytes flipped, no text
+		}
+		// PHP flips the bits of an int, a float it truncates or a
+		// string's bytes, and throws on anything else: bool and null too,
+		// which arithmetic takes as numbers. A union that holds a GMP is
+		// refused too, as PHPStan refuses it.
+		if !types.IsMixed(t) && !types.IsSubtype(t, types.MakeUnion(types.TInt, types.TFloat, types.TString, types.TBytes), x.p()) {
+			x.report(e.S, P2301, "operator ~ on %s", x.typeName(t))
+		}
+		if lit, ok := types.IsIntLit(t); ok {
+			return types.IntLit(^lit)
+		}
+		switch {
+		case hasBytes(t):
+			return types.MakeUnion(types.TInt, types.TBytes)
+		case types.Overlaps(t, types.TString, x.p()):
+			return types.MakeUnion(types.TInt, types.TString)
 		}
 		return types.TInt
 	case token.Kind('@'):
@@ -1874,7 +1901,7 @@ func (x *fnCtx) cast(e *ast.Cast, env *state) types.Type {
 	// spelling, and nothing else follows from it.
 	switch e.Op {
 	case token.T_INT_CAST:
-		if types.IsObjectLike(t) && !types.IsMixed(t) {
+		if types.IsObjectLike(t) && !types.IsMixed(t) && !isGMP(t) { // a GMP casts to its number
 			x.report(e.S, P2309, "cannot cast %s to int", x.typeName(t))
 		}
 		if lit, ok := t.(types.StringLit); ok {
@@ -1887,7 +1914,7 @@ func (x *fnCtx) cast(e *ast.Cast, env *state) types.Type {
 		}
 		return types.TInt
 	case token.T_DOUBLE_CAST:
-		if types.IsObjectLike(t) && !types.IsMixed(t) {
+		if types.IsObjectLike(t) && !types.IsMixed(t) && !isGMP(t) {
 			x.report(e.S, P2309, "cannot cast %s to float", x.typeName(t))
 		}
 		return types.TFloat
@@ -2023,6 +2050,16 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 		}
 	case types.IsMixed(t):
 		result = types.TMixed
+	case isGMP(t):
+		result = t // GMP overloads ++ and --, as its other operators
+	case besideGMP(t):
+		// A GMP beside other types is stepped as the number PHPStan
+		// converts it to, and the others are to be numbers too.
+		result = types.MakeUnion(types.TInt, types.TFloat)
+		if !types.IsSubtype(gmpAsNumber(t), result, nil) {
+			x.report(e.S, P2301, "cannot increment or decrement %s", x.typeName(t))
+			result = t
+		}
 	default:
 		x.report(e.S, P2301, "cannot increment or decrement %s", x.typeName(t))
 		result = t
@@ -2232,6 +2269,21 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		x.explicitThrow(types.NewClass("DivisionByZeroError"), false, e.Span())
 	}
 	span := e.Span()
+	if gmpArithmetic[op] {
+		if isGMP(l) || isGMP(r) {
+			return x.gmpResult(op, l, r, span)
+		}
+		if op == token.T_POW && (besideGMP(l) || besideGMP(r)) {
+			// A power of a union that holds a GMP, or to one, is an error
+			// to PHPStan whatever the other operand is.
+			t := l
+			if !besideGMP(l) {
+				t = r
+			}
+			x.report(span, P2301, "operator ** on %s", x.typeName(t))
+			return types.TError
+		}
+	}
 	switch op {
 	case token.Kind('.'):
 		// `.` joins two values of the same kind (strings.md §2): binary
@@ -2275,6 +2327,12 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 	case token.Kind('+'):
 		if isArrayType(l) || isArrayType(r) {
 			if isArrayType(l) && isArrayType(r) {
+				// An array or a GMP is added to an array only: beside
+				// anything else PHPStan has an error, where two unions of
+				// arrays and numbers pass.
+				if besideGMP(l) && !types.IsSubtype(r, types.TArray, x.p()) || besideGMP(r) && !types.IsSubtype(l, types.TArray, x.p()) {
+					x.report(span, P2301, "cannot add %s and %s", x.typeName(l), x.typeName(r))
+				}
 				return boundedPlus(l, r)
 			}
 			if !types.IsMixed(l) && !types.IsMixed(r) {
@@ -2327,7 +2385,13 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		x.arithResult(l, r, span, "%")
 		return types.TInt
 	case token.Kind('&'), token.Kind('|'), token.Kind('^'):
-		if types.IsSubtype(l, types.TString, nil) && types.IsSubtype(r, types.TString, nil) {
+		// Two strings combine byte by byte: of text, a string; where one
+		// is bytes, bytes, since what comes out is no text (a mask).
+		stringish := types.MakeUnion(types.TString, types.TBytes)
+		if types.IsSubtype(l, stringish, nil) && types.IsSubtype(r, stringish, nil) {
+			if hasBytes(l) || hasBytes(r) {
+				return types.TBytes
+			}
 			return types.TString
 		}
 		// Flags combine into a literal: PREG_SPLIT_NO_EMPTY |
@@ -2349,6 +2413,31 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		return types.TInt
 	case token.T_SL, token.T_SR:
 		x.arithResult(l, r, span, "shift")
+		// Literals shift into a literal, as the flags of `1 << 3` do in
+		// PHPStan. A shift by 64 or more is 0, or -1 for a negative one
+		// shifted right; one by less than 0 throws, and stays int here.
+		if a, ok := types.IsIntLit(l); ok {
+			if b, ok := types.IsIntLit(r); ok && b >= 0 {
+				switch {
+				case op == token.T_SL && b >= 64:
+					return types.IntLit(0)
+				case op == token.T_SL:
+					return types.IntLit(a << b)
+				case b >= 64 && a < 0:
+					return types.IntLit(-1)
+				case b >= 64:
+					return types.IntLit(0)
+				}
+				return types.IntLit(a >> b)
+			}
+		}
+		if besideGMP(l) || besideGMP(r) {
+			// PHPStan joins the numbers of the two operands, unless one
+			// is a float: int|float with a GMP read as a number.
+			if !types.IsSubtype(gmpAsNumber(l), types.TFloat, nil) && !types.IsSubtype(gmpAsNumber(r), types.TFloat, nil) {
+				return types.MakeUnion(types.TInt, types.TFloat)
+			}
+		}
 		return types.TInt
 	case token.T_IS_IDENTICAL, token.T_IS_NOT_IDENTICAL:
 		return types.TBool // binary() reports the impossible comparisons
@@ -2374,6 +2463,78 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 		return types.TBool
 	}
 	return types.TMixed
+}
+
+// gmpArithmetic are the binary operators GMP overloads: arithmetic,
+// bitwise and shifts, whose result is a GMP.
+var gmpArithmetic = map[token.Kind]bool{
+	token.Kind('+'): true, token.Kind('-'): true, token.Kind('*'): true, token.Kind('/'): true,
+	token.Kind('%'): true, token.T_POW: true, token.Kind('&'): true, token.Kind('|'): true,
+	token.Kind('^'): true, token.T_SL: true, token.T_SR: true,
+}
+
+// isGMP reports a type that is a GMP number, every member.
+func isGMP(t types.Type) bool {
+	members := types.Members(t)
+	for _, m := range members {
+		if c, ok := m.(types.Class); !ok || !strings.EqualFold(c.Name, "GMP") {
+			return false
+		}
+	}
+	return len(members) > 0
+}
+
+// besideGMP reports a union that holds a GMP beside other types, `int|GMP`
+// or `?GMP`.
+func besideGMP(t types.Type) bool {
+	members := types.Members(t)
+	if len(members) < 2 {
+		return false
+	}
+	for _, m := range members {
+		if isGMP(m) {
+			return true
+		}
+	}
+	return false
+}
+
+// gmpAsNumber is t with the GMP of a union read as the number PHPStan
+// converts it to, int|float. Its GMP extension answers only for an operand
+// that is a GMP for certain (gmpResult); the member of a union is typed as
+// a number among numbers. So `$ig + 1` with `int|GMP $ig` is int|float,
+// where PHP computes an int or a GMP: what PHPStan says of the compiled
+// code is what the checker says of the source.
+func gmpAsNumber(t types.Type) types.Type {
+	if !besideGMP(t) {
+		return t
+	}
+	return types.Map(t, func(m types.Type) types.Type {
+		if isGMP(m) {
+			return types.MakeUnion(types.TInt, types.TFloat)
+		}
+		return m
+	})
+}
+
+// gmpResult types l op r where one operand is a GMP: PHP's GMP overloads
+// the operator, and the result is a GMP, as PHPStan types it. The other
+// operand is a GMP, an int or a numeric string; anything else, a float,
+// another string, a bool or null, is P2301, as PHPStan reports it
+// ("results in an error").
+func (x *fnCtx) gmpResult(op token.Kind, l, r types.Type, span ast.Span) types.Type {
+	ok := true
+	for _, t := range []types.Type{l, r} {
+		if isGMP(t) || types.IsMixed(t) || types.IsSubtype(t, types.MakeUnion(types.TInt, types.String{Numeric: true}), x.p()) {
+			continue
+		}
+		x.report(span, P2301, "operator %s on %s", opText(op), x.typeName(t))
+		ok = false
+	}
+	if !ok {
+		return types.TError
+	}
+	return types.NewClass("GMP")
 }
 
 // numberComparable are the classes whose comparison handler takes a number:
@@ -2677,10 +2838,11 @@ func (x *fnCtx) arithResult(l, r types.Type, span ast.Span, op string) types.Typ
 		if types.IsMixed(t) {
 			continue
 		}
-		if !types.IsSubtype(t, numeric, x.p()) {
+		if !types.IsSubtype(gmpAsNumber(t), numeric, x.p()) {
 			x.report(span, P2301, "operator %s on %s", op, x.typeName(t))
 		}
 	}
+	l, r = gmpAsNumber(l), gmpAsNumber(r)
 	isFloat := func(t types.Type) bool {
 		for _, m := range types.Members(t) {
 			switch m.(type) {

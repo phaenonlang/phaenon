@@ -223,6 +223,11 @@ func (p *Parser) exprBP(min int) ast.Expr {
 			rbp = op.lbp
 		}
 		right := p.exprBP(rbp)
+		if k == token.T_AMPERSAND_FOLLOWED_BY_VAR_OR_VARARG || k == token.T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG {
+			// The lexer tells the two `&` apart for references; as an
+			// operator both are bitwise and, the one kind a binary has.
+			k = token.Kind('&')
+		}
 		left = &ast.Binary{S: p.span(start), Op: k, Left: left, Right: right}
 		if op.nonAssoc {
 			lastNonAssoc = op.lbp
