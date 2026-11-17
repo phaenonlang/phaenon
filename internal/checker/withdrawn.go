@@ -12,6 +12,30 @@ import (
 	"github.com/phaenonlang/phaenon/internal/token"
 )
 
+// genericClosures reports a closure or an arrow function that declares
+// type parameters, `fn<T>(T $x): T => $x`, in every place one stands, a
+// constant expression and an attribute's argument included: the grammar
+// reads them (design/generics.md lists the syntax), and nothing gives
+// them a meaning yet (design issue #28). P1007, once for the list; the
+// closure is checked with its type parameters read as reported names, so
+// that nothing else follows from them (closureTypeParams).
+func (c *Checker) genericClosures(f *program.File) {
+	ast.Inspect(f.AST, func(n ast.Node) bool {
+		var tps []*ast.TypeParam
+		switch n := n.(type) {
+		case *ast.Closure:
+			tps = n.TypeParams
+		case *ast.ArrowFunc:
+			tps = n.TypeParams
+		}
+		if len(tps) > 0 {
+			at := ast.Span{Start: tps[0].S.Start, End: tps[len(tps)-1].S.End}
+			c.report(at, P1007, "generic closures are not available yet: declare a generic function or method, or give the closure the concrete types")
+		}
+		return true
+	})
+}
+
 // withdrawnSpellings reports the spellings roadmap D26 and D27 withdrew on
 // 2026-11-09, each as P1001 with its replacement, which phn fmt writes
 // (design/tooling.md §5.6): a declaration spelled `fun`, and the type

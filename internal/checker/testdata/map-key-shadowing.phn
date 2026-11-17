@@ -2,9 +2,11 @@ namespace MapKeyShadowing;
 
 // `map<K, V>` gives an unbounded K the bound of a map's keys, int|string
 // (design/collections.md §2). The K is the one in scope where the map is
-// written: a method, a function or a closure inside a generic class that
-// declares a K of its own takes the bound for its K, a class inside sees
-// no K of the class around it, and that class's K stays unbounded.
+// written: a method or a function inside a generic class that declares a
+// K of its own takes the bound for its K, a class inside sees no K of the
+// class around it, and that class's K stays unbounded. A closure that
+// declares a K is refused until generic closures are designed (P1007),
+// and its K hides the class's all the same.
 
 final class ViaMethod<K>
 {
@@ -23,14 +25,14 @@ final class ViaTemplate<K>
 
 final class ViaClosure<K>
 {
-    counter(): \Closure => function <K>(map<K, int> $m): int {
+    counter(): \Closure => function <K>(map<K, int> $m): int { // want P1007
         return count($m);
     };
 }
 
 final class ViaArrow<K>
 {
-    counter(): \Closure => fn<K>(map<K, int> $m): int => count($m);
+    counter(): \Closure => fn<K>(map<K, int> $m): int => count($m); // want P1007
 }
 
 final class ViaFunction<K>

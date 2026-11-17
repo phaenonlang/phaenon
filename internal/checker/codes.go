@@ -25,7 +25,8 @@ type Code struct {
 }
 
 var (
-	// P1 — removed constructs, and constructs the target PHP lacks.
+	// P1 — removed constructs, constructs the target PHP lacks, and syntax
+	// not designed yet.
 	// P1001 is `var`, a `concurrently` block or `spawn` (D25), the
 	// spellings D26 and D27 withdrew: `is`, `as`, `as?` and `fun`, and the
 	// casts PHP removed or deprecates, `(integer)` to `(real)` and `(unset)`.
@@ -50,6 +51,11 @@ var (
 	// writes it in lower case. `Map` and `Bytes` are class names instead,
 	// P2001 where none resolves.
 	P1006 = Code{"P1006", Error, "Phaenon's word in another letter case"}
+	// P1007: syntax the parser reads whose meaning is not designed yet: a
+	// closure or an arrow function that declares type parameters
+	// (design/generics.md, design issue #28). Nothing else is reported of
+	// them.
+	P1007 = Code{"P1007", Error, "construct not available yet"}
 
 	// P11xx — constructs PHP deprecates, reported whatever the target
 	// unless --no-deprecations (design/php-versions.md §4).
