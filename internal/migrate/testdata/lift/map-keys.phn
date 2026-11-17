@@ -1,0 +1,14 @@
+namespace Lift\MapKeys;
+
+/**
+ * A map's key is int|string or within it. PHP stores a null key as '', so
+ * null goes where a string or array-key already holds '', and a key that may
+ * be null otherwise, a bool or a float has no map key that means it: its tag
+ * stays, with a note. A mixed key is any key, as PHPStan reads it.
+ *
+ * @param array<bool, string> $flags
+ * @param array<float, string> $ratios
+ * @return array<int|null, int>
+ */
+function keys(array<int> $any, array<int> $whatever, map<string, int> $named, map<string, int> $short, map<int, string> $numbered, array $flags, array $ratios): array
+    => [\count($any) + \count($whatever) + \count($named) + \count($short) + \count($numbered) + \count($flags) + \count($ratios)];

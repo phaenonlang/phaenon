@@ -20,6 +20,7 @@ package migrate
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -1243,6 +1244,61 @@ func typeName(name string) bool {
 // spelling in a declaration.
 func render(n *docblock.TypeNode) (string, bool) { return renderType(n, false) }
 
+// mapKey is the key of an array type as a map writes it, int|string or
+// within it (a map key outside it is P2518, design/collections.md §2), or
+// false where none means the same. PHP stores a null key as the empty
+// string, so null goes where a string or array-key already holds it:
+// array<array-key|null, V> is a map of int|string keys. A key that may be
+// null otherwise (int|null, stored as an int or the empty string), a bool
+// (0|1), a float or a type no key can be has no map key that means it, and
+// the tag stays. A mixed key is any key, as PHPStan reads it: array-key,
+// which the lift writes as an array of V, as for a key left unwritten.
+func mapKey(k *docblock.TypeNode) (*docblock.TypeNode, bool) {
+	members := []*docblock.TypeNode{k}
+	switch k.Kind {
+	case docblock.KindNullable:
+		members = []*docblock.TypeNode{k.Args[0], {Kind: docblock.KindNull}}
+		if k.Args[0].Kind == docblock.KindUnion {
+			members = append(slices.Clone(k.Args[0].Args), &docblock.TypeNode{Kind: docblock.KindNull})
+		}
+	case docblock.KindUnion:
+		members = k.Args
+	}
+	var keep []*docblock.TypeNode
+	null, holdsEmpty := false, false
+	for _, m := range members {
+		switch m.Kind {
+		case docblock.KindNull:
+			null = true
+			continue
+		case docblock.KindBoolLit:
+			return nil, false
+		case docblock.KindNamed:
+			if len(m.Args) == 0 {
+				switch strings.ToLower(m.Name) {
+				case "mixed":
+					return &docblock.TypeNode{Kind: docblock.KindNamed, Name: "array-key"}, true
+				case "string", "array-key":
+					holdsEmpty = true
+				case "bool", "boolean", "float", "double", "object", "resource", "callable", "iterable",
+					"array", "list", "null", "void", "never", "scalar", "numeric", "number", "true", "false":
+					return nil, false
+				}
+			}
+		}
+		keep = append(keep, m)
+	}
+	switch {
+	case !null:
+		return k, true
+	case !holdsEmpty:
+		return nil, false
+	case len(keep) == 1:
+		return keep[0], true
+	}
+	return &docblock.TypeNode{Kind: docblock.KindUnion, Args: keep}, true
+}
+
 // renderType is render for a type position; alias says the position is the
 // right-hand side of a `type` declaration, the one place a shape with
 // named keys is syntax (design/collections.md §6.1).
@@ -1256,6 +1312,11 @@ func renderType(n *docblock.TypeNode, alias bool) (string, bool) {
 			name = "static"
 		case "array":
 			if len(n.Args) == 2 {
+				key, ok := mapKey(n.Args[0])
+				if !ok {
+					return "", false
+				}
+				n = &docblock.TypeNode{Kind: n.Kind, Name: n.Name, Args: []*docblock.TypeNode{key, n.Args[1]}}
 				if anyKey(n.Args[0]) {
 					// array<array-key, V> is array<V>: the keys do not
 					// matter (design/collections.md §2).
