@@ -263,7 +263,7 @@ final class Holder
         $deep = $this->next?->item as? int; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
         $first = $this->next?->item is ?User; // want P1001 "the operand would be evaluated twice; assign it to a variable first"
 
-        return $id + ($self === null ? 0 : 1) + ($item?->id ?? 0) + ($key ?? 0) + ($deep ?? 0) + ($first ? 1 : 0);
+        return $id + ($self === null ? 0 : 1) + ($item?->id ?? 0) + ($key ?? 0) + ($deep ?? 0) + ($first ? 1 : 0); // want P2307 "?->id"
     }
 }
 

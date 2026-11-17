@@ -117,7 +117,9 @@ var (
 	P2304 = Code{"P2304", Error, "match arm missing"}
 	P2305 = Code{"P2305", Error, "strict comparison between incompatible types"}
 	P2306 = Code{"P2306", Error, "instanceof always has the same result"}
-	P2307 = Code{"P2307", Error, "nullsafe operator on a non-nullable value"}
+	// P2307: a ?-> that does nothing -> would not, on a value that is never
+	// null, or a property fetch that ??, isset() or empty() reads.
+	P2307 = Code{"P2307", Error, "unnecessary nullsafe operator"}
 	P2308 = Code{"P2308", Error, "null coalescing on a value that is never null"}
 	P2309 = Code{"P2309", Error, "invalid cast"}
 	P2310 = Code{"P2310", Error, "clone of a non-object"}

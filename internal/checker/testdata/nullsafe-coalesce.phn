@@ -1,0 +1,76 @@
+namespace NullsafeCoalesce;
+
+// `??`, isset() and empty() read a property of null without an error, so a
+// ?-> property fetch they read directly is unnecessary: `$u?->email ?? ''`
+// is `$u->email ?? ''`. PHPStan reports it (nullsafe.neverNull); P2307, as
+// a ?-> on a value that is never null is. A method call is not read so: a
+// method of null throws under `??` too, and the ?-> stays.
+
+final class Address
+{
+    public string $city = '';
+    public ?string $zip = null;
+}
+
+final class User
+{
+    public string $email = '';
+    public ?string $nick = null;
+    public ?User $manager = null;
+    public Address $address;
+
+    public function __construct()
+    {
+        $this->address = new Address();
+    }
+
+    public function name(): string
+    {
+        return 'n';
+    }
+
+    public function boss(): ?User
+    {
+        return $this->manager;
+    }
+}
+
+function coalesced(?User $u): string
+{
+    $a = $u?->email ?? ''; // want P2307 "?->email on the left side of ?? is unnecessary"
+    $b = $u?->nick ?? ''; // want P2307 "?->nick"
+    $c = ($u?->email) ?? ''; // want P2307
+    $d = $u?->manager?->email ?? ''; // want P2307 "?->email"
+    $e = $u?->address?->zip ?? ''; // want P2307 "?->zip"
+    return $a . $b . $c . $d . $e;
+}
+
+function tested(?User $u): bool
+{
+    return isset($u?->email) // want P2307 "?->email in isset() is unnecessary"
+        || empty($u?->nick); // want P2307 "?->nick in empty() is unnecessary: empty() reads a property of null without an error"
+}
+
+/** @param array<string, User|null> $users */
+function offsets(array $users): string
+{
+    return $users['a']?->email ?? ''; // want P2307
+}
+
+// What PHPStan leaves: calls, a ?-> under a plain fetch, the plain fetch.
+function left(?User $u): string
+{
+    $a = $u?->name() ?? '';
+    $b = $u?->boss()?->name() ?? '';
+    $c = $u?->address->city ?? '';
+    $d = $u?->address->zip ?? '';
+    $e = $u->email ?? '';
+    $f = isset($u?->manager->email) ? 'm' : '';
+    return $a . $b . $c . $d . $e . $f;
+}
+
+// A receiver that is never null is the ?-> that is dead anywhere.
+function never(User $u): string
+{
+    return $u?->email ?? ''; // want P2307 "?-> on NullsafeCoalesce\User, which is never null"
+}

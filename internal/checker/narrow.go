@@ -68,6 +68,7 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 	case *ast.Isset:
 		then = env.clone()
 		for _, v := range e.Vars {
+			x.idleNullsafe(v, env, "isset()", "in isset()")
 			t := x.exprLenient(v, env)
 			x.narrowPath(then, v, types.StripNull(t), true)
 			x.issetChain(then, v)
@@ -82,6 +83,7 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		}
 		return then, els
 	case *ast.Empty:
+		x.idleNullsafe(e.Expr, env, "empty()", "in empty()")
 		t := x.exprLenient(e.Expr, env)
 		then, els = env.clone(), env.clone()
 		x.narrowPath(then, e.Expr, types.Falsy(t), false)
