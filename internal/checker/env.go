@@ -42,6 +42,13 @@ type condHolder struct {
 	// whenType itself, not to a part of it, as PHPStan's holders of an
 	// assigned `??` are matched (coalesceConds).
 	exact bool
+	// unless, set in place of whenType, is the type of the other branch's
+	// value where this branch's is mixed: no type says "mixed but not
+	// null", so the branch is held where the variable is narrowed to a
+	// type that shares no value with unless, or where a test rules out
+	// every value of unless though the variable stays mixed
+	// (applyExclusion).
+	unless types.Type
 }
 
 // condBranch records the narrowings of one branch of a condition against
@@ -112,14 +119,44 @@ func (e *state) applyConds(name string, t types.Type, p *program.Program) {
 	}
 	var taken []condHolder
 	for _, c := range info.conds {
-		if c.exact && types.Equal(t, c.whenType) || !c.exact && types.IsSubtype(t, c.whenType, p) {
+		switch {
+		case c.unless != nil:
+			if !types.IsMixed(t) && !isNeverType(t) && !types.Overlaps(t, c.unless, p) {
+				taken = append(taken, c)
+			}
+		case c.exact && types.Equal(t, c.whenType) || !c.exact && types.IsSubtype(t, c.whenType, p):
 			taken = append(taken, c)
 		}
 	}
 	if len(taken) != 1 {
 		return
 	}
-	for k, nt := range taken[0].narrowed {
+	e.applyHolder(taken[0], p)
+}
+
+// applyExclusion applies the branch of a condition assigned to name whose
+// other branch gives only values a test ruled out, excluded, where name's
+// type cannot show it: after `null !== $v` a mixed $v is still mixed.
+func (e *state) applyExclusion(name string, excluded types.Type, p *program.Program) {
+	info, ok := e.vars[name]
+	if !ok || len(info.conds) == 0 {
+		return
+	}
+	var taken []condHolder
+	for _, c := range info.conds {
+		if c.unless != nil && types.IsSubtype(c.unless, excluded, p) {
+			taken = append(taken, c)
+		}
+	}
+	if len(taken) == 1 {
+		e.applyHolder(taken[0], p)
+	}
+}
+
+// applyHolder narrows the variables and offsets one branch of a condition
+// narrowed, the branch known to be taken.
+func (e *state) applyHolder(h condHolder, p *program.Program) {
+	for k, nt := range h.narrowed {
 		cur, ok := e.vars[k]
 		if !ok {
 			continue
@@ -132,7 +169,7 @@ func (e *state) applyConds(name string, t types.Type, p *program.Program) {
 		cur.native = narrowNative(cur.native, r, p)
 		e.vars[k] = cur
 	}
-	for k, nt := range taken[0].offsets {
+	for k, nt := range h.offsets {
 		if cur, ok := e.paths[k]; ok {
 			if r := types.Intersect(cur, nt, p); !isNeverType(r) {
 				e.paths[k] = r
@@ -153,6 +190,58 @@ func (e *state) dropConds(name string) {
 		root, _ := offsetRoot(k)
 		return root == name
 	})
+}
+
+// written forgets what the conditions say of name and what name holds of
+// one, as an assignment does, where name was written in a way that leaves
+// its type as it was: a by-reference argument of a function, a `@var` tag.
+// The variables it is a reference to are written too.
+func (e *state) written(name string) {
+	e.writtenOne(name)
+	for o := range e.refs[name] {
+		e.writtenOne(o)
+	}
+}
+
+func (e *state) writtenOne(name string) {
+	if info, ok := e.vars[name]; ok && info.conds != nil {
+		info.conds = nil
+		e.vars[name] = info
+	}
+	e.dropConds(name)
+}
+
+// reordered is written for an array whose int keys were renumbered and
+// whose string keys kept their values (array_multisort()): what the
+// conditions say of its string offsets stands.
+func (e *state) reordered(name string) {
+	e.reorderedOne(name)
+	for o := range e.refs[name] {
+		e.reorderedOne(o)
+	}
+}
+
+func (e *state) reorderedOne(name string) {
+	if info, ok := e.vars[name]; ok && info.conds != nil {
+		info.conds = nil
+		e.vars[name] = info
+	}
+	e.forgetInConds(func(k string) bool { return k == name }, func(k string) bool {
+		root, _ := offsetRoot(k)
+		_, key, _ := strings.Cut(k, "[")
+		return root == name && !strings.HasPrefix(key, "'")
+	})
+}
+
+// forgetConds forgets every condition: include, extract() and a variable
+// variable may write any variable.
+func (e *state) forgetConds() {
+	for name, info := range e.vars {
+		if info.conds != nil {
+			info.conds = nil
+			e.vars[name] = info
+		}
+	}
 }
 
 // forgetInConds takes out of every condition branch the variables it
@@ -563,14 +652,16 @@ func joinAll(es ...*state) *state {
 }
 
 // equal reports whether two environments agree on every variable (for the
-// loop fixed point).
+// loop fixed point), the conditions remembered with it included: a body
+// that assigns a variable a condition narrowed changes what the condition
+// says at the loop head, though no type changes.
 func (e *state) equal(o *state) bool {
 	if e.dead != o.dead || len(e.vars) != len(o.vars) {
 		return false
 	}
 	for k, v := range e.vars {
 		w, ok := o.vars[k]
-		if !ok || v.maybe != w.maybe || !types.Equal(v.t, w.t) {
+		if !ok || v.maybe != w.maybe || !types.Equal(v.t, w.t) || !equalConds(v.conds, w.conds) {
 			return false
 		}
 	}
@@ -583,6 +674,37 @@ func (e *state) equal(o *state) bool {
 		}
 	}
 	return true
+}
+
+// equalConds reports two lists of condition branches that say the same.
+func equalConds(a, b []condHolder) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !equalOrNil(a[i].whenType, b[i].whenType) || a[i].exact != b[i].exact || !equalOrNil(a[i].unless, b[i].unless) ||
+			!equalTypeMaps(a[i].narrowed, b[i].narrowed) || !equalTypeMaps(a[i].offsets, b[i].offsets) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalTypeMaps(a, b map[string]types.Type) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, t := range a {
+		if u, ok := b[k]; !ok || !types.Equal(t, u) {
+			return false
+		}
+	}
+	return true
+}
+
+// equalOrNil reports two types equal, or both absent.
+func equalOrNil(a, b types.Type) bool {
+	return a == nil && b == nil || a != nil && b != nil && types.Equal(a, b)
 }
 
 // widen generalises the variables that changed between prev and e so loop
@@ -1132,11 +1254,11 @@ func joinConds(a, b []condHolder) []condHolder {
 	}
 	var out []condHolder
 	for i := range a {
-		if !types.Equal(a[i].whenType, b[i].whenType) || a[i].exact != b[i].exact {
+		if !equalOrNil(a[i].whenType, b[i].whenType) || a[i].exact != b[i].exact || !equalOrNil(a[i].unless, b[i].unless) {
 			return nil
 		}
 		same := len(a[i].narrowed) == len(b[i].narrowed) && len(a[i].offsets) == len(b[i].offsets)
-		common := condHolder{whenType: a[i].whenType, exact: a[i].exact, narrowed: map[string]types.Type{}, offsets: map[string]types.Type{}}
+		common := condHolder{whenType: a[i].whenType, exact: a[i].exact, unless: a[i].unless, narrowed: map[string]types.Type{}, offsets: map[string]types.Type{}}
 		for k, t := range a[i].narrowed {
 			if u, ok := b[i].narrowed[k]; ok && types.Equal(t, u) {
 				common.narrowed[k] = t

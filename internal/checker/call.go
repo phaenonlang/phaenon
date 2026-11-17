@@ -124,6 +124,9 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	if _, isNever := ret.(types.Never); isNever {
 		env.dead = true
 	}
+	if sig.stub && strings.EqualFold(fn.Name, "extract") {
+		env.forgetConds() // it may write any variable
+	}
 	if lower == "array_push" || lower == "array_unshift" {
 		x.arrayPush(e, env)
 	}
@@ -2236,6 +2239,43 @@ var byRefReads = map[string]string{
 	"usort":                  "array",
 }
 
+// movesPointerOnly reports the php-src functions whose by-reference array
+// keeps its values: end(), next(), prev() and reset() move its internal
+// pointer, and the conditions about it stand, as in PHPStan.
+func movesPointerOnly(sig *signature) bool {
+	if sig.fn == nil {
+		return false
+	}
+	switch strings.ToLower(sig.fn.Name) {
+	case "end", "next", "prev", "reset":
+		return true
+	}
+	return false
+}
+
+// writtenThrough forgets the conditions about the variable e is, or whose
+// offset it is, which a write the checker does not follow changed: a
+// by-reference argument, a by-reference foreach over the array.
+func (x *fnCtx) writtenThrough(e ast.Expr, env *state) {
+	for {
+		switch v := e.(type) {
+		case *ast.Paren:
+			e = v.Expr
+			continue
+		case *ast.Index:
+			e = v.Array
+			continue
+		case *ast.Variable:
+			if v.Name != "this" {
+				env.written(v.Name)
+			}
+		case *ast.VariableVariable:
+			env.forgetConds()
+		}
+		return
+	}
+}
+
 // readsByRef reports a by-reference parameter that reads the argument it
 // is given, so that an offset passed to it may be missing (P2321), as
 // PHPStan has it. Of php-src, those byRefReads names. Of any other code,
@@ -2783,6 +2823,18 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			x.c.rollback(saved)
 		}
 	}
+	// array_walk() whose callback takes the value by value writes none back.
+	walksByValue := false
+	if sig.stub && sig.fn != nil {
+		switch strings.ToLower(sig.fn.Name) {
+		case "array_walk", "array_walk_recursive":
+			for i, b := range bindings {
+				if c, ok := argTypes[i].(types.Callable); ok && strings.EqualFold(b.param.Name, "callback") {
+					walksByValue = c.HasSig && len(c.Params) > 0 && !c.Params[0].ByRef
+				}
+			}
+		}
+	}
 	// By-reference parameters define or retype their arguments.
 	for i, b := range bindings {
 		if !b.param.ByRef || b.arg.Value == x.pipeOperand {
@@ -2801,6 +2853,19 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			if sig.stub && defined {
 				if x.c.opts.ByRef != nil {
 					x.c.opts.ByRef(x.file, b.arg.Value, nil)
+				}
+				// The checker keeps the type, but the value may be another
+				// one (settype(), similar_text(), array_walk() with a
+				// callback that takes it by reference): what a condition
+				// said of the old one is gone. array_multisort() renumbers
+				// int keys and keeps a string key with its value.
+				v, isVar := b.arg.Value.(*ast.Variable)
+				switch {
+				case movesPointerOnly(sig) || walksByValue:
+				case isVar && sig.fn != nil && strings.EqualFold(sig.fn.Name, "array_multisort"):
+					env.reordered(v.Name)
+				default:
+					x.writtenThrough(b.arg.Value, env)
 				}
 				continue // php-src reads and writes the reference (sort, end, ksort): the type stays
 			}
