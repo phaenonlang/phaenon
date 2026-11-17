@@ -355,7 +355,23 @@ vendor/bin/phpstan analyse --error-format=raw | phn trace
 vendor/bin/phpstan analyse --error-format=github | phn trace   # annotations GitHub can show
 phn trace < clover.xml > clover.phn.xml           # coverage on the .phn lines
 phn trace --root /app=. < production-trace.txt    # /app/.src/Foo.php(18) → src/Foo.phn(9)
+phn trace -- vendor/bin/phpunit --colors=never    # runs it; exits with PHPUnit's status
+phn trace -- php vendor/bin/phpunit               # the same on Windows, which runs no PHP script directly
 ```
+
+Piped into `phn trace`, a command's exit status is lost unless the shell keeps it (`set -o
+pipefail`). `phn trace -- command …` runs the command itself instead: its standard output and
+error are rewritten the same way, a line at a time as it arrives, and phn exits with its status as
+a shell gives it (128 and the signal's number where a signal ended it, 127 where it was not found,
+126 where it could not be run). The two streams come through two pipes: each keeps its order, but
+a line written to one just before a line written to the other may come out after it. Once the
+command has ended, phn reads what is left in the pipes for 200 ms and stops, so that a server the
+command left running in the background does not hold it (on Windows it waits for the pipes).
+What is sent to phn's process group, as Ctrl-C, Ctrl-\ and a terminal's hangup are, reaches the
+command too, and phn passes none of it on, so each reaches the command once. A termination sent to
+phn alone is passed on after a second if the command is still running; phn cannot tell it from one
+sent to the group, so a command that takes longer than that to end after a termination sent to the
+group is sent it a second time.
 
 It rewrites `file.php:42`, `file.php(42)` and `file.php on line 42` where the file carries a map,
 and leaves the rest of the text as it is. A GitHub workflow command (`::error file=…,line=…::`)
@@ -623,6 +639,7 @@ phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [-
 phn stdlib --out DIR [--check]                         # the compiled stdlib (Debug/…), as phaenon/debug ships it
 phn build --vendor                        # the installed packages with a phaenon.json, as the plugin builds them, but for the roots they commit
 phn trace [--root PREFIX=LOCAL]... [text...]  # positions in compiled files → .phn: text, workflow commands, XML reports on stdin
+phn trace [--root PREFIX=LOCAL]... -- <command> [arg...]  # runs the command, its streams so rewritten; exits with its status
 phn version                               # the version a release sets, dev otherwise
 phn help                                  # the usage, on standard output (also -h, --help); phn <command> --help: its options
 phn lex   [--php] file                    # token stream
