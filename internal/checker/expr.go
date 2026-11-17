@@ -1883,6 +1883,9 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 	switch {
 	case types.IsSubtype(t, types.TInt, nil):
 		result = types.TInt
+		if lit, ok := types.IsIntLit(t); ok && (e.Inc && lit == math.MaxInt64 || !e.Inc && lit == math.MinInt64) {
+			result = types.TFloat // one past the last integer
+		}
 	case types.IsSubtype(t, types.TFloat, nil):
 		result = types.TFloat
 	case types.IsSubtype(t, types.TString, nil):
@@ -2162,7 +2165,7 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 				return types.TFloat // past the integers, PHP's result is a float
 			}
 		}
-		return x.arithResult(l, r, span, "+")
+		return pastTheIntegers(op, l, r, x.arithResult(l, r, span, "+"))
 	case token.Kind('-'), token.Kind('*'), token.T_POW:
 		if a, ok := types.IsIntLit(l); ok {
 			if b, ok := types.IsIntLit(r); ok {
@@ -2183,13 +2186,7 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 				return types.TFloat
 			}
 		}
-		t := x.arithResult(l, r, span, opText(op))
-		if b, ok := types.IsIntLit(r); ok && b < 0 && op == token.T_POW && types.Equal(t, types.TInt) {
-			// A negative exponent gives a float whatever the base: 2 ** -1
-			// is 0.5, and 1 ** -1 is 1.0.
-			return types.TFloat
-		}
-		return t
+		return pastTheIntegers(op, l, r, x.arithResult(l, r, span, opText(op)))
 	case token.Kind('/'):
 		x.arithResult(l, r, span, "/")
 		if a, ok := types.IsIntLit(l); ok {
@@ -2390,6 +2387,114 @@ func addInt(a, b int64) (int64, bool) {
 		return 0, false
 	}
 	return s, true
+}
+
+// pastTheIntegers is the type of l op r, for `+`, `-`, `*` and `**`, where
+// t is what arithResult makes of it. An int is looked at again, since PHP's
+// result is a float where the integers end, and PHPStan types it so:
+//
+//   - a power whose exponent is below zero for certain is a float whatever
+//     the base: 2 ** -1 is 0.5, and 1 ** -1 is 1.0;
+//   - operands that are a few integers each (a literal, a union of them, a
+//     short range, true, false, null) are computed pair by pair: float
+//     when every result is past the integers, int|float when some are.
+//
+// Anything else stays int, as a sum of two plain ints does: there the
+// overflow is possible and nobody's finding.
+func pastTheIntegers(op token.Kind, l, r, t types.Type) types.Type {
+	if !types.Equal(t, types.TInt) {
+		return t
+	}
+	if op == token.T_POW && belowZero(r) {
+		return types.TFloat
+	}
+	as, ok := fewInts(l)
+	if !ok {
+		return t
+	}
+	bs, ok := fewInts(r)
+	if !ok {
+		return t
+	}
+	past := 0
+	for _, a := range as {
+		for _, b := range bs {
+			ok := false
+			switch op {
+			case token.Kind('+'):
+				_, ok = addInt(a, b)
+			case token.Kind('-'):
+				_, ok = subInt(a, b)
+			case token.Kind('*'):
+				_, ok = mulInt(a, b)
+			case token.T_POW:
+				_, ok = powInt(a, b)
+			}
+			if !ok {
+				past++
+			}
+		}
+	}
+	switch past {
+	case 0:
+		return t
+	case len(as) * len(bs):
+		return types.TFloat
+	}
+	return types.MakeUnion(types.TInt, types.TFloat)
+}
+
+// belowZero reports an integer type whose every value is below zero: -1,
+// -1|-2, int<min, -1>.
+func belowZero(t types.Type) bool {
+	members := types.Members(t)
+	for _, m := range members {
+		if i, ok := m.(types.Int); !ok || i.Hi >= 0 {
+			return false
+		}
+	}
+	return len(members) > 0
+}
+
+// maxFewInts bounds the values fewInts lists for one operand, and so the
+// pairs pastTheIntegers computes at maxFewInts squared.
+const maxFewInts = 8
+
+// fewInts lists the integers an operand of arithmetic may be, when they are
+// at most maxFewInts: its integer literals and short ranges, and the
+// numbers PHP reads true, false and null as.
+func fewInts(t types.Type) ([]int64, bool) {
+	var out []int64
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.Int:
+			if uint64(m.Hi)-uint64(m.Lo) >= maxFewInts {
+				return nil, false
+			}
+			for v := m.Lo; ; v++ {
+				out = append(out, v)
+				if v == m.Hi {
+					break
+				}
+			}
+		case types.BoolLit:
+			if m.V {
+				out = append(out, 1)
+			} else {
+				out = append(out, 0)
+			}
+		case types.Bool:
+			out = append(out, 0, 1)
+		case types.Null:
+			out = append(out, 0)
+		default:
+			return nil, false
+		}
+		if len(out) > maxFewInts {
+			return nil, false
+		}
+	}
+	return out, len(out) > 0
 }
 
 // subInt is a - b, and false when the difference is no int64.
