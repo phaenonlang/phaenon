@@ -50,13 +50,20 @@ through the nearest `vendor/composer` autoload maps, and the php-src stubs embed
 (refined by an overlay for what PHP cannot express: `array_map` returning `array<K, R>`,
 `ReflectionClass<T>`, PHPUnit's assertions). Docblocks are the interop contract: `@param`,
 `@return`, `@var`, `@template`, `@extends`, `@phpstan-assert` and the PHPStan type grammar are
-understood, and `@phpstan-ignore` comments are honoured. A `.phn` docblock may use Phaenon's own
-spellings, as an array shape often does (`array{by: map<string, int>, pair: (int, int)}`); the
-emitter writes them in PHPStan's. A declared `array` names its element type (`array<V>` for a list
-or keyed array of `V`, `array<mixed>` for any), unless the method it overrides documents one: a
-bare `array` is `P2516`, as PHPStan at level max reports it. Diagnostic codes are stable: `P1xxx`
-removed constructs, `P2xxx` types and flow, `P4xxx` interop (docblocks, vendor). Design:
-`design/checker.md`.
+understood. A `@phpstan-ignore` comment is honoured as it was written for PHPStan, and silences
+every finding of its line; `@phaenon-ignore P2103, P2202` silences the codes it names, on its line
+or the next, and is itself `P4015` where it silences nothing, as is a `@phaenon-ignore` that names
+no code (`@phaenon-ignore-line` and `-next-line` silence a whole line). The line is the one phn
+reports the finding on: in a call written over several lines, the argument's, not the line the
+call starts on. A comment is held only to the codes the run reports: `phn build` and `phn check
+--no-deprecations` leave the deprecations out (`P1101`, `P4006`), and hold no comment to them, nor
+a whole-line form to what it silenced. `P4015` itself is silenced by no comment. A `.phn` docblock
+may use Phaenon's own spellings, as an array shape often does (`array{by: map<string, int>, pair:
+(int, int)}`); the emitter writes them in PHPStan's. A declared `array` names its element type
+(`array<V>` for a list or keyed array of `V`, `array<mixed>` for any), unless the method it
+overrides documents one: a bare `array` is `P2516`, as PHPStan at level max reports it. Diagnostic
+codes are stable: `P1xxx` removed constructs, `P2xxx` types and flow, `P4xxx` interop (docblocks,
+vendor). Design: `design/checker.md`.
 
 Dead code is reported as warnings, as PHPStan reports it at level max: a private method, property
 or constant nothing in its class uses (`P2406`), and a private property only written (`P2407`) or

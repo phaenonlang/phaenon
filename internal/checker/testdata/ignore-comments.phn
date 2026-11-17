@@ -1,0 +1,85 @@
+// deprecations: on
+namespace IgnoreComments;
+// A phaenon-ignore comment naming codes (P2103, P2202, a reason in
+// parentheses) silences those codes on its line, or on the next one when it
+// stands alone, and no other code; one that silences nothing it names is
+// P4015, as PHPStan reports its own (ignore.unmatchedIdentifier). The -line
+// and -next-line forms silence every finding, and are P4015 where there is
+// none (ignore.unmatchedLine). A phpstan-ignore comment silences every
+// finding of its line, its identifiers not compared, and is never reported.
+
+function wantsInt(int $i): void {}
+
+function silenced(): void {
+    wantsInt('a'); // @phaenon-ignore P2103
+    // @phaenon-ignore P2103 (a reason in parentheses)
+    wantsInt('b');
+    /** @phaenon-ignore P2103 */
+    wantsInt('c');
+    wantsInt('d'); // @phaenon-ignore P2202, P2103 // want P4015 "no P2202 is reported on line 19"
+    wantsInt('e'); // @phaenon-ignore-line
+    // @phaenon-ignore-next-line
+    wantsInt('f');
+    wantsInt('g'); // @phpstan-ignore argument.type
+    wantsInt('h'); // @phpstan-ignore return.type
+}
+
+function unmatched(): void {
+    wantsInt('i'); // @phaenon-ignore P2202 // want P2103, P4015 "no P2202 is reported on line 28"
+    wantsInt(1); // @phaenon-ignore P2103 // want P4015 "no P2103 is reported on line 29"
+    wantsInt('j'); // @phaenon-ignore P2103, P2202 // want P4015 "no P2202"
+    wantsInt(2); // @phaenon-ignore-line // want P4015 "@phaenon-ignore-line: nothing is reported on line 31"
+    // @phaenon-ignore-next-line // want P4015 "nothing is reported on line 33"
+    wantsInt(3);
+    wantsInt('k'); // @phaenon-ignore // want P2103, P4015 "names no code"
+    wantsInt('l'); // @phaenon-ignore argument.type // want P2103, P4015 "names no code"
+    wantsInt('m'); // @phaenon-ignore P2103 because the fixture says so
+    wantsInt('n'); // @phaenon-ignore P2202, argument.type // want P2103, P4015 "no P2202 is reported on line 37"
+}
+
+/**
+ * Says how to write `@phaenon-ignore P2103` in prose, which is no tag.
+ */
+function prose(): void {
+    wantsInt(5);
+    wantsInt(4); // @phpstan-ignore argument.type
+}
+
+function covered(): void {
+    // @phaenon-ignore-next-line
+    wantsInt('o'); // @phaenon-ignore P2103
+    // @phaenon-ignore P2103
+    wantsInt('p'); // @phaenon-ignore P2103
+    wantsInt('q'); // @phaenon-ignore P2103: the fixture says so
+    wantsInt('r'); // @phaenon-ignore P2103.
+    wantsInt('s'); /* @phaenon-ignore P2103; */
+}
+
+// A code that punctuation ends is the code, whatever the punctuation. P4015
+// is silenced by no comment, or naming it would hide a stale suppression:
+// a comment that names it is told so, and held to its other codes as ever.
+// The line a comment covers is the one the finding is reported on: an
+// argument's, in a call written over several lines, not the line the call
+// starts on.
+function named(): void {
+    wantsInt('t'); // @phaenon-ignore P2103!
+    wantsInt(6); /* @phaenon-ignore P2103 */ // @phaenon-ignore P4015 // want P4015 "no P2103 is reported", P4015 "P4015 cannot be silenced: remove the comment, or the code in it that matches nothing"
+    wantsInt(7); // @phaenon-ignore P2103, P4015 // want P4015 "no P2103 is reported", P4015 "P4015 cannot be silenced"
+    wantsInt('w'); // @phaenon-ignore P2103, P4015 // want P4015 "P4015 cannot be silenced"
+    wantsInt(8); // @phaenon-ignore-line P4015 // want P4015 "nothing is reported"
+    wantsInt(
+        'u' // @phaenon-ignore P2103
+    );
+    // @phaenon-ignore P2103 // want P4015 "no P2103 is reported on line 74"
+    wantsInt(
+        'v' // want P2103
+    );
+}
+
+// With the deprecations reported, a comment is held to their codes as to
+// any other.
+function deprecations(): string {
+    $a = \DATE_RFC7231; // @phaenon-ignore P4006
+    $b = 'x'; // @phaenon-ignore P4006 // want P4015 "no P4006 is reported"
+    return $a . $b;
+}

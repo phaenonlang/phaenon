@@ -1,0 +1,23 @@
+namespace IgnoreCommentsLeftOut;
+
+// Without the deprecations, as in every phn build and under phn check
+// --no-deprecations, a comment is not held to a code the run leaves out
+// (P1101, P4006): whether it silences anything is known only to a run that
+// reports the code. A comment that silences every finding of its line is
+// not held to what it silenced either, since the finding it is for may be
+// one of those. The other codes are held as ever.
+
+function wantsInt(int $i): void {}
+
+function leftOut(): string {
+    $a = \DATE_RFC7231; // @phaenon-ignore P4006
+    $b = 'x'; // @phaenon-ignore P1101
+    wantsInt(1); // @phaenon-ignore-line
+    // @phaenon-ignore-next-line
+    wantsInt(2);
+    wantsInt(3); // @phaenon-ignore P2103 // want P4015 "no P2103 is reported"
+    wantsInt(4); // @phaenon-ignore P2103, P4006 // want P4015 "no P2103 is reported"
+    wantsInt('a'); // @phaenon-ignore-line
+    wantsInt('b'); // @phaenon-ignore P4006 // want P2103
+    return $a . $b;
+}

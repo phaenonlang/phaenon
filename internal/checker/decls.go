@@ -159,7 +159,7 @@ func (c *Checker) noteElementless(f *program.File, t ast.TypeExpr, at ast.Span) 
 	if c.opts.Elementless == nil {
 		return
 	}
-	if line, _ := c.file.Position(at.Start); c.ignored[c.file.Path][line] {
+	if line, _ := c.file.Position(at.Start); c.silencing(c.file, line, P2516.ID) != nil {
 		return
 	}
 	ast.Inspect(t, func(n ast.Node) bool {

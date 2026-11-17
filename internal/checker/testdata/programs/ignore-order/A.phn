@@ -1,0 +1,7 @@
+namespace IgnoreOrder;
+
+// A finding in a constant's value is reported when the constant is first
+// read: here, in a file checked before the one that declares it. The
+// ignore comment beside the constant silences it in whichever order the
+// two files are checked, and is not reported as silencing nothing.
+function read(): mixed => K::X;

@@ -4,8 +4,11 @@ package checker
 
 import (
 	"fmt"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/lexer"
@@ -89,6 +92,10 @@ type Diagnostic struct {
 	// breaks. phn lsp shows them beside the finding.
 	Related []Related
 	key     string // the dedupe key, so a rollback can forget the diagnostic
+	// silencedBy is the ignore comment that silences the finding: it is
+	// kept, and rolled back as any finding is, until Check knows which
+	// comments silenced something, and then left out.
+	silencedBy *ignoreRule
 }
 
 // SyntaxError is the P1000 of a file that does not parse (err, from
@@ -138,9 +145,13 @@ type Checker struct {
 	// callSeq numbers call sites so a callee's type parameters get fresh
 	// identities per call (T of the callee is not T of the caller).
 	callSeq int
-	// ignored lists, per file, the lines silenced by @phpstan-ignore /
-	// @phaenon-ignore comments.
-	ignored map[string]map[int]bool
+	// ignored lists, per file and line, the ignore comments that silence
+	// findings there (@phpstan-ignore, @phaenon-ignore): a checked file's,
+	// read when the first finding is reported in it or when it is checked,
+	// whichever comes first (rules). judged are the files checked to their
+	// end, whose comments settleIgnores holds to what they silenced.
+	ignored map[string]map[int][]*ignoreRule
+	judged  map[string]bool
 	// recvs, dynNames and byRefArgs are what the unused-member pass reads
 	// (unused.go): the receiver type of each member access in a class body,
 	// the type of each dynamic member name, and the properties passed by
@@ -168,27 +179,58 @@ type Checker struct {
 
 // New creates a checker for the program.
 func New(p *program.Program, opts Options) *Checker {
-	c := &Checker{p: p, opts: opts, seen: map[string]bool{}, ignored: map[string]map[int]bool{}}
+	c := &Checker{p: p, opts: opts, seen: map[string]bool{}, ignored: map[string]map[int][]*ignoreRule{}, judged: map[string]bool{}}
 	p.ConstType = c.constType
 	return c
 }
 
-// ignoredLines finds the lines silenced by ignore comments: `// @phpstan-ignore …`
-// (or `@phaenon-ignore`) at the end of a line silences that line, on its
-// own line the next one; `@phpstan-ignore-line` always silences its own
-// line and `@phpstan-ignore-next-line` the next.
-func ignoredLines(src []byte, toks []token.Token) map[int]bool {
-	out := map[int]bool{}
+// ignoreRule is one ignore comment and the line it silences. A
+// `@phpstan-ignore …` silences every finding of its line, as it always
+// has: how PHPStan's identifiers would match Phaenon's codes is not
+// settled. A `@phaenon-ignore P2103, P2202` silences the codes it names
+// and no other, and like `@phaenon-ignore-line` and
+// `@phaenon-ignore-next-line`, which silence every finding, it is itself
+// reported (P4015) where it silences nothing, as PHPStan reports its own
+// (ignore.unmatchedIdentifier, ignore.unmatchedLine).
+type ignoreRule struct {
+	line int
+	// at is the comment's tag, where a rule that silences nothing is
+	// reported; word is the tag as written.
+	at   ast.Span
+	word string
+	// all marks a comment that silences every finding of its line; codes
+	// are the codes a @phaenon-ignore names, the words after its tag up to
+	// the first that is no code, where its prose begins.
+	all   bool
+	codes []string
+	// native marks a @phaenon-ignore form, held to what it silences.
+	native bool
+	used   map[string]bool // the codes it silenced
+}
+
+// silences reports whether the rule silences a finding of the code.
+func (r *ignoreRule) silences(code string) bool {
+	return r.all || slices.Contains(r.codes, code)
+}
+
+// ignoreRules finds the ignore comments: `// @phpstan-ignore …` (or
+// `@phaenon-ignore …`) at the end of a line silences that line, on its own
+// line the next one; `-ignore-line` always silences its own line and
+// `-ignore-next-line` the next.
+func ignoreRules(src []byte, toks []token.Token) map[int][]*ignoreRule {
+	out := map[int][]*ignoreRule{}
 	for i, t := range toks {
 		if t.Kind != token.T_COMMENT && t.Kind != token.T_DOC_COMMENT {
 			continue
 		}
 		text := t.Text(src)
-		if !strings.Contains(text, "@phpstan-ignore") && !strings.Contains(text, "@phaenon-ignore") {
+		r := parseIgnore(text)
+		if r == nil {
 			continue
 		}
-		sameLine := strings.Contains(text, "-ignore-line")
-		if !sameLine && !strings.Contains(text, "-ignore-next-line") {
+		r.at = ast.Span{Start: t.Start + r.at.Start, End: t.Start + r.at.End}
+		sameLine := strings.HasSuffix(r.word, "-ignore-line")
+		if !sameLine && !strings.HasSuffix(r.word, "-ignore-next-line") {
 			// Code before the comment on the same line makes it a trailing comment.
 			for j := i - 1; j >= 0; j-- {
 				if toks[j].Kind.IsTrivia() {
@@ -199,17 +241,175 @@ func ignoredLines(src []byte, toks []token.Token) map[int]bool {
 			}
 		}
 		if sameLine {
-			out[t.Line] = true
+			r.line = t.Line
+			out[r.line] = append(out[r.line], r)
 			continue
 		}
 		for j := i + 1; j < len(toks); j++ {
 			if !toks[j].Kind.IsTrivia() {
-				out[toks[j].Line] = true
+				r.line = toks[j].Line
+				out[r.line] = append(out[r.line], r)
 				break
 			}
 		}
 	}
 	return out
+}
+
+// reIgnore is an ignore tag and what follows it on its line: the
+// identifiers, comma-separated, up to a parenthesised reason. The tag starts
+// the comment's text or follows a space or the comment's own marks: one
+// quoted in prose (`@phaenon-ignore P2103`) is no tag.
+var reIgnore = regexp.MustCompile(`(?:^|[\s/*#])(@(phpstan|phaenon)-ignore(-next-line|-line)?)\b([^\n(]*)`)
+
+// reCode is a diagnostic code as phn writes it.
+var reCode = regexp.MustCompile(`^P[1-4][0-9]{3}$`)
+
+// parseIgnore reads the ignore tag of a comment, nil without one; at is
+// the tag's span within the comment.
+func parseIgnore(text string) *ignoreRule {
+	m := reIgnore.FindStringSubmatchIndex(text)
+	if m == nil {
+		return nil
+	}
+	r := &ignoreRule{at: ast.Span{Start: m[2], End: m[3]}, word: text[m[2]:m[3]], used: map[string]bool{}}
+	r.native = text[m[4]:m[5]] == "phaenon"
+	if !r.native || m[6] >= 0 {
+		r.all = true // every finding of the line
+		return r
+	}
+	// The names end at a reason in parentheses (the pattern's stop), at the
+	// end of a block comment, or at a second `//`, after which a line
+	// comment says something else.
+	rest := text[m[8]:m[9]]
+	for _, stop := range []string{"*/", "//"} {
+		rest, _, _ = strings.Cut(rest, stop)
+	}
+	// The codes run up to the first word that is none, where the prose
+	// after them begins; a code that punctuation ends (`P2103: why`,
+	// `P2103.`, `P2103!`) is still the code, and the last one.
+	for _, f := range strings.FieldsFunc(rest, func(c rune) bool { return c == ',' || c == ' ' || c == '\t' }) {
+		code := strings.TrimRightFunc(f, func(c rune) bool { return !unicode.IsLetter(c) && !unicode.IsDigit(c) })
+		if !reCode.MatchString(code) {
+			break
+		}
+		r.codes = append(r.codes, code)
+		if code != f {
+			break
+		}
+	}
+	return r
+}
+
+// rules returns the ignore comments of a checked file by the line each
+// silences. They are read when the first finding is reported in the file
+// or when the file is checked, whichever comes first: a constant's value
+// is checked from the file that reads it and a trait's body from the class
+// that uses it, either of which may be checked before the file the finding
+// is in, and a comment there silences the finding in whichever order the
+// files come. A file that is not checked has none; nothing is reported in
+// it.
+func (c *Checker) rules(f *program.File) map[int][]*ignoreRule {
+	if f == nil || !f.Checked {
+		return nil
+	}
+	rules, ok := c.ignored[f.Path]
+	if !ok {
+		rules = ignoreRules(f.Src, lexer.Tokenize(f.Src, f.Mode))
+		c.ignored[f.Path] = rules
+	}
+	return rules
+}
+
+// silencing returns the ignore comment that silences a finding of the code
+// on a line of the file, nil when none does.
+func (c *Checker) silencing(f *program.File, line int, code string) *ignoreRule {
+	for _, r := range c.rules(f)[line] {
+		if r.silences(code) {
+			return r
+		}
+	}
+	return nil
+}
+
+// leftOut reports a code whose findings this run does not report: the
+// deprecations, of the language (P1101) and of the library (P4006),
+// without Options.Deprecations, as in every phn build and under phn check
+// --no-deprecations. An ignore comment is not held to such a code: whether
+// it silences anything is known only to a run that reports it, and a
+// comment that is right must not warn in every build.
+func (c *Checker) leftOut(code string) bool {
+	return !c.opts.Deprecations && (code == P1101.ID || code == P4006.ID)
+}
+
+// leavesOut reports a run that leaves some code's findings out (leftOut):
+// a comment that silences every finding of its line is not held to what
+// it silenced there, since the finding it is for may be one of those.
+func (c *Checker) leavesOut() bool {
+	return !c.opts.Deprecations
+}
+
+// settleIgnores leaves the silenced findings out, and reports the
+// @phaenon-ignore comments that silenced nothing they name (P4015), in the
+// files checked to their end. A comment is held to the codes this run
+// reports and no other (leftOut). P4015 itself is silenced by no comment,
+// or a stale suppression could be hidden by naming it, and a comment that
+// names it is told so.
+func (c *Checker) settleIgnores() {
+	kept := c.diags[:0]
+	for _, d := range c.diags {
+		if d.silencedBy != nil {
+			// Every comment that covers the line and names the code silenced
+			// it, not the first alone: one above the line and one after it,
+			// or a -next-line form and a trailing one.
+			for _, r := range c.ignored[d.File][d.Line] {
+				if r.silences(d.Code) {
+					r.used[d.Code] = true
+				}
+			}
+			continue
+		}
+		kept = append(kept, d)
+	}
+	c.diags = kept
+	for _, f := range c.p.CheckedFiles() {
+		if !c.judged[f.Path] {
+			continue
+		}
+		rules := c.ignored[f.Path]
+		lines := make([]int, 0, len(rules))
+		for line := range rules {
+			lines = append(lines, line)
+		}
+		sort.Ints(lines)
+		c.file = f
+		for _, line := range lines {
+			for _, r := range rules[line] {
+				if !r.native {
+					continue
+				}
+				switch {
+				case r.all:
+					if len(r.used) == 0 && !c.leavesOut() {
+						c.report(r.at, P4015, "%s: nothing is reported on line %d", r.word, line)
+					}
+				case r.codes == nil:
+					c.report(r.at, P4015, "%s names no code, and silences nothing: name the codes it silences, as in `%s P2103`", r.word, r.word)
+				default:
+					// One finding for each code that silences nothing, as PHPStan
+					// reports each identifier (ignore.unmatchedIdentifier).
+					for _, code := range r.codes {
+						switch {
+						case code == P4015.ID:
+							c.report(r.at, P4015, "%s: P4015 cannot be silenced: remove the comment, or the code in it that matches nothing", r.word)
+						case !r.used[code] && !c.leftOut(code):
+							c.report(r.at, P4015, "%s: no %s is reported on line %d", r.word, code, line)
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 // Check analyses every checked file and returns the diagnostics sorted by
@@ -221,6 +421,7 @@ func (c *Checker) Check() []Diagnostic {
 		}
 		c.file = f
 		c.checkFile(f)
+		c.judged[f.Path] = true
 	}
 	c.checkReadonlyInits()
 	for _, pr := range c.p.Problems {
@@ -234,6 +435,7 @@ func (c *Checker) Check() []Diagnostic {
 		}
 		c.report(pr.Span, code, "%s", pr.Msg)
 	}
+	c.settleIgnores()
 	sort.SliceStable(c.diags, func(i, j int) bool {
 		a, b := c.diags[i], c.diags[j]
 		if a.File != b.File {
@@ -271,9 +473,6 @@ func related(f *program.File, span ast.Span, format string, args ...any) *Relate
 func (c *Checker) reportRelated(span ast.Span, code Code, rel *Related, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	line, col := c.file.Position(span.Start)
-	if c.ignored[c.file.Path][line] {
-		return
-	}
 	end := span.End
 	if end > span.Start {
 		end--
@@ -286,6 +485,9 @@ func (c *Checker) reportRelated(span ast.Span, code Code, rel *Related, format s
 	c.seen[key] = true
 	d := Diagnostic{File: c.file.Path, Line: line, Col: col, EndLine: endLine, EndCol: endCol + 1,
 		Severity: code.Severity, Code: code.ID, Message: msg, key: key}
+	if code != P4015 {
+		d.silencedBy = c.silencing(c.file, line, code.ID)
+	}
 	if rel != nil {
 		d.Related = []Related{*rel}
 	}
@@ -325,7 +527,9 @@ func (c *Checker) checkTabs(f *program.File) {
 func (c *Checker) checkFile(f *program.File) {
 	phaenon := f.Mode == lexer.ModePhaenon
 	toks := lexer.Tokenize(f.Src, f.Mode)
-	c.ignored[f.Path] = ignoredLines(f.Src, toks)
+	if _, read := c.ignored[f.Path]; !read {
+		c.ignored[f.Path] = ignoreRules(f.Src, toks)
+	}
 	if phaenon {
 		c.checkTabs(f)
 		c.checkWords(f)
