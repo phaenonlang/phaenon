@@ -58,7 +58,9 @@ final class Launcher
         if ($build !== null) {
             return $build;
         }
-        $installed = BinaryResolver::installedPath($packageDir);
+        // The binary for the platform this runs on: a vendor/ shared between platforms holds each
+        // one's under its own name, and the one missing here is fetched as at the first run.
+        $installed = BinaryResolver::installedPath($packageDir, BinaryResolver::pinned($packageDir));
         // The plugin checked the binary against the pinned checksum when it put it there, and
         // Composer replaces the package directory with each version. Hashing 9 MB on every run
         // would add some 45 ms to each command.

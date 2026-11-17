@@ -11,9 +11,11 @@ namespace Phaenon\Composer;
  * `PHN_BINARY` wins and is used as it is. A package that is a checkout of the compiler, as through
  * a symlinked path repository, runs the developer's own build in its bin/, and nothing is ever
  * written into it. Otherwise the binary is the release asset that composer/checksums.json pins for
- * the platform, installed as bin/phn in the package. It is downloaded once into Composer's cache,
- * and every copy is checked against the pinned SHA-256 before it is used, so the binary that runs
- * is the one composer.lock pins.
+ * the platform, installed in the package's bin/ under the asset's own name (phn-linux-arm64), so
+ * that the binaries of several platforms sharing one vendor/ stand side by side and the launcher
+ * runs the one for its platform, fetching it when it is missing. It is downloaded once into
+ * Composer's cache, and every copy is checked against the pinned SHA-256 before it is used, so the
+ * binary that runs is the one composer.lock pins.
  *
  * Nothing here needs Composer: the launcher uses it with a downloader of its own.
  */
@@ -86,7 +88,7 @@ final readonly class BinaryResolver
         if (!self::isCheckout($packageDir)) {
             return null;
         }
-        $build = self::installedPath($packageDir);
+        $build = self::checkoutPath($packageDir);
         if (is_file($build) && is_executable($build)) {
             return $build;
         }
@@ -99,9 +101,34 @@ final readonly class BinaryResolver
         ));
     }
 
-    public static function installedPath(string $packageDir): string
+    /**
+     * Where the pinned binary for a platform is installed: bin/ under the release asset's own
+     * name (phn-linux-arm64, phn-darwin-arm64, phn-windows-amd64.exe), so that one vendor/ shared
+     * between platforms, a macOS host and a Linux container, holds each one's binary side by side,
+     * and the launcher runs the one for the platform it runs on.
+     */
+    public static function installedPath(string $packageDir, PinnedBinary $binary): string
+    {
+        return $packageDir . '/bin/' . $binary->file;
+    }
+
+    /**
+     * Where a checkout of the compiler has its own build: `go build -o bin/phn ./cmd/phn`.
+     */
+    private static function checkoutPath(string $packageDir): string
     {
         return $packageDir . '/bin/' . Platform::executableName();
+    }
+
+    /**
+     * The binary the package pins for the platform PHP runs on.
+     *
+     * @throws BinaryUnavailable when there is none for it
+     * @throws \UnexpectedValueException when composer/checksums.json is broken
+     */
+    public static function pinned(string $packageDir): PinnedBinary
+    {
+        return Checksums::read($packageDir . '/composer/checksums.json')->binaryFor(Platform::current());
     }
 
     /**
@@ -129,12 +156,23 @@ final readonly class BinaryResolver
      */
     private function install(): string
     {
-        $binary = Checksums::read($this->packageDir . '/composer/checksums.json')->binaryFor(Platform::current());
-        $target = self::installedPath($this->packageDir);
+        $binary = self::pinned($this->packageDir);
+        $target = self::installedPath($this->packageDir, $binary);
         if ($binary->matches($target)) {
             return $target;
         }
-        self::ensureDirectory(\dirname($target));
+        // A runtime image that leaves the compiler out removes this directory or makes it
+        // read-only: say so, rather than how a temporary file could not be written in it.
+        $dir = \dirname($target);
+        if ((!is_dir($dir) && !@mkdir($dir, 0777, true) && !is_dir($dir)) || !is_writable($dir)) {
+            throw new BinaryUnavailable(sprintf(
+                '%s, the phn binary for this platform, is not installed, and %s cannot be written to '
+                . 'install it: it is missing or read-only, as in an image that leaves the compiler out. '
+                . 'Run composer install where vendor/ can be written, or set PHN_BINARY to a phn binary',
+                $binary->file,
+                $dir,
+            ));
+        }
         $cached = $this->cacheEntry($binary);
         if ($cached === null) {
             $this->download($binary, $target);

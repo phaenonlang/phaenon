@@ -430,9 +430,14 @@ func (p *project) environ() []string {
 	return env
 }
 
-// installed is where the plugin installs the binary in the project.
+// installed is where the plugin installs the binary for the platform the
+// tests run on: bin/ under the release asset's name.
 func (p *project) installed() string {
-	return filepath.Join(p.dir, "vendor", "phaenon", "phn", "bin", "phn")
+	name := "phn-" + platformKey()
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(p.dir, "vendor", "phaenon", "phn", "bin", name)
 }
 
 // platformKey names the platform the tests run on as checksums.json does.

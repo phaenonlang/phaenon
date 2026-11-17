@@ -448,10 +448,16 @@ composer require phaenon/phn
 
 `phaenon/phn` is a Composer plugin (`design/tooling.md` §3). It brings the `phn` binary for the
 platform, pinned by its SHA-256 in the package, so `composer.lock` pins the compiler too, and links
-it as `vendor/bin/phn`. When Composer writes the autoloader, it compiles every installed package
-that has a `phaenon.json` (each for its own target, its findings shown as warnings, skipped while
-nothing changed: `phn build --vendor`), then the project itself (`phn build`), so that
-`--classmap-authoritative` finds the outputs. With no `phaenon.json` anywhere it does nothing.
+it as `vendor/bin/phn`. The binary is kept under its platform's name (`phn-linux-arm64`), and
+`vendor/bin/phn` runs the one for the platform it runs on, fetching it when it is missing: one
+`vendor/` shared between a macOS host and a Linux container serves both. A runtime image that
+leaves the compiler out removes the directory, `rm -rf vendor/phaenon/phn/bin` (earlier releases
+kept the one file `vendor/phaenon/phn/bin/phn`); `vendor/bin/phn`, if it is run there, fetches
+the binary again, or says that it cannot where the directory cannot be written. When
+Composer writes the autoloader, it compiles every installed package that has a `phaenon.json`
+(each for its own target, its findings shown as warnings, skipped while nothing changed: `phn build
+--vendor`), then the project itself (`phn build`), so that `--classmap-authoritative` finds the
+outputs. With no `phaenon.json` anywhere it does nothing.
 A root an installed package lists under `committed` (above) is left as installed, and a package
 whose installed roots are all committed is nothing to build: alone, it makes the plugin neither
 fetch the binary nor run it. A package that came without the outputs it commits fails the command
