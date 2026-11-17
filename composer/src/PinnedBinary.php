@@ -26,7 +26,7 @@ final readonly class PinnedBinary
         if (!is_file($path)) {
             return false;
         }
-        $actual = hash_file('sha256', $path);
+        $actual = @hash_file('sha256', $path); // one that cannot be read does not match
 
         return $actual !== false && hash_equals($this->sha256, $actual);
     }
