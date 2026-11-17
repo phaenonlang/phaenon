@@ -14,7 +14,8 @@ package migrate
 //   - an empty body — a function or method without statements, a class-like
 //     without members, and no comment inside — is `{}` on the declaration's
 //     line, as PER-CS 2.0 writes it;
-//   - a docblock with one line of content becomes one line;
+//   - a docblock with one line of content that starts its line becomes one
+//     line;
 //   - a body that is exactly one `return expr;` — or one expression
 //     statement under void or never — with no comment inside the braces
 //     becomes `=> expr;`, wrapped after the arrow when the line would pass
