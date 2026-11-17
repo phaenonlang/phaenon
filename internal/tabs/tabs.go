@@ -95,14 +95,14 @@ func Expand(src []byte) []byte {
 			col = 0
 			i++
 		case c == '\t':
-			n := Width - col%Width
+			stop := advance(col, c)
 			if next < len(offs) && offs[next] == i {
 				next++
-				out = append(out, bytes.Repeat([]byte{' '}, n)...)
+				out = append(out, bytes.Repeat([]byte{' '}, stop-col)...)
 			} else {
 				out = append(out, c)
 			}
-			col += n
+			col = stop
 			i++
 		default:
 			_, size := utf8.DecodeRune(src[i:])
@@ -114,8 +114,10 @@ func Expand(src []byte) []byte {
 	return out
 }
 
-// advance returns the column after c, a space or a tab, written at col of
-// a line's leading whitespace.
+// advance returns the column after c, a space or a tab, written at col: a
+// tab reaches the next tab stop. It is the one statement of where a tab
+// ends, for Expand, which writes the spaces up to there, and for the reach
+// of a heredoc's closing indentation, which must count as Expand writes.
 func advance(col int, c byte) int {
 	if c == '\t' {
 		return col + Width - col%Width
