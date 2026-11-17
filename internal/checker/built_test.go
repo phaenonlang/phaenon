@@ -44,10 +44,47 @@ func TestBuiltArraysStayBounded(t *testing.T) {
 		b.WriteString("$o['done'] = true;\n")
 		return b.String()
 	}
+	// unset() and `+=` in a chain of if/else double the shapes as writes
+	// do, and are bounded as writes are: sixteen of them took over 40 s.
+	unsets := func(n int) string {
+		var b strings.Builder
+		b.WriteString("$o = [")
+		for i := 0; i < n; i++ {
+			fmt.Fprintf(&b, "'k%d' => %d, ", i, i)
+		}
+		b.WriteString("];\n")
+		for i := 0; i < n; i++ {
+			fmt.Fprintf(&b, "if ($c[%d] ?? false) { unset($o['k%d']); }\n", i, i)
+		}
+		return b.String()
+	}
+	plus := func(n int) string {
+		var b strings.Builder
+		b.WriteString("$o = ['id' => 0];\n")
+		for i := 0; i < n; i++ {
+			fmt.Fprintf(&b, "if ($c[%d] ?? false) { $o += ['a%d' => %d]; } else { $o += ['b%d' => 'x']; }\n", i, i, i, i)
+		}
+		return b.String()
+	}
+	// Two arrays of 256 shapes each, added: each pair of shapes gives one,
+	// and the product is bounded too (boundedPlus).
+	product := func(n int) string {
+		var b strings.Builder
+		b.WriteString("$a = ['id' => 0];\n$b = ['id' => 'x'];\n")
+		for i := 0; i < n; i++ {
+			fmt.Fprintf(&b, "if ($c[%d] ?? false) { $a['a%d'] = %d; } else { $a['c%d'] = 'x'; }\n", i, i, i, i)
+		}
+		for i := 0; i < n; i++ {
+			fmt.Fprintf(&b, "if ($c[%d] ?? false) { $b['b%d'] = %d; } else { $b['d%d'] = 'y'; }\n", i+n, i, i, i)
+		}
+		b.WriteString("$o = $a + $b;\n")
+		return b.String()
+	}
 	for name, c := range map[string]struct {
 		body     string
 		min, max int
 	}{
+		"product":        {product(8), 1, 256},
 		"writes":         {keys.String(), 1, 1},
 		"merges":         {merges.String(), 1, 1},
 		"few joins":      {joins(6), 64, 64},
@@ -55,6 +92,8 @@ func TestBuiltArraysStayBounded(t *testing.T) {
 		"nine options":   {options(9), 512, 512},
 		"ten options":    {options(10), 1, 1},
 		"twelve options": {options(12), 1, 1},
+		"unsets":         {unsets(16), 1, 1024},
+		"plus":           {plus(16), 1, 1024},
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := "function takesInt(int $i): void {}\n\n/** @param list<bool> $c */\nfunction f(array $c): void\n{\n" + c.body + "takesInt($o);\n}\n"

@@ -2234,7 +2234,7 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 	case token.Kind('+'):
 		if isArrayType(l) || isArrayType(r) {
 			if isArrayType(l) && isArrayType(r) {
-				return arrayPlus(l, r)
+				return boundedPlus(l, r)
 			}
 			if !types.IsMixed(l) && !types.IsMixed(r) {
 				x.report(span, P2301, "cannot add %s and %s", x.typeName(l), x.typeName(r))
@@ -3845,6 +3845,66 @@ func (x *fnCtx) withdrawn(e *ast.Withdrawn, env *state) types.Type {
 		}
 	}
 	return types.TError
+}
+
+// boundedPlus is arrayPlus of l and r with their shapes bounded as a write
+// bounds them (boundedShapes): `$o += …` in a chain of if/else adds them up
+// as writes do. Each pair of shapes gives one, so the product is bounded
+// too: past maxShapeValues entries in all, the shapes one key tells apart
+// merge first, which loses nothing, and then each side's collapse into
+// one, which loses what their values said together, as the steps of
+// boundedShapes past the limit do.
+func boundedPlus(l, r types.Type) types.Type {
+	l, r = boundedShapes(l), boundedShapes(r)
+	if pairedEntries(l, r) > maxShapeValues {
+		l, r = shapesReduced(l, false), shapesReduced(r, false)
+	}
+	if pairedEntries(l, r) > maxShapeValues {
+		l, r = shapesReduced(l, true), shapesReduced(r, true)
+	}
+	return arrayPlus(l, r)
+}
+
+// pairedEntries is how many entries the shapes of l and r give paired, each
+// with each: what arrayPlus of them holds.
+func pairedEntries(l, r types.Type) int {
+	count := func(t types.Type) (shapes, entries int) {
+		for _, m := range types.Members(t) {
+			if s, ok := m.(types.Shape); ok {
+				shapes++
+				entries += len(s.Entries)
+			}
+		}
+		return shapes, entries
+	}
+	ln, le := count(l)
+	rn, re := count(r)
+	return ln*re + rn*le
+}
+
+// shapesReduced is t with its shapes merged where one key tells two apart
+// (reduceShapes), and collapsed into one as well where collapse is true.
+func shapesReduced(t types.Type, collapse bool) types.Type {
+	var shapes []types.Shape
+	var out []types.Type
+	for _, m := range types.Members(t) {
+		if s, ok := m.(types.Shape); ok {
+			shapes = append(shapes, s)
+		} else {
+			out = append(out, m)
+		}
+	}
+	if len(shapes) < 2 {
+		return t
+	}
+	shapes = reduceShapes(shapes)
+	if collapse && len(shapes) > 1 {
+		shapes = []types.Shape{collapseShapes(shapes)}
+	}
+	for _, s := range shapes {
+		out = append(out, s)
+	}
+	return types.MakeUnion(out...)
 }
 
 // arrayPlus types `$a + $b` on arrays: the left operand's entries, then the
