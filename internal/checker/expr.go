@@ -1340,6 +1340,9 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 		x.report(e.Index.Span(), P2313, "offset %s does not exist on %s", x.typeName(raw), x.typeName(base))
 	}
 	var out []types.Type
+	// The arrays that do not have the key, reported once after the loop:
+	// one mistake, one finding, however many shapes the array may be.
+	var lacking []types.Type
 	for _, m := range types.Members(base) {
 		if types.IsTextBytes(m) {
 			// One byte of UTF-8 text is binary data: it may be part of a
@@ -1388,7 +1391,7 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 			t, found, certain := shapeOffset(m, idx)
 			if !found {
 				if !lenient && !m.Unsealed && certain {
-					x.report(e.Index.Span(), P2313, "offset %s does not exist on %s", x.typeName(raw), x.typeName(m))
+					lacking = append(lacking, m)
 				}
 				switch {
 				case m.Unsealed:
@@ -1407,7 +1410,7 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 			out = append(out, t)
 		case types.Array:
 			if !types.IsMixed(raw) && !types.Overlaps(idx, m.Key, x.p()) && !lenient {
-				x.report(e.Index.Span(), P2313, "offset %s does not exist on %s", x.typeName(raw), x.typeName(m))
+				lacking = append(lacking, m)
 			}
 			out = append(out, m.Value)
 		case types.String, types.StringLit:
@@ -1466,6 +1469,9 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 			}
 			out = append(out, types.TMixed)
 		}
+	}
+	if len(lacking) > 0 {
+		x.report(e.Index.Span(), P2313, "offset %s does not exist on %s", x.typeName(raw), x.typeName(types.MakeUnion(lacking...)))
 	}
 	return types.MakeUnion(out...)
 }
