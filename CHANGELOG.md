@@ -3,6 +3,21 @@
 From 0.3.0 on, release-please writes each entry from the Conventional Commits merged since the
 previous release (`release-please-config.json`). The two releases before were cut by hand.
 
+## [0.7.2](https://github.com/phaenonlang/phaenon/compare/v0.7.1...v0.7.2) (2026-11-17)
+
+
+### Bug Fixes
+
+* **checker:** a ?-&gt; on null is null, and a loop over it settles ([#58](https://github.com/phaenonlang/phaenon/issues/58)) ([a285d1e](https://github.com/phaenonlang/phaenon/commit/a285d1e9c0235edbc70a64d20814c8d6d5e19b62))
+* **checker:** a ?-&gt; property fetch under ??, isset() or empty() is P2307 ([#57](https://github.com/phaenonlang/phaenon/issues/57)) ([b68d2bb](https://github.com/phaenonlang/phaenon/commit/b68d2bb495ee6b6765a71c46e4a71a0d45d9e6c2))
+* **checker:** a key of a few literals reads the entries it may name ([#61](https://github.com/phaenonlang/phaenon/issues/61)) ([0361a6b](https://github.com/phaenonlang/phaenon/commit/0361a6b8e27702f4b410e2470049258a08bc1502))
+* **checker:** arrays built in loops, spreads and merges keep their shapes ([#66](https://github.com/phaenonlang/phaenon/issues/66)) ([64fb234](https://github.com/phaenonlang/phaenon/commit/64fb2347f361304cd44698519b139736acc70585))
+* **checker:** five mistakes are reported once each ([#56](https://github.com/phaenonlang/phaenon/issues/56)) ([18364c9](https://github.com/phaenonlang/phaenon/commit/18364c99bd1f537543cfbbd46203d30ce1117200))
+* **checker:** four reads of a missing offset get PHPStan's finding ([#60](https://github.com/phaenonlang/phaenon/issues/60)) ([ba431d0](https://github.com/phaenonlang/phaenon/commit/ba431d0710e3d8c47f43e3fd78098955e88e0818))
+* **checker:** integer, double and boolean in a declaration are P2001 ([#59](https://github.com/phaenonlang/phaenon/issues/59)) ([bfea29f](https://github.com/phaenonlang/phaenon/commit/bfea29f6fc6f2ad2277cac3c04778ae6780517bf))
+* **fmt:** the tabs of a heredoc are replaced in one run ([#64](https://github.com/phaenonlang/phaenon/issues/64)) ([d570590](https://github.com/phaenonlang/phaenon/commit/d5705900562028609df7bcf62a85071ccbace032))
+* **parser:** a throws clause may name static ([#55](https://github.com/phaenonlang/phaenon/issues/55)) ([6a7379b](https://github.com/phaenonlang/phaenon/commit/6a7379be5d19c5e2cd926f75aa0968056ab496c2))
+
 ## [0.7.1](https://github.com/phaenonlang/phaenon/compare/v0.7.0...v0.7.1) (2026-11-16)
 
 
