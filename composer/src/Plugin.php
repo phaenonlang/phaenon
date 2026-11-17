@@ -152,6 +152,17 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
             }
         }
         $buildsProject = $settings->buildRoot && is_file($projectDir . '/phaenon.json');
+        // A project file that names no roots, as `phn migrate --php` writes one, has nothing for
+        // `phn build` to build without paths, and it would fail the dump: the project's build is
+        // skipped, with a line saying so. A file phn would refuse is left for phn to report.
+        $file = $buildsProject ? ProjectFile::read($projectDir . '/phaenon.json') : null;
+        if ($file !== null && $file->roots === [] && $file->unknown === [] && $file->refusal === null) {
+            $buildsProject = false;
+            $io->writeError(
+                'phaenon/phn: phaenon.json names no roots, so the project is not built: '
+                . '`vendor/bin/phn build src` builds a path until it names them, as in {"roots": {"src": ".src"}}',
+            );
+        }
         if ($packages === [] && !$buildsProject) {
             $io->writeError(
                 'phaenon/phn: nothing to build: no installed package has a root to build, and the project builds none',

@@ -242,7 +242,9 @@ target decides what the output may contain.
 ```
 
 - `"php"` in `phaenon.json` states it; `phn migrate --php 8.6 [path...]` writes it there (creating
-  the file when there is none, which may then state only the target).
+  the file when there is none, which may then state only the target). Until the file names roots,
+  `phn check` and `phn build` take paths, and the Composer plugin builds nothing of the project and
+  says so.
 - Without it, the target is the lowest version composer.json's `require.php` admits: `>=8.5`,
   `^8.5`, `~8.5.0`, `8.5.*` and `^8.5 || ^9.0` all mean 8.5.
 - Neither: PHP 8.5, with a warning (`P4010`).

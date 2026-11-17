@@ -769,6 +769,14 @@ func printDiag(d checker.Diagnostic) {
 
 // ------------------------------------------------------------------ migrate
 
+// sayNoRoots ends phn migrate with what a project file that names no
+// roots means for the next commands, where there is such a file.
+func sayNoRoots() {
+	if p := loadProject(); p != nil && len(p.Roots) == 0 {
+		fmt.Println(noRoots("phn check and phn build take", "phn check src"))
+	}
+}
+
 func migrateCmd(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	keepDoc := fs.Bool("keep-docblocks", false, "leave generic docblocks as they are")
@@ -789,6 +797,7 @@ func migrateCmd(args []string) {
 	if *keepCalls {
 		minCalls = 0
 	}
+	defer sayNoRoots()
 	if *phpTarget != "" {
 		v, err := phpversion.Parse(*phpTarget)
 		if err != nil {
