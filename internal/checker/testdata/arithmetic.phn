@@ -137,3 +137,20 @@ function aShortRange(int $e, int $j): void
     takesInt(9223372036854775807 + $e); // want P2103 "expects int, float given"
     takesInt(2 ** $e); // want P2103 "expects int, int|float given"
 }
+
+function twoSteps(): void
+{
+    $x = 9223372036854775806;
+    $x++;
+    takesInt($x);
+    $x++;
+    takesInt($x); // want P2103 "expects int, float given"
+    $y = -9223372036854775807;
+    $y--;
+    takesInt($y);
+    --$y;
+    takesInt($y); // want P2103 "expects int, float given"
+    $n = 5;
+    $n++;
+    takesInt($n);
+}

@@ -1986,27 +1986,14 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 	var result types.Type
 	switch {
 	case types.IsSubtype(t, types.TInt, nil):
-		result = types.TInt
-		// One past the last integer is a float: from PHP_INT_MAX for
-		// certain, from PHP_INT_MAX|5 perhaps.
-		if vs, ok := fewInts(t); ok {
-			edge, past := int64(math.MinInt64), 0
-			if e.Inc {
-				edge = math.MaxInt64
-			}
-			for _, v := range vs {
-				if v == edge {
-					past++
-				}
-			}
-			switch past {
-			case 0:
-			case len(vs):
-				result = types.TFloat
-			default:
-				result = types.MakeUnion(types.TInt, types.TFloat)
-			}
+		// A step is the sum or the difference with 1, typed as that one
+		// is: 5 stepped is 6, and the last integer stepped is a float, so
+		// that a second step from 9223372036854775806 is one too.
+		op := token.Kind('-')
+		if e.Inc {
+			op = token.Kind('+')
 		}
+		result = x.binaryTypes(op, t, types.IntLit(1), e)
 	case types.IsSubtype(t, types.TFloat, nil):
 		result = types.TFloat
 	case types.IsSubtype(t, types.MakeUnion(types.TInt, types.TFloat), nil):
