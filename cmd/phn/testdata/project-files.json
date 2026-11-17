@@ -6,7 +6,8 @@
     "exclude",
     "php",
     "fmt",
-    "unused"
+    "unused",
+    "extra-checks"
   ],
   "keys-of-unused": [
     "reflected-attributes",
@@ -677,6 +678,120 @@
       "root": "unknown key \"a\\u001bb\" (this is phn",
       "unknown": [
         "a\u001bb"
+      ]
+    },
+    {
+      "name": "extra-checks, off: the checker's extra checks are left out (D33)",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"extra-checks\": false}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "extra-checks, on: what no key says",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"extra-checks\": true}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "extra-checks as null is no key",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"extra-checks\": null}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "extra-checks that is a word",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"extra-checks\": \"off\"}",
+      "refused": true,
+      "error": "\"extra-checks\" is true or false"
+    },
+    {
+      "name": "extra-checks that is a number",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"extra-checks\": 0}",
+      "refused": true,
+      "error": "\"extra-checks\" is true or false"
+    },
+    {
+      "name": "extra-checks that is a list of codes: there is no such list (D33)",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"extra-checks\": [\"P2301\"]}",
+      "refused": true,
+      "error": "\"extra-checks\" is true or false"
+    },
+    {
+      "name": "extra-checks that is an object",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"extra-checks\": {}}",
+      "refused": true,
+      "error": "\"extra-checks\" is true or false"
+    },
+    {
+      "name": "extra-checks in another letter case",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"Extra-Checks\": false}",
+      "refused": true,
+      "error": "the key \"Extra-Checks\" is written \"extra-checks\""
+    },
+    {
+      "name": "extra-checks written twice",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"extra-checks\": false, \"extra-checks\": true}",
+      "refused": true,
+      "error": "is written twice"
+    },
+    {
+      "name": "extra-checks in camel case is a key the compiler does not know",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"extraChecks\": false}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "root": "unknown key \"extraChecks\"",
+      "unknown": [
+        "extraChecks"
+      ]
+    },
+    {
+      "name": "extra-checks with an underscore is a key the compiler does not know",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"extra_checks\": false}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ],
+      "root": "unknown key \"extra_checks\"",
+      "unknown": [
+        "extra_checks"
+      ]
+    },
+    {
+      "name": "the two keys 0.8.0 brought, together",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflected-attributes\": [\"App\\\\Mapped\"]}, \"extra-checks\": false}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "extra-checks beside the earlier spelling of the key under unused",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": []}, \"extra-checks\": true}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
       ]
     }
   ]

@@ -2892,7 +2892,13 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			continue
 		}
 		if !types.IsAcceptable(at, pt, x.p()) {
-			x.c.reportRelated(b.arg.S, P2103, related(sig.file, b.param.Span, "parameter $%s of %s declared here", b.param.Name, sig.name),
+			// The argument's expression is the value, unless it is spread:
+			// then what is held to the parameter is an element of it.
+			arg := x.given(b.arg.Value)
+			if b.arg.Unpack {
+				arg = given{}
+			}
+			x.c.reportUnfit(arg, at, pt, b.arg.S, P2103, related(sig.file, b.param.Span, "parameter $%s of %s declared here", b.param.Name, sig.name),
 				"argument %d ($%s) of %s expects %s, %s given", b.idx+1, b.param.Name, sig.name, x.typeName(pt), x.typeName(at))
 		}
 	}

@@ -45,6 +45,7 @@ output. `../design/roadmap.md` §3 names the milestones and what each one brings
 | Open questions and deferred work | `../design/roadmap.md` §6, `checker.md` §10, `tooling.md` §13; the repository's issues |
 | Every `PHAENON_*` test variable | [Test variables](#test-variables) |
 | A diagnostic code | `internal/checker/codes.go` |
+| A finding's kind: language rule, parity finding or extra check | `internal/checker/kinds.go` for the codes that are language rules as a whole; otherwise the place that reports it (`report`, `reportExtra`), and for an extra check the proof it rests on (`internal/checker/extra.go`); `../design/roadmap.md` D33, `../design/checker.md` §9 |
 | The release a `phaenon.json` key came in | `keyReleases` in `cmd/phn/conflict.go`: a new key is added there too, `earlierReleases` extended to the last release without it (`TestKeyReleases`) and `composer.json`'s alias of `dev-main` moved to the key's release line (`TestBranchAliasCoversTheKeys`) |
 | What PHP does | `php` itself (the oracle), then `../php-src` |
 | A PHP function's signature | `stdlib/php-src/**/*.stub.php`, refined by `stdlib/overlay/` |
@@ -62,7 +63,7 @@ internal/printer      AST → canonical PHP, token-faithful round trip
 internal/docblock     PHPDoc tags and the PHPStan/Psalm type grammar
 internal/types        the type lattice (PHPStan semantics): subtyping, narrowing, printing
 internal/program      program model: project files, Composer vendor code (lazy), stubs + overlay
-internal/checker      the type checker behind `phn check`; a withdrawn is/as reported as P1001 with the PHP test phn fmt writes for it (typetest.go)
+internal/checker      the type checker behind `phn check`; a withdrawn is/as reported as P1001 with the PHP test phn fmt writes for it (typetest.go); each finding's kind, and the extra checks `"extra-checks": false` leaves out (kinds.go), with what proves one (extra.go)
 internal/emit         patch-based emitter: PER Coding Style 3.0 layout of what it writes (D22), the line map; generics erasure, the `public function` of a method head
 internal/linemap      the `// phaenon-map v1 …` comment every compiled file ends with: parse, write, lookups
 internal/format       `phn fmt`'s first layer: the withdrawn spellings rewritten and Phaenon's words written in lower case (respell.go), Phaenon's layout (spaces for tabs, migrate's braces and docblocks, the spacing of Phaenon's syntax)
@@ -134,7 +135,7 @@ PHPStan parity.
 | `PHAENON_PHPT_FILTER` | `internal/conformance` | Only the `.phpt` paths containing this substring, e.g. `Zend/tests` |
 | `PHAENON_SHOW_DIFFS` | printer round trip, execution suites | How many differences to print (default 25) |
 | `PHAENON_SHOW_FALSE_ACCEPT` | `TestParserAgainstPHP` | Lists (up to 30) files PHP rejects but Phaenon parses |
-| `PHAENON_PHPSTAN` | `TestPHPStanParity` (checker), `TestGenerics` (emit) | Path to a PHPStan binary (`/path/to/phpstan`), run at level max with `treatPhpDocTypesAsCertain: false` (`../design/checker.md` §9) |
+| `PHAENON_PHPSTAN` | `TestPHPStanParity` (checker), `TestGenerics` (emit) | Path to a PHPStan binary (`/path/to/phpstan`), run at level max with `treatPhpDocTypesAsCertain: false` (`../design/checker.md` §9); the checker's run holds the corpus to it in both directions, the extra checks' marks included |
 | `PHAENON_UPDATE` | the emit, format, migrate and trace goldens; `TestComposerAgrees` (semver) | Rewrites the expected files from the current output; for the constraint vectors, their answers from Composer's |
 | `PHAENON_GOLDEN` | `TestGolden` (checker) | Only the golden files whose name contains this substring |
 | `PHAENON_COMPOSER` | `internal/distribution`; `TestComposerAgrees` (semver) | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects that install it alone; one of them builds `phn` and runs what it compiles. The constraint vectors are asked of its composer/semver, in a script of a project that installs nothing |
@@ -185,6 +186,38 @@ from the package by hand.
   `internal/emit`); comments explain why, not what.
 - Diagnostic codes are stable once published: `P1xxx` syntax and removed constructs, `P2xxx` types
   and flow, `P3xxx` generics, `P4xxx` interop. One mistake, one diagnostic.
+- **Every finding has a kind** (`internal/checker/kinds.go`, `../design/roadmap.md` D33). A code
+  that only Phaenon's source can draw is a language rule as a whole and goes into
+  `languageRules`; any other goes into `placedCodes`, and each place that reports it says what the
+  finding is: `report` for a parity finding, which PHP refuses or PHPStan reports on the output,
+  `reportExtra` for an extra check (`TestEveryCodeHasAKind`). An extra check has to
+  be true: a finding that claims what is false is a defect, fixed and never marked. **An extra
+  check is a claim that PHPStan makes no such finding of the code and php runs it, and it needs
+  proof at the place it is made** (`internal/checker/extra.go`). The checker's type of a value is none: PHPStan
+  folds `strtolower('ABC')`, reads a constant's value, keeps forty literals apart where the
+  lattice has an int, and inherits a docblock by routes the checker does not follow. Nor is
+  anything the checker follows through the flow of a function: PHPStan learns of a value by
+  more ways than that models. A proof is what PHPStan cannot know more about than the checker,
+  by syntax alone: a declaration compared with a declaration; a literal; an **untouched
+  parameter** (`internal/checker/untouched.go`), one declared by its function or method alone
+  whose **only occurrence in the body is the read the finding is about** (typed by PHP alone
+  where the claim is that PHPStan knows no value). One occurrence leaves no other place where
+  PHPStan could have learnt anything, of the variable or of an expression that holds it, which
+  it remembers as well. Where that occurrence may stand is a default-deny list: a position is
+  added to it with a PHPStan run of the finding there, a line in `TestUntouchedPositions` and
+  one in `testdata/untouched.phn`; in doubt it stays off. A place that cannot prove it reports
+  through `report`: the finding then stands in both modes, and costs a line in `checkerAlone`,
+  never a finding the switch hides. Every place that may report an extra check is listed in
+  `extraCheckSites` with its proof and with the rule PHPStan judges the place by, and
+  `TestExtraCheckSites` fails for one that is not: a place PHPStan judges by a rule of its own,
+  as it does the assignment of an offset, is no place for an extra check until a run of that
+  rule says so. An extra check ends nothing that could find a parity
+  finding: it returns no error type, stops no loop and sets no flag that a later check reads,
+  or the extra checks off would hide code PHP refuses (`checkOverride`). The extra checks are left out at the end of
+  `Checker.Check`, never where they are reported, so that a check with
+  `Options.NoExtraChecks` is the check without it, less its extra checks; anything that reads
+  the findings before they are returned comes before `settleExtraChecks`. A new extra check is a
+  `feat` and comes in a minor release; closing a gap against PHPStan stays a `fix`.
 - The emitter edits spans; plain PHP passes through byte for byte, but for the `public` a method
   without a visibility gets. What it writes or rewrites (the header, imports, docblocks, a
   method's `public function`, expression bodies, declaration braces, the closures of lowerings)
@@ -202,14 +235,38 @@ from the package by hand.
 
 - **Checker corpus** `internal/checker/testdata/*.phn`: one file per feature; expected diagnostics as
   `// want P2103` on the offending line (several codes comma-separated, optional `"message
-  substring"`); the set of (line, code) pairs must match exactly. Vendor fixtures live under
+  substring"`), an extra check marked after its code: `// want P2301 extra`, `// want P2103 extra
+  "substring"`. The set of (line, code, kind) triples must match exactly, and each file is checked
+  a second time with the extra checks off, where the marked findings must be gone and every other
+  one must stay, word for word. Vendor fixtures live under
   `testdata/vendor/` (PSR-4 root `Acme\`). The file's opening comment lines may say `// target: 8.6`
   (the floor, 8.5, otherwise) and `// deprecations: on`. A rule that takes several files, as a type
   alias found from another file does, has a directory under `testdata/programs/`: every `.phn` in
   it is checked as one program (`TestGoldenPrograms`), each with its own `// want` comments.
-- **PHPStan parity:** the checker may be stricter than PHPStan, never more lenient. A PHPStan rule
-  Phaenon deliberately lacks goes into the allow-list in `internal/checker/phpstan_test.go` with its
-  reason.
+- **PHPStan parity**, held in both directions by `TestPHPStanParity`:
+  - PHPStan judges each golden as the emitter compiles it, its lines read through the line map:
+    a parity finding is one the output draws (D33), and the output is not the source read as PHP
+    where the emitter rewrites plain PHP, as it does an overriding method's native types.
+  - The checker is never more lenient than PHPStan: a line PHPStan flags is one the corpus expects
+    a finding on. A PHPStan rule Phaenon deliberately lacks goes into the allow-list in
+    `internal/checker/phpstan_test.go` with its reason; where PHPStan reports on another line a
+    mistake the checker reports, the allowance names those lines (`allowAt`) and no file.
+  - What the checker reports above PHPStan is accounted for: a finding the corpus expects on a
+    line PHPStan does not flag is a language rule by its code, or an extra check marked on its
+    line, or one of the findings `checkerAlone` names there, by file, code and line, with the
+    reason it stands unmarked: an extra check by what it says, which the place that reports it
+    cannot prove to be one (`../design/checker.md` §10), what PHP itself refuses, something of
+    the source that the emitter rewrites, an artifact of PHPStan's line or version, a false
+    finding waiting for its fix. The run fails for any other, and for an entry
+    whose line has no such finding; a change that moves a listed line moves its entry. The table
+    is to shrink, and a change does not add to it what it could mark or fix. "PHP refuses it" is
+    held to php: the run loads the compiled golden, and php must refuse it for that line, or
+    throw there when the code `thrownWhenRun` names is run.
+  - A line whose findings are all marked `extra` is one PHPStan does not flag: a finding PHPStan
+    reports too is a parity finding. A rule the allow-list has, because the checker lacks it,
+    may still speak on such a line; the run names each of those lines with its identifier
+    (`besideExtra`) and fails for one it does not name. The files with syntax only Phaenon has, which the run
+    otherwise skips, are compiled and held to this one rule where they carry marks.
 - **Emitter goldens** `internal/emit/testdata/X.phn` → `X.php`: regenerate with `PHAENON_UPDATE=1`,
   never edit by hand, and read the diff before committing it, the map line included. A directory
   under `testdata/programs/` is one program of several files, each `X.phn` compiled to the `X.php`

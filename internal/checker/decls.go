@@ -418,7 +418,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 		ctx.inConst = true
 		vt := ctx.expr(k.Value, newEnv(), k.Type)
 		if k.Type != nil && !types.IsAcceptable(vt, k.Type, c.p) {
-			c.report(k.Span, P2211, "constant %s::%s (%s) does not accept %s", cl.Name, k.Name, types.Print(k.Type), types.Print(vt))
+			c.reportUnfit(given{expr: k.Value}, vt, k.Type, k.Span, P2211, nil, "constant %s::%s (%s) does not accept %s", cl.Name, k.Name, types.Print(k.Type), types.Print(vt))
 		}
 	}
 	if cl.Kind == ast.KindEnum {
@@ -685,7 +685,7 @@ func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 	if pr.HasDefault && pr.Default != nil {
 		dt := ctx.expr(pr.Default, newEnv(), pr.Type)
 		if !types.IsAcceptable(dt, pr.Type, c.p) {
-			c.report(pr.Default.Span(), P2201, "property %s::$%s (%s) does not accept default %s", cl.Name, pr.Name, types.Print(pr.Type), types.Print(dt))
+			c.reportUnfit(given{expr: pr.Default}, dt, pr.Type, pr.Default.Span(), P2201, nil, "property %s::$%s (%s) does not accept default %s", cl.Name, pr.Name, types.Print(pr.Type), types.Print(dt))
 		}
 	}
 	for _, h := range pr.Hooks {
@@ -998,7 +998,12 @@ func (c *Checker) constructorBound(cl *program.Class) (*program.Method, *program
 // against all of them, and so do PHPStan's method compatibility rules: a
 // class whose two interfaces disagree on a method fits one of them at best.
 // One mistake is one diagnostic, so the first declaration the method breaks
-// is the one reported.
+// is the one reported. An extra check ends nothing: the declarations after
+// the one that drew it are still compared, for what PHP refuses and PHPStan
+// reports, and only another extra check is left unsaid there. Otherwise a
+// static method whose documented types break its parent's would hide the
+// interface its native types break, and with the extra checks off nothing
+// would be reported of a class PHP cannot declare.
 func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 	hasOverrideAttr := hasOverride(m.Attrs)
 	parents := overriddenMethods(cl, m)
@@ -1014,10 +1019,13 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 		// on 8.5).
 		c.libraryMethod(declSpan(m), parents[0])
 	}
+	extra := false
 	for i, parent := range parents {
-		if c.checkOverrideOf(cl, m, parent, i == 0) {
+		broken, drewExtra := c.checkOverrideOf(cl, m, parent, i == 0, extra)
+		if broken {
 			break
 		}
+		extra = extra || drewExtra
 	}
 }
 
@@ -1085,13 +1093,45 @@ func constructorSignature(parent *program.Method) *program.Method {
 	return nil
 }
 
-// checkOverrideOf compares a method with one it overrides and tells whether
-// it reported anything; first marks the first declaration of the list.
-func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, first bool) bool {
-	broken := false
+// checkOverrideOf compares a method with one it overrides. broken says that
+// it reported what PHP refuses or PHPStan reports, which ends the
+// comparison with the declarations after this one (checkOverride); extra,
+// that it drew an extra check, which ends nothing. first marks the first
+// declaration of the list, and afterExtra one that comes after a
+// declaration that drew an extra check: another is not reported there.
+func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, first, afterExtra bool) (broken, extra bool) {
 	mismatch := func(span ast.Span, format string, args ...any) {
 		broken = true
 		c.reportRelated(span, P2502, overridden(parent), format, args...)
+	}
+	// typeMismatch is mismatch for two types that do not fit as the method
+	// states them. For a static method it is an extra check where the
+	// native types the source writes fit as PHP compares them
+	// (nativesFit): a caller typed against the parent is given what the
+	// child documents. The proof compares declarations and no value: php
+	// declares the class, and PHPStan compares the documented types of
+	// static methods only with reportStaticMethodSignatures, which level
+	// max does not set.
+	//
+	// Where the written native types are apart the finding is a parity
+	// finding, static or not, and stays with the extra checks off, though
+	// php may well declare the compiled class: the emitter rewrites an
+	// overriding method's native types until they fit what they override
+	// (program.Method.ErasureOverrides), `(): iterable` over `(): array`
+	// compiling to `(): array`. The body is checked against the type the
+	// source writes, so this finding is all that stands between a body
+	// that returns a generator and a compiled method that refuses it. It
+	// is a rule about the source, which the compiled output no longer
+	// shows.
+	typeMismatch := func(nativesFit bool, span ast.Span, format string, args ...any) {
+		if !m.Static || !parent.Static || !nativesFit {
+			mismatch(span, format, args...)
+			return
+		}
+		if !afterExtra {
+			c.reportExtraRelated(span, P2502, overridden(parent), format, args...)
+		}
+		extra = true
 	}
 	if parent.Final {
 		c.report(declSpan(m), P2505, "%s::%s() overrides final method %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
@@ -1115,7 +1155,7 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 	}
 	if ctor {
 		if parent = constructorSignature(parent); parent == nil {
-			return broken // a concrete constructor binds no signature
+			return broken, extra // a concrete constructor binds no signature
 		}
 	}
 	// Map the parent's types into this class's generic arguments.
@@ -1126,6 +1166,38 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 			return nil
 		}
 		return ctx.bindReceiver(t, self, decl)
+	}
+	// nativesFit is PHP's own rule of an override, on the native types as
+	// the source writes them (written). sub stands where super is
+	// declared: the child's return type for the parent's, the parent's
+	// parameter type for the child's. A type that is not written is no
+	// demand where it is super; where it is sub, a missing return type
+	// fits no declared one (PHP: "must be compatible with …(): array"),
+	// and a parameter without a type, which takes anything, fits only
+	// mixed.
+	nativesFit := func(sub, super types.Type, isReturn bool) bool {
+		switch {
+		case super == nil:
+			return true
+		case sub == nil:
+			return !isReturn && types.IsMixed(phpType(super))
+		}
+		return types.IsSubtype(phpType(sub), phpType(super), c.p)
+	}
+	// written is the native type the source writes at a slot of a method,
+	// a parameter's index or -1 for the return, as PHP would hold it: for
+	// a parameter, with null under a default of null, which makes
+	// `array $x = null` a `?array $x`.
+	written := func(of *program.Method, decl *program.Class, slot int) types.Type {
+		if slot < 0 {
+			return bind(of.NativeReturn, decl)
+		}
+		p := of.Params[slot]
+		t := bind(p.NativeType, decl)
+		if t != nil && p.Default != nil && isNullConst(p.Default) && !types.IsNullable(t) && !types.IsMixed(t) {
+			t = types.Nullable(t)
+		}
+		return t
 	}
 	for i, pp := range parent.Params {
 		if i >= len(m.Params) {
@@ -1141,7 +1213,8 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 		}
 		pt, ct := bind(pp.Type, parent.Class), bind(cp.Type, cl)
 		if pt != nil && ct != nil && !c.overrideFits(pt, ct) {
-			mismatch(cp.Span, "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
+			typeMismatch(nativesFit(written(parent, parent.Class, i), written(m, cl, i), false),
+				cp.Span, "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
 				cp.Name, cl.Name, m.Name, types.Print(ct), parent.Class.Name, parent.Name, types.Print(pt))
 		}
 		if pp.ByRef != cp.ByRef {
@@ -1162,12 +1235,34 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 			}
 		} else if !c.overrideFits(cr, pr) {
 			if _, parentVoid := pr.(types.Void); !(parentVoid && isVoidLike(cr)) {
-				mismatch(m.Span, "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
+				typeMismatch(nativesFit(written(m, cl, -1), written(parent, parent.Class, -1), true),
+					m.Span, "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
 					types.Print(cr), cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
 			}
 		}
 	}
-	return broken
+	return broken, extra
+}
+
+// phpType is a native type as PHP compares it in an override: erased of
+// what only Phaenon reads in it (`list<int>` is array, `class<T>` string, a
+// type parameter its bound), and of nothing PHP tells apart. types.Erase
+// alone would make `false` and `true` the bool they are members of, and
+// `array|bool` would pass for `array|false`, which PHP refuses.
+func phpType(t types.Type) types.Type {
+	switch t := t.(type) {
+	case types.BoolLit:
+		return t
+	case types.Union:
+		return types.Map(t, phpType)
+	case types.Intersection:
+		ms := make([]types.Type, len(t.Types))
+		for i, m := range t.Types {
+			ms[i] = phpType(m)
+		}
+		return types.MakeIntersection(ms...)
+	}
+	return types.Erase(t)
 }
 
 // overrideFits reports whether sub may stand where an overridden method

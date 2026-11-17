@@ -1,7 +1,9 @@
 // A method is compared with every declaration it overrides: the nearest a
 // parent class has and each interface's. PHP links the class against all
 // of them and refuses one that fits its first interface and not its
-// second; PHPStan reports the same line.
+// second. The findings are about the native types as written: compiled,
+// those of an overriding method are rewritten until they fit where one
+// type can (the override-erasure rule).
 namespace App\OverrideInterfaces;
 
 interface Counts

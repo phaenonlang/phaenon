@@ -63,6 +63,16 @@ func TestErrorWithheld(t *testing.T) {
 	}
 }
 
+// The playground has no project file, so the extra checks are on, as they
+// are for a project that says nothing (design/roadmap.md D33): `**` on a
+// string, which PHPStan passes, is reported.
+func TestExtraChecksAreOn(t *testing.T) {
+	res := Compile(Request{Files: map[string]string{"main.phn": "namespace App;\n\nfunction power(string $s): float|int => $s ** 2;\n"}, Main: "main.phn"})
+	if strings.Join(codes(res.Findings), ",") != "P2301" || res.OK {
+		t.Errorf("findings %v, ok %v; want the extra check P2301", res.Findings, res.OK)
+	}
+}
+
 // A file that does not parse is P1000, at the end of the file here, and
 // never has an output.
 func TestParseError(t *testing.T) {

@@ -47,9 +47,14 @@ function closures(): void {
 function variadics(): void {
     glue('a', prefix: 'b'); // want P2010
     glue('a', x: 'b', x: 'c'); // want P2010 "named argument $x of NamedArguments\glue()"
-    glue('a', rest: 'b', rest: 'c'); // want P2010
     glue('a', 'b', rest: 'c');
     glue('a', x: 'b', y: 'c');
+}
+
+// The variadic parameter's own name given twice collides as any name does.
+// In a function of its own, so that it can be run to the Error.
+function variadicsOwnName(): void {
+    glue('a', rest: 'b', rest: 'c'); // want P2010
 }
 
 // PHP throws the overwrite before it counts or checks types: the parameter

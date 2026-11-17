@@ -203,9 +203,9 @@ func TestLSPRereadsTheProject(t *testing.T) {
 // startWatch runs `phn watch` in dir until the test ends, and returns a
 // function that waits for a line of its output, standard output and error
 // together, holding want.
-func startWatch(t *testing.T, bin, dir string) (wait func(want string)) {
+func startWatch(t *testing.T, bin, dir string, args ...string) (wait func(want string)) {
 	t.Helper()
-	cmd := exec.Command(bin, "watch", "--interval", "50ms")
+	cmd := exec.Command(bin, append([]string{"watch", "--interval", "50ms"}, args...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "PHN_PHP=/nonexistent-php")
 	out, w, err := os.Pipe()

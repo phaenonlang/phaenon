@@ -72,7 +72,7 @@ final readonly class ProjectFile
      * phn reads the earlier spelling as the key, warning of it, until the first beta, when the
      * second name here goes with phn's field for it; a file that writes both is refused.
      */
-    private const array KEYS = ['roots', 'committed', 'exclude', 'php', 'fmt', 'unused'];
+    private const array KEYS = ['roots', 'committed', 'exclude', 'php', 'fmt', 'unused', 'extra-checks'];
     private const array UNUSED_KEYS = ['reflected-attributes', 'reflectedAttributes'];
 
     /**
@@ -227,10 +227,10 @@ final readonly class ProjectFile
      * The key beside `roots` and `committed` for whose value phn refuses the file
      * (readProjectFile in cmd/phn/project.go), when there is one. phn reads `exclude` and `fmt`
      * as lists of strings, `php` as a string, `unused` as an object whose one key,
-     * `reflected-attributes`, lists class names, and each of them as null. The key's earlier
-     * spelling, `reflectedAttributes`, is read as the key, and the two in one object are
-     * refused. A key under `unused` that phn does not know is refused, not passed over: only a
-     * key of the file's own object is.
+     * `reflected-attributes`, lists class names, `extra-checks` as true or false, and each of
+     * them as null. The key's earlier spelling, `reflectedAttributes`, is read as the key, and
+     * the two in one object are refused. A key under `unused` that phn does not know is
+     * refused, not passed over: only a key of the file's own object is.
      */
     private static function keyPhnRefuses(\stdClass $data): ?string
     {
@@ -241,6 +241,7 @@ final readonly class ProjectFile
             $read = match ((string) $key) {
                 'exclude', 'fmt' => $strings($value),
                 'php' => $value === null || \is_string($value),
+                'extra-checks' => $value === null || \is_bool($value),
                 'unused' => $value === null || ($value instanceof \stdClass && self::readsUnused($value)),
                 default => true, // parse() reads roots and committed, and passes over the rest
             };

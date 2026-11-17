@@ -20,7 +20,8 @@ D31). What works today:
 
 - `phn check`, the type checker: PHP plus Phaenon's syntax (generics, `list<T>` and `map<K, V>`,
   tuples, `bytes`, methods without a keyword, `throws` and `nothrow`) and the PHPStan docblock
-  vocabulary; it reports what PHPStan reports at level max, and may be stricter, never more lenient.
+  vocabulary; it reports what PHPStan reports at level max and never less, and its extra checks
+  above that, which are on by default and which one switch turns off.
 - `phn build`, the emitter: the PHP you would have written, with PHPStan docblocks, laid out as PER
   Coding Style 3.0, each file ending with a line map back to its `.phn`.
 - The `phaenon/phn` Composer plugin: the pinned compiler, and the builds at every autoload dump.
@@ -37,7 +38,8 @@ Platform's, from its libraries to its services, whose own suites run on the comp
 
 ```sh
 phn check src tests            # diagnostics with codes, source lines and carets; exit 1 on errors
-phn check --json src           # one JSON object per diagnostic, for editors
+phn check --json src           # one JSON object per diagnostic, for editors, with its kind
+phn check --no-extra-checks    # this run without the extra checks: the findings PHPStan does not make
 phn check --format=github      # workflow commands: the findings as annotations on the .phn lines
 phn check --format=checkstyle  # Checkstyle XML, for other CI systems
 phn build src                  # type-checks first; a file with errors is not written
@@ -64,6 +66,52 @@ may use Phaenon's own spellings, as an array shape often does (`array{by: map<st
 overrides documents one: a bare `array` is `P2516`, as PHPStan at level max reports it. Diagnostic
 codes are stable: `P1xxx` removed constructs, `P2xxx` types and flow, `P4xxx` interop (docblocks,
 vendor). Design: `design/checker.md`.
+
+### Extra checks
+
+A finding is one of three kinds (`design/roadmap.md` D33):
+
+- A **language rule** is what Phaenon's syntax and types ask for: the removed constructs, text and
+  bytes, `throws`, generics, declared types on every declaration. PHPStan never sees the source and
+  has no say in them. They are always reported.
+- A **parity finding** is one the compiled output draws without Phaenon: PHP refuses the code, or
+  PHPStan reports it at level max with `treatPhpDocTypesAsCertain: false`. It is always reported,
+  and the checker is never more lenient than PHPStan there.
+- An **extra check** is a finding PHPStan does not make of the code at that level, kept because
+  the code can fail when it runs or a declared type says less than the code relies on: `**` on a string, a
+  power of integers that is a float given for an int, a list shape given an array that may be no
+  list, a longer tuple given for a shorter one, a static method whose documented types break its
+  parent's where the native types fit. The checker calls a finding an extra check only where it
+  can prove that PHPStan has nothing to say of it: the value is written out, or is a parameter
+  that its function names nowhere else. In doubt the finding is reported in both modes.
+
+Extra checks are on by default. `"extra-checks": false` in `phaenon.json` turns them off for a
+project, and `--no-extra-checks` does for one run of `phn check`, `phn build` or `phn watch`,
+whatever the file says. `phn lsp`, `phn fix` and `phn fmt` go by the project file and refuse the
+flag; `phn migrate` checks with the defaults, the extra checks on. An installed package is checked
+with its own project file's setting, whatever the project that installed it says, and its findings
+are warnings either way.
+
+```json
+{"roots": {"src": ".src"}, "extra-checks": false}
+```
+
+With the extra checks off, the findings the checker knows as extra are not reported at all: no
+line, no count, no part in the exit status, and `phn build` writes a file whose only findings
+they were. Every other finding stays as it is, and a `@phaenon-ignore` comment that silences an
+extra check is still a comment with something to silence, no `P4015`: the finding comes back with
+the switch. That is not a promise to report exactly what PHPStan reports: some findings above
+PHPStan's bar cannot be told from parity findings yet and are reported in both modes
+(`design/checker.md` §10). A project that moves a large PHP tree over can reach PHPStan's level
+first and take the extra checks afterwards.
+
+`--format=json` names each finding's kind in its last member, `"kind"`: `"language"`, `"parity"` or
+`"extra"`. The language server gives each diagnostic the same word as `data.kind`, which an editor
+may show and need not read. The text, `github` and `checkstyle` formats are as they were.
+
+```json
+{"file":"src/Power.phn","line":5,"col":12,"endLine":5,"endCol":19,"severity":"error","code":"P2301","message":"operator ** on string","kind":"extra"}
+```
 
 Dead code is reported as warnings, as PHPStan reports it at level max: a private method, property
 or constant nothing in its class uses (`P2406`), and a private property only written (`P2407`) or
@@ -107,7 +155,7 @@ the `.phn`'s output takes its path. Roots and their outputs are separate directo
 them another or inside another, so that every file compiles into one place. `exclude` names the paths the checker leaves alone
 (fixtures another analyser owns); `phn build` compiles them all the same, and copies a plain `.php`
 among them without reading it. `unused` narrows which attributes spare a private property the
-dead-code warnings (above).
+dead-code warnings, and `"extra-checks": false` leaves out the checker's extra checks (both above).
 
 The file is one JSON object, in UTF-8. A key `phn` does not know is an error of the project's own
 file, which catches a key misspelt; so are a known key in another letter case, a key written
@@ -213,7 +261,7 @@ beside the library:
 Nothing makes an author write that line, and one that is missing or too low shows only in
 somebody else's project. So `phn build` of a project that commits a root checks it, and
 `phn build --check` does. The floor is the newest first release among the keys the project file
-uses: 0.5.0 for `committed`, 0.8.0 for `unused.reflected-attributes`. The build fails, with one line on stderr and status 1, while a release
+uses: 0.5.0 for `committed`, 0.8.0 for `unused.reflected-attributes` and for `extra-checks`. The build fails, with one line on stderr and status 1, while a release
 from before the floor can be installed beside the package:
 
 ```text
@@ -723,10 +771,14 @@ with the `.php` next to them (`PHAENON_UPDATE=1` rewrites them); the output must
 and PHPStan at level max when `PHAENON_PHPSTAN` is set.
 
 The checker's golden corpus lives in `internal/checker/testdata`: each `.phn` carries the expected
-diagnostics as `// want P2103` comments on the offending lines. `PHAENON_PHPSTAN=/path/to/phpstan`
-additionally runs PHPStan at level max over the same corpus and fails when PHPStan reports
-something the corpus does not expect — the checker may be stricter than PHPStan, never more
-lenient. `PHAENON_COMPOSER_PROJECT=/path/to/a/composer/project` exercises the vendor reader.
+diagnostics as `// want P2103` comments on the offending lines, an extra check marked after its
+code (`// want P2301 extra`), and is checked twice: with the extra checks, where each finding
+must be of the kind its line says, and without them, where the marked findings must be gone and
+every other one must stay. `PHAENON_PHPSTAN=/path/to/phpstan` additionally runs PHPStan at level
+max over the same corpus, compiled, and holds it both ways: it fails when PHPStan reports something the
+corpus does not expect (the checker is never more lenient than PHPStan), when the corpus expects
+a finding PHPStan does not have that is neither a language rule nor marked extra, and when
+PHPStan reports a line whose findings are all marked extra. `PHAENON_COMPOSER_PROJECT=/path/to/a/composer/project` exercises the vendor reader.
 
 `PHAENON_COMPOSER=$(which composer) go test ./internal/distribution` runs the `phaenon/phn` plugin
 under a real Composer in temporary projects: the builds at the autoload dump, the download and its

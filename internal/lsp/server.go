@@ -52,7 +52,8 @@ type Host interface {
 	// (P1000) and what could not be read: vendor code, extensions.
 	Program(files []string, read func(path string) ([]byte, error), check func(path string) bool) (p *program.Program, diags []checker.Diagnostic, err error)
 	// Options adds the checker's settings the project states to opts: the
-	// attributes that exempt a private property (P2406–P2408).
+	// attributes that exempt a private property (P2406–P2408), and whether
+	// the extra checks are left out ("extra-checks": false).
 	Options(opts checker.Options) checker.Options
 	// ProjectDiagnostics are the findings about the project as a whole: its
 	// target (P4008–P4010).
@@ -672,7 +673,8 @@ func (s *Server) diagnostics(t *text, diags []checker.Diagnostic, p *program.Pro
 		if d.Severity != checker.Error {
 			severity = 2
 		}
-		diag := Diagnostic{Range: t.rangeOf(start, end), Severity: severity, Code: d.Code, Source: "phn", Message: d.Message}
+		diag := Diagnostic{Range: t.rangeOf(start, end), Severity: severity, Code: d.Code, Source: "phn", Message: d.Message,
+			Data: &DiagnosticData{Kind: d.Kind.String()}}
 		for _, rel := range d.Related {
 			if loc := s.relatedLocation(rel, p); loc != nil {
 				diag.RelatedInformation = append(diag.RelatedInformation, DiagnosticRelatedInformation{Location: *loc, Message: rel.Message})

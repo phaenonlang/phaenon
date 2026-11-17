@@ -2165,6 +2165,9 @@ func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Typ
 		}
 		return types.TBool
 	}
+	x.c.noteArithmetic(e, l, r, x.untouched)
+	x.arith = arithOperands{e.Left, e.Right}
+	defer func() { x.arith = arithOperands{} }()
 	return x.binaryTypes(e.Op, l, r, e)
 }
 
@@ -2905,11 +2908,16 @@ func powInt(a, b int64) (int64, bool) {
 // arithResult types an arithmetic operation and reports non-numeric operands.
 func (x *fnCtx) arithResult(l, r types.Type, span ast.Span, op string) types.Type {
 	numeric := types.MakeUnion(types.TInt, types.TFloat, types.TBool, types.TNull, types.String{Numeric: true})
-	for _, t := range []types.Type{l, r} {
+	for i, t := range []types.Type{l, r} {
 		if types.IsMixed(t) {
 			continue
 		}
 		if !types.IsSubtype(gmpAsNumber(t), numeric, x.p()) {
+			if op == "**" && x.arith.left != nil && x.powerOnString(i, l, r) {
+				// An extra check, proven by the operands (powerOnString).
+				x.reportExtra(span, P2301, "operator %s on %s", op, x.typeName(t))
+				continue
+			}
 			x.report(span, P2301, "operator %s on %s", op, x.typeName(t))
 		}
 	}
@@ -3119,7 +3127,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 			x.destructure(lit, vt, env, e.S, e.Value)
 			return vt
 		}
-		x.assignTo(e.Target, vt, env, e.S)
+		x.assignFrom(e.Value, e.Target, vt, env, e.S)
 		if v, ok := e.Target.(*ast.Variable); ok {
 			env.setNative(v.Name, x.guaranteedOf(e.Value, env))
 			x.rememberCondition(v.Name, e.Value, env)
@@ -3143,7 +3151,9 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 	if op == token.T_COALESCE {
 		res = types.MakeUnion(types.StripNull(cur), vt)
 	} else {
+		x.arith = arithOperands{e.Target, e.Value}
 		res = x.binaryTypes(op, cur, vt, e)
+		x.arith = arithOperands{}
 	}
 	if idx, ok := e.Target.(*ast.Index); ok && idx.Index != nil && !types.IsNullable(cur) {
 		// `$parts[0] .= $chunk` reads the offset before it writes it: the
@@ -3240,9 +3250,17 @@ func (x *fnCtx) lookupPropertyForWrite(t *ast.PropertyFetch, env *state) (*progr
 
 // assignTo records an assignment of a value of type vt to a target.
 func (x *fnCtx) assignTo(target ast.Expr, vt types.Type, env *state, span ast.Span) {
+	x.assignFrom(nil, target, vt, env, span)
+}
+
+// assignFrom is assignTo for a plain assignment, whose value is the
+// expression given: where a property refuses the value, that expression is
+// what may prove the finding an extra check (extra.go). Every other
+// assignment has no expression of its own and passes none.
+func (x *fnCtx) assignFrom(value ast.Expr, target ast.Expr, vt types.Type, env *state, span ast.Span) {
 	switch t := target.(type) {
 	case *ast.Paren:
-		x.assignTo(t.Expr, vt, env, span)
+		x.assignFrom(value, t.Expr, vt, env, span)
 	case *ast.Variable:
 		if t.Name == "this" {
 			x.report(t.S, P2311, "cannot re-assign $this")
@@ -3254,11 +3272,11 @@ func (x *fnCtx) assignTo(target ast.Expr, vt types.Type, env *state, span ast.Sp
 		}
 		env.set(t.Name, vt)
 	case *ast.PropertyFetch:
-		x.assignProperty(t, vt, env, span)
+		x.assignProperty(t, vt, env, span, value)
 	case *ast.StaticPropertyFetch:
 		pt, pr := x.staticPropertyFetch(t, env)
 		if pr != nil && !types.IsAcceptable(vt, pr.Type, x.p()) {
-			x.report(span, P2201, "property %s::$%s (%s) does not accept %s", pr.Class.Name, pr.Name, x.typeName(pt), x.typeName(vt))
+			x.c.reportUnfit(x.given(value), vt, pr.Type, span, P2201, nil, "property %s::$%s (%s) does not accept %s", pr.Class.Name, pr.Name, x.typeName(pt), x.typeName(vt))
 		}
 		if key, ok := x.pathKey(t); ok {
 			env.setPath(key, vt)
@@ -3275,7 +3293,7 @@ func (x *fnCtx) assignTo(target ast.Expr, vt types.Type, env *state, span ast.Sp
 	}
 }
 
-func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, span ast.Span) {
+func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, span ast.Span, value ast.Expr) {
 	name, ok := identName(t.Name)
 	if !ok {
 		x.noteRecv(t, x.expr(t.Object, env, nil))
@@ -3309,7 +3327,7 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 			x.report(t.Name.Span(), P2005, "unknown property %s::$%s", lacking.Name, name)
 		}
 		for _, pr := range prs {
-			x.assignDeclared(t, pr, name, base, vt, span)
+			x.assignDeclared(t, pr, name, base, vt, span, value)
 		}
 	}
 	if v, ok := t.Object.(*ast.Variable); ok && v.Name == "this" && x.trackInits {
@@ -3322,7 +3340,7 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 }
 
 // assignDeclared checks an assignment of vt to the declared property pr.
-func (x *fnCtx) assignDeclared(t *ast.PropertyFetch, pr *program.Property, name string, base, vt types.Type, span ast.Span) {
+func (x *fnCtx) assignDeclared(t *ast.PropertyFetch, pr *program.Property, name string, base, vt types.Type, span ast.Span, value ast.Expr) {
 	if pr.Static {
 		x.report(t.Name.Span(), P2210, "static property %s::$%s accessed through an instance", pr.Class.Name, name)
 	}
@@ -3349,7 +3367,7 @@ func (x *fnCtx) assignDeclared(t *ast.PropertyFetch, pr *program.Property, name 
 	}
 	declared := x.bindReceiver(pr.Type, base, pr.Class)
 	if !types.IsAcceptable(vt, declared, x.p()) {
-		x.report(span, P2201, "property %s::$%s (%s) does not accept %s", pr.Class.Name, name, x.typeName(declared), x.typeName(vt))
+		x.c.reportUnfit(x.given(value), vt, declared, span, P2201, nil, "property %s::$%s (%s) does not accept %s", pr.Class.Name, name, x.typeName(declared), x.typeName(vt))
 	}
 }
 
@@ -3463,6 +3481,9 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 					if s := cl.FindMethod("offsetSet"); s != nil && len(s.Params) >= 2 {
 						declared := x.bindReceiver(s.Params[1].Type, m, s.Class)
 						if !types.IsAcceptable(vt, declared, x.p()) {
+							// No extra check is told here: PHPStan holds an offset's
+							// assignment to a rule of its own (offsetAssign.valueType),
+							// stricter than the acceptance of an argument.
 							x.report(span, P2103, "%s::offsetSet() expects %s, %s given", cl.Name, x.typeName(declared), x.typeName(vt))
 						}
 					}

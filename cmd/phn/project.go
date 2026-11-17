@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -55,8 +56,13 @@ type project struct {
 	Fmt *[]string `json:"fmt"`
 	// Unused tunes the unused private member findings (P2406–P2408).
 	Unused *unusedSettings `json:"unused"`
-	data   []byte          // the file as read, to place diagnostics
-	path   string          // the file's path, for diagnostics
+	// ExtraChecks, when false, leaves out the checker's extra checks, the
+	// findings PHPStan does not make at level max (design/roadmap.md
+	// D33); no key and true keep them. It is the project's own setting: an
+	// installed package is checked with its own file's.
+	ExtraChecks *bool  `json:"extra-checks"`
+	data        []byte // the file as read, to place diagnostics
+	path        string // the file's path, for diagnostics
 	// ignored lists, sorted, the keys of an installed package's file that
 	// this compiler does not know and has passed over (readInstalledProject).
 	ignored []string
@@ -79,11 +85,30 @@ type unusedSettings struct {
 	EarlierReflectedAttributes *[]string `json:"reflectedAttributes" spelt:"reflected-attributes"`
 }
 
-// checkerOptions are the checker's settings the project file states; a nil
-// project states none.
+// noExtraChecks is --no-extra-checks of phn check, phn build and phn watch:
+// the run leaves out the checker's extra checks whatever the project file
+// says. No other command sets it: phn lsp and the build of an installed
+// package go by the file alone.
+var noExtraChecks bool
+
+// extraChecksFlag gives a command --no-extra-checks.
+func extraChecksFlag(fs *flag.FlagSet) {
+	fs.BoolVar(&noExtraChecks, "no-extra-checks", false,
+		`leave out the extra checks, the findings PHPStan does not make at level max, for this run (`+ProjectFile+`'s "extra-checks": false does for the project)`)
+}
+
+// checkerOptions are the checker's settings the project file states, and
+// the command line's --no-extra-checks over them; a nil project states
+// none.
 func (p *project) checkerOptions(opts checker.Options) checker.Options {
 	if p != nil && p.Unused != nil && p.Unused.ReflectedAttributes != nil {
 		opts.ReflectedAttributes = append([]string{}, *p.Unused.ReflectedAttributes...)
+	}
+	if p != nil && p.ExtraChecks != nil && !*p.ExtraChecks {
+		opts.NoExtraChecks = true
+	}
+	if noExtraChecks {
+		opts.NoExtraChecks = true
 	}
 	return opts
 }
@@ -240,6 +265,15 @@ func readProjectFile(path string, installed bool) (*project, error) {
 		p.ignored = unknown
 	case len(unknown) > 0:
 		return nil, unknownKey(path, unknown[0])
+	}
+	// "extra-checks" is a switch, and says so of any other value: a list of
+	// codes or a level is what the key deliberately is not (design/roadmap.md
+	// D33), and the decoder's own words for it would not say that.
+	var members map[string]json.RawMessage
+	if json.Unmarshal(text, &members) == nil {
+		if value, written := members["extra-checks"]; written && !slices.Contains([]string{"true", "false", "null"}, string(bytes.TrimSpace(value))) {
+			return nil, fmt.Errorf(`%s: "extra-checks" is true or false: false leaves out the checker's extra checks, and no key keeps them`, path)
+		}
 	}
 	dec := json.NewDecoder(bytes.NewReader(text))
 	dec.DisallowUnknownFields()
