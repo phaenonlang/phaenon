@@ -1,0 +1,82 @@
+namespace App\StaticConstants;
+
+// `static::X`, `$this::X` and `$object::X` name the constant of the class
+// the value has at run time, which a subclass may override: unless the
+// class is final (an enum is), the constant is its declared type, and
+// mixed without one, as PHPStan types it. `self::X` is the constant
+// written. Plain PHP, so that PHPStan reads this file as written.
+
+class Base
+{
+    public const int FLAGS = 3;
+    public const UNTYPED = 3;
+
+    public function flags(): bool
+    {
+        if ((static::FLAGS | 4) === 15) {
+            return true;
+        }
+        if (($this::FLAGS | 4) === 15) {
+            return true;
+        }
+        return (self::FLAGS | 4) === 15; // want P2305 "strict comparison between 7 and 15 is always false"
+    }
+
+    public function untyped(): int
+    {
+        return static::UNTYPED; // want P2202 "returns mixed"
+    }
+}
+
+class Child extends Base
+{
+    public const int FLAGS = 11;
+}
+
+final class Sealed
+{
+    public const int FLAGS = 3;
+
+    public function flags(): bool
+    {
+        return (static::FLAGS | 4) === 15; // want P2305
+    }
+}
+
+// A final constant no subclass overrides: its value, as PHPStan reads it.
+interface HasMask
+{
+    final const FIXED = 3;
+}
+
+class Masked implements HasMask
+{
+    final public const F = 3;
+    final public const int TF = 3;
+
+    public function a(): bool
+    {
+        return static::F === 4; // want P2305
+    }
+
+    public function b(): bool
+    {
+        if (static::FIXED === 4) { // want P2305
+            return true;
+        }
+        return $this::TF === 4; // want P2305
+    }
+}
+
+function viaFinal(Masked $m): bool
+{
+    return $m::F === 4; // want P2305
+}
+
+function viaObject(Base $b, Sealed $s): bool
+{
+    if (($b::FLAGS | 4) === 15) {
+        return true;
+    }
+    return ($s::FLAGS | 4) === 15; // want P2305
+}
