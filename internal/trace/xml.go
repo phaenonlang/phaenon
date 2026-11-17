@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"unicode/utf8"
 )
 
 // node is an element or a piece of text of an XML document, held with the
@@ -134,6 +135,9 @@ func escapeXML(s string, attr bool) string {
 			b.WriteString("&#10;")
 		case attr && r == '\t':
 			b.WriteString("&#9;")
+		case r < 0x20 && r != '\t' && r != '\n' || r == 0xFFFE || r == 0xFFFF:
+			// No XML document holds it, written out or as a reference.
+			b.WriteRune(utf8.RuneError)
 		default:
 			b.WriteRune(r)
 		}

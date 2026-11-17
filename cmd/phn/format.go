@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -17,12 +18,28 @@ import (
 // The formats phn check writes its findings in (design/tooling.md §7.1).
 var checkFormats = []string{"text", "json", "github", "checkstyle"}
 
-// writeJSON writes one JSON object per finding, a line each.
+// writeJSON writes one JSON object per finding, a line each. A line is
+// JSON whatever a path or a message holds: a control character is written
+// as its \u escape and bytes that are no UTF-8 as U+FFFD, where Go's own
+// quoting (%q) writes \x00 and \U0001F600, which no JSON reader takes.
+// `<`, `>` and `&` stay as they are: the types in a message are read by
+// people too.
 func writeJSON(w io.Writer, diags []checker.Diagnostic) {
 	for _, d := range diags {
-		fmt.Fprintf(w, `{"file":%q,"line":%d,"col":%d,"endLine":%d,"endCol":%d,"severity":%q,"code":%q,"message":%q}`+"\n",
-			d.File, d.Line, d.Col, d.EndLine, d.EndCol, d.Severity, d.Code, d.Message)
+		fmt.Fprintf(w, `{"file":%s,"line":%d,"col":%d,"endLine":%d,"endCol":%d,"severity":%s,"code":%s,"message":%s}`+"\n",
+			jsonString(d.File), d.Line, d.Col, d.EndLine, d.EndCol, jsonString(d.Severity.String()), jsonString(d.Code), jsonString(d.Message))
 	}
+}
+
+// jsonString is s as a JSON string.
+func jsonString(s string) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(s); err != nil {
+		return `""` // a string always encodes
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // writeGitHub writes each finding as the workflow command that makes it an

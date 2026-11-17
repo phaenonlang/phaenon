@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"encoding/xml"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,6 +182,27 @@ func TestPHPFloat(t *testing.T) {
 	for f, want := range map[float64]string{0: "0", 1: "1", 0.75: "0.75", 4.0 / 7: "0.57142857142857", 0.00001: "1.0E-5", 0.0000125: "1.25E-5"} {
 		if got := phpFloat(f); got != want {
 			t.Errorf("phpFloat(%v) = %s, want %s", f, got, want)
+		}
+	}
+}
+
+// A rewritten text or attribute is XML whatever it holds: a character no
+// XML document has, written out or as a reference, becomes U+FFFD, as do
+// bytes that are no UTF-8.
+func TestEscapeXMLControlCharacters(t *testing.T) {
+	const s = "a\x00b\nc\"d\\e\xff f\x1b <g> & h\r\t"
+	for _, attr := range []bool{false, true} {
+		doc := `<r a="` + escapeXML(s, true) + `">` + escapeXML(s, attr) + `</r>`
+		var r struct {
+			A    string `xml:"a,attr"`
+			Text string `xml:",chardata"`
+		}
+		if err := xml.Unmarshal([]byte(doc), &r); err != nil {
+			t.Fatalf("not XML: %v\n%q", err, doc)
+		}
+		want := strings.NewReplacer("\x00", "�", "\x1b", "�", "\xff", "�").Replace(s)
+		if r.A != want || r.Text != want {
+			t.Errorf("read back %q and %q, want %q", r.A, r.Text, want)
 		}
 	}
 }
