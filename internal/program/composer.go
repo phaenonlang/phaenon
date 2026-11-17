@@ -34,6 +34,12 @@ type ComposerLoader struct {
 	namesOnce sync.Once
 	allNames  []string
 
+	// realSources is Sources keyed by the output directories with their
+	// symbolic links resolved, made the first time source needs it.
+	realOnce    sync.Once
+	realSources map[string]string
+	realDirs    sync.Map // a directory → its path with links resolved, "" when none
+
 	// sourcePrefixes are the prefixes whose directories Sources maps to a
 	// source root, found on the first SourceDirs: Sources is set by then.
 	sourcesOnce    sync.Once
@@ -174,12 +180,43 @@ func (l *ComposerLoader) source(dir string) (string, bool) {
 		return "", false
 	}
 	abs = filepath.Clean(abs)
-	for out, src := range l.Sources {
-		if abs == out {
+	if src, ok := underOutput(abs, l.Sources); ok {
+		return src, true
+	}
+	// The maps and the project file may spell one directory two ways,
+	// through a symbolic link (macOS's /tmp is /private/tmp): compared
+	// with their links resolved, they are the same.
+	l.realOnce.Do(func() {
+		l.realSources = map[string]string{}
+		for out, src := range l.Sources {
+			if real, err := filepath.EvalSymlinks(out); err == nil {
+				l.realSources[real] = src
+			}
+		}
+	})
+	real, ok := l.realDirs.Load(abs)
+	if !ok {
+		r, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			r = ""
+		}
+		real, _ = l.realDirs.LoadOrStore(abs, r)
+	}
+	if real == "" {
+		return "", false
+	}
+	return underOutput(real.(string), l.realSources)
+}
+
+// underOutput maps dir, under one of the output directories of sources, to
+// the same place under its source root.
+func underOutput(dir string, sources map[string]string) (string, bool) {
+	for out, src := range sources {
+		if dir == out {
 			return src, true
 		}
-		if strings.HasPrefix(abs, out+string(filepath.Separator)) {
-			return filepath.Join(src, abs[len(out)+1:]), true
+		if strings.HasPrefix(dir, out+string(filepath.Separator)) {
+			return filepath.Join(src, dir[len(out)+1:]), true
 		}
 	}
 	return "", false

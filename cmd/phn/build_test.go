@@ -115,3 +115,37 @@ func TestFilesEntryOfAnOutput(t *testing.T) {
 		t.Errorf("a check of Greeter alone should read greet() from its changed source (%v):\n%s%s", err, stdout, stderr)
 	}
 }
+
+// TestFilesEntryThroughALink: a project reached under two spellings, through
+// a symbolic link to its directory, declares a Composer `files` entry once:
+// the working directory spelled one way, the paths given the other.
+func TestFilesEntryThroughALink(t *testing.T) {
+	bin := phnBinary(t)
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"composer.json":                     `{"name": "acme/app", "require": {"php": ">=8.5"}, "autoload": {"psr-4": {"App\\": ".src/"}, "files": [".src/functions.php"]}}`,
+		"phaenon.json":                      `{"roots": {"src": ".src"}}`,
+		"vendor/composer/installed.json":    `{"packages": []}`,
+		"vendor/composer/autoload_psr4.php": "<?php\n\n$baseDir = dirname(dirname(__DIR__));\n\nreturn array(\n    'App\\\\' => array($baseDir . '/.src'),\n);\n",
+		"vendor/composer/autoload_files.php": "<?php\n\n$baseDir = dirname(dirname(__DIR__));\n\nreturn array(\n" +
+			"    'a1' => $baseDir . '/.src/functions.php',\n);\n",
+		"src/functions.phn": "namespace App;\n\nfunction greet(string $name): string => \"Hello, {$name}\";\n",
+		"src/Greeter.phn":   "namespace App;\n\nfinal class Greeter\n{\n    hello(): string => greet('world');\n}\n",
+	})
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Skipf("no symbolic links here: %v", err)
+	}
+	if stdout, stderr, err := run(t, root, bin, "build"); err != nil {
+		t.Fatalf("build (%v):\n%s%s", err, stdout, stderr)
+	}
+	for _, c := range []struct{ dir, path string }{
+		{link, filepath.Join(root, "src")},
+		{root, filepath.Join(link, "src")},
+		{link, "src"},
+	} {
+		if stdout, stderr, err := run(t, c.dir, bin, "check", c.path); err != nil || !strings.Contains(stdout, "0 errors") {
+			t.Errorf("check %s from %s (%v):\n%s%s", c.path, c.dir, err, stdout, stderr)
+		}
+	}
+}

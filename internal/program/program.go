@@ -123,10 +123,25 @@ func (p *Program) Expect(paths []string) {
 		p.expected = map[string]bool{}
 	}
 	for _, path := range paths {
-		if abs, err := filepath.Abs(path); err == nil {
-			p.expected[abs] = true
+		if real, ok := realPath(path); ok {
+			p.expected[real] = true
 		}
 	}
+}
+
+// realPath is the absolute path of a file with its symbolic links
+// resolved, so that one file reached under two spellings (a directory
+// linked to another, macOS's /tmp and /private/tmp) is one path; the
+// absolute path as written where it cannot be resolved.
+func realPath(path string) (string, bool) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real, true
+	}
+	return abs, true
 }
 
 // AddLoader appends a loader; loaders are consulted in order. The files it
@@ -134,7 +149,7 @@ func (p *Program) Expect(paths []string) {
 func (p *Program) AddLoader(l Loader) {
 	p.loaders = append(p.loaders, l)
 	for _, path := range l.Preload() {
-		if abs, err := filepath.Abs(path); err == nil && p.expected[abs] {
+		if real, ok := realPath(path); ok && p.expected[real] {
 			continue
 		}
 		src, err := l.Read(path)
