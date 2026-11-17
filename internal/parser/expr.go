@@ -825,12 +825,96 @@ func (p *Parser) heredoc() ast.Expr {
 	start := p.tok().Start
 	open := p.next()
 	s := &ast.InterpolatedString{Kind: ast.StringHeredoc, Open: open.Text(p.src)}
+	var parts []token.Token // the first token of each part
 	for !p.at(token.T_END_HEREDOC) {
+		parts = append(parts, p.tok())
 		s.Parts = append(s.Parts, p.encapsPart())
 	}
-	s.Close = p.expect(token.T_END_HEREDOC).Text(p.src)
+	end := p.expect(token.T_END_HEREDOC)
+	p.heredocIndentation(parts, end)
+	s.Close = end.Text(p.src)
 	s.S = p.span(start)
 	return s
+}
+
+// heredocIndentation refuses a heredoc or nowdoc PHP's scanner refuses
+// when it strips the closing marker's indentation from the body
+// (zend_language_scanner.l, strip_multiline_string_indentation and the
+// heredoc's start and end): the indentation mixes tabs and spaces, or a
+// body line starts with fewer than its columns of the same whitespace
+// before text or an interpolation. A line that ends first is whitespace
+// only, and may be shorter. parts are the body's tokens, the first of each
+// part; end is the closing marker. Lines end as PHP's scanner ends them,
+// at `\r\n`, `\n` or a `\r` alone.
+func (p *Parser) heredocIndentation(parts []token.Token, end token.Token) {
+	n := 0
+	tabs, spaces := false, false
+	for i := end.Start; i < end.End && (p.src[i] == ' ' || p.src[i] == '\t'); i++ {
+		n++
+		tabs = tabs || p.src[i] == '\t'
+		spaces = spaces || p.src[i] == ' '
+	}
+	if tabs && spaces {
+		// PHP's scanner says so as it reads the body's last text, on the
+		// line that text starts on; an empty body's error is the marker's.
+		at := end
+		for _, t := range parts {
+			if t.Kind == token.T_ENCAPSED_AND_WHITESPACE {
+				at = t
+			}
+		}
+		p.errorAt(at, "Invalid indentation - tabs and spaces cannot be mixed")
+	}
+	if n == 0 {
+		return
+	}
+	at := func(t token.Token, off int) token.Token {
+		line := t.Line
+		for i := t.Start; i < off; i++ {
+			if p.src[i] == '\n' || p.src[i] == '\r' && (i+1 == len(p.src) || p.src[i+1] != '\n') {
+				line++
+			}
+		}
+		return token.Token{Kind: t.Kind, Start: off, End: off + 1, Line: line}
+	}
+	tooShallow := func(t token.Token, off int) {
+		p.errorAt(at(t, off), "Invalid body indentation level (expecting an indentation level of at least %d)", n)
+	}
+	lineStart, col := true, 0 // the first body line starts after the opening line
+	for _, t := range parts {
+		if t.Kind != token.T_ENCAPSED_AND_WHITESPACE {
+			// An interpolation: on a line's indentation, it is text there.
+			if lineStart && col < n {
+				tooShallow(t, t.Start)
+			}
+			lineStart = false
+			continue
+		}
+		for i := t.Start; i < t.End; i++ {
+			c := p.src[i]
+			if c == '\r' || c == '\n' {
+				if c == '\r' && i+1 < t.End && p.src[i+1] == '\n' {
+					i++
+				}
+				lineStart, col = true, 0
+				continue
+			}
+			if !lineStart {
+				continue
+			}
+			if col == n {
+				lineStart = false
+				continue
+			}
+			switch {
+			case c != ' ' && c != '\t':
+				tooShallow(t, i)
+			case c == ' ' && tabs, c == '\t' && spaces:
+				p.errorAt(at(t, i), "Invalid indentation - tabs and spaces cannot be mixed")
+			}
+			col++
+		}
+	}
 }
 
 // encapsPart parses one element of encaps_list.
