@@ -311,9 +311,9 @@ reason (`design/tooling.md` §8.2).
 Then it lays the code out in the canonical style (`design/functions.md` §5): the opening brace of a
 function, method or closure moves up to the declaration's line, while a class, interface, trait or
 enum keeps its brace on a line of its own (moved back down where an earlier migrate moved it up), a
-docblock with one line of content becomes one line, and a body that is exactly one `return expr;`
-— or one expression statement under `void` or `never` — becomes `=> expr;`, wrapped after the
-arrow when the line would pass 120 columns. A body with a comment inside stays a block, as do
+docblock with one line of content that starts its line becomes one line, and a body that is exactly
+one `return expr;` — or one expression statement under `void` or `never` — becomes `=> expr;`,
+wrapped after the arrow when the line would pass 120 columns. A body with a comment inside stays a block, as do
 constructors, destructors and generators. These and the pipelines are the only edits that change
 a file's line count (beside docblock lines whose tags were lifted); `--keep-layout` skips the
 layout. Re-running migrate on its own output changes nothing.
