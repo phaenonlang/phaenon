@@ -37,6 +37,14 @@ func TestExpand(t *testing.T) {
 			"$s = <<<EOT\n        x\n        EOT;\n"},
 		{"heredoc: a tab past the closing indentation's columns is text", "$s = <<<EOT\n  \t\tx\n  \tEOT;\n",
 			"$s = <<<EOT\n    \tx\n    EOT;\n"},
+		// PHP's scanner ends a line at \r\n, \n and a \r alone: a column
+		// starts again after each, and a heredoc's body lines start there.
+		{"a lone \\r ends a line", "$a = 1;\r\t$b = <<<EOT\r\t\tx\r\t\ty\r\t\tEOT;\r",
+			"$a = 1;\r    $b = <<<EOT\r        x\r        y\r        EOT;\r"},
+		{"\\r\\n ends a line", "$a = 1;\r\n\t$b = <<<EOT\r\n\t\tx\r\n\t\ty\r\n\t\tEOT;\r\n",
+			"$a = 1;\r\n    $b = <<<EOT\r\n        x\r\n        y\r\n        EOT;\r\n"},
+		{"a docblock's lines after \\r", "\t/**\r\t * a\tb\r\t */\r",
+			"    /**\r     * a\tb\r     */\r"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -61,6 +69,9 @@ func TestFindLines(t *testing.T) {
 	}
 	if n := Lines(src, offs); n != 2 {
 		t.Errorf("Lines = %d, want 2", n)
+	}
+	if n := Lines([]byte("\ta;\r\tb;\r\n\tc;\n"), []int{0, 4, 9}); n != 3 {
+		t.Errorf("Lines over \\r, \\r\\n and \\n = %d, want 3", n)
 	}
 	if Find([]byte("$s = 'a\tb';\n")) != nil {
 		t.Error("a tab in a string is allowed")
@@ -95,10 +106,14 @@ func TestHeredocValues(t *testing.T) {
 		}
 		return string(out)
 	}
-	before, after := run(src), run(string(Expand([]byte(src))))
-	if before != after {
-		t.Errorf("values changed:\nbefore %s\nafter  %s", before, after)
+	for _, eol := range []string{"\n", "\r", "\r\n"} {
+		code := strings.ReplaceAll(src, "\n", eol)
+		before, after := run(code), run(string(Expand([]byte(code))))
+		if before != after {
+			t.Errorf("%q line breaks: values changed:\nbefore %s\nafter  %s", eol, before, after)
+		}
 	}
+	before := run(src)
 	if !strings.Contains(before, `deeper X`) {
 		t.Errorf("unexpected output %s", before)
 	}
