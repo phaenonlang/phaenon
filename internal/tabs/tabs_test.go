@@ -28,6 +28,15 @@ func TestExpand(t *testing.T) {
 			"$s = <<<'EOT'\n    x\n    EOT;\n"},
 		{"heredoc at column 0 keeps its text", "$s = <<<EOT\n\tx\nEOT;\n",
 			"$s = <<<EOT\n\tx\nEOT;\n"},
+		// PHP refuses the next three (text left of the closing indentation,
+		// tabs mixed with spaces), and the parser reads them: Expand must
+		// still settle in one run.
+		{"heredoc: a tab after text left of the closing indentation is text", "$s = <<<EOT\n000\t\n  \tEOT;\n",
+			"$s = <<<EOT\n000\t\n    EOT;\n"},
+		{"heredoc: the prefix reaches as far as the closing indentation's columns", "$s = <<<EOT\n \t\tx\n\t\tEOT;\n",
+			"$s = <<<EOT\n        x\n        EOT;\n"},
+		{"heredoc: a tab past the closing indentation's columns is text", "$s = <<<EOT\n  \t\tx\n  \tEOT;\n",
+			"$s = <<<EOT\n    \tx\n    EOT;\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

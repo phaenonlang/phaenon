@@ -114,6 +114,15 @@ func Expand(src []byte) []byte {
 	return out
 }
 
+// advance returns the column after c, a space or a tab, written at col of
+// a line's leading whitespace.
+func advance(col int, c byte) int {
+	if c == '\t' {
+		return col + Width - col%Width
+	}
+	return col + 1
+}
+
 func tabsIn(out []int, src []byte, start, end int) []int {
 	for i := start; i < end; i++ {
 		if src[i] == '\t' {
@@ -161,10 +170,19 @@ func closing(toks []token.Token, open int) int {
 }
 
 // heredocPrefixes reports the tabs of a heredoc's closing indentation and
-// of the same number of bytes at the start of each body line. toks runs
-// from the T_START_HEREDOC to its T_END_HEREDOC; body lines start after the
-// opening line and after each line break of the body's own text (a nested
-// heredoc's text is that heredoc's).
+// of the whitespace each body line starts with, as far as that indentation
+// reaches. toks runs from the T_START_HEREDOC to its T_END_HEREDOC; body
+// lines start after the opening line and after each line break of the
+// body's own text (a nested heredoc's text is that heredoc's).
+//
+// The reach is counted in columns, as Expand lays the tabs out, and not in
+// the bytes of the closing indentation: Expand changes that number where
+// spaces precede a tab, and a prefix counted in bytes would then take in,
+// on a second run, a tab the first one left as the string's text. It ends
+// at the first byte that is no whitespace too: what PHP strips with the
+// closing indentation is whitespace, and a tab after text is text. In a
+// heredoc PHP accepts, each body line starts with the closing indentation's
+// own bytes, and the two counts name the same tabs.
 func heredocPrefixes(out []int, src []byte, toks []token.Token) []int {
 	end := toks[len(toks)-1]
 	indent := 0
@@ -175,11 +193,17 @@ func heredocPrefixes(out []int, src []byte, toks []token.Token) []int {
 	if indent == 0 {
 		return out
 	}
+	width := 0
+	for _, c := range src[end.Start : end.Start+indent] {
+		width = advance(width, c)
+	}
 	prefix := func(lineStart, limit int) {
-		for j := lineStart; j < lineStart+indent && j < limit && src[j] != '\n'; j++ {
+		col := 0
+		for j := lineStart; j < limit && col < width && (src[j] == ' ' || src[j] == '\t'); j++ {
 			if src[j] == '\t' {
 				out = append(out, j)
 			}
+			col = advance(col, src[j])
 		}
 	}
 	depth := 0
