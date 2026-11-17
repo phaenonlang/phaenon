@@ -68,8 +68,13 @@ func Find(src []byte) []int {
 // Lines returns the number of distinct lines the offsets lie on.
 func Lines(src []byte, offs []int) int {
 	n, last := 0, -1
-	for _, off := range offs {
-		line := bytes.Count(src[:off], []byte{'\n'})
+	line, i := 0, 0
+	for _, off := range offs { // in order
+		for ; i < off; i++ {
+			if breaks(src, i) {
+				line++
+			}
+		}
 		if line != last {
 			n++
 			last = line
@@ -90,7 +95,7 @@ func Expand(src []byte) []byte {
 	for i := 0; i < len(src); {
 		c := src[i]
 		switch {
-		case c == '\n':
+		case c == '\n' || c == '\r':
 			out = append(out, c)
 			col = 0
 			i++
@@ -140,7 +145,7 @@ func tabsIn(out []int, src []byte, start, end int) []int {
 // before the comment.
 func continuationIndents(out []int, src []byte, t token.Token) []int {
 	for i := t.Start; i < t.End; i++ {
-		if src[i] != '\n' {
+		if !breaks(src, i) {
 			continue
 		}
 		for j := i + 1; j < t.End && (src[j] == ' ' || src[j] == '\t'); j++ {
@@ -175,7 +180,8 @@ func closing(toks []token.Token, open int) int {
 // of the whitespace each body line starts with, as far as that indentation
 // reaches. toks runs from the T_START_HEREDOC to its T_END_HEREDOC; body
 // lines start after the opening line and after each line break of the
-// body's own text (a nested heredoc's text is that heredoc's).
+// body's own text (a nested heredoc's text is that heredoc's), `\r\n`,
+// `\n` or a `\r` alone.
 //
 // The reach is counted in columns, as Expand lays the tabs out, and not in
 // the bytes of the closing indentation: Expand changes that number where
@@ -230,10 +236,16 @@ func heredocPrefixes(out []int, src []byte, toks []token.Token) []int {
 			continue
 		}
 		for i := t.Start; i < t.End; i++ {
-			if src[i] == '\n' && i+1 < t.End {
+			if breaks(src, i) && i+1 < t.End {
 				prefix(i+1, t.End)
 			}
 		}
 	}
 	return out
+}
+
+// breaks reports whether src[i] ends a line, as PHP's scanner reads line
+// breaks: `\n`, a `\r` alone, and `\r\n`, whose `\n` ends it.
+func breaks(src []byte, i int) bool {
+	return src[i] == '\n' || src[i] == '\r' && (i+1 == len(src) || src[i+1] != '\n')
 }
