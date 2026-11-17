@@ -33,6 +33,18 @@ func PrintQualified(t Type) string {
 	return b.String()
 }
 
+// PrintQualifiedValues is PrintQualified with the value type of every
+// iterable type written out: array<mixed>, list<mixed> and iterable<mixed>
+// where PrintQualified writes the bare word. It is for a type the compiler
+// chose and writes into a docblock of its own (the @var of a lowered
+// closure's parameter): PHPStan reads the bare word as an iterable type
+// without its value type and reports it (missingType.iterableValue).
+func PrintQualifiedValues(t Type) string {
+	var b strings.Builder
+	(&printer{b: &b, qualified: true, values: true}).print(forPHPStan(t), false)
+	return b.String()
+}
+
 // PrintQualifiedMember is PrintQualified for a type that is written among
 // the members of a union, or of an intersection: the text an alias expands
 // to where the source wrote `Alias|null` or `A&Alias`. What would merge
@@ -118,6 +130,7 @@ type printer struct {
 	b         *strings.Builder
 	qualified bool
 	phaenon   bool // PrintPhaenon's spelling
+	values    bool // PrintQualifiedValues: no iterable type without its value type
 }
 
 func (pr *printer) class(name string) {
@@ -218,7 +231,7 @@ func (pr *printer) print(t Type, nested bool) {
 				b.WriteString("non-empty-")
 			}
 			b.WriteString("list")
-			if !IsMixed(t.Value) {
+			if !IsMixed(t.Value) || pr.values {
 				b.WriteString("<")
 				pr.print(t.Value, false)
 				b.WriteString(">")
@@ -233,7 +246,7 @@ func (pr *printer) print(t Type, nested bool) {
 			} else {
 				b.WriteString("array")
 			}
-			if !keyIsAny || !IsMixed(t.Value) {
+			if !keyIsAny || !IsMixed(t.Value) || pr.values {
 				b.WriteString("<")
 				if !keyIsAny {
 					pr.print(t.Key, false)
@@ -407,7 +420,7 @@ func (pr *printer) print(t Type, nested bool) {
 	case Iterable:
 		b.WriteString("iterable")
 		keyIsAny := IsMixed(t.Key)
-		if !keyIsAny || !IsMixed(t.Value) {
+		if !keyIsAny || !IsMixed(t.Value) || pr.values {
 			b.WriteString("<")
 			if !keyIsAny {
 				pr.print(t.Key, false)

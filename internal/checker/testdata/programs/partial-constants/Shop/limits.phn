@@ -1,0 +1,4 @@
+namespace Shop;
+
+const MAX = 10;
+const SPAN = 2 * 5;

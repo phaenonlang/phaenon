@@ -37,6 +37,9 @@ func localArgs(name string, env *state) bool {
 // contextual typing. It updates env for assignments and other side effects.
 func (x *fnCtx) expr(e ast.Expr, env *state, expected types.Type) types.Type {
 	t := x.exprType(e, env, expected)
+	if c, ok := t.(types.Callable); ok && expected != nil && e != nil {
+		t = x.closeOpen(c, expected, e)
+	}
 	if assume := x.c.opts.Assume; assume != nil && e != nil {
 		if a := assume(x.file, e); a != nil {
 			t = a
@@ -385,6 +388,9 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 	isShape := true
 	var keys, values []types.Type
 	nextInt := int64(0)
+	// positioned says nextInt is where the next unkeyed item goes for
+	// certain: not after an unpacked value of unknown length.
+	positioned := true
 	isList := true
 	hasItems, nonEmpty := false, false
 	for i, item := range e.Items {
@@ -413,6 +419,7 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 						// (namedOnly).
 						entry = types.ShapeEntry{IsInt: true, IntKey: nextInt, Type: se.Type, Optional: se.Optional}
 						nextInt++
+						positioned = positioned && !se.Optional
 					} else {
 						isList = false
 						if before, ok := shapeEntry(shape, entry); ok && se.Optional {
@@ -428,6 +435,7 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 				continue
 			}
 			isShape = false
+			positioned = false
 			// An unpacked iterable may yield nothing, and what it yields lands
 			// under the keys an array can have: PHP throws on any other key,
 			// so iterable<mixed, V> unpacks to array<array-key, V>.
@@ -504,7 +512,13 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 				}
 			}
 		} else {
-			ev = x.expr(item.Value, env, expectedValue)
+			// A tuple's entry is expected at its position, as a shape's
+			// under its key, where the position is known.
+			var entryExpected types.Type = expectedValue
+			if sh, ok := expectedShapeEntry(expected, types.IntLit(nextInt)); ok && positioned {
+				entryExpected = sh
+			}
+			ev = x.expr(item.Value, env, entryExpected)
 			if len(e.Items) == 2 && item == e.Items[0] {
 				x.noteRecv(e, ev) // [$this, 'name'] may name a private method
 			}
@@ -2033,7 +2047,7 @@ func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Typ
 		x.pipeLeft++
 		left := x.expr(e.Left, env, nil)
 		x.pipeLeft--
-		return x.pipe(e, left, env)
+		return x.pipe(e, left, env, expected)
 	}
 	l := x.expr(e.Left, env, nil)
 	r := x.expr(e.Right, env, nil)

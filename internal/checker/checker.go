@@ -540,7 +540,11 @@ type fnCtx struct {
 	// is checked as a call that takes it as an argument; pipeOperand is
 	// that expression while its stage is checked, and pipeParam the
 	// parameter it was bound to (design/php-versions.md §5.4).
-	argKnown    map[ast.Expr]types.Type
+	argKnown map[ast.Expr]types.Type
+	// wished is, for a partial application that is an argument of a call
+	// being checked, the callable type the call's own expected type makes
+	// of its parameter (partialChoice.join).
+	wished      map[ast.Expr]types.Type
 	pipeOperand ast.Expr
 	pipeParam   *program.Param
 	pipeSig     *signature

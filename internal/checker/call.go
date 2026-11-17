@@ -53,6 +53,9 @@ type signature struct {
 	// throws (throws.go); neither for a callable of unknown origin.
 	fn   *program.Function
 	meth *program.Method
+	// open marks the call of a closure that kept a generic function's type
+	// parameters open (sigOfCallable): they are typeParams here.
+	open bool
 	// removed marks a call of a function Phaenon does not have, reported
 	// as P1001 (extract()): that the variables it writes need a variable
 	// to come from is part of the finding, not a second one (P2112). Its
@@ -115,7 +118,7 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	sig.removed = removed && fn.File.IsStub()
 	sig.explicit = x.explicitArgs(e.TypeArgs, fn.TypeParams, fn.Name+"()", e.S)
 	if e.Args != nil && e.Args.FirstClassCallable {
-		return x.callableOf(sig)
+		return x.firstClassCallable(sig)
 	}
 	if lower == "array_map" && e.Args != nil && len(e.Args.Args) > 2 {
 		x.arrayMapOverSeveral(sig, e.Args, env)
@@ -969,9 +972,21 @@ func (x *fnCtx) dynamicCall(e *ast.Call, env *state, expected types.Type) types.
 	return types.MakeUnion(out...)
 }
 
-// sigOfCallable turns a callable type into a signature.
+// sigOfCallable turns a callable type into a signature. The type
+// parameters a generic function's first-class callable kept open
+// (firstClassCallable) are the signature's: a call of the closure infers
+// them from its arguments, `$h = pick(...); $h(1, 'a')`, as a call of the
+// function does.
 func (x *fnCtx) sigOfCallable(c types.Callable) *signature {
 	sig := &signature{name: "callable", ret: c.Return}
+	seen := map[string]bool{}
+	types.Walk(c, func(m types.Type) {
+		if p, ok := m.(types.Param); ok && strings.Contains(p.Name, "\x00") && !seen[p.Name] {
+			seen[p.Name] = true
+			sig.typeParams = append(sig.typeParams, &program.TypeParam{Name: p.Name, Bound: p.Bound})
+			sig.open = true
+		}
+	})
 	for i, p := range c.Params {
 		name := p.Name
 		if name == "" {
@@ -982,11 +997,18 @@ func (x *fnCtx) sigOfCallable(c types.Callable) *signature {
 	return sig
 }
 
-// callableOf builds the Closure type of f(...).
+// callableOf builds the Closure type of a callable named by a string
+// ('strval', 'Foo::bar'), a generic one with its type parameters open.
 func (x *fnCtx) callableOf(sig *signature) types.Type {
-	// A generic function's first-class callable stays generic, with
-	// fresh parameter identities that call-site inference resolves later.
-	rename, _ := x.freshParams(sig.typeParams)
+	c, _ := x.openCallable(sig)
+	return c
+}
+
+// openCallable builds the Closure type of sig with a generic callee's type
+// parameters open, under fresh identities that the inference of a call it
+// is passed to resolves (unify), and returns them.
+func (x *fnCtx) openCallable(sig *signature) (types.Callable, []*program.TypeParam) {
+	rename, tps := x.freshParams(sig.typeParams)
 	c := types.Callable{Closure: true, HasSig: true, Return: sig.ret}
 	if c.Return == nil {
 		c.Return = types.TMixed
@@ -1002,7 +1024,7 @@ func (x *fnCtx) callableOf(sig *signature) types.Type {
 	if sig.recv != nil {
 		c.Return = replaceStatic(c.Return, sig.recv)
 	}
-	return c
+	return c, tps
 }
 
 // argsOnly types the arguments of a call that cannot be checked further.
@@ -1336,7 +1358,7 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 				sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 				if e.Args != nil && e.Args.FirstClassCallable {
 					sig.subst = x.memberSubst(m, meth.Class)
-					out = append(out, x.callableOf(sig))
+					out = append(out, x.firstClassCallable(sig))
 					continue
 				}
 				ret := x.checkCall(sig, e.Args, env, e.S, expected)
@@ -1494,7 +1516,7 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 		sig.explicit = x.explicitArgs(e.TypeArgs, meth.TypeParams, sig.name, e.S)
 		if e.Args != nil && e.Args.FirstClassCallable {
 			sig.subst = x.memberSubst(recv, meth.Class)
-			out = append(out, x.callableOf(sig))
+			out = append(out, x.firstClassCallable(sig))
 			continue
 		}
 		out = append(out, x.checkCall(sig, e.Args, env, e.S, expected))
@@ -2496,12 +2518,28 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 	// are not callables; pass 1 infers from callable-typed arguments (a
 	// generic first-class callable resolves its own parameters against
 	// what pass 0 found); pass 2 types closures with their expected
-	// parameter types and infers from their return types.
+	// parameter types and infers from their return types. A partial
+	// application waits for pass 2 as a closure does: what its
+	// placeholders will receive, which the other arguments say
+	// (array_map's array after its callback), chooses its callee's type
+	// parameters with its bound arguments (partialChoice).
 	argTypes := make([]types.Type, len(bindings))
+	// For a partial application, what the bound arguments determine with
+	// the literals written in them generalised (partialChoice).
+	var general map[string]types.Type
+	if partial && len(inferable) > 0 {
+		general = map[string]types.Type{}
+	}
 	isClosure := func(e ast.Expr) bool {
-		switch e.(type) {
+		switch e := e.(type) {
 		case *ast.Closure, *ast.ArrowFunc:
 			return true
+		case *ast.Call:
+			return e.Args.Partial() && e != x.pipeOperand && known(e) == nil
+		case *ast.MethodCall:
+			return e.Args.Partial() && e != x.pipeOperand && known(e) == nil
+		case *ast.StaticCall:
+			return e.Args.Partial() && e != x.pipeOperand && known(e) == nil
 		}
 		return false
 	}
@@ -2520,7 +2558,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			}
 			x.byValue[b.arg] = true
 		}
-		if isClosure(b.arg.Value) {
+		if isClosure(b.arg.Value) && !b.param.ByRef {
 			continue
 		}
 		pt := paramType(b.param)
@@ -2585,41 +2623,144 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			// a string) or `array<K, V> ...$arrays` widens the binding
 			// instead of being checked against the first argument's.
 			unify(types.Substitute(b.param.Type, rename), at, subst, inferable, x.p())
+			if general != nil {
+				unify(types.Substitute(b.param.Type, rename), x.literalGeneral(b.arg.Value, at), general, inferable, x.p())
+			}
 		}
 	}
 	for i, b := range bindings {
-		if isClosure(b.arg.Value) || argTypes[i] == nil || !isCallableType(argTypes[i]) {
+		if isClosure(b.arg.Value) && !b.param.ByRef || argTypes[i] == nil || !isCallableType(argTypes[i]) {
 			continue
 		}
-		if len(inferable) > 0 {
-			unify(paramType(b.param), argTypes[i], subst, inferable, x.p())
+		// A closure with open type parameters given to another one's call
+		// binds nothing: PHPStan cannot resolve the type parameter there
+		// ("Unable to resolve the template type T in call to closure"),
+		// so it is the bound here too, with P3010 where the result has it.
+		if len(inferable) > 0 && !(sig.open && mentionsFreshParam(argTypes[i])) {
+			pt := paramType(b.param)
+			unify(pt, argTypes[i], subst, inferable, x.p())
+			if general != nil {
+				unify(pt, argTypes[i], general, inferable, x.p())
+			}
 		}
 	}
 	// A parameter left to its default binds its template parameter to the
 	// default's type: `get($id, B $behavior = self::EXCEPTION)` with
-	// `@return (B is 1 ? object : ?object)` decides on the constant.
+	// `@return (B is 1 ? object : ?object)` decides on the constant. One a
+	// placeholder stands for is the closure's callers' to give, with its
+	// default or without, and binds nothing.
 	if len(inferable) > 0 {
 		given := map[*program.Param]bool{}
 		for _, b := range bindings {
 			given[b.param] = true
+		}
+		if shape != nil {
+			for _, s := range shape.slots {
+				given[s.param] = true
+			}
 		}
 		for _, p := range sig.params {
 			if given[p] || !p.HasDefault || p.Default == nil {
 				continue
 			}
 			if dt := x.defaultType(p.Default, sig); dt != nil {
-				unify(paramType(p), dt, subst, inferable, x.p())
+				pt := paramType(p)
+				unify(pt, dt, subst, inferable, x.p())
+				if general != nil {
+					unify(pt, x.literalGeneral(p.Default, dt), general, inferable, x.p())
+				}
 			}
 		}
 	}
+	// taken says, for each bound argument typed so far, whether the callee
+	// takes it with the type parameters as subst has them; for one bound
+	// by reference, the type its parameter has, which the variable is
+	// retyped to.
+	taken := func() []string {
+		out := make([]string, len(bindings))
+		for i, b := range bindings {
+			if argTypes[i] == nil || b.arg.Unpack || over[b.arg] {
+				continue
+			}
+			pt := finalizeParams(paramType(b.param), tps)
+			switch {
+			case b.param.ByRef:
+				out[i] = "&" + types.PrintQualified(pt)
+			case types.IsAcceptable(types.Substitute(argTypes[i], freshOnly(subst)), pt, x.p()):
+				out[i] = "taken"
+			default:
+				out[i] = "refused"
+			}
+		}
+		return out
+	}
+	// closureNow is the closure a partial application makes with the type
+	// parameters as subst has them.
+	closureNow := func() types.Type {
+		close := func(t types.Type) types.Type {
+			t = finalizeParams(types.Substitute(t, freshOnly(subst)), tps)
+			if mentionsFreshParam(t) {
+				t = finalizeParams(types.Substitute(t, freshOnly(subst)), tps)
+			}
+			return t
+		}
+		var ret types.Type
+		if sig.ret != nil {
+			ret = close(renameForeign(types.Substitute(types.Substitute(sig.ret, rename), subst)))
+		}
+		return partialClosure(shape, func(p *program.Param) types.Type { return close(paramType(p)) }, ret)
+	}
+	// A partial application's literals are read as their types now, before
+	// the closures among its arguments are typed with its type parameters
+	// (partialChoice).
+	var choice *partialChoice
+	if general != nil {
+		choice = &partialChoice{x: x, shape: shape, tps: tps, subst: subst, inferable: inferable, taken: taken, closure: closureNow,
+			declared: func(p *program.Param) types.Type { return types.Substitute(p.Type, rename) }}
+		choice.generalise(general)
+	}
 	for i, b := range bindings {
-		if !isClosure(b.arg.Value) {
+		if !isClosure(b.arg.Value) || b.param.ByRef {
 			continue
 		}
 		pt := paramType(b.param)
 		at := known(b.arg.Value)
 		if at == nil {
+			if _, literal := b.arg.Value.(*ast.Closure); !literal && len(inferable) > 0 && expected != nil && sig.ret != nil && !mentionsFreshParam(expected) {
+				// What this call is expected to return says what a
+				// partial application among its arguments should: its
+				// callee keeps a literal as written where the closure of
+				// the generalised one would not do (partialChoice.join).
+				if _, arrow := b.arg.Value.(*ast.ArrowFunc); !arrow {
+					wished := map[string]types.Type{}
+					for k, v := range subst {
+						wished[k] = v
+					}
+					// (A conditional return type is either of its branches.)
+					ret := types.MapDeep(renameForeign(types.Substitute(types.Substitute(sig.ret, rename), subst)), func(m types.Type) types.Type {
+						if c, ok := m.(types.Conditional); ok {
+							return types.MakeUnion(c.Then, c.Else)
+						}
+						return m
+					})
+					unify(ret, expected, wished, inferable, x.p())
+					if x.wished == nil {
+						x.wished = map[ast.Expr]types.Type{}
+					}
+					x.wished[b.arg.Value] = types.Substitute(types.Substitute(b.param.Type, rename), wished)
+				}
+			}
 			at = x.expr(b.arg.Value, env, pt)
+			delete(x.wished, b.arg.Value)
+		}
+		if rec := x.partialOf(b.arg.Value); rec != nil {
+			// PHPStan reads this callback's parameters from the other
+			// arguments by itself (program.PartialParam.Typed).
+			if sig.stub && sig.fn != nil && phpstanReadsCallback[strings.ToLower(sig.fn.Name)] {
+				for j, p := range rec.Params {
+					rec.Params[j].Typed = p.Variadic || p.DocArray
+				}
+			}
 		}
 		argTypes[i] = at
 		if len(inferable) > 0 {
@@ -2628,16 +2769,31 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			unify(types.Substitute(b.param.Type, rename), at, subst, inferable, x.p())
 		}
 	}
+	// What the place gives a partial application's placeholders joins its
+	// type parameters now that every bound argument is typed.
+	if choice != nil {
+		place := expected
+		if w, ok := x.wished[sig.node]; ok && sig.node != nil {
+			place = w
+		}
+		choice.join(expected, place)
+	}
 	// Infer from the expected type too (contextual typing of the return),
 	// unless the enclosing call is still inferring it: its open parameter
 	// says nothing yet, and binding ours to it would leave both open
 	// (`$m->toDatabase($m->fromDatabase($doc, $class))`).
-	if len(inferable) > 0 && expected != nil && sig.ret != nil && !mentionsFreshParam(expected) {
+	// Not for a partial application, which is not what its callee returns:
+	// the type expected of it is the closure's (partialChoice), and the
+	// closure is checked against it, as any value is, with the type
+	// parameters chosen.
+	if len(inferable) > 0 && !partial && expected != nil && sig.ret != nil && !mentionsFreshParam(expected) {
 		unify(renameForeign(types.Substitute(types.Substitute(sig.ret, rename), subst)), expected, subst, inferable, x.p())
 	}
 	// Expose the results under the declared names too (new Foo() reads them).
 	for i, tp := range sig.typeParams {
-		if v, ok := subst[tps[i].Name]; ok {
+		// Not an open closure's, which has them under fresh names only
+		// (sigOfCallable): an argument may hold the same closure's.
+		if v, ok := subst[tps[i].Name]; ok && !strings.Contains(tp.Name, "\x00") {
 			subst[tp.Name] = v
 		}
 	}
@@ -2678,7 +2834,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			if nativeMismatch(tp.Name) {
 				continue // the argument PHP refuses is the finding
 			}
-			x.report(span, P3002, "type argument %s inferred for %s of %s is not a subtype of its bound %s", x.typeName(v), tp.Name, sig.name, x.typeName(bound))
+			// By its declared name: an open closure's type parameters are
+			// the signature's under their fresh ones (sigOfCallable).
+			x.report(span, P3002, "type argument %s inferred for %s of %s is not a subtype of its bound %s", x.typeName(v), types.ParamName(tp.Name), sig.name, x.typeName(bound))
 		}
 	}
 	// With an unpacked argument the overwrites wait for its type: a sealed
@@ -2835,6 +2993,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		ret = renameForeign(ret)
 		ret = types.Substitute(ret, freshOnly(subst))
 		ret = finalizeParams(ret, tps)
+		if mentionsFreshParam(ret) {
+			ret = finalizeParams(types.Substitute(ret, freshOnly(subst)), tps) // `U of T`
+		}
 		if sig.recv != nil {
 			ret = replaceStatic(ret, sig.recv)
 		}
@@ -2901,14 +3062,19 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		if opaque {
 			continue
 		}
-		x.report(span, P3010, "type argument %s of %s is not inferable here and is mixed: write it as an explicit type argument, or type what receives the result", tp.Name, sig.name)
+		x.report(span, P3010, "type argument %s of %s is not inferable here and is mixed: write it as an explicit type argument, or type what receives the result", types.ParamName(tp.Name), sig.name)
 	}
 	// The parameters as the arguments resolved them; a type parameter
 	// nothing determined widens to its bound (closure types are not
 	// generic).
 	resolved := func(p *program.Param) types.Type {
-		t := types.Substitute(paramType(p), freshOnly(subst))
-		return finalizeParams(t, tps)
+		t := finalizeParams(types.Substitute(paramType(p), freshOnly(subst)), tps)
+		if mentionsFreshParam(t) {
+			// A bound that names another type parameter, `U of T`, is
+			// what that one was made.
+			t = finalizeParams(types.Substitute(t, freshOnly(subst)), tps)
+		}
+		return t
 	}
 	if x.pipeSig == sig && x.pipeParam != nil {
 		x.pipeParamType = resolved(x.pipeParam)
@@ -3349,7 +3515,7 @@ func kindMatches(param, arg types.Type) bool {
 // closures in bound arguments and by-reference parameters included — and
 // any other right side is called with the left side, ($stage)(A). The left
 // side is typed once, before the stage.
-func (x *fnCtx) pipe(e *ast.Binary, left types.Type, env *state) types.Type {
+func (x *fnCtx) pipe(e *ast.Binary, left types.Type, env *state, expected types.Type) types.Type {
 	savedOperand, savedParam, savedSig := x.pipeOperand, x.pipeParam, x.pipeSig
 	x.pipeOperand, x.pipeParam, x.pipeSig = e.Left, nil, nil
 	if x.argKnown == nil {
@@ -3361,7 +3527,10 @@ func (x *fnCtx) pipe(e *ast.Binary, left types.Type, env *state) types.Type {
 		x.pipeOperand, x.pipeParam, x.pipeSig = savedOperand, savedParam, savedSig
 	}()
 	if call, args := pipeCall(e); call != nil {
-		t := x.expr(call, env, nil)
+		// A stage is typed as the call it becomes, with what is expected
+		// of the pipe: a call's result is inferred from it, and so is a
+		// partial application among its arguments.
+		t := x.expr(call, env, expected)
 		if args.Partial() && x.pipeParam != nil && x.pipeSig != nil {
 			x.recordPipePartial(e.Right, args, x.pipeSig, x.pipeParam)
 		}
@@ -3369,5 +3538,5 @@ func (x *fnCtx) pipe(e *ast.Binary, left types.Type, env *state) types.Type {
 		return t
 	}
 	operand := &ast.Arg{S: e.Left.Span(), Value: e.Left}
-	return x.dynamicCall(&ast.Call{S: e.S, Callee: e.Right, Args: &ast.ArgList{S: e.Left.Span(), Args: []*ast.Arg{operand}}}, env, nil)
+	return x.dynamicCall(&ast.Call{S: e.S, Callee: e.Right, Args: &ast.ArgList{S: e.Left.Span(), Args: []*ast.Arg{operand}}}, env, expected)
 }

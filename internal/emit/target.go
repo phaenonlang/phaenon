@@ -378,7 +378,13 @@ type closure struct {
 func closureParts(rec *program.Partial, fb, constExpr bool, uses []string) closure {
 	var vars []string
 	for _, p := range rec.Params {
-		if p.Doc != "" && !p.Variadic && !(fb && p.Arg == nil) {
+		switch {
+		case p.Doc == "" || p.Typed || fb && p.Arg == nil:
+		case p.Variadic:
+			// In the body a variadic parameter is the array of what it
+			// was given, under the names of named arguments too.
+			vars = append(vars, "/** @var array<int|string, "+p.Doc+"> $"+p.Name+" */")
+		default:
 			vars = append(vars, "/** @var "+p.Doc+" $"+p.Name+" */")
 		}
 	}

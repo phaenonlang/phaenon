@@ -70,6 +70,29 @@ $names = ['ada', 'bob'];
 $pick = first($names, ?);
 wantsInt($pick); // want P2103 "Closure(int $i): 'ada'|'bob'"
 
+// A closure among the bound arguments is typed with the type parameter
+// chosen, the literal beside it read as its type; an operation is no
+// literal.
+function fold<T>(T $init, Closure(T): int $step, T $extra): int { return $step($init); }
+function same<T>(T $a, T $b): T { return $a; }
+$folded = fold(0, fn($v) => $v + 1, ?);
+wantsInt($folded); // want P2103 "Closure(int $extra): int"
+$summed = same(?, 1 + 2);
+wantsInt($summed); // want P2103 "Closure(3 $a): 3"
+
+// A partial application among the bound arguments is one of them: where the
+// place gives the placeholder what it does not take, the closure is refused
+// at the place, not the argument.
+function on<T>(Closure(T): int $h, T $v): int { return $h($v); }
+$lengths = array_map(on(strlen(?), ?), [1, 2]); // want P2103 "argument 1 ($callback) of array_map()"
+// An argument bound by reference holds its type parameter as it is.
+function fill<T>(array<T> &$xs, T $with, T $more): void { $xs[] = $with; $xs[] = $more; }
+/** @param list<'asc'|'desc'> $order */
+function filled(array $order): void {
+    $add = fill($order, 'asc', ?);
+    wantsInt($add); // want P2103 "Closure('asc'|'desc' $more): void"
+}
+
 // Bound arguments are checked when the closure is created.
 $bad = three('one', ?, 1.0); // want P2103
 

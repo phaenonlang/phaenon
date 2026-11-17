@@ -1,0 +1,273 @@
+// Partial application of a generic function (design/php-versions.md §5.2).
+// The callee's type parameters come from the bound arguments, a literal
+// written in one read as its type, and, where the application stands in a
+// place that expects a callable type, from what that type gives the
+// placeholders; the two are joined. The types are the same for either
+// target (TestPartialGenericTargets checks this file for 8.6 too).
+
+function pick<T>(T $a, T $b): T { return $a; }
+function same<T>(T $a): T { return $a; }
+function show<T of \Stringable>(T $a, T $b): string { return (string) $a; }
+function last<T>(T $first, T ...$rest): T { return $first; }
+function first<T>(list<T> $xs, int $i): T { return $xs[$i]; }
+/**
+ * @template T of 'asc'|'desc'
+ * @param T $a
+ * @param T $b
+ * @return T
+ */
+function either(string $a, string $b): string { return $a; }
+function apply<A, B>(A $a, Closure(A): B $f): B { return $f($a); }
+function applyTo<A, B>(Closure(A): B $f, A $a): B { return $f($a); }
+function put<T>(Box<T> $box, T $v): void { $box->v = $v; }
+function on<T>(Closure(T): void $h, T $v): void { $h($v); }
+function opt<T>(T $a, ?T $b = null): T { return $b ?? $a; }
+function optZero<T>(T $a, T $b = 0): T { return $a; }
+function append<T>(list<T> $xs, T $x): list<T> { return [...$xs, $x]; }
+function twoLit<A, B>(Box<A> $box, A $la, B $lb, A $a, B $b): (A, B) { return [$a, $b]; }
+function withInt<T>(int $n, T $a, T $b): T { return $a; }
+function wantsInt(int $x): void {}
+function takesInts(Closure(int, int): int $f): void {}
+/** @param 'asc'|'desc' $d */
+function wantsDir(string $d): void {}
+/** @param Closure('asc'|'desc'): ('asc'|'desc') $f */
+function takesDir(Closure $f): void {}
+function takes(Closure(string): int|string $f): void {}
+function takesTwo(Closure(string, float): mixed $f): void {}
+/** @param Closure(positive-int): positive-int $f */
+function takesPositive(Closure $f): void {}
+
+final class Name implements \Stringable {
+    public function __construct(private string $n) {}
+    public function __toString(): string { return $this->n; }
+}
+
+enum Suit { case Hearts; case Spades; }
+
+final class Box<T> { public function __construct(public T $v) {} }
+
+final class Limits {
+    const LOW = 1;
+    const SUM = 1 + 2;
+    const int HIGH = 10;
+    /** @var 'asc'|'desc' */
+    const string ORDER = 'asc';
+}
+
+final class Pair<U> {
+    public function __construct(public U $u) {}
+    with<V>(V $v, U $w): V { return $v; }
+    static both<W>(W $a, W $b): W { return $a; }
+}
+
+// Nothing is expected: the bound arguments decide. A literal written in
+// one is read as its type where the closure's callers give values of the
+// type parameter.
+function unexpected(Pair<int> $pair, Name $name): void {
+    $f = pick(?, 0);
+    wantsInt($f); // want P2103 "Closure(int $a): int given"
+    $f('a'); // want P2103 "expects int, 'a' given"
+    wantsInt(pick(b: 0, a: ?)); // want P2103 "Closure(int $a): int given"
+    wantsInt(pick('x', ...)); // want P2103 "Closure(string $b): string given"
+    wantsInt(pick(?, -1.5)); // want P2103 "Closure(float $a): float given"
+    wantsInt(pick(?, true)); // want P2103 "Closure(bool $a): bool given"
+    wantsInt(pick(?, null)); // want P2103 "Closure(null $a): null given"
+    wantsInt(pick(Suit::Hearts, ?)); // want P2103 "Closure(Suit $b): Suit given"
+    wantsInt(pick([1, 'k' => 'x'], ?)); // want P2103 "Closure(array{0: int, k: string} $b): array{0: int, k: string} given"
+    wantsInt(last(1, ?, ...)); // want P2103 "Closure(int $rest0, int... $rest=): int given"
+    wantsInt(Pair::both(?, 1.5)); // want P2103 "Closure(float $a): float given"
+    // A constant is the literal its declaration writes, or its declared type.
+    wantsInt(pick(?, PHP_INT_SIZE)); // want P2103 "Closure(int $a): int given"
+    wantsInt(pick(?, Limits::LOW)); // want P2103 "Closure(int $a): int given"
+    wantsInt(pick(?, Limits::HIGH)); // want P2103 "Closure(int $a): int given"
+    wantsInt(pick(?, Limits::ORDER)); // want P2103 "Closure('asc'|'desc' $a): 'asc'|'desc' given"
+    wantsInt(pick(?, Limits::SUM)); // want P2103 "Closure(3 $a): 3 given"
+    // The empty array is an array.
+    wantsInt(pick(?, [])); // want P2103 "Closure(array $a): array given"
+    // A literal that is all its bound admits stays.
+    wantsInt(either('asc', ?)); // want P2103 "Closure('asc' $b): 'asc' given"
+    // So does what the callers give nothing of: a type parameter no
+    // placeholder has, and one whose values the callee gives a callback.
+    wantsInt(first(['ada', 'bob'], ?)); // want P2103 "Closure(int $i): 'ada'|'bob' given"
+    wantsInt(array_map(?, ['a', 'b'])); // want P2103 "Closure(callable('a'|'b'): mixed $callback): list given", P3010
+    // One that nothing determines is its bound, mixed without one.
+    wantsInt($pair->with(?, 2)); // want P2103 "Closure(mixed $v): mixed given", P3010
+    wantsInt(show(?, ?)); // want P2103 "Closure(Stringable $a, Stringable $b): string given"
+    wantsInt(show(?, $name)); // want P2103 "Closure(Name $a): string given"
+    // Explicit type arguments win.
+    wantsInt(pick<int|string>(?, 0)); // want P2103 "Closure(int|string $a): int|string given"
+    // A partial application of a partial application has nothing generic left.
+    wantsInt($f(?)); // want P2103 "Closure(int $a): int given"
+}
+
+// What is not written as a literal is typed as declared, and stays so.
+/**
+ * @param 'asc'|'desc' $dir
+ * @param int<1, 12> $month
+ * @param Suit::Hearts $hearts
+ * @param array{type: 'created', id: int} $event
+ * @param Box<'asc'|'desc'> $box
+ * @param Closure('asc'|'desc'): void $handler
+ */
+function declared(string $dir, int $month, Suit $hearts, array $event, Box $box, Closure $handler): void {
+    $f = pick(?, $dir);
+    wantsDir($f('desc'));
+    wantsInt(pick(?, $month)); // want P2103 "Closure(int<1, 12> $a): int<1, 12> given"
+    wantsInt(pick(?, $hearts)); // want P2103 "Closure(Suit::Hearts $a): Suit::Hearts given"
+    wantsInt(pick(?, $event)); // want P2103 "Closure(array{type: 'created', id: int} $a): array{type: 'created', id: int} given"
+    wantsInt(pick(?, [$dir])); // want P2103 "Closure(list{'asc'|'desc'} $a): list{'asc'|'desc'} given"
+    // A bound argument that holds the type parameter as it is keeps a
+    // literal beside it from widening it.
+    $put = put($box, ?);
+    $put('asc');
+    put($box, 'asc', ...);
+    $on = on($handler, ?);
+    $on('desc');
+    wantsInt(pick(?, $box)); // want P2103 "Closure(Box<'asc'|'desc'> $a): Box<'asc'|'desc'> given"
+    // Each type parameter by itself: the Box holds A, and nothing B.
+    wantsInt(twoLit($box, 'asc', 0, ?, ?)); // want P2103 "Closure('asc'|'desc' $a, int $b): list{'asc'|'desc', int} given"
+    // A bound argument refused as written is no reason to keep a literal.
+    wantsInt(withInt('oops', 0, ?)); // want P2103 "Closure(int $b): int given", P2103 "expects int, 'oops' given"
+    // A parameter a placeholder stands for, `?` or `...`, is the callers'
+    // to give and not left to its default; never says nothing of what they
+    // give.
+    wantsInt(optZero(?, ?)); // want P2103 "Closure(mixed $a, mixed $b): mixed given", P3010
+    wantsInt(optZero(?, ...)); // want P2103 "Closure(mixed $a, mixed $b=): mixed given", P3010
+    wantsInt(optZero(?)); // want P2103 "Closure(int $a): int given"
+    wantsInt(opt(?)); // want P2103 "Closure(mixed $a): mixed given", P3010
+    wantsInt(append([], ?)); // want P2103 "Closure(mixed $x): list given", P3010
+}
+
+// An argument of a call, a generic one included, whichever argument says
+// what the closure receives.
+function argument(Pair<int> $pair, Name $name, string $s): void {
+    takes(pick(?, 0));
+    takes(pick(b: 0, a: ?));
+    takes(Pair::both(?, 1));
+    takes($pair->with(?, 2));
+    takesTwo(last(?, ...));
+    takesTwo(pick(?, ...));
+    takes(pick(?, ...)); // want P2103 "Closure(string $a, string $b): string given"
+    wantsInt(array_map(pick(?, 0), [$s])); // want P2103 "list{int|string} given"
+    // What the type gives is taken as it is, as a declared type is.
+    wantsInt(array_map(pick(?, 0), ['a', 'b'])); // want P2103 "list{int|'a'|'b', int|'a'|'b'} given"
+    wantsInt(apply('a', pick(?, 0))); // want P2103 "expects int, int|'a' given"
+    wantsInt(applyTo(pick(?, 0), 'a')); // want P2103 "expects int, int|'a' given"
+    wantsInt(apply(1, pick(?, 2)));
+    // A literal is kept as written where the place refuses the closure of
+    // its type and takes the closure of the literal.
+    takesDir(pick(?, 'asc'));
+    takesPositive(pick(?, 1));
+    takesDir(same(?));
+    takesDir(either(?, 'asc'));
+    // The closure is checked against the type once T is chosen: what the
+    // type says it returns never chooses T.
+    takes(pick<int>(?, 0)); // want P2103 "Closure(int $a): int given"
+    takes(pick(?, 1.5)); // want P2103 "Closure(float|string $a): float|string given"
+    $f = pick(?, 0);
+    takes($f); // want P2103 "Closure(int $a): int given"
+    takes($f(?)); // want P2103 "Closure(int $a): int given"
+    // A join that leaves the bound is reported where the application is.
+    takes(show(?, $name)); // want P3002 "string|Name inferred for T of show() is not a subtype of its bound Stringable"
+    wantsInt(array_map(show(?, $name), [$name])); // want P2103 "list{string} given"
+    wantsInt(array_map(show(?, $name), ['a'])); // want P2103, P3002
+    takes(either(?, 'asc')); // want P3002 "string inferred for T of either()"
+}
+
+// The place may be what the call the application is an argument of is
+// expected to return.
+/**
+ * @param list<'asc'|'desc'> $dirs
+ * @return list<'asc'|'desc'>
+ */
+function wished(array $dirs): array { return array_map(pick(?, 'asc'), $dirs); }
+/**
+ * @param list<'asc'|'desc'> $dirs
+ * @return list<'asc'|'desc'>
+ */
+function wishedOfAPipe(array $dirs): array { return $dirs |> array_map(pick(?, 'asc'), ?); }
+/**
+ * @param list<'asc'|'desc'> $dirs
+ * @return list<int>
+ */
+function notWished(array $dirs): array { return array_map(pick(?, 'asc'), $dirs); } // want P2202 "returns list<string>"
+
+// A return type, a property, a parameter's default, an entry of a list, of
+// a shape and of a tuple.
+final class Holder {
+    public Closure(string): int|string $f;
+    public ?Closure(string): int|string $maybe = null;
+    public static ?Closure(string): int|string $shared = null;
+    /** @var array{run: Closure(string): (int|string), n: int} */
+    public array $shape;
+    /** @var list<Closure(string): (int|string)> */
+    public array $list = [];
+
+    public function __construct(bool $c) {
+        $this->f = pick(?, 0);
+        $this->maybe = $c ? pick(?, 0) : null;
+        self::$shared = $this->maybe ?? pick(?, 1);
+        $this->shape = ['run' => pick(?, 0), 'n' => 1];
+        $this->list[] = pick(?, 2);
+        $this->list = [pick(?, 0), pick(b: ?, a: 1)];
+        $this->f = pick(?, 1.5); // want P2201
+    }
+
+    run(Closure(string): int|string $f = pick(?, 0)): void {}
+    stop(Closure(string): int $f = pick(?, 0)): void {} // want P2208 "Closure(int|string $a): int|string"
+}
+
+function returned(): Closure(string): int|string { return pick(?, 0); }
+function returnedNarrower(): Closure(string): int { return pick(?, 0); } // want P2202 "returns Closure(int|string $a): int|string"
+/** @return callable(string): (int|string) */
+function returnedCallable(): callable { return pick(?, 0); }
+/** @return array{Closure(string): (int|string), int} */
+function returnedTuple(): array { return [pick(?, 0), 1]; }
+function returnedMatch(int $n): Closure(string): int|string {
+    return match ($n) {
+        0 => pick(?, 0),
+        default => pick(?, $n),
+    };
+}
+
+/** @return array{Closure(string): (int|string), int} */
+function returnedAfterSpread(string ...$more): array { return [...$more, pick(?, 0), 1]; } // want P2202
+
+// A first-class callable of a generic function keeps its type parameters
+// open for what receives it: the call it is passed to, or a call of the
+// closure. Where the place expects a callable type that says what the
+// closure receives, they are chosen there, every parameter being a
+// placeholder's.
+/** @param list<list<int>> $lists */
+function firstClass(Pair<int> $pair, array $lists): void {
+    $all = pick(...);
+    wantsInt($all); // want P2103 "Closure(T $a, T $b): T given"
+    wantsInt($all(1, 'a')); // want P2103 "expects int, 1|'a' given"
+    wantsInt(pick(...)(1, 2));
+    $head = first(...);
+    wantsInt(array_map($head, $lists, [0])); // want P2103 "list<int> given"
+    wantsInt(pick<int>(...)); // want P2103 "Closure(int $a, int $b): int given"
+    wantsInt($pair->with(...)); // want P2103 "Closure(V $v, int $w): V given"
+    takesTwo(pick(...));
+    takesDir(same(...));
+    takesTwo(show(...)); // want P3002 "float|string inferred for T of show()"
+    takes(pick(...)); // want P2103 "Closure(string $a, string $b): string given"
+    wantsInt(array_map(pick(...), [1], ['a'])); // want P2103 "list<1|'a'> given"
+    // An open closure meets a place from a variable as the expression does.
+    takesInts($all);
+    takesInts($head); // want P2103 "Closure(list $xs, int $i): mixed given"
+    // One given to another one's call binds nothing there.
+    $same = same(...);
+    wantsInt($same(1));
+    $both = $same($all); // want P3010 "type argument T of callable is not inferable here and is mixed"
+}
+
+function returnedFromVariable(): Closure(int, int): int { $all = pick(...); return $all; }
+
+final class Kept {
+    const Closure(string, float): mixed PICK = pick(...);
+    public Closure(int, int): int $sum = pick(...);
+}
+
+function returnedFirstClass(): Closure(string, string): string { return pick(...); }
+function returnedNarrower2(): Closure(string, string): int { return pick(...); } // want P2202 "returns Closure(string $a, string $b): string"

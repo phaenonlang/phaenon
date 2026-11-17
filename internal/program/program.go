@@ -608,8 +608,21 @@ type PartialParam struct {
 	// names fully qualified; "" when it declares none.
 	Native string
 	// Doc is its type for a docblock when the type says more than PHP can
-	// declare (list<int>, a literal, a generic class); "" otherwise.
+	// declare (list<int>, a literal, a generic class) or than the callee's
+	// parameter does (the type chosen for its type parameter); "" otherwise.
 	Doc string
+	// DocArray says Doc is an array type, or holds one.
+	DocArray bool
+	// Typed marks a parameter PHPStan types by itself, and holds an inline
+	// @var to: the application is the callback of array_map or of another
+	// function PHPStan reads the callback's parameters for, and the
+	// parameter's type is an array's (DocArray, or a variadic parameter,
+	// an array in the body). PHPStan refuses a @var of an array type that
+	// is not within what it read: the type chosen for the closure may be
+	// wider (`array{int, int}` beside the `array{1, 2}` of a literal
+	// argument), so the lowering writes none. Another type's @var may be
+	// wider than what PHPStan read, and is written.
+	Typed bool
 	// Default is an optional parameter's default as PHP code that means
 	// the same in any file; "" when required or when it cannot be written
 	// so (Unwritable).

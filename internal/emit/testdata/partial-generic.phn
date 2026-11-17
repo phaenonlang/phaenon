@@ -1,0 +1,139 @@
+// targets: 8.5, 8.6
+// Partial application of a generic function (design/php-versions.md
+// §5.2): the callee's type parameters come from the bound arguments and
+// from what the place expects the closure to receive. The closure written
+// for PHP 8.5 says the type chosen in an inline @var, so that PHPStan reads
+// the compiled file as the checker read the source, but for an array's
+// type in the callback of array_map and the like, whose parameters PHPStan
+// reads itself.
+
+function pick<T>(T $a, T $b): T { return $a; }
+function last<T>(T $first, T ...$rest): T { return $rest === [] ? $first : $rest[array_key_last($rest)]; }
+function show<T of \Stringable>(T $a, T $b): string { return "$a$b"; }
+function apply<A, B>(A $a, Closure(A): B $f): B { return $f($a); }
+function same<F>(F $f): F { return $f; }
+function call<A, B>(Closure(A): B $f): Closure(A): B { return $f; }
+/** @param list<int> $xs */
+function total(array $xs, int $k): int { return array_sum($xs) + $k; }
+/** @param list<int> $xs */
+function longer(array $xs, int $than): bool { return count($xs) > $than; }
+function append<T>(list<T> $xs, T $x): list<T> { return [...$xs, $x]; }
+function later<T>(T $carry, T $item): T { return $item; }
+/**
+ * @param list<int> $a
+ * @param list<int> $b
+ */
+function byTotal(array $a, array $b): int { return array_sum($a) <=> array_sum($b); }
+/** @param Closure(list<int>): int $f */
+function plain(Closure $f): int { return $f([1]); }
+function wantsScalar(int|string $x): string { return (string) $x; }
+
+final class Name implements \Stringable {
+    public function __construct(private string $n) {}
+    public function __toString(): string { return $this->n; }
+}
+
+final class Pair<U> {
+    public function __construct(public U $u) {}
+    or<V>(V $v, V $w): V|U { return $v ?? $this->u; }
+    static first<W>(W $a, W $b): W { return $a; }
+    keep(Pair<U> $other): Closure(Pair<U>): Pair<U> { return pick(?, $other); }
+}
+
+final class Holder {
+    public Closure(string): int|string $f;
+    /** @var array{run: Closure(string): (int|string), n: int} */
+    public array $shape;
+    /** @var list<Closure(string): (int|string)> */
+    public array $list;
+
+    public function __construct() {
+        $this->f = pick(?, 0);
+        $this->shape = ['run' => pick(?, 1), 'n' => 1];
+        $this->list = [pick(?, 2), pick(b: ?, a: 3)];
+    }
+
+    run(string $s, Closure(string): int|string $f = pick(?, 4)): string { return wantsScalar($f($s)); }
+}
+
+function made(): Closure(string): int|string { return pick(?, 0); }
+/** @return array{Closure(string): (int|string), int} */
+function tuple(): array { return [pick(?, 5), 1]; }
+
+// An argument of a generic call: the callback's parameter comes from the
+// array after it.
+echo implode(',', array_map(pick(?, 0), ['a', 'b'])), "\n";
+echo implode(',', array_map(wantsScalar(...), array_map(pick(0, ?), ['a', 'b']))), "\n";
+echo wantsScalar(apply('x', pick(?, 0))), "\n";
+// The callee's parameter is no callable type, or has fewer parameters than
+// the closure: the closure says its types itself.
+$kept = same(last(1, ...));
+echo wantsScalar($kept(2, 3)), "\n";
+echo wantsScalar(apply('b', last(?, ...))), "\n";
+// An array type: PHPStan reads the callback's parameter from the literal
+// behind the other argument, and needs no word of it.
+$local = [[1, 2], [3, 4]];
+echo count(array_map(pick(?, [5, 6]), $local)), "\n";
+$pairOf = pick(?, [5, 6]);
+echo count($pairOf([7, 8])), "\n";
+// An array's type where the closure is an argument. PHPStan types the
+// function's type parameters from the closure as it declares itself, so
+// the closure says its type: a callable parameter of a generic function,
+// whether another argument fixes its type or the closure alone does,
+// array_reduce's and usort's, and one that is not generic.
+/**
+ * @param list<int> $ints
+ * @param list<list<int>> $lists
+ */
+function arrays(array $ints, array $lists, int $n): string {
+    $first = call(total(?, $n))($ints);
+    $second = apply($ints, append(?, $n))[0];
+    $third = array_reduce($lists, later(?, ?), $ints)[0] ?? 0;
+    usort($lists, byTotal(?, ?));
+    $fourth = plain(total(?, $n));
+    // Where PHPStan reads the callback's parameter from the array itself,
+    // the closure says nothing: PHPStan would hold it to what it read.
+    $fifth = count(array_filter([[1, 2], [3]], longer(?, 1))) + array_sum(array_map(total(?, $n), [[1, 2], [3]]));
+    $sixth = array_sum(array_map(total(?, $n), $lists));
+    return implode(',', [$first, $second, $third, $fourth, $fifth, $sixth]);
+}
+echo arrays([1, 2], [[3], [4, 5]], 6), "\n";
+// The empty array is an array of whatever its callers give, alone or in
+// another literal: the closure says it with the value type PHPStan asks
+// of every iterable type.
+$empty = pick(?, []);
+$pairs = pick(?, [[], []]);
+$keyed = pick(?, ['k' => []]);
+echo count($empty([1])), count($pairs([[2], [3]])[1]), count($keyed(['k' => [4, 5]])['k']), "\n";
+// Nothing is expected: the bound argument decides, a literal as its type.
+$f = pick(?, 0);
+echo $f(7), "\n";
+$named = pick(b: 'z', a: ?);
+echo $named('y'), "\n";
+$rest = last(1, ?, ...);
+echo $rest(2), $rest(2, 3, 4), "\n";
+$every = last(1, ...);
+echo $every(), $every(5, 6), "\n";
+echo implode(',', array_map(last(?, ...), ['a', 'b'], [1, 2])), "\n";
+// A return type, a property, an entry of a shape, of a list and of a
+// tuple, and a parameter's default.
+echo wantsScalar(made()('m')), "\n";
+$holder = new Holder();
+echo wantsScalar(($holder->f)('p')), wantsScalar($holder->shape['run']('q')), wantsScalar($holder->list[0]('r')), wantsScalar($holder->list[1]('s')), "\n";
+echo $holder->run('d'), wantsScalar(tuple()[0]('t')), "\n";
+// Methods, static and not, and a bound type parameter.
+$pair = new Pair(1);
+echo $pair->keep(new Pair(2))(new Pair(3))->u, "\n";
+$or = $pair->or(?, 2);
+echo $or(3), "\n";
+echo implode(',', array_map(Pair::first(?, 'w'), [1, 2])), "\n";
+$ada = new Name('ada');
+$shown = show(?, $ada);
+echo $shown(new Name('bob')), "\n";
+// A partial application of a partial application, and a first-class
+// callable: its type parameters are their bounds where nothing is expected.
+$again = $f(?);
+echo $again(8), "\n";
+$all = pick(...);
+echo wantsScalar($all(1, 'a')), "\n";
+echo implode(',', array_map(pick(...), [1, 2], ['a', 'b'])), "\n";
