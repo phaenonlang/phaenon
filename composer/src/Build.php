@@ -22,6 +22,18 @@ final readonly class Build
     }
 
     /**
+     * Whether the binary runs here at all, asked after a build failed: a status alone does not
+     * tell a phn that ran and reported findings from one the system could not start, which a
+     * shell may report with any status.
+     */
+    public function starts(): bool
+    {
+        $output = '';
+
+        return $this->executor->execute([$this->binary, 'version'], $output, $this->projectDir) === 0;
+    }
+
+    /**
      * @param list<string>                    $arguments
      * @param string                          $meaning     what a failure means, for the message
      * @param array<non-empty-string, string> $environment variables phn is run with, each put
@@ -65,6 +77,7 @@ final readonly class Build
             throw new BuildFailed(
                 sprintf('`%s` exited with status %d in %s: %s', $command, $status, $this->projectDir, $meaning),
                 $status,
+                $arguments,
             );
         }
     }

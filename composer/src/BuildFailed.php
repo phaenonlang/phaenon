@@ -9,4 +9,12 @@ namespace Phaenon\Composer;
  */
 final class BuildFailed extends \RuntimeException
 {
+    /**
+     * @param list<string> $arguments the arguments phn was run with, which tell the build of the
+     *                                installed packages (`build --vendor`) from the project's
+     */
+    public function __construct(string $message, int $code, public readonly array $arguments)
+    {
+        parent::__construct($message, $code);
+    }
 }

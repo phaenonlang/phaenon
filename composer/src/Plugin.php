@@ -44,6 +44,15 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
      */
     public const string EARLIER_BUILDS_CLEARED = 'PHN_EARLIER_BUILDS_CLEARED';
 
+    /**
+     * The environment variable that turns the build off for one run: with `PHN_BUILD=0` the plugin
+     * installs the binary and writes the autoload maps, and builds nothing, as in a CI job that
+     * reports the findings with `vendor/bin/phn check --format=github` before it builds. Any other
+     * value, or none, builds. `extra.phaenon.build: false` is the project's lasting switch for its
+     * own root; this one is a run's, and leaves the installed packages unbuilt too.
+     */
+    public const string BUILD = 'PHN_BUILD';
+
     public function activate(Composer $composer, IOInterface $io): void
     {
     }
@@ -175,6 +184,15 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
 
         AutoloadMaps::write($composer, $event->isDevMode());
 
+        if (ComposerPlatform::getEnv(self::BUILD) === '0') {
+            $io->writeError(
+                'phaenon/phn: ' . self::BUILD . '=0: nothing is built; vendor/bin/phn is installed, '
+                . '`vendor/bin/phn check` shows the findings and `composer dump-autoload` builds',
+            );
+
+            return;
+        }
+
         $build = new Build($binary, $projectDir, new ProcessExecutor($io), $io);
         try {
             if ($packages !== []) {
@@ -198,7 +216,16 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
                 );
             }
         } catch (BuildFailed $e) {
-            throw self::failure($io, $e->getMessage(), $e->getCode(), $e);
+            $failure = self::failure($io, $e->getMessage(), $e->getCode(), $e);
+            if (!\in_array('--vendor', $e->arguments, true) && $build->starts()) {
+                // The project's own build, which phn ran and reported on: the last lines say what
+                // a developer or a CI job does next, since the compiler is installed whatever the
+                // build found. Where phn could not start there are no findings to show.
+                self::error($io, 'vendor/bin/phn is installed: `vendor/bin/phn check` shows the findings, and '
+                    . self::withoutBuilding());
+            }
+
+            throw $failure;
         }
     }
 
@@ -279,6 +306,33 @@ final class Plugin implements PluginInterface, EventSubscriberInterface
         self::error($io, $message);
 
         return new ScriptExecutionException($message, $status, $previous);
+    }
+
+    /**
+     * How the Composer command that is running runs without the build: the command named, as it
+     * was given (`PHN_BUILD=0 composer update`), where it can be told from the arguments, and the
+     * variable alone where it cannot.
+     */
+    private static function withoutBuilding(): string
+    {
+        $argv = $_SERVER['argv'] ?? null;
+        $args = \is_array($argv) ? \array_slice($argv, 1) : [];
+        for ($i = 0; $i < \count($args); ++$i) {
+            $arg = $args[$i];
+            if (!\is_string($arg) || $arg === '') {
+                continue;
+            }
+            if ($arg === '-d' || $arg === '--working-dir') {
+                ++$i; // the option's value
+
+                continue;
+            }
+            if ($arg[0] !== '-') {
+                return '`' . self::BUILD . '=0 composer ' . $arg . '` runs it without building';
+            }
+        }
+
+        return self::BUILD . '=0 in the environment runs Composer without building';
     }
 
     /**
