@@ -1,0 +1,64 @@
+// integer, double and boolean are a docblock's words for int, float and
+// bool. In a declaration PHP reads them as class names, in any letter case
+// (it warns of the lower-case ones: "integer" will be interpreted as a class
+// name), and PHPStan reports a class that does not exist (class.notFound).
+// The checker reports the name once, saying how PHP spells the type, and
+// reads the type meant, so that nothing else follows from the mistake.
+// Where the emitter writes the type into a docblock (a type argument, a
+// closure signature, a tuple, an alias), the words are read as PHPStan
+// reads a docblock: pseudo-type-classes and the emit golden
+// confusable-erased hold those.
+namespace App\Confusable\Types {
+    final class Integer
+    {
+    }
+}
+
+namespace App\Confusable {
+    final class Holder
+    {
+        public integer $count = 0; // want P2001 "unknown class App\Confusable\integer: PHP's type is written `int`"
+
+        public ?Boolean $flag = null; // want P2001 "unknown class App\Confusable\Boolean: PHP's type is written `bool`"
+
+        public function ratio(DOUBLE $r): void { echo $r; } // want P2001 "`float`"
+
+        public function half(): double { return $this->count / 2; } // want P2001 "unknown class App\Confusable\double: PHP's type is written `float`"
+    }
+
+    // A qualified name is a class's name, said so: it is unknown, nothing
+    // more. real and binary are no type's words, in a docblock either.
+    function qualified(\integer $n, ?real $r = null, ?binary $b = null): void {} // want P2001 "unknown class integer", P2001 "unknown class App\Confusable\real", P2001 "App\Confusable\binary"
+
+    // In a docblock the words are int, float and bool, as PHPStan reads them.
+    /**
+     * @param integer $n
+     * @param Boolean $round
+     * @return double
+     */
+    function docblock(mixed $n, mixed $round): float
+    {
+        return $round ? \round($n / 3) : $n / 3;
+    }
+}
+
+// A class of the name, imported or declared, is that class.
+namespace App\Confusable\Imported {
+    use App\Confusable\Types\Integer;
+
+    function whole(Integer $w): \App\Confusable\Types\Integer
+    {
+        return $w;
+    }
+}
+
+namespace App\Confusable\Own {
+    final class double
+    {
+    }
+
+    function own(double $d): \App\Confusable\Own\double
+    {
+        return $d;
+    }
+}

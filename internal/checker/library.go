@@ -138,8 +138,8 @@ func (x *fnCtx) declaredTypes(t ast.TypeExpr, erased bool) {
 		if x.res.TypeAlias(t.Name) != nil {
 			return // a type alias: the classes it names are judged at its declaration
 		}
-		if name := x.res.ClassName(t.Name); x.p().Class(name) == nil && x.otherCaseTypeName(t.Name, name) {
-			return // `Map` that names no class, read as Phaenon's map
+		if name := x.res.ClassName(t.Name); x.p().Class(name) == nil && (x.otherCaseTypeName(t.Name, name) || !erased && x.confusableTypeName(t.Name, name)) {
+			return // `Map` or `integer` that names no class, read as the type meant
 		}
 		// What the name denotes: a class, or an alias a class docblock
 		// declares or imports (@phpstan-type, @phpstan-import-type), self,
@@ -178,6 +178,27 @@ func (x *fnCtx) declaredTypes(t ast.TypeExpr, erased bool) {
 			x.declaredTypes(e.Type, true)
 		}
 	}
+}
+
+// confusableTypeName reports integer, double or boolean in a declared type
+// that reaches PHP as written, where no class of the name resolves
+// (resolved): a docblock's word for int, float or bool, which PHP reads as
+// a class's name there, so that every value fails the type. The resolver
+// read it as the type meant, so this is the one finding, P2001 as
+// PHPStan's class.notFound, its message naming PHP's spelling of the type.
+// Where the emitter writes the type into a docblock (a type argument, a
+// closure signature, a tuple, an alias), the word is the type it means
+// and the caller does not ask.
+func (x *fnCtx) confusableTypeName(n *ast.Name, resolved string) bool {
+	if n.Kind != ast.NameUnqualified || len(n.Parts) != 1 {
+		return false
+	}
+	meant, ok := program.ConfusableTypeName(n.Parts[0])
+	if !ok {
+		return false
+	}
+	x.report(n.S, P2001, "unknown class %s: PHP's type is written `%s`", resolved, meant)
+	return true
 }
 
 // bareClosure judges `Closure` written where the type reaches PHP as

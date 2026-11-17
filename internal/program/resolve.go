@@ -23,6 +23,11 @@ type resolver struct {
 	aliasNodes map[string]*docblock.TypeNode
 	resolving  map[string]bool
 	span       ast.Span
+	// erased counts the positions around the type being read that do not
+	// reach PHP as written (a type argument, a closure signature, a tuple's
+	// or a shape's members, an alias's right-hand side): the emitter writes
+	// them into docblocks, where a word such as `integer` is int.
+	erased int
 }
 
 func (p *Program) newResolver(f *File, scope *Scope, class *Class, span ast.Span) *resolver {
@@ -68,6 +73,10 @@ func (r *Resolver) WithParams(tps []*TypeParam) *Resolver { return r.withParams(
 // Native resolves a native type expression (nil → nil).
 func (r *Resolver) Native(t ast.TypeExpr) types.Type { return r.native(t) }
 
+// NativeErased resolves a type written where it compiles into a docblock: a
+// type parameter's bound or default (resolver.erased).
+func (r *Resolver) NativeErased(t ast.TypeExpr) types.Type { return r.nativeErased(t) }
+
 // Doc resolves a docblock type node.
 func (r *Resolver) Doc(n *docblock.TypeNode) types.Type { return r.docType(n) }
 
@@ -101,7 +110,7 @@ func (r *Resolver) NativeParams(tps []*ast.TypeParam) []*TypeParam { return nati
 func (r *Resolver) NativeArgs(ts []ast.TypeExpr) []types.Type {
 	out := make([]types.Type, len(ts))
 	for i, t := range ts {
-		out[i] = r.native(t)
+		out[i] = r.nativeErased(t) // type arguments compile into docblocks
 	}
 	return out
 }
@@ -142,7 +151,7 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 	case *ast.NamedType:
 		args := make([]types.Type, 0, len(t.TypeArgs))
 		for _, a := range t.TypeArgs {
-			args = append(args, r.native(a))
+			args = append(args, r.nativeErased(a))
 		}
 		word, otherCase := "", false
 		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
@@ -156,8 +165,10 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 				return types.ClassString{}
 			}
 			if word, otherCase = OtherCaseTypeName(t.Name.Parts[0]); !otherCase {
-				if ty, ok := r.keyword(lower, args, nil); ok {
-					return ty
+				if !r.namesClass(t.Name, lower) {
+					if ty, ok := r.keyword(lower, args, nil); ok {
+						return ty
+					}
 				}
 			}
 			if tp, ok := r.params[t.Name.Parts[0]]; ok {
@@ -196,16 +207,16 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 		}
 		return types.MakeIntersection(ms...)
 	case *ast.ClosureType:
-		c := types.Callable{Closure: true, HasSig: true, Return: r.native(t.Return)}
+		c := types.Callable{Closure: true, HasSig: true, Return: r.nativeErased(t.Return)}
 		for _, pt := range t.Params {
-			c.Params = append(c.Params, types.CallableParam{Type: r.native(pt.Type), Optional: pt.Optional, Variadic: pt.Variadic})
+			c.Params = append(c.Params, types.CallableParam{Type: r.nativeErased(pt.Type), Optional: pt.Optional, Variadic: pt.Variadic})
 		}
 		return c
 	case *ast.TupleType:
 		// (A, B) is the sealed positional shape array{A, B}.
 		sh := types.Shape{List: true}
 		for i, el := range t.Elems {
-			sh.Entries = append(sh.Entries, types.ShapeEntry{IsInt: true, IntKey: int64(i), Type: r.native(el)})
+			sh.Entries = append(sh.Entries, types.ShapeEntry{IsInt: true, IntKey: int64(i), Type: r.nativeErased(el)})
 		}
 		return sh
 	case *ast.ShapeType:
@@ -213,7 +224,7 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 		// docblock's shape is (docType): the two spell one type.
 		sh := types.Shape{Unsealed: t.Unsealed}
 		for _, e := range t.Entries {
-			se := types.ShapeEntry{Type: r.native(e.Type), Optional: e.Optional}
+			se := types.ShapeEntry{Type: r.nativeErased(e.Type), Optional: e.Optional}
 			if v, ok := types.IntKey(e.Name); e.IsInt {
 				se.IsInt, se.IntKey = true, e.Int
 			} else if ok {
@@ -226,6 +237,46 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 		return sh
 	}
 	return types.TMixed
+}
+
+// pseudoTypeNames are the docblock words PHPStan reads as a class where one
+// of that name is imported or declared in the namespace, and else as a
+// type (TypeNodeResolver::tryResolvePseudoTypeClassType).
+var pseudoTypeNames = map[string]bool{
+	"integer": true, "double": true, "boolean": true,
+	"scalar": true, "number": true, "numeric": true, "resource": true,
+}
+
+// namesClass reports whether a one-part name written in a Phaenon type
+// (lower, its lower case) names a class where the resolver would otherwise
+// read one of its type words. Where the type reaches PHP as written,
+// integer, double and boolean are class names, as PHP reads them, and the
+// class is the one PHP finds; without one the checker reports the name
+// (P2001) and the type is read as the one meant, so that nothing else is
+// reported. Where the emitter writes the type into a docblock (erased),
+// the docblock's words are read as PHPStan reads them: the class when a
+// `use` imports one of that name, in any letter case, or the namespace
+// declares one (not the global namespace), else the word.
+func (r *resolver) namesClass(n *ast.Name, lower string) bool {
+	if r.erased > 0 {
+		if !pseudoTypeNames[lower] {
+			return false
+		}
+		if _, imported := r.scope.classes[lower]; imported {
+			return true
+		}
+		return r.scope.Namespace != "" && r.p.Class(r.scope.Namespace+"\\"+n.Parts[0]) != nil
+	}
+	_, confusable := ConfusableTypeName(lower)
+	return confusable && r.p.Class(r.scope.ResolveClass(n)) != nil
+}
+
+// nativeErased reads a type in a position that does not reach PHP as
+// written (resolver.erased).
+func (r *resolver) nativeErased(t ast.TypeExpr) types.Type {
+	r.erased++
+	defer func() { r.erased-- }()
+	return r.native(t)
 }
 
 func (r *resolver) owner() string {
@@ -315,6 +366,23 @@ var phaenonTypeNames = map[string]bool{"map": true, "non-empty-map": true, "byte
 func OtherCaseTypeName(name string) (string, bool) {
 	lower := strings.ToLower(name)
 	return lower, phaenonTypeNames[lower] && name != lower
+}
+
+// ConfusableTypeName reports, in any letter case, a name a docblock reads
+// as one of PHP's types and a declaration as a class's name, and returns
+// the type's name in a declaration: integer, double and boolean, int,
+// float and bool. PHP warns of them in lower case and PHPStan reports them
+// in any case as classes that do not exist (class.notFound).
+func ConfusableTypeName(name string) (string, bool) {
+	switch strings.ToLower(name) {
+	case "integer":
+		return "int", true
+	case "double":
+		return "float", true
+	case "boolean":
+		return "bool", true
+	}
+	return "", false
 }
 
 // NonClassTypeName reports a name that a type position reads as a type
@@ -735,11 +803,12 @@ func nativeTypeParams(tps []*ast.TypeParam, r *resolver) []*TypeParam {
 	}
 	rr := r.withParams(out)
 	for i, tp := range tps {
+		// A bound and a default compile into @template, a docblock.
 		if tp.Bound != nil {
-			out[i].Bound = rr.native(tp.Bound)
+			out[i].Bound = rr.nativeErased(tp.Bound)
 		}
 		if tp.Default != nil {
-			out[i].Default = rr.native(tp.Default)
+			out[i].Default = rr.nativeErased(tp.Default)
 		}
 	}
 	return out

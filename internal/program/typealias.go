@@ -109,7 +109,7 @@ func (p *Program) resolveAlias(a *TypeAlias) bool {
 		r := p.newResolver(a.File, a.Scope, nil, a.Decl.S)
 		a.Params = nativeTypeParams(a.Decl.TypeParams, r)
 		ImplyMapKeyBounds(a.Params, a.Decl)
-		a.Type = r.withParams(a.Params).native(a.Decl.Type)
+		a.Type = r.withParams(a.Params).nativeErased(a.Decl.Type) // compiled into docblocks, or to its erasure
 		p.aliases.resolving = p.aliases.resolving[:len(p.aliases.resolving)-1]
 		a.state = 2
 	}

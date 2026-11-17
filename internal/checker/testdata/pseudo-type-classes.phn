@@ -1,0 +1,103 @@
+// Where the emitter writes a type into a docblock (a type argument, a
+// closure signature, a tuple, an alias, a bound), integer, double, boolean,
+// scalar, number, numeric and resource are read as PHPStan reads a
+// docblock (TypeNodeResolver::tryResolvePseudoTypeClassType): the class
+// when a `use` imports one of that name, in any letter case, or the
+// namespace declares one, and else the type the word names. The emit golden
+// confusable-erased holds the same forms through PHPStan.
+
+namespace Pseudo\Types {
+    final class Integer
+    {
+        public int $v = 1;
+    }
+
+    final class Boolean
+    {
+        public int $v = 1;
+    }
+
+    final class Scalar
+    {
+        public int $v = 1;
+    }
+
+    final class Number
+    {
+        public int $v = 1;
+    }
+
+    final class Numeric
+    {
+        public int $v = 1;
+    }
+
+    final class Resource
+    {
+        public int $v = 1;
+    }
+
+    // The namespace declares the class: the word names it, in any letter
+    // case (PHPStan adds class.nameCase for `integer`, which the checker
+    // does not report).
+    final class Same
+    {
+        exact(list<Integer> $xs): int => $xs[0]->v;
+
+        lower(list<integer> $xs): int => $xs[0]->v;
+
+        signature(Closure(Boolean): int $f): int => $f(new Boolean());
+    }
+}
+
+namespace Pseudo\Imports {
+    use Pseudo\Types\Boolean;
+    use Pseudo\Types\Integer;
+    use Pseudo\Types\Number;
+    use Pseudo\Types\Numeric;
+    use Pseudo\Types\Resource;
+    use Pseudo\Types\Scalar;
+
+    type One = Integer;
+    type Many = list<integer>;
+
+    final class Uses
+    {
+        first(list<Integer> $xs): int => $xs[0]->v;
+
+        upper(list<INTEGER> $xs): int => $xs[0]->v;
+
+        flags(map<string, boolean> $m): int => $m['k']->v;
+
+        pair((Integer, Boolean) $t): int => $t[0]->v + $t[1]->v;
+
+        one(One $o): int => $o->v;
+
+        many(Many $xs): int => $xs[0]->v;
+
+        others(list<scalar> $a, list<number> $b, list<numeric> $c, list<resource> $d): int
+            => $a[0]->v + $b[0]->v + $c[0]->v + $d[0]->v;
+
+        bounded<T of Integer>(T $t): int => $t->v;
+    }
+}
+
+// Imported under another name, the class leaves the word to the type, and
+// a word with no class of its name is the type.
+namespace Pseudo\Elsewhere {
+    use Pseudo\Types\Integer as Whole;
+
+    function words(list<integer> $xs, list<Whole> $ws, list<double> $ds): float
+        => $xs[0]->v + $ws[0]->v + $ds[0]; // want P2105 "cannot access property $v on int"
+}
+
+// The global namespace: only a `use` makes the word a class, not a class
+// declared there.
+namespace {
+    final class Integer
+    {
+        public int $v = 1;
+    }
+
+    function globalWords(list<Integer> $xs): int => $xs[0]->v; // want P2105 "cannot access property $v on int", P2202
+}

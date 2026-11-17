@@ -276,7 +276,7 @@ func (x *fnCtx) checkTypeParams(tps []*ast.TypeParam) {
 		x.checkTypeExpr(tp.Bound)
 		x.checkTypeExpr(tp.Default)
 		if tp.Default != nil && tp.Bound != nil {
-			d, b := x.res.Native(tp.Default), x.res.Native(tp.Bound)
+			d, b := x.res.NativeErased(tp.Default), x.res.NativeErased(tp.Bound)
 			if !types.IsSubtype(d, b, x.p()) {
 				x.report(tp.Default.Span(), P3002, "default %s of %s is not a subtype of its bound %s", x.typeName(d), tp.Name.Name, x.typeName(b))
 			}
