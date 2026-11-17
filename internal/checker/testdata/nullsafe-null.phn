@@ -1,0 +1,113 @@
+namespace NullsafeNull;
+
+// `null?->m()` and `null?->p` are null, as PHP evaluates them; PHPStan
+// reports the access on null (method.nonObject, property.nonObject) and
+// types it null. A loop whose variable is null on its first pass reaches
+// its fixed point through that type: an error type there would come back
+// to the loop's head and read as mixed on the pass whose findings stand.
+
+final class Money
+{
+    public function __construct(public readonly int $cents)
+    {
+    }
+
+    public function plus(Money $other): Money
+    {
+        return new Money($this->cents + $other->cents);
+    }
+}
+
+/** @param list<Money> $xs */
+function total(array $xs): ?Money
+{
+    $total = null;
+    foreach ($xs as $x) {
+        $total = $total?->plus($x) ?? $x;
+    }
+    return $total;
+}
+
+/** @param list<Money> $xs */
+function totalInSteps(array $xs): ?Money
+{
+    $total = null;
+    foreach ($xs as $x) {
+        $next = $total?->plus($x);
+        $total = $next ?? $x;
+    }
+    return $total;
+}
+
+/** @param list<Money> $xs */
+function lastCents(array $xs): int
+{
+    $last = null;
+    $cents = 0;
+    foreach ($xs as $x) {
+        // The chain is skipped on the first pass and reached on the next:
+        // each pass's own answer.
+        $cents += $last?->plus($x)->cents ?? 0;
+        $step = $last?->plus($x)->cents;
+        if ($step !== null) {
+            $cents += $step;
+        }
+        $last = $x;
+    }
+    return $cents;
+}
+
+function chained(Money $x): ?int
+{
+    $none = null;
+    return $none?->plus($x)->plus($x)->cents; // want P2105 "cannot call method plus() on null"
+}
+
+function direct(Money $x): ?Money
+{
+    $none = null;
+    $sum = $none?->plus($x); // want P2105 "cannot call method plus() on null"
+    $cents = $none?->cents; // want P2105 "cannot access property $cents on null"
+    return $sum;
+}
+
+final class Bag
+{
+    /** @var list<int> */
+    public array $items = [];
+
+    public string $label = '';
+
+    /** @return list<int> */
+    public function all(): array
+    {
+        return $this->items;
+    }
+}
+
+// An offset is part of the chain PHP skips.
+function offsets(): ?int
+{
+    $none = null;
+    $a = $none?->items[0]; // want P2105 "cannot access property $items on null"
+    return $a ?? $none?->all()[0]; // want P2105 "cannot call method all() on null"
+}
+
+// ?? and isset() forgive a null on the way, not a receiver that is only
+// null: the access is reported there too, as PHPStan reports it.
+function forgiven(): string
+{
+    $none = null;
+    $set = isset($none?->label); // want P2105 "cannot access property $label on null"
+    return $set ? 'set' : $none?->label ?? ''; // want P2105 "cannot access property $label on null"
+}
+
+// The value of a ?-> on null is only null: a test of it decides a ternary,
+// whose other branch reads the receiver as never and reports nothing, and
+// whose value is the branch taken. (PHPStan also says the test is always
+// true, identical.alwaysTrue, which the checker does not report.)
+function decided(Money $x): int
+{
+    $none = null;
+    return ($sum = $none?->plus($x)) === null ? 0 : $sum->cents; // want P2105 "cannot call method plus() on null"
+}

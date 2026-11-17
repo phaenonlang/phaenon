@@ -213,6 +213,7 @@ func (x *fnCtx) exprLenient(e ast.Expr, env *state) types.Type {
 				return t
 			}
 		}
+		delete(x.skippedChain, e) // a mark of an earlier pass over a loop: this one decides
 		if t, ok := x.narrowedByLiteralKeys(e, env); ok {
 			return t
 		}
@@ -748,6 +749,7 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 // ------------------------------------------------------------------ members
 
 func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) types.Type {
+	delete(x.skippedChain, e) // a mark of an earlier pass over a loop: this one decides
 	x.prematureRead(e, env)
 	if key, ok := x.pathKey(e); ok {
 		if t, ok := env.getPath(key); ok {
@@ -767,6 +769,9 @@ func (x *fnCtx) propertyFetch(e *ast.PropertyFetch, env *state, lenient bool) ty
 		}
 	}
 	obj := x.expr(e.Object, env, nil)
+	if x.skippedChain[e.Object] {
+		return x.skipChain(e) // `$n?->a()->b` with $n null: reported at the ?->
+	}
 	x.noteRecv(e, obj)
 	name, ok := identName(e.Name)
 	if !ok {
@@ -812,6 +817,16 @@ func inNullsafeChain(e ast.Expr) bool {
 			return false
 		}
 	}
+}
+
+// skipChain records that PHP skips e and the rest of its chain: a ?-> on a
+// value that is null, or a member reached through one. Its value is null.
+func (x *fnCtx) skipChain(e ast.Expr) types.Type {
+	if x.skippedChain == nil {
+		x.skippedChain = map[ast.Expr]bool{}
+	}
+	x.skippedChain[e] = true
+	return types.TNull
 }
 
 // markShortCircuit records that e's own value is never null, so a chain
@@ -896,6 +911,17 @@ func (x *fnCtx) propertyType(obj types.Type, name string, e *ast.PropertyFetch, 
 		if !types.IsNullable(obj) && !types.IsMixed(obj) {
 			x.report(e.S, P2307, "?-> on %s, which is never null", x.typeName(obj))
 		}
+		if _, isNull := obj.(types.Null); isNull {
+			// `null?->p` is null, what PHP evaluates it to, and the rest
+			// of the chain is skipped; PHPStan reports the access
+			// (property.nonObject) and types it null, under ?? and isset()
+			// too: they forgive a null on the way, not a receiver that is
+			// never anything else. A loop whose variable is null on its
+			// first pass reaches its fixed point through that type
+			// (fixpoint).
+			x.report(e.Object.Span(), P2105, "cannot access property $%s on null", name)
+			return x.skipChain(e)
+		}
 	} else if types.IsNullable(obj) && !types.IsMixed(obj) && !lenient {
 		if _, isNull := obj.(types.Null); isNull {
 			x.report(e.Object.Span(), P2105, "cannot access property $%s on null", name)
@@ -904,6 +930,12 @@ func (x *fnCtx) propertyType(obj types.Type, name string, e *ast.PropertyFetch, 
 		x.report(e.Object.Span(), P2105, "cannot access property $%s on %s (possibly null)", name, x.typeName(obj))
 	}
 	base := types.StripNull(obj)
+	if _, never := base.(types.Never); never {
+		// A receiver that is never anything: the code is not reached, as
+		// in the branch a test of a value that is only null rules out.
+		// PHPStan reports nothing there, and reads the member as mixed.
+		return types.TMixed
+	}
 	if types.IsMixed(base) {
 		if _, unknown := base.(types.Unknown); unknown {
 			return base // a member of what was already reported stays reported
@@ -1137,6 +1169,7 @@ func shapeValueTypes(m types.Shape) []types.Type {
 }
 
 func (x *fnCtx) index(e *ast.Index, env *state) types.Type {
+	delete(x.skippedChain, e) // a mark of an earlier pass over a loop: this one decides
 	if key, ok := x.pathKey(e); ok {
 		if t, ok := env.getPath(key); ok {
 			if mayBeObject(x.pathType(e.Array, env)) {
@@ -1158,6 +1191,14 @@ func (x *fnCtx) index(e *ast.Index, env *state) types.Type {
 
 // indexType types base[index].
 func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient bool) types.Type {
+	if x.skippedChain[e.Array] {
+		// `$n?->all()[0]` with $n null: PHP skips the offset with the rest
+		// of the chain, reported at the ?->.
+		if e.Index != nil {
+			x.expr(e.Index, env, nil)
+		}
+		return x.skipChain(e)
+	}
 	if mayBeObject(base) {
 		x.implicitThrow() // an ArrayAccess's offsetGet() or offsetExists() runs
 	}
