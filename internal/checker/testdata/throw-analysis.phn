@@ -181,7 +181,7 @@ function catches(int $id, Plain $plain, Open $open, int $n): void
     }
 
     try {
-        $label = match ($id) { // want P2304
+        $label = match ($id) {
             1 => 'one',
             2 => 'two',
         };

@@ -443,6 +443,11 @@ type fnCtx struct {
 	constClosure bool // a closure inside a constant expression: static, capturing nothing (P2531)
 	nameOnly     bool // resolving a class name PHP does not load: X::class, instanceof X, catch (X)
 	inFinally    int  // depth of finally blocks around the statement being checked
+	// matchCaught counts the try blocks around the statement being checked
+	// whose catches take the UnhandledMatchError of a match without a
+	// matching arm (catchesUnhandledMatch): there such a match is no
+	// P2304. A closure's context starts at none, as the error leaves it.
+	matchCaught int
 	// throwFrames collect the throw points of the try blocks and the body
 	// being checked, innermost last (design/tooling.md §9.1, throws.go);
 	// resolvedCalls are the calls whose callee gave their point, and
