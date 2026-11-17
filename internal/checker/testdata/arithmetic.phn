@@ -45,3 +45,95 @@ function pastTheIntegers(): void
     takesInt((-9223372036854775807 - 1) / -1); // want P2103 "expects int, float given"
     takesInt(-(-9223372036854775807 - 1)); // want P2103 "expects int, float given"
 }
+
+function subtrahendAtTheEdge(): void
+{
+    takesInt(-1 - (-9223372036854775807 - 1));
+    takesInt(0 - (-9223372036854775807 - 1)); // want P2103 "expects int, float given"
+}
+
+function compound(): void
+{
+    $v = 9223372036854775807;
+    $v += 1;
+    takesInt($v); // want P2103 "expects int, float given"
+    $w = 2;
+    $w **= -1;
+    takesInt($w); // want P2103 "expects int, float given"
+}
+
+function steps(): void
+{
+    $v = 9223372036854775807;
+    $v++;
+    takesInt($v); // want P2103 "expects int, float given"
+    $w = -9223372036854775807 - 1;
+    --$w;
+    takesInt($w); // want P2103 "expects int, float given"
+    $x = 9223372036854775806;
+    $x++;
+    takesInt($x);
+}
+
+/** @phpstan-impure */
+function more(): bool
+{
+    return random_int(0, 1) === 1;
+}
+
+function counters(bool $c, int|float $x): void
+{
+    $v = 9223372036854775807;
+    if ($c) {
+        $v++;
+    }
+    $v++;
+    takesInt($v); // want P2103 "expects int, int|float given"
+    $w = 9223372036854775807;
+    while (more()) {
+        $w++;
+    }
+    takesInt($w); // want P2103 "expects int, int|float given"
+    $o = -9223372036854775807 - 1;
+    do {
+        --$o;
+    } while (more());
+    takesInt($o); // want P2103 "expects int, int|float given"
+    for ($r = 9223372036854775807; more(); $r++) {
+    }
+    $t = $c + 9223372036854775807;
+    $t++;
+    takesInt($t); // want P2103 "expects int, int|float given"
+    $x++;
+    $x--;
+    takesInt($x); // want P2103 "expects int, int|float given"
+    $u = $c ? 9223372036854775807 : 5;
+    $u++;
+    takesInt($u); // want P2103 "expects int, int|float given"
+}
+
+/** @param int<min, -1> $below */
+function aFewIntegers(bool $c, int $below, int $i): void
+{
+    $w = $c ? 2 : 3;
+    takesInt($w ** 2);
+    takesInt($w ** 63); // want P2103 "expects int, float given"
+    takesInt($w * 9223372036854775807); // want P2103 "expects int, float given"
+    takesInt($w * 4611686018427387903); // want P2103 "expects int, int|float given"
+    $n = $c ? -1 : -2;
+    takesInt(2 ** $n); // want P2103 "expects int, float given"
+    takesInt($i ** $n); // want P2103 "expects int, float given"
+    takesInt($i ** $below); // want P2103 "expects int, float given"
+    takesInt(true + 9223372036854775807); // want P2103 "expects int, float given"
+    takesInt($c + 9223372036854775807); // want P2103 "expects int, int|float given"
+    takesInt(false + 9223372036854775807);
+    takesInt($c + 1);
+}
+
+/** @param int<62, 64> $e */
+function aShortRange(int $e, int $j): void
+{
+    takesInt(1 + $e);
+    takesInt(9223372036854775807 + $e); // want P2103 "expects int, float given"
+    takesInt(2 ** $e); // want P2103 "expects int, int|float given"
+}

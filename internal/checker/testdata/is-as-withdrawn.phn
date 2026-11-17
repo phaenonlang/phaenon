@@ -466,7 +466,7 @@ function constants(): int
     $m = \PHP_INT_MAX as? int; // want P1001 "is_int(\PHP_INT_MAX) ? \PHP_INT_MAX : null"
     $k = Limits::KEY as int|string; // want P1001 "is_string(Limits::KEY) ? Limits::KEY : throw new \TypeError('expected "
 
-    return $n + ($m ?? 0) + \strlen((string) $k);
+    return $n + ($m ?? 0) + \strlen((string) $k); // want P2202 "returns int|float"
 }
 
 // A property with a get hook runs it on each read: a test that writes it
