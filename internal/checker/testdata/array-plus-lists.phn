@@ -1,0 +1,41 @@
+namespace App\ArrayPlusLists;
+
+// `+` and array_replace() of lists are lists, as PHPStan types them, and
+// non-empty where one of them is; with an array that is no list, they are
+// not. Plain PHP, so that PHPStan reads this file as written.
+
+/**
+ * @param list<int> $l
+ */
+function takesList(array $l): void
+{
+}
+
+/**
+ * @param non-empty-list<int> $l
+ */
+function takesNonEmptyList(array $l): void
+{
+}
+
+/**
+ * @param list<int> $a
+ * @param list<int> $b
+ * @param non-empty-list<int> $ne
+ * @param array<int, int> $m
+ * @param list{int, int} $pair
+ * @param array{0: int, 1?: int} $short
+ */
+function lists(array $a, array $b, array $ne, array $m, array $pair, array $short): void
+{
+    takesList($short + $a);
+    takesList(array_replace($a, $short));
+    takesList(array_replace($a, $b));
+    takesList($a + $b);
+    takesList($a + $pair);
+    takesList(array_replace($a));
+    takesNonEmptyList($ne + $a);
+    takesNonEmptyList(array_replace($a, $ne));
+    takesList($a + $m); // want P2103 "array<int, int> given"
+    takesList(array_replace($m, $a)); // want P2103 "array<int, int> given"
+}
