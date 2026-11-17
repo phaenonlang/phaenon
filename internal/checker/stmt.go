@@ -173,6 +173,7 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 
 // exprStmt checks an expression statement, honouring an inline `@var`.
 func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
+	x.stmtExpr = s.Expr
 	// self::assertNotNull($x) and other callees with @phpstan-assert tags.
 	if s.Doc == "" && x.applyCallAsserts(s.Expr, env) {
 		return
@@ -865,6 +866,13 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 				if vv, isVar := s.Value.(*ast.Variable); isVar {
 					head.setNative(vv.Name, nv)
 				}
+			}
+		}
+		// `foreach (array_keys($r) as $k)`: `$r[$k]` is there, as PHPStan
+		// has it.
+		if arr := x.keysSource(s.Expr); arr != nil {
+			if key, ok := x.pathKey(&ast.Index{S: s.Value.Span(), Array: arr, Index: s.Value}); ok {
+				head.setPath(key, x.valuesOf(arr, head))
 			}
 		}
 		x.stmt(s.Body, head)
@@ -1638,6 +1646,27 @@ func (x *fnCtx) closureParams(decls []*ast.Param, expected types.Type) ([]*progr
 	return params, cps
 }
 
+// capturedOffset reports a path of offsets, `$r['k']` or `$r['x'][$k]`,
+// whose array and every variable naming an offset of it a closure
+// captures: what the scope knows of it holds in the closure's body.
+func capturedOffset(k string, captured map[string]bool) bool {
+	root, rest, found := strings.Cut(strings.TrimPrefix(k, "$"), "[")
+	if !found || !strings.HasPrefix(k, "$") || !captured[root] || strings.Contains(rest, "->") || strings.Contains(rest, "::") {
+		return false
+	}
+	for {
+		_, after, mentions := strings.Cut(rest, "$")
+		if !mentions {
+			return true
+		}
+		end := strings.IndexAny(after, "[]")
+		if end < 0 || !captured[after[:end]] {
+			return false
+		}
+		rest = after[end:]
+	}
+}
+
 func closureHasByRefUse(e *ast.Closure) bool {
 	for _, u := range e.Uses {
 		if u.ByRef {
@@ -1673,18 +1702,14 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		}
 		cenv.set(p.Name, t)
 	}
-	// An array is captured with what the scope knows of its constant
-	// offsets where the closure is created, `isset($r['k'])` before it
-	// included, by value or by reference alike, as PHPStan has it; an
-	// offset named by another variable is not the closure's.
-	capturePaths := func(name string) {
-		prefix := "$" + name + "["
-		for k, t := range env.paths {
-			if rest, found := strings.CutPrefix(k, prefix); found && !strings.ContainsAny(rest, "$:") && !strings.Contains(rest, "->") {
-				cenv.setPath(k, t)
-			}
-		}
-	}
+	// An array is captured with what the scope knows of its offsets where
+	// the closure is created, `isset($r['k'])` before it included, by value
+	// or by reference alike, as PHPStan has it: its constant offsets, and
+	// those another captured variable names, `$r[$k]` with `use ($r, $k)`
+	// after `$k = array_key_first($r)`. An offset named by a variable the
+	// closure does not capture is not the closure's.
+	captured := map[string]bool{}
+	capturePaths := func(name string) { captured[name] = true }
 	for _, u := range e.Uses {
 		info, ok := env.get(u.Var.Name)
 		if u.ByRef {
@@ -1711,6 +1736,11 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		}
 		cenv.set(u.Var.Name, info.t)
 		capturePaths(u.Var.Name)
+	}
+	for k, t := range env.paths {
+		if capturedOffset(k, captured) {
+			cenv.setPath(k, t)
+		}
 	}
 	c.generator = bodyHasYield(e.Body)
 	exits := cenv

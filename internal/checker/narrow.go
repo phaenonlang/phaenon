@@ -109,7 +109,9 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		}
 	case *ast.Assign:
 		// if ($x = expr): the assigned value's truthiness narrows $x.
+		x.truthyAssign = e
 		t := x.assign(e, env)
+		x.truthyAssign = nil
 		x.condValueType = t
 		then, els = env.clone(), env.clone()
 		if e.Op == token.Kind('=') {
@@ -212,6 +214,12 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 				if keys := literalOffsetKeys(x.pathType(v, env)); keys != nil {
 					for _, k := range keys {
 						env.setPath(base+k, t)
+					}
+					// And the offset as written, which a write under the
+					// same variable sets too: a join of the two keeps it,
+					// `if (!isset($c[$k])) { $c[$k] = 1; }`.
+					if key, ok := x.pathKey(p); ok {
+						env.setPath(key, t)
 					}
 					return
 				}
@@ -611,6 +619,224 @@ func hasNeverEntry(entries []types.ShapeEntry) bool {
 		}
 	}
 	return false
+}
+
+// shapeMayHave reports a shape with an entry a key of any type may name.
+func shapeMayHave(s types.Shape, key types.Type) bool {
+	for _, e := range s.Entries {
+		if types.Overlaps(shapeEntryKey(e), key, nil) {
+			return true
+		}
+	}
+	return false
+}
+
+// keysSource is the array whose keys e lists, `array_keys($r)` (a value to
+// search for or not), written as the iterable itself: PHPStan follows
+// that one, not a variable holding the keys; nil otherwise.
+func (x *fnCtx) keysSource(e ast.Expr) ast.Expr {
+	if c, ok := unparen(e).(*ast.Call); ok {
+		return x.arrayArg(c, "array_keys", 0)
+	}
+	return nil
+}
+
+// arrayArg is the argument at index i of a call to PHP's function name,
+// where it is a path the flow can key an offset of; nil otherwise.
+func (x *fnCtx) arrayArg(c *ast.Call, name string, i int) ast.Expr {
+	n, ok := c.Callee.(*ast.Name)
+	if !ok || c.Args == nil || c.Args.Closure() || len(c.Args.Args) <= i {
+		return nil
+	}
+	if fn := x.lookupFunction(n); fn == nil || !strings.EqualFold(fn.Name, name) {
+		return nil
+	}
+	for _, a := range c.Args.Args[:i+1] {
+		if a.Value == nil || a.Unpack || a.Name != nil {
+			return nil
+		}
+	}
+	arr := c.Args.Args[i].Value
+	if _, ok := x.pathKey(arr); !ok {
+		return nil
+	}
+	return arr
+}
+
+// valuesOf is what the values of an array are, as a read of a key it has
+// gives them: every entry's own type, an optional one's without null.
+func (x *fnCtx) valuesOf(arr ast.Expr, env *state) types.Type {
+	if _, v, ok := types.IterableKV(x.pathType(arr, env), x.p()); ok {
+		return v
+	}
+	return types.TMixed
+}
+
+// rememberKeyOf records, on $k assigned a key taken from an array, that
+// `$r[$k]` is there, as PHPStan has it: after array_key_first($r),
+// array_key_last($r) or array_rand($r) at once where $r cannot be empty,
+// and otherwise, but array_rand(), where $k is not null; after
+// array_search($v, $r) where $k is not false, of the type of $v too
+// where the search is strict; after array_find_key($r, …) where $k is
+// not null. So for an assignment that is a statement, or a condition
+// itself, `if ($k = array_key_first($r))`. One compared with null in a
+// condition, `($k = array_key_first($r)) !== null`, records nothing,
+// where the array cannot be empty too: PHPStan follows no key there. One
+// compared with false, array_search()'s, is followed. A foreach over
+// array_keys($r) is the other way (keysSource). Whatever changes $r or $k
+// forgets it (state.invalidatePrefix, state.set).
+func (x *fnCtx) rememberKeyOf(assign *ast.Assign, name string, value ast.Expr, env *state) {
+	c, ok := unparen(value).(*ast.Call)
+	if !ok {
+		return
+	}
+	var arr ast.Expr
+	var sentinel types.Type // $k where no key is found; nil: there is one
+	first := false          // a key wherever the array has one
+	val := types.Type(nil)
+	switch {
+	case x.arrayArg(c, "array_key_first", 0) != nil:
+		arr, sentinel, first = x.arrayArg(c, "array_key_first", 0), types.TNull, true
+	case x.arrayArg(c, "array_key_last", 0) != nil:
+		arr, sentinel, first = x.arrayArg(c, "array_key_last", 0), types.TNull, true
+	case x.arrayArg(c, "array_rand", 0) != nil && randsOne(c):
+		arr, sentinel = x.arrayArg(c, "array_rand", 0), nil
+	case x.arrayArg(c, "array_find_key", 0) != nil:
+		arr, sentinel = x.arrayArg(c, "array_find_key", 0), types.TNull
+	case x.arrayArg(c, "array_search", 1) != nil:
+		arr, sentinel = x.arrayArg(c, "array_search", 1), types.BoolLit{V: false}
+		if len(c.Args.Args) >= 3 && isTrueLit(c.Args.Args[2].Value) {
+			val = types.Intersect(x.pathType(c.Args.Args[0].Value, env), x.valuesOf(arr, env), x.p())
+		}
+	default:
+		return
+	}
+	if val == nil {
+		val = x.valuesOf(arr, env)
+	}
+	nonEmpty := certainlyNonEmpty(x.pathType(arr, env))
+	asStatement := x.stmtExpr == ast.Expr(assign) || x.truthyAssign == assign
+	switch {
+	case !asStatement && (sentinel == nil || first || isNullType(sentinel)):
+		// Compared with null, `($k = array_key_first($r)) !== null`:
+		// PHPStan follows no key there, the array certain or not.
+		return
+	case !nonEmpty && sentinel == nil:
+		return // array_rand() of what may be empty
+	}
+	key, ok := x.pathKey(&ast.Index{S: value.Span(), Array: arr, Index: &ast.Variable{S: value.Span(), Name: name}})
+	if !ok {
+		return
+	}
+	if nonEmpty && (sentinel == nil || first) {
+		env.setPath(key, val)
+		return
+	}
+	info, defined := env.get(name)
+	if !defined {
+		return
+	}
+	when := x.subtract(info.t, sentinel, x.p())
+	if isNeverType(when) {
+		return
+	}
+	env.setConds(name, &condHolder{whenType: when, offsets: map[string]types.Type{key: val}})
+}
+
+// certainlyNonEmpty reports an array type every value of which holds an
+// entry: a shape with a required one, a non-empty array.
+func certainlyNonEmpty(t types.Type) bool {
+	members := types.Members(t)
+	for _, m := range members {
+		switch m := m.(type) {
+		case types.Shape:
+			required := false
+			for _, e := range m.Entries {
+				required = required || !e.Optional
+			}
+			if !required {
+				return false
+			}
+		case types.Array:
+			if !m.NonEmpty {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return len(members) > 0
+}
+
+// keyOfSameArray reports an offset whose key is taken from the variable
+// it reads, which cannot be empty, `$r[array_key_first($r)]`,
+// `$r[array_rand($r)]`: it is there, as PHPStan has it. Another array, a
+// property or an offset is no such key (PHPStan's NonexistentOffset rule
+// names the variable alone), nor is array_search(), which may return
+// false.
+func (x *fnCtx) keyOfSameArray(e *ast.Index, env *state) bool {
+	c, ok := unparen(e.Index).(*ast.Call)
+	if !ok || c.Args == nil {
+		return false
+	}
+	v, ok := unparen(e.Array).(*ast.Variable)
+	if !ok {
+		return false
+	}
+	var arr ast.Expr
+	switch {
+	case x.arrayArg(c, "array_key_first", 0) != nil:
+		arr = x.arrayArg(c, "array_key_first", 0)
+	case x.arrayArg(c, "array_key_last", 0) != nil:
+		arr = x.arrayArg(c, "array_key_last", 0)
+	case x.arrayArg(c, "array_rand", 0) != nil && randsOne(c):
+		arr = x.arrayArg(c, "array_rand", 0)
+	default:
+		return false
+	}
+	a, ok := unparen(arr).(*ast.Variable)
+	return ok && a.Name == v.Name && certainlyNonEmpty(x.pathType(arr, env))
+}
+
+// randsOne reports array_rand() asked for one key: no count, or 1.
+func randsOne(c *ast.Call) bool {
+	switch len(c.Args.Args) {
+	case 1:
+		return true
+	case 2:
+		lit, ok := unparen(c.Args.Args[1].Value).(*ast.IntLit)
+		return ok && lit.Raw == "1"
+	}
+	return false
+}
+
+// presentValue is what an offset holds where its key is there: the entries
+// a key of literals names, each its own type, without the null a read of
+// an optional one gives; any other offset as a read gives it.
+func (x *fnCtx) presentValue(offset *ast.Index, env *state) types.Type {
+	lits := keyLiterals(normaliseKey(x.pathType(offset.Index, env)))
+	if lits == nil {
+		return x.pathType(offset, env)
+	}
+	var ts []types.Type
+	for _, m := range types.Members(x.pathType(offset.Array, env)) {
+		s, ok := m.(types.Shape)
+		if !ok {
+			return x.pathType(offset, env)
+		}
+		for _, k := range lits {
+			if entry, ok := constantEntry(s, k); ok {
+				ts = append(ts, entry.Type)
+			}
+		}
+		if s.Unsealed {
+			ts = append(ts, types.TMixed)
+		}
+	}
+	if len(ts) == 0 {
+		return x.pathType(offset, env)
+	}
+	return types.MakeUnion(ts...)
 }
 
 // isLiteralKey reports a constant offset: one string or int literal.
@@ -1480,6 +1706,14 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 			at := x.pathType(arrExpr, env)
 			x.narrowPath(then, arrExpr, withKey(at, keyT, true), false)
 			x.narrowPath(els, arrExpr, withKey(at, keyT, false), false)
+			// `$r[$k]` is there where it holds, as isset($r[$k]) says,
+			// whichever literal $k is, with the value of an entry it names.
+			offset := &ast.Index{S: e.S, Array: arrExpr, Index: arg}
+			if key, ok := x.pathKey(offset); ok {
+				if _, known := then.getPath(key); !known {
+					then.setPath(key, x.presentValue(offset, then))
+				}
+			}
 			return then, els, true
 		case "in_array":
 			if len(e.Args.Args) < 3 || !isTrueLit(e.Args.Args[2].Value) {
@@ -1594,6 +1828,36 @@ func isTrueLit(e ast.Expr) bool {
 // withKey marks a shape key as present (or absent) in t.
 func withKey(t types.Type, key types.Type, present bool) types.Type {
 	key = normaliseKey(key)
+	if lits := keyLiterals(key); len(lits) > 1 {
+		// A key that is one of a few literals: the array has one of them,
+		// where it holds; where it does not, which one it lacks is unknown.
+		if !present {
+			return t
+		}
+		var out []types.Type
+		for _, k := range lits {
+			out = append(out, withKey(t, k, true))
+		}
+		return types.MakeUnion(out...)
+	}
+	if keyLiterals(key) == nil {
+		// Any other key, `string $k`: which entry it names is unknown. A
+		// shape no entry of which it can name, sealed, has no value where
+		// the test holds; the others stay.
+		return types.Map(t, func(m types.Type) types.Type {
+			switch m := m.(type) {
+			case types.Shape:
+				if present && !m.Unsealed && !shapeMayHave(m, key) {
+					return types.TNever
+				}
+			case types.Array:
+				if present {
+					m.NonEmpty = true
+				}
+			}
+			return m
+		})
+	}
 	return types.Map(t, func(m types.Type) types.Type {
 		if _, isMixed := m.(types.Mixed); isMixed && present {
 			// array_key_exists('k', $m) answers true only for an array

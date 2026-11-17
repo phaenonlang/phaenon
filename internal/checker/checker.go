@@ -493,9 +493,18 @@ type fnCtx struct {
 	throwEnvs []*state
 	trySeeds  map[*ast.Try]*state
 	// writeOffsets are the offsets a reference is taken to, `$v = &$a['k']`,
-	// which PHP creates when they are missing: no P2321 for them, as
-	// PHPStan has none. `.=` and `++` read the offset first, and are P2321.
+	// which PHP creates when they are missing, and those whose key is taken
+	// from the array itself, `$a[array_key_first($a)]`: no P2321 for them,
+	// as PHPStan has none. `.=` and `++` read the offset first, and are
+	// P2321.
 	writeOffsets map[*ast.Index]bool
+	// stmtExpr is the expression of the statement being checked: an
+	// assignment that is not it is a part of an expression, a
+	// condition's (rememberKeyOf).
+	stmtExpr ast.Expr
+	// truthyAssign is an assignment a condition tests for truthiness
+	// itself, `if ($k = array_key_first($r))`, while it is checked.
+	truthyAssign *ast.Assign
 	// quietOffsets is above zero while the object of a member that
 	// isset(), empty() or ?? tests is typed, `$r['o']` of `isset($r['o']->p)`:
 	// PHP reads the whole chain as quietly as its last link, so an offset in

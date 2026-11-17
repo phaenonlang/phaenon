@@ -1,0 +1,321 @@
+namespace App\LiteralKeys;
+
+// A key that is one of a few literals, `'a'|'c'`, reads the entries it may
+// name: P2321 where one of them may be missing and another is there, as
+// PHPStan reports "might not exist", and P2313 where none is there. true,
+// false and a float literal are the int PHP stores them under. Plain PHP,
+// so that PHPStan reads this file as written.
+
+/**
+ * @param array{a: int, b: int, c?: int} $r
+ * @param 'a'|'b' $required
+ * @param 'a'|'c' $optional
+ * @param 'a'|'z' $absent
+ * @param 'y'|'z' $none
+ */
+function keys(array $r, string $required, string $optional, string $absent, string $none): int
+{
+    $sum = $r[$required];
+    $sum += $r[$optional]; // want P2321 "offset 'a'|'c' might not exist on array{a: int, b: int, c?: int}"
+    $sum += $r[$absent]; // want P2321
+    echo $r[$none]; // want P2313 "offset 'y'|'z' does not exist"
+    return $sum;
+}
+
+/**
+ * @param array{a: int, ...} $r
+ * @param 'a'|'z' $k
+ */
+function unsealed(array $r, string $k): mixed
+{
+    return $r[$k]; // want P2321
+}
+
+/**
+ * @param array{0: int, 1?: int, a: int} $r
+ * @param 0|'a' $required
+ * @param 1|'a' $optional
+ */
+function intAndString(array $r, int|string $required, int|string $optional): int
+{
+    return $r[$required] + $r[$optional]; // want P2321 "offset 1|'a' might not exist"
+}
+
+/**
+ * @param array{a: int, b?: int}|array{a: int, b: int, c: int} $r
+ * @param 'a'|'b' $k
+ */
+function shapes(array $r, string $k): int
+{
+    return $r[$k]; // want P2321
+}
+
+/**
+ * @param array{a: int, c?: int} $r
+ * @param 'a'|'c' $k
+ */
+function guarded(array $r, string $k): int
+{
+    $sum = $r[$k] ?? 0;
+    if (isset($r[$k])) {
+        $sum += $r[$k];
+    }
+    return $sum;
+}
+
+/**
+ * @param array{a: int, c?: int} $r
+ * @param 'a'|'c' $k
+ */
+function keyExists(array $r, string $k): int
+{
+    if (array_key_exists($k, $r)) {
+        return $r[$k];
+    }
+    return 0;
+}
+
+/**
+ * @param array{a: int, c?: int} $r
+ */
+function anyKeyExists(array $r, string $k): int
+{
+    if (array_key_exists($k, $r)) {
+        return $r[$k];
+    }
+    return 0;
+}
+
+// Filled where it is missing, under either test.
+/**
+ * @param array{a?: int, b?: int} $cache
+ * @param 'a'|'b' $k
+ */
+function filled(array $cache, string $k): int
+{
+    if (!isset($cache[$k])) {
+        $cache[$k] = 1;
+    }
+    return $cache[$k];
+}
+
+/**
+ * @param array{a?: int, b?: int} $cache
+ * @param 'a'|'b' $k
+ */
+function filledByKeyTest(array $cache, string $k): int
+{
+    if (!array_key_exists($k, $cache)) {
+        $cache[$k] = 1;
+    }
+    return $cache[$k];
+}
+
+// A key taken from the array itself is one it has, as PHPStan follows it:
+// iterated from array_keys(), from array_key_first() or array_key_last()
+// (where the array cannot be empty, or the key is not null), from
+// array_search() where the key is not false. A variable holding
+// array_keys() is not followed, by PHPStan either.
+/** @param array{a: int, b?: int} $r */
+function keysOfItself(array $r, int $v): int
+{
+    $sum = 0;
+    foreach (array_keys($r) as $k) {
+        $sum += $r[$k];
+    }
+    foreach (array_keys($r, 5, true) as $i => $k) {
+        $sum += $r[$k] + $i;
+    }
+    $first = array_key_first($r);
+    $last = array_key_last($r);
+    $sum += $r[$first] + $r[$last] + $r[array_key_first($r)];
+    $found = array_search($v, $r, true);
+    if ($found !== false) {
+        $sum += $r[$found];
+    }
+    return $sum;
+}
+
+/** @param array{a?: int, b?: int} $r */
+function keyOfMaybeEmpty(array $r): int
+{
+    $k = array_key_first($r);
+    if ($k === null) {
+        return 0;
+    }
+    return $r[$k];
+}
+
+// What changes the array forgets that the key is one of its own: an
+// assignment to it, a write to one of its offsets or to the array above
+// it, unset(), a call that may change $this.
+/** @param array{a?: int, b?: int} $r */
+function keyOfAnotherArray(array $r): int
+{
+    $k = array_key_first($r);
+    $r['a'] = 5;
+    if ($k === null) {
+        return 0;
+    }
+    return $r[$k]; // want P2321 "offset 'a'|'b' might not exist on array{a: 5, b?: int}"
+}
+
+/** @param array{a?: int, b?: int} $r */
+function keyOfAnEmptiedArray(array $r): int
+{
+    $k = array_key_first($r);
+    unset($r['a'], $r['b']);
+    if ($k === null) {
+        return 0;
+    }
+    return $r[$k]; // want P2313 "offset 'a'|'b' does not exist on array{}"
+}
+
+/** @param array{x: array{a?: int, b?: int}, y: int} $r */
+function keyOfAWrittenParent(array $r): int
+{
+    $k = array_key_first($r['x']);
+    $r['y'] = 2;
+    if ($k === null) {
+        return 0;
+    }
+    return $r['x'][$k]; // want P2321
+}
+
+final class Keys
+{
+    /** @var array{a?: int, b?: int} */
+    private array $r = [];
+
+    private function reset(): void
+    {
+        $this->r = [];
+    }
+
+    public function afterACall(): int
+    {
+        $k = array_key_first($this->r);
+        $this->reset();
+        if ($k === null) {
+            return 0;
+        }
+        return $this->r[$k]; // want P2321
+    }
+}
+
+// A closure that captures the array and the key knows the key is one of
+// its own.
+/** @param array{a: int, b?: int} $r */
+function keyInAClosure(array $r): int
+{
+    $sum = 0;
+    foreach (array_keys($r) as $k) {
+        $f = function () use ($r, $k): int {
+            return $r[$k];
+        };
+        $sum += $f();
+    }
+    return $sum;
+}
+
+// An assignment in a condition compared with null is not followed, as
+// PHPStan follows none, where the array cannot be empty too; one the
+// condition tests for truthiness is, and so is array_search() compared
+// with false. Read at once, `$r[array_key_first($r)]`, the key is the
+// array's own only where it cannot be empty.
+/** @param array{a?: int, b?: int} $r */
+function keyInACondition(array $r): int
+{
+    $sum = 0;
+    while (($k = array_key_first($r)) !== null) {
+        $sum += $r[$k]; // want P2321
+        unset($r[$k]);
+    }
+    return $sum + $r[array_key_last($r)]; // want P2321
+}
+
+/** @param array{a: int, b?: int} $r */
+function keyInAConditionCertain(array $r, int $v): int
+{
+    $sum = 0;
+    if (($k = array_find_key($r, fn (int $w): bool => $w > $v)) !== null) {
+        $sum += $r[$k]; // want P2321
+    }
+    if ($j = array_key_last($r)) {
+        $sum += $r[$j];
+    }
+    if (($i = array_search($v, $r, true)) !== false) {
+        $sum += $r[$i];
+    }
+    return $sum;
+}
+
+// A change of the array forgets what a condition said of its offset, and
+// nothing else it said.
+interface Item
+{
+    public function weight(): int;
+}
+
+/** @param array{k?: int, j?: int} $a */
+function otherNarrowingStands(?Item $x, array $a, bool $by): int
+{
+    $ok = isset($a['k']) && $x !== null;
+    if ($by) {
+        sort($a);
+    } else {
+        $a['j'] = 5;
+    }
+    if ($ok) {
+        return $x->weight();
+    }
+    return 0;
+}
+
+/** @param array{k?: int, j?: int} $a */
+function otherNarrowingStandsUnset(?Item $x, array $a, bool $all): int
+{
+    $ok = isset($a['k']) && $x !== null;
+    if ($all) {
+        unset($a);
+    } else {
+        unset($a['j']);
+    }
+    if ($ok) {
+        return $x->weight();
+    }
+    return 0;
+}
+
+/** @param array{b?: int} $r */
+function oneKey(array $r): int
+{
+    $sum = 0;
+    foreach (array_keys($r) as $k) {
+        $sum += $r[$k];
+    }
+    return $sum;
+}
+
+/** @param array{a: int, b?: int} $r */
+function keysInAVariable(array $r): int
+{
+    $sum = 0;
+    $keys = array_keys($r);
+    foreach ($keys as $k) {
+        $sum += $r[$k]; // want P2321
+    }
+    return $sum;
+}
+
+/**
+ * @param array{0: int, 1?: int} $r
+ * @param array{0: int, 1: int} $both
+ */
+function scalars(array $r, array $both): int
+{
+    $sum = $r[false] + $both[true];
+    $sum += $r[true]; // want P2321 "offset 1 might not exist"
+    $sum += $r[1.0]; // want P2321
+    return $sum;
+}

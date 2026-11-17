@@ -143,34 +143,72 @@ func (e *state) applyConds(name string, t types.Type, p *program.Program) {
 	}
 }
 
-// offsetsUnder reports an offset of the variable name among offsets.
-func offsetsUnder(offsets map[string]types.Type, name string) bool {
-	for k := range offsets {
-		if root, _ := offsetRoot(k); root == name {
-			return true
-		}
-	}
-	return false
+// dropConds forgets what the conditions say of name, a variable they
+// narrowed or an array whose offsets they set: it has another value now.
+// What a condition says of other variables stands: `$ok = isset($a['k'])
+// && $x !== null` still says $x is not null where $ok is true once $a is
+// sorted.
+func (e *state) dropConds(name string) {
+	e.forgetInConds(func(k string) bool { return k == name }, func(k string) bool {
+		root, _ := offsetRoot(k)
+		return root == name
+	})
 }
 
-// dropConds forgets the conditions that mention name: the variable it
-// narrowed has another value now.
-func (e *state) dropConds(name string) {
-	for k, v := range e.vars {
+// forgetInConds takes out of every condition branch the variables it
+// narrowed that narrowed reports and the offsets it set that offset
+// reports, and keeps the rest of the branch, a branch still where nothing
+// is left. A branch is shared between states, so a changed one is a copy.
+func (e *state) forgetInConds(narrowed, offset func(key string) bool) {
+	for name, v := range e.vars {
 		if len(v.conds) == 0 {
 			continue
 		}
-		kept := v.conds[:0:0]
-		for _, c := range v.conds {
-			if _, mentions := c.narrowed[name]; !mentions && !offsetsUnder(c.offsets, name) {
-				kept = append(kept, c)
+		var conds []condHolder
+		for i, c := range v.conds {
+			kept, changed := c, false
+			for k := range c.narrowed {
+				if narrowed(k) {
+					if !changed {
+						kept, changed = c.copy(), true
+					}
+					delete(kept.narrowed, k)
+				}
+			}
+			for k := range c.offsets {
+				if offset(k) {
+					if !changed {
+						kept, changed = c.copy(), true
+					}
+					delete(kept.offsets, k)
+				}
+			}
+			if changed && conds == nil {
+				conds = append([]condHolder{}, v.conds...)
+			}
+			if changed {
+				conds[i] = kept
 			}
 		}
-		if len(kept) != len(v.conds) {
-			v.conds = kept
-			e.vars[k] = v
+		if conds != nil {
+			v.conds = conds
+			e.vars[name] = v
 		}
 	}
+}
+
+// copy is the branch with maps of its own.
+func (c condHolder) copy() condHolder {
+	n := c
+	n.narrowed = make(map[string]types.Type, len(c.narrowed))
+	for k, t := range c.narrowed {
+		n.narrowed[k] = t
+	}
+	n.offsets = make(map[string]types.Type, len(c.offsets))
+	for k, t := range c.offsets {
+		n.offsets[k] = t
+	}
+	return n
 }
 
 // state is the abstract state at one program point: the type of every
@@ -335,6 +373,7 @@ func narrowNative(native, t types.Type, p *program.Program) types.Type {
 func (e *state) unset(name string) {
 	delete(e.vars, name)
 	e.invalidatePrefix("$" + name)
+	e.dropConds(name)
 }
 
 func (e *state) setPath(key string, t types.Type) {
@@ -347,24 +386,43 @@ func (e *state) getPath(key string) (types.Type, bool) {
 }
 
 // invalidatePrefix drops every narrowed path that starts with prefix
-// followed by a member or offset separator (or equals it).
+// followed by a member or offset separator (or equals it), and the
+// condition branches that would set one.
 func (e *state) invalidatePrefix(prefix string) {
+	e.invalidate(func(k string) bool {
+		return k == prefix || pathUnder(k, prefix)
+	})
+}
+
+// pathUnder reports a path strictly under prefix: a member or an offset
+// of it.
+func pathUnder(k, prefix string) bool {
+	if len(k) <= len(prefix) || !strings.HasPrefix(k, prefix) {
+		return false
+	}
+	rest := k[len(prefix):]
+	return strings.HasPrefix(rest, "->") || strings.HasPrefix(rest, "[") || strings.HasPrefix(rest, "::")
+}
+
+// invalidate drops the narrowed paths drop names, and takes them out of
+// the condition branches that would set them, which hold what was known of
+// the value before it changed: `$k = array_key_first($r)` knows `$r[$k]`
+// is there where $k is not null only while $r is the array it was. What a
+// branch says of anything else stands.
+func (e *state) invalidate(drop func(key string) bool) {
 	for k := range e.paths {
-		if k == prefix || (strings.HasPrefix(k, prefix) && (strings.HasPrefix(k[len(prefix):], "->") || strings.HasPrefix(k[len(prefix):], "[") || strings.HasPrefix(k[len(prefix):], "::"))) {
+		if drop(k) {
 			delete(e.paths, k)
 		}
 	}
+	e.forgetInConds(func(string) bool { return false }, drop)
 }
 
 // invalidateUnder drops the narrowed paths strictly under a receiver —
 // `$this->calls` once `$this->record()` ran, which may have changed it —
 // and keeps the receiver's own narrowing: the object is the same one.
 func (e *state) invalidateUnder(prefix string) {
-	for k := range e.paths {
-		if len(k) > len(prefix) && strings.HasPrefix(k, prefix) && (strings.HasPrefix(k[len(prefix):], "->") || strings.HasPrefix(k[len(prefix):], "[") || strings.HasPrefix(k[len(prefix):], "::")) {
-			delete(e.paths, k)
-		}
-	}
+	e.invalidate(func(k string) bool { return pathUnder(k, prefix) })
 }
 
 // invalidateOwnScope drops what was narrowed about the current object and
@@ -372,15 +430,13 @@ func (e *state) invalidateUnder(prefix string) {
 // at `self::`, `static::`, `parent::` or a class name own accepts — unless
 // keep spares the path.
 func (e *state) invalidateOwnScope(own func(class string) bool, keep func(key string) bool) {
-	for k := range e.paths {
+	e.invalidate(func(k string) bool {
 		drop := strings.HasPrefix(k, "$this->") || strings.HasPrefix(k, "$this[")
 		if i := strings.Index(k, "::"); !drop && i > 0 && !strings.HasPrefix(k, "$") {
 			drop = own(k[:i])
 		}
-		if drop && !keep(k) {
-			delete(e.paths, k)
-		}
-	}
+		return drop && !keep(k)
+	})
 }
 
 // invalidateCalls drops the narrowed method-call paths under a receiver:
@@ -440,11 +496,9 @@ func constantArgKey(e ast.Expr) (string, bool) {
 // mutate objects) but keeps offset narrowings on local arrays, which are
 // values.
 func (e *state) invalidateMembers() {
-	for k := range e.paths {
-		if strings.Contains(k, "->") || strings.Contains(k, "::") {
-			delete(e.paths, k)
-		}
-	}
+	e.invalidate(func(k string) bool {
+		return strings.Contains(k, "->") || strings.Contains(k, "::")
+	})
 }
 
 // join merges two environments at a control-flow meet.
@@ -1003,21 +1057,38 @@ func generalizeArrays(a, b []types.Array, depth int) []types.Type {
 
 // joinConds keeps the condition a variable carried into both branches of a
 // join — the same holders, as a ternary testing the variable leaves them —
-// and forgets it when the sides disagree.
+// with what both sides still say of each branch: a side that changed `$a`
+// since says nothing of it, and the other variables the branch narrowed
+// stand. Holders that disagree on when they hold are forgotten.
 func joinConds(a, b []condHolder) []condHolder {
 	if len(a) == 0 || len(a) != len(b) {
 		return nil
 	}
+	var out []condHolder
 	for i := range a {
-		if !types.Equal(a[i].whenType, b[i].whenType) || len(a[i].narrowed) != len(b[i].narrowed) {
+		if !types.Equal(a[i].whenType, b[i].whenType) || a[i].exact != b[i].exact {
 			return nil
 		}
+		same := len(a[i].narrowed) == len(b[i].narrowed) && len(a[i].offsets) == len(b[i].offsets)
+		common := condHolder{whenType: a[i].whenType, exact: a[i].exact, narrowed: map[string]types.Type{}, offsets: map[string]types.Type{}}
 		for k, t := range a[i].narrowed {
-			u, ok := b[i].narrowed[k]
-			if !ok || !types.Equal(t, u) {
-				return nil
+			if u, ok := b[i].narrowed[k]; ok && types.Equal(t, u) {
+				common.narrowed[k] = t
+			} else {
+				same = false
 			}
 		}
+		for k, t := range a[i].offsets {
+			if u, ok := b[i].offsets[k]; ok && types.Equal(t, u) {
+				common.offsets[k] = t
+			} else {
+				same = false
+			}
+		}
+		if same {
+			common = a[i]
+		}
+		out = append(out, common)
 	}
-	return a
+	return out
 }
