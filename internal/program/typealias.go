@@ -183,7 +183,7 @@ func (r *Resolver) TypeAlias(n *ast.Name) *TypeAlias {
 			return nil
 		}
 		if lower, otherCase := OtherCaseTypeName(n.Parts[0]); !otherCase {
-			if _, keyword := r.keyword(lower, nil, nil); keyword {
+			if _, keyword := r.keyword(lower, nil, nil); keyword && !r.namesClass(n, lower) {
 				return nil
 			}
 		}

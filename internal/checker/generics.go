@@ -116,7 +116,12 @@ func (x *fnCtx) checkNamedType(t *ast.NamedType) {
 				return
 			}
 		}
-		if ar, ok := keywordArity[lower]; ok && !otherCase {
+		// A docblock's type word that an alias or a class of the name
+		// stands for (`type Numeric<T> = list<T>`) is the alias or the
+		// class, whose arity is checked below.
+		_, confusable := program.ConfusableTypeName(lower)
+		shadowed := confusable && (x.res.TypeAlias(t.Name) != nil || x.p().Class(x.res.ClassName(t.Name)) != nil)
+		if ar, ok := keywordArity[lower]; ok && !otherCase && !shadowed {
 			if lower == "list" && given == 0 && x.testedNames[t] {
 				return // `is list`: list<mixed> (design/generics.md §11.4)
 			}
