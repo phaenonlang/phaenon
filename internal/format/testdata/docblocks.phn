@@ -1,0 +1,28 @@
+namespace App;
+
+/**
+ * Starts its line and fits: one line.
+ */
+interface Fits
+{
+    /**
+     * xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx too long for one line by a few
+     */
+    public const A = 0;
+}
+
+// A docblock after code on its line is left as written: the brace that
+// moves down takes the header off its line, and the line it would make
+// is not the one measured.
+interface WithAVeryLongNameThatFillsTheWholeLine extends Fits { public const B = 0; public const C = 0; /** After the code
+     */
+    public const D = 0;
+}
+
+final class Trailing
+{
+    public int $x = 0; /**
+     * After a property, short
+     */
+    public int $y = 0;
+}
