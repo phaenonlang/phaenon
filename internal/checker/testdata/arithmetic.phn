@@ -1,0 +1,47 @@
+namespace App;
+
+function takesInt(int $x): void
+{
+}
+
+function takesFloat(float $x): void
+{
+}
+
+/** @param array<string, int> $m */
+function operands(string $s, int $i, array $m): void
+{
+    $a = $s ** 2; // want P2301 "operator ** on string"
+    $b = $i ** $m; // want P2301 "operator ** on array<string, int>"
+    $i **= $s; // want P2301 "operator ** on string"
+    $c = $s * 2; // want P2301 "operator * on string"
+    $d = $s - 2; // want P2301 "operator - on string"
+    $e = $s + 2; // want P2301 "operator + on string"
+}
+
+function powers(int $i, int $j): void
+{
+    takesInt(2 ** 3);
+    takesInt((-2) ** 63);
+    takesInt($i ** 2);
+    takesInt($i ** $j);
+    takesInt(2 ** -1); // want P2103 "expects int, float given"
+    takesInt(1 ** -1); // want P2103 "expects int, float given"
+    takesInt($i ** -2); // want P2103 "expects int, float given"
+    takesInt(2 ** 63); // want P2103 "expects int, float given"
+    takesInt(10 ** 19); // want P2103 "expects int, float given"
+    takesFloat(2 ** -1);
+    takesFloat(2 ** 64);
+}
+
+function pastTheIntegers(): void
+{
+    takesInt(9223372036854775807 + 0);
+    takesInt(-9223372036854775807 - 1);
+    takesInt(9223372036854775807 + 1); // want P2103 "expects int, float given"
+    takesInt(-9223372036854775807 - 2); // want P2103 "expects int, float given"
+    takesInt(4611686018427387904 * 2); // want P2103 "expects int, float given"
+    takesInt((-9223372036854775807 - 1) * -1); // want P2103 "expects int, float given"
+    takesInt((-9223372036854775807 - 1) / -1); // want P2103 "expects int, float given"
+    takesInt(-(-9223372036854775807 - 1)); // want P2103 "expects int, float given"
+}

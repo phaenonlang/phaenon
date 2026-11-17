@@ -1741,7 +1741,10 @@ func (x *fnCtx) unary(e *ast.Unary, env *state) types.Type {
 		return types.TBool
 	case token.Kind('-'), token.Kind('+'):
 		t := x.expr(e.Expr, env, nil)
-		if lit, ok := types.IsIntLit(t); ok && e.Op == token.Kind('-') && lit != math.MinInt64 {
+		if lit, ok := types.IsIntLit(t); ok && e.Op == token.Kind('-') {
+			if lit == math.MinInt64 {
+				return types.TFloat // -PHP_INT_MIN is past PHP_INT_MAX
+			}
 			return types.IntLit(-lit)
 		}
 		if lit, ok := t.(types.FloatLit); ok && e.Op == token.Kind('-') {
@@ -2156,29 +2159,44 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 				if s, ok := addInt(a, b); ok {
 					return types.IntLit(s)
 				}
+				return types.TFloat // past the integers, PHP's result is a float
 			}
 		}
 		return x.arithResult(l, r, span, "+")
 	case token.Kind('-'), token.Kind('*'), token.T_POW:
 		if a, ok := types.IsIntLit(l); ok {
 			if b, ok := types.IsIntLit(r); ok {
+				// Two integers whose result is past the integers give a
+				// float, as PHP computes it and PHPStan types it.
+				s, ok := int64(0), false
 				switch op {
 				case token.Kind('-'):
-					if s, ok := addInt(a, -b); ok && b != math.MinInt64 {
-						return types.IntLit(s)
-					}
+					s, ok = subInt(a, b)
 				case token.Kind('*'):
-					if s, ok := mulInt(a, b); ok {
-						return types.IntLit(s)
-					}
+					s, ok = mulInt(a, b)
+				case token.T_POW:
+					s, ok = powInt(a, b)
 				}
+				if ok {
+					return types.IntLit(s)
+				}
+				return types.TFloat
 			}
 		}
-		return x.arithResult(l, r, span, string(rune(op)))
+		t := x.arithResult(l, r, span, opText(op))
+		if b, ok := types.IsIntLit(r); ok && b < 0 && op == token.T_POW && types.Equal(t, types.TInt) {
+			// A negative exponent gives a float whatever the base: 2 ** -1
+			// is 0.5, and 1 ** -1 is 1.0.
+			return types.TFloat
+		}
+		return t
 	case token.Kind('/'):
 		x.arithResult(l, r, span, "/")
 		if a, ok := types.IsIntLit(l); ok {
 			if b, ok := types.IsIntLit(r); ok && b != 0 && a%b == 0 {
+				if a == math.MinInt64 && b == -1 {
+					return types.TFloat // PHP_INT_MIN / -1 is past PHP_INT_MAX
+				}
 				return types.IntLit(a / b)
 			}
 		}
@@ -2300,6 +2318,8 @@ func opText(op token.Kind) string {
 		return ">="
 	case token.T_SPACESHIP:
 		return "<=>"
+	case token.T_POW:
+		return "**"
 	}
 	return string(rune(op))
 }
@@ -2372,13 +2392,50 @@ func addInt(a, b int64) (int64, bool) {
 	return s, true
 }
 
+// subInt is a - b, and false when the difference is no int64.
+func subInt(a, b int64) (int64, bool) {
+	s := a - b
+	if (s < a) != (b > 0) {
+		return 0, false
+	}
+	return s, true
+}
+
 func mulInt(a, b int64) (int64, bool) {
 	if a == 0 || b == 0 {
 		return 0, true
 	}
+	// The one overflow the division below does not show: MinInt64 * -1
+	// wraps to MinInt64, and so does MinInt64 / -1.
+	if a == math.MinInt64 && b == -1 {
+		return 0, false
+	}
 	s := a * b
 	if s/b != a {
 		return 0, false
+	}
+	return s, true
+}
+
+// powInt is a ** b for the exponents that keep an integer one, b >= 0, and
+// false when the power is no int64. A negative exponent gives a float in
+// PHP even where the value is whole.
+func powInt(a, b int64) (int64, bool) {
+	if b < 0 {
+		return 0, false
+	}
+	s, ok := int64(1), true
+	for b > 0 {
+		if b&1 == 1 {
+			if s, ok = mulInt(s, a); !ok {
+				return 0, false
+			}
+		}
+		if b >>= 1; b > 0 {
+			if a, ok = mulInt(a, a); !ok {
+				return 0, false
+			}
+		}
 	}
 	return s, true
 }
