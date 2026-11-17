@@ -1943,7 +1943,7 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 				}
 			}
 		}
-		return x.arithResult(l, r, span, string(rune(op)))
+		return x.arithResult(l, r, span, opText(op))
 	case token.Kind('/'):
 		x.arithResult(l, r, span, "/")
 		if a, ok := types.IsIntLit(l); ok {
@@ -2069,6 +2069,8 @@ func opText(op token.Kind) string {
 		return ">="
 	case token.T_SPACESHIP:
 		return "<=>"
+	case token.T_POW:
+		return "**"
 	}
 	return string(rune(op))
 }

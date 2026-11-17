@@ -1,0 +1,20 @@
+namespace App;
+
+function takesInt(int $x): void
+{
+}
+
+function takesFloat(float $x): void
+{
+}
+
+/** @param array<string, int> $m */
+function operands(string $s, int $i, array $m): void
+{
+    $a = $s ** 2; // want P2301 "operator ** on string"
+    $b = $i ** $m; // want P2301 "operator ** on array<string, int>"
+    $i **= $s; // want P2301 "operator ** on string"
+    $c = $s * 2; // want P2301 "operator * on string"
+    $d = $s - 2; // want P2301 "operator - on string"
+    $e = $s + 2; // want P2301 "operator + on string"
+}
