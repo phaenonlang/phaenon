@@ -1,7 +1,7 @@
 # Contributing to Phaenon
 
-Phaenon is pre-alpha: the language still changes, and a change to the language starts as a change
-to its design.
+Phaenon is alpha: the language still changes, in minor releases, and a change to the language
+starts as a change to its design.
 
 ## Before you start
 

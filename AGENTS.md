@@ -8,7 +8,7 @@ depends on nothing but PHP (`../design/roadmap.md` D24): the compiler adds the h
 a construct it lowers, and never a call into a package. Phaenon adds types and the spelling of
 declarations, never an operation PHP lacks (D26): a type test is PHP's own, a method is declared
 without a keyword (D27). The type checker is the product. This repository is the compiler, `phn`,
-written in Go. Pre-alpha; MIT-licensed; GitHub org `phaenonlang`.
+written in Go. Alpha (`../design/roadmap.md` D31); MIT-licensed; GitHub org `phaenonlang`.
 
 **This repository is the entry point for agents.** Start here; the map below says where everything
 else lives. The language design and every decision are in the `design` repository. Milestone
