@@ -426,6 +426,32 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 		if sh, ok := argType(0).(types.Shape); ok {
 			return types.Array{Key: types.TInt, Value: shapeKeys(sh), List: true, NonEmpty: len(sh.Entries) > 0}
 		}
+	case "array_replace":
+		// Lists replace each other's entries number by number, and what is
+		// left is a list, as PHPStan has it; the stub's array<K, V> would
+		// not say so. A list that cannot be empty makes the result one.
+		var values []types.Type
+		nonEmpty := false
+		for i, a := range args.Args {
+			t := argType(i)
+			if a.Unpack {
+				_, t, _ = types.IterableKV(t, x.p())
+			}
+			for _, m := range types.Members(t) {
+				if !isList(m) {
+					return ret
+				}
+			}
+			_, v, ok := types.IterableKV(t, x.p())
+			if !ok {
+				return ret
+			}
+			values = append(values, v)
+			nonEmpty = nonEmpty || !a.Unpack && certainlyHolds(t)
+		}
+		if len(values) > 0 {
+			return types.Array{Key: types.TInt, Value: types.MakeUnion(values...), List: true, NonEmpty: nonEmpty}
+		}
 	case "array_merge":
 		if len(args.Args) == 0 {
 			return ret // the stub's array: PHPStan types no merge of nothing

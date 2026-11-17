@@ -3909,7 +3909,9 @@ func shapesReduced(t types.Type, collapse bool) types.Type {
 
 // arrayPlus types `$a + $b` on arrays: the left operand's entries, then the
 // right's for the keys the left lacks. Two sealed shapes merge entry by
-// entry; anything else is the union of keys and of values.
+// entry; two lists are a list, the longer one's numbers following the
+// shorter's, as PHPStan has it; anything else is the union of keys and of
+// values.
 func arrayPlus(l, r types.Type) types.Type {
 	var out []types.Type
 	for _, lm := range types.Members(l) {
@@ -3935,10 +3937,36 @@ func arrayPlus(l, r types.Type) types.Type {
 			}
 			lk, lv, lne := arrayKV(lm)
 			rk, rv, rne := arrayKV(rm)
+			if isList(lm) && isList(rm) {
+				out = append(out, types.Array{Key: types.TInt, Value: types.MakeUnion(lv, rv), List: true, NonEmpty: lne || rne})
+				continue
+			}
 			out = append(out, types.Array{Key: types.MakeUnion(lk, rk), Value: types.MakeUnion(lv, rv), NonEmpty: lne || rne})
 		}
 	}
 	return types.MakeUnion(out...)
+}
+
+// isList reports an array type member that is a list: a list, or a shape
+// whose keys number its entries from 0, those that may be missing last.
+func isList(m types.Type) bool {
+	switch m := m.(type) {
+	case types.Array:
+		return m.List
+	case types.Shape:
+		if listLike(m) {
+			return true
+		}
+		// `array{0: int, 1?: int}` is a list as PHPStan reads it: one
+		// optional key, the last, leaves no gap; two may.
+		for i, e := range m.Entries {
+			if !e.IsInt || e.IntKey != int64(i) || e.Optional && i != len(m.Entries)-1 {
+				return false
+			}
+		}
+		return !m.Unsealed && len(m.Entries) > 0
+	}
+	return false
 }
 
 // shapeEntry is the entry of s under key's key.
