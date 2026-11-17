@@ -489,9 +489,16 @@ func (l *layout) dedent(lines []string, declIndent, level string, span ast.Span)
 
 // docblocks collapses every docblock with exactly one line of content onto
 // one line, unless the result would pass 120 columns.
+//
+// Only a docblock that starts its line is collapsed. The columns of one
+// that follows code depend on that code, which this pass and phn fmt's
+// spacing are still laying out: a class brace moved to its own line takes
+// the header off the docblock's line, so the docblock that passed 120
+// columns in one run would fit in the next, and formatting a file would
+// not settle in one run. Indentation is what no later step changes.
 func (l *layout) docblocks() {
 	for _, t := range l.toks {
-		if t.Kind != token.T_DOC_COMMENT {
+		if t.Kind != token.T_DOC_COMMENT || !isLineStart(l.src, t.Start) {
 			continue
 		}
 		text := string(l.src[t.Start:t.End])
