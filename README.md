@@ -66,10 +66,17 @@ attribute but PHP's own. For a stricter check, `phaenon.json` names the attribut
 their subclasses and implementations included; `[]` lets none count:
 
 ```json
-{"roots": {"src": ".src"}, "unused": {"reflectedAttributes": ["Doctrine\\ORM\\Mapping\\MappingAttribute"]}}
+{"roots": {"src": ".src"}, "unused": {"reflected-attributes": ["Doctrine\\ORM\\Mapping\\MappingAttribute"]}}
 ```
 
 Design: `design/tooling.md` §9.2.
+
+The keys of `phaenon.json` are lower-case words joined by dashes, as `composer.json`'s are
+(`design/roadmap.md` D34). Until 0.8.0 this one was written `reflectedAttributes`. That spelling
+is still read, as the key above, until the first beta, and `phn check`, `phn build`, `phn watch`
+and `phn lsp` warn of it on the project file with the spelling to write (`P4016`); a file that
+writes both is refused. A library that commits its outputs and writes the key with its dash keeps
+out the releases from before 0.8.0, which refuse the file (below).
 
 ## How it fits into a Composer project
 
@@ -195,7 +202,7 @@ beside the library:
 Nothing makes an author write that line, and one that is missing or too low shows only in
 somebody else's project. So `phn build` of a project that commits a root checks it, and
 `phn build --check` does. The floor is the newest first release among the keys the project file
-uses: 0.5.0 for `committed`. The build fails, with one line on stderr and status 1, while a release
+uses: 0.5.0 for `committed`, 0.8.0 for `unused.reflected-attributes`. The build fails, with one line on stderr and status 1, while a release
 from before the floor can be installed beside the package:
 
 ```text
@@ -211,7 +218,7 @@ composer.json: "conflict": {"phaenon/phn": "<0.4"} does not keep this package fr
   any letter case, and of two spellings the last counts, as Composer takes them; the line to
   write names the entry as the file writes it. A project on the compiler's main branch is not kept out
   by the line the check asks for: Composer takes `dev-main` for its branch alias, which stands at
-  the newest key's release line (`0.5.x-dev`).
+  the newest key's release line (`0.8.x-dev`).
 - **A constraint `phn` cannot read fails the build as well**, as one that "cannot be judged", with
   the reason: it is not known to keep anything out. `phn` reads the comparisons, `~`, `^`,
   wildcards, hyphen ranges, alternatives, stability suffixes and flags, and branches. It does not

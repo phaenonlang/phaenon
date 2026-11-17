@@ -1,5 +1,5 @@
 // reflected-attributes: ["\\UnusedAttributesListed\\Mapping", "UnusedAttributesListed\\Exact"]
-// unused.reflectedAttributes in phaenon.json (design/tooling.md §9.2) names
+// unused.reflected-attributes in phaenon.json (design/tooling.md §9.2) names
 // the attributes that mark reflected properties. A listed class, or one that
 // extends or implements a listed class, exempts a private property; any other
 // attribute does not.

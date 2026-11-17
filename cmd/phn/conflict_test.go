@@ -309,7 +309,10 @@ func TestProjectFloor(t *testing.T) {
 		{`{"php": "8.6", "exclude": ["x"], "roots": {"src": ".src"}}`, "roots", "0.1.0"},
 		{`{"roots": {"src": ".src"}, "fmt": []}`, "fmt", "0.2.0"},
 		{`{"roots": {"src": ".src"}, "unused": {}}`, "unused", "0.2.0"},
+		// The key under "unused" in the spelling it had from 0.2.0 on, which
+		// every release since reads, and in the one 0.8.0 gave it.
 		{`{"unused": {"reflectedAttributes": []}, "roots": {"src": ".src"}, "committed": []}`, "committed", "0.5.0"},
+		{`{"unused": {"reflected-attributes": []}, "roots": {"src": ".src"}, "committed": []}`, "unused.reflected-attributes", "0.8.0"},
 	}
 	for _, c := range cases {
 		dir := t.TempDir()
@@ -322,10 +325,50 @@ func TestProjectFloor(t *testing.T) {
 			t.Errorf("%s: the floor is %s, for %q; want %s, for %q", c.file, since, key, c.since, c.key)
 		}
 	}
-	file := `{"roots": {"src": ".src"}, "unused": {"reflectedAttributes": []}, "php": "8.5"}`
-	want := []string{"roots", "php", "unused", "unused.reflectedAttributes"}
-	if got := usedKeys([]byte(file), reflect.TypeFor[project](), ""); !slices.Equal(got, want) {
-		t.Errorf("%s uses %v, want %v", file, got, want)
+	for file, want := range map[string][]string{
+		`{"roots": {"src": ".src"}, "unused": {"reflected-attributes": []}, "php": "8.5"}`: {"roots", "php", "unused", "unused.reflected-attributes"},
+		`{"roots": {"src": ".src"}, "unused": {"reflectedAttributes": []}, "php": "8.5"}`:  {"roots", "php", "unused", "unused.reflectedAttributes"},
+	} {
+		if got := usedKeys([]byte(file), reflect.TypeFor[project](), ""); !slices.Equal(got, want) {
+			t.Errorf("%s uses %v, want %v", file, got, want)
+		}
+	}
+}
+
+// A library that commits a root and writes the key 0.8.0 gave its dash
+// keeps out every release before 0.8.0, which refuse its project file: the
+// floor names the key, and the releases since "committed" came are among
+// those a conflict that was right for "committed" alone lets in.
+func TestConflictFloorOfTheDashedKey(t *testing.T) {
+	const file = `{"roots": {"src": ".src"}, "committed": ["src"], "unused": {"reflected-attributes": []}}`
+	for manifest, want := range map[string]string{
+		`{"name": "acme/kit", "conflict": {"phaenon/phn": "<0.8.0"}}`: "",
+		`{"name": "acme/kit", "conflict": {"phaenon/phn": "<0.5.0"}}`: `composer.json: "conflict": {"phaenon/phn": "<0.5.0"} does not keep this package from being installed beside phaenon/phn 0.7.2 or one of 4 earlier releases, ` +
+			`which cannot read its phaenon.json: the key "unused.reflected-attributes" is known from 0.8.0 on; write "phaenon/phn": "<0.8.0" under "conflict"`,
+	} {
+		t.Chdir(t.TempDir())
+		writeTree(t, ".", map[string]string{ProjectFile: file, "composer.json": manifest})
+		p, err := readProject(ProjectFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := p.conflictFloor(); got != want {
+			t.Errorf("%s:\n got %s\nwant %s", manifest, got, want)
+		}
+	}
+	// In the spelling it had before, the key asks for no more than
+	// "committed" does.
+	t.Chdir(t.TempDir())
+	writeTree(t, ".", map[string]string{
+		ProjectFile:     `{"roots": {"src": ".src"}, "committed": ["src"], "unused": {"reflectedAttributes": []}}`,
+		"composer.json": kitManifest,
+	})
+	p, err := readProject(ProjectFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.conflictFloor(); got != "" {
+		t.Errorf("the earlier spelling: %s", got)
 	}
 }
 
@@ -525,7 +568,7 @@ func TestConflictFloorWhereItDoesNotApply(t *testing.T) {
 	for _, file := range []string{
 		`{"roots": {"src": ".src"}}`,
 		`{"roots": {"src": ".src"}, "committed": []}`,
-		`{"roots": {"src": ".src"}, "fmt": [], "unused": {"reflectedAttributes": []}}`,
+		`{"roots": {"src": ".src"}, "fmt": [], "unused": {"reflected-attributes": []}}`,
 	} {
 		t.Chdir(t.TempDir())
 		writeTree(t, ".", map[string]string{ProjectFile: file, "composer.json": `{"name": "acme/app"}`})

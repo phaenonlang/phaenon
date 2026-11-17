@@ -1,5 +1,5 @@
 {
-  "format": "phaenon.json as its readers answer it (../design/tooling.md §3.7, T19): the compiler reading a project's own file (readProject in cmd/phn/project.go), the compiler reading an installed package's (readInstalledProject), and the Composer plugin, which reads installed packages alone (composer/src/ProjectFile.php). \"file\" is the project file's text. Where the file is not text, \"bytes\" holds it in base64. \"refused\" marks a file that is in error for all three, and \"error\" is then part of the compiler's error, where the vector holds it to one. Otherwise \"roots\" maps each source root to its output directory and \"committed\" lists the roots whose outputs the project commits, in the file's order, all as cleaned paths with forward slashes. \"root\" marks a file that is in error as a project's own, with part of that error, and is read as given as an installed package's: it has keys the compiler does not know, which \"unknown\" lists, sorted, as both readers of an installed package name them. A file without \"root\" is read alike in both ways, and has no unknown key. \"keys\" are the keys of the file's object that the readers know, and \"keys-of-unused\" those under \"unused\": both readers are held to these lists, so that a key one of them learns is one the other learns. The two readers decode with different libraries, and the compiler refuses by name what PHP's decoder refuses and Go's would read: bytes that are no UTF-8, half a surrogate pair, a key that begins with U+0000, nesting past 511 values. No file is known that one reads and the other refuses; should one turn up, the plugin leaves its package to the compiler, which then does for it all the plugin did not.",
+  "format": "phaenon.json as its readers answer it (../design/tooling.md §3.7, T19): the compiler reading a project's own file (readProject in cmd/phn/project.go), the compiler reading an installed package's (readInstalledProject), and the Composer plugin, which reads installed packages alone (composer/src/ProjectFile.php). \"file\" is the project file's text. Where the file is not text, \"bytes\" holds it in base64. \"refused\" marks a file that is in error for all three, and \"error\" is then part of the compiler's error, where the vector holds it to one. Otherwise \"roots\" maps each source root to its output directory and \"committed\" lists the roots whose outputs the project commits, in the file's order, all as cleaned paths with forward slashes. \"root\" marks a file that is in error as a project's own, with part of that error, and is read as given as an installed package's: it has keys the compiler does not know, which \"unknown\" lists, sorted, as both readers of an installed package name them. A file without \"root\" is read alike in both ways, and has no unknown key. \"keys\" are the keys of the file's object that the readers know, and \"keys-of-unused\" those under \"unused\": both readers are held to these lists, so that a key one of them learns is one the other learns. The second key under \"unused\" is the first as it was spelt before the keys were dashed (../design/roadmap.md D34): it is read as the first until the first beta, the compiler warning of it, and a file that writes both is refused. The two readers decode with different libraries, and the compiler refuses by name what PHP's decoder refuses and Go's would read: bytes that are no UTF-8, half a surrogate pair, a key that begins with U+0000, nesting past 511 values. No file is known that one reads and the other refuses; should one turn up, the plugin leaves its package to the compiler, which then does for it all the plugin did not.",
   "keys": [
     "roots",
     "committed",
@@ -9,6 +9,7 @@
     "unused"
   ],
   "keys-of-unused": [
+    "reflected-attributes",
     "reflectedAttributes"
   ],
   "vectors": [
@@ -94,7 +95,7 @@
     },
     {
       "name": "the keys beside it that the compiler reads",
-      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"src/Fixture\"], \"php\": \"8.6\", \"fmt\": [], \"unused\": {\"reflectedAttributes\": []}}",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"src/Fixture\"], \"php\": \"8.6\", \"fmt\": [], \"unused\": {\"reflected-attributes\": []}}",
       "roots": {
         "src": ".src"
       },
@@ -294,7 +295,7 @@
     },
     {
       "name": "another key's value the compiler refuses",
-      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [\"App/Mapping\"]}}",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflected-attributes\": [\"App/Mapping\"]}}",
       "refused": true,
       "error": "is not one"
     },
@@ -306,13 +307,13 @@
     },
     {
       "name": "a key of another key's object in another letter case",
-      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"ReflectedAttributes\": []}}",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"Reflected-Attributes\": []}}",
       "refused": true,
-      "error": "the key \"ReflectedAttributes\" is written \"reflectedAttributes\""
+      "error": "the key \"Reflected-Attributes\" is written \"reflected-attributes\""
     },
     {
       "name": "every other key, as the compiler reads it: the plugin's strict reading takes the file too",
-      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"src/Fixture\"], \"php\": \"8.5\", \"fmt\": [\"vendor/bin/php-cs-fixer\", \"fix\"], \"unused\": {\"reflectedAttributes\": [\"\\\\App\\\\Mapped\", \"Doctrine\\\\ORM\\\\Mapping\\\\MappingAttribute\"]}}",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"exclude\": [\"src/Fixture\"], \"php\": \"8.5\", \"fmt\": [\"vendor/bin/php-cs-fixer\", \"fix\"], \"unused\": {\"reflected-attributes\": [\"\\\\App\\\\Mapped\", \"Doctrine\\\\ORM\\\\Mapping\\\\MappingAttribute\"]}}",
       "roots": {
         "src": ".src"
       },
@@ -332,7 +333,7 @@
     },
     {
       "name": "unused without its key, and with it as null",
-      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": null}}",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflected-attributes\": null}}",
       "roots": {
         "src": ".src"
       },
@@ -378,7 +379,7 @@
     },
     {
       "name": "a class name of unused that starts with a digit",
-      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [\"1App\\\\Mapped\"]}}",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflected-attributes\": [\"1App\\\\Mapped\"]}}",
       "refused": true,
       "error": "is not one"
     },
@@ -396,9 +397,59 @@
     },
     {
       "name": "a key of unused written twice",
-      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [], \"reflectedAttributes\": []}}",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflected-attributes\": [], \"reflected-attributes\": []}}",
       "refused": true,
       "error": "is written twice"
+    },
+    {
+      "name": "the key of unused as it was spelt before the keys were dashed (D34): read until the first beta",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [\"App\\\\Mapped\"]}}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "the earlier spelling as null",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": null}}",
+      "roots": {
+        "src": ".src"
+      },
+      "committed": [
+        "src"
+      ]
+    },
+    {
+      "name": "the earlier spelling is held to class names too",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [\"App/Mapping\"]}}",
+      "refused": true,
+      "error": "is not one"
+    },
+    {
+      "name": "the earlier spelling in another letter case: the error names the key as it is written now",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"ReflectedAttributes\": []}}",
+      "refused": true,
+      "error": "the key \"ReflectedAttributes\" is written \"reflected-attributes\""
+    },
+    {
+      "name": "both spellings of the key: one setting written twice",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflected-attributes\": [], \"reflectedAttributes\": []}}",
+      "refused": true,
+      "error": "\"unused\" has both \"reflected-attributes\" and \"reflectedAttributes\""
+    },
+    {
+      "name": "both spellings, the earlier one first and null",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": null, \"reflected-attributes\": [\"App\\\\Mapped\"]}}",
+      "refused": true,
+      "error": "\"unused\" has both \"reflected-attributes\" and \"reflectedAttributes\""
+    },
+    {
+      "name": "the key with an underscore is no spelling of it",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflected_attributes\": []}}",
+      "refused": true,
+      "error": "unknown key \"unused.reflected_attributes\""
     },
     {
       "name": "a colon and a quote inside a string are no key",
@@ -465,7 +516,7 @@
     },
     {
       "name": "an unknown key under a known key is refused: only a key of the file's own object is passed over",
-      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflectedAttributes\": [], \"later\": true}}",
+      "file": "{\"roots\": {\"src\": \".src\"}, \"committed\": [\"src\"], \"unused\": {\"reflected-attributes\": [], \"later\": true}}",
       "refused": true,
       "error": "unknown key \"unused.later\""
     },

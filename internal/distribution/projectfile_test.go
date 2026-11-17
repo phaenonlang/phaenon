@@ -52,7 +52,7 @@ func TestProjectFileReadersAgree(t *testing.T) {
 require $argv[1];
 $reference = json_decode((string) file_get_contents($argv[2]), true);
 $class = new ReflectionClass(Phaenon\Composer\ProjectFile::class);
-$answers = ['keys' => $class->getConstant('KEYS'), 'keys-of-unused' => [$class->getConstant('UNUSED_KEY')], 'vectors' => []];
+$answers = ['keys' => $class->getConstant('KEYS'), 'keys-of-unused' => $class->getConstant('UNUSED_KEYS'), 'vectors' => []];
 foreach ($reference['vectors'] as $vector) {
     $file = Phaenon\Composer\ProjectFile::parse(isset($vector['bytes']) ? (string) base64_decode($vector['bytes'], true) : $vector['file']);
     // The plugin refuses a file in two ways: it reads nothing of it, or it reads the roots

@@ -68,7 +68,15 @@ type unusedSettings struct {
 	// property as read and written through reflection, their subclasses and
 	// implementations included; without it, any attribute but PHP's own
 	// does, and an empty list lets none (design/tooling.md §9.2).
-	ReflectedAttributes *[]string `json:"reflectedAttributes"`
+	ReflectedAttributes *[]string `json:"reflected-attributes"`
+	// EarlierReflectedAttributes is the same key as it was spelt before
+	// the keys of the project file became words joined by dashes
+	// (design/roadmap.md D34). It is read as ReflectedAttributes, with a
+	// warning that names the spelling of today (spellingDiags), and a file
+	// that writes both is refused. The first beta stops reading it: this
+	// field goes then, with its release in keyReleases, its name in the
+	// plugin's ProjectFile::UNUSED_KEYS and its vectors.
+	EarlierReflectedAttributes *[]string `json:"reflectedAttributes" spelt:"reflected-attributes"`
 }
 
 // checkerOptions are the checker's settings the project file states; a nil
@@ -78,6 +86,75 @@ func (p *project) checkerOptions(opts checker.Options) checker.Options {
 		opts.ReflectedAttributes = append([]string{}, *p.Unused.ReflectedAttributes...)
 	}
 	return opts
+}
+
+// respelt is a key the file writes in a spelling the reader took before:
+// the field's `spelt` tag names the one it has now.
+type respelt struct {
+	above        string // the keys above it, each with its dot: "unused."
+	earlier, now string
+}
+
+// earlierSpellings lists the keys the JSON object data writes in an
+// earlier spelling, of those a struct of type t reads, in the order of its
+// fields, and returns the first whose spelling of today the object writes
+// as well: one setting written twice, which no reader chooses between.
+func earlierSpellings(data []byte, t reflect.Type, above string) (found []respelt, both *respelt) {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	var object map[string]json.RawMessage
+	if t.Kind() != reflect.Struct || json.Unmarshal(data, &object) != nil {
+		return nil, nil
+	}
+	for i := range t.NumField() {
+		tag, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		value, written := object[tag]
+		if tag == "" || !written {
+			continue
+		}
+		if now := t.Field(i).Tag.Get("spelt"); now != "" {
+			r := respelt{above: above, earlier: tag, now: now}
+			found = append(found, r)
+			if _, twice := object[now]; twice && both == nil {
+				both = &r
+			}
+			continue
+		}
+		nested, nestedBoth := earlierSpellings(value, t.Field(i).Type, above+tag+".")
+		found = append(found, nested...)
+		if both == nil {
+			both = nestedBoth
+		}
+	}
+	return found, both
+}
+
+// spellingDiags are the warnings of the keys the project file writes in an
+// earlier spelling (P4016), each on its key: the file is read as if it
+// wrote the spelling of today, which the message names.
+func (p *project) spellingDiags() []checker.Diagnostic {
+	if p == nil {
+		return nil
+	}
+	var diags []checker.Diagnostic
+	found, _ := earlierSpellings(p.data, reflect.TypeFor[project](), "")
+	for _, r := range found {
+		// The key stands before its value, written as it is spelt: a key
+		// written with an escape is no earlier spelling the reader knows.
+		key := `"` + r.earlier + `"`
+		at := max(jsonValueOffset(p.data, strings.Split(r.above+r.earlier, ".")), 0)
+		if before := bytes.LastIndex(p.data[:at], []byte(key)); before >= 0 {
+			at = before
+		}
+		line := 1 + bytes.Count(p.data[:at], []byte("\n"))
+		col := at - bytes.LastIndexByte(p.data[:at], '\n') // in bytes, as jsonPosition counts
+		diags = append(diags, checker.Diagnostic{File: p.path, Line: line, Col: col, EndLine: line, EndCol: col + len(key),
+			Severity: checker.P4016.Severity, Code: checker.P4016.ID,
+			Message: fmt.Sprintf("%s is written %s since phn %s: the keys of %s are lower-case words joined by dashes, and this spelling is read until the first beta",
+				quoted(r.above+r.earlier), quoted(r.above+r.now), keyReleases[r.above+r.now], ProjectFile)})
+	}
+	return diags
 }
 
 // loadProject reads phaenon.json from the working directory; nil when there is none.
@@ -180,6 +257,17 @@ func readProjectFile(path string, installed bool) (*project, error) {
 	if key, want := misspeltKey(object, reflect.TypeFor[project]()); key != "" {
 		return nil, fmt.Errorf("%s: the key %q is written %q", path, key, want)
 	}
+	// A key in the spelling it had before is read as the key of today
+	// (design/roadmap.md D34), and warned of where the file's findings are
+	// printed (spellingDiags). Both in one object are refused, whatever
+	// their values: which of the two a reader took would be its own choice.
+	if _, both := earlierSpellings(text, reflect.TypeFor[project](), ""); both != nil {
+		return nil, fmt.Errorf("%s: %s has both %q and %q, one key in two spellings: write %q alone",
+			path, quoted(strings.TrimSuffix(both.above, ".")), both.now, both.earlier, both.now)
+	}
+	if p.Unused != nil && p.Unused.EarlierReflectedAttributes != nil {
+		p.Unused.ReflectedAttributes, p.Unused.EarlierReflectedAttributes = p.Unused.EarlierReflectedAttributes, nil
+	}
 	var lists struct {
 		Exclude []*string `json:"exclude"`
 		Fmt     []*string `json:"fmt"`
@@ -234,7 +322,7 @@ func readProjectFile(path string, installed bool) (*project, error) {
 	if p.Unused != nil && p.Unused.ReflectedAttributes != nil {
 		for _, name := range *p.Unused.ReflectedAttributes {
 			if !isClassName(strings.TrimPrefix(name, "\\")) {
-				return nil, fmt.Errorf(`%s: "unused": {"reflectedAttributes": [...]} lists attribute classes by their full name, as in "Doctrine\\ORM\\Mapping\\MappingAttribute"; %q is not one`, path, name)
+				return nil, fmt.Errorf(`%s: "unused": {"reflected-attributes": [...]} lists attribute classes by their full name, as in "Doctrine\\ORM\\Mapping\\MappingAttribute"; %q is not one`, path, name)
 			}
 		}
 	}
@@ -463,6 +551,11 @@ func misspeltKey(data []byte, t reflect.Type) (key, want string) {
 			case tag == "" || !strings.EqualFold(tag, key):
 				continue
 			case tag != key:
+				// An earlier spelling in another letter case is sent to
+				// the spelling of today, not to the one that is going.
+				if now := t.Field(i).Tag.Get("spelt"); now != "" {
+					return key, now
+				}
 				return key, tag
 			}
 			if key, want := misspeltKey(object[key], t.Field(i).Type); key != "" {
