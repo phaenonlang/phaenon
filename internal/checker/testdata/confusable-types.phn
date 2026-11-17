@@ -1,7 +1,10 @@
 // integer, double and boolean are a docblock's words for int, float and
-// bool. In a declaration PHP reads them as class names, in any letter case
-// (it warns of the lower-case ones: "integer" will be interpreted as a class
-// name), and PHPStan reports a class that does not exist (class.notFound).
+// bool, and scalar, numeric, number, noreturn and resource for
+// int|float|string|bool, int|float|string, int|float, never and a type PHP
+// cannot declare. In a declaration PHP reads them as class names, in any
+// letter case (it warns of some lower-case ones: "integer" will be
+// interpreted as a class name), and PHPStan reports a class that does not
+// exist (class.notFound).
 // The checker reports the name once, saying how PHP spells the type, and
 // reads the type meant, so that nothing else follows from the mistake.
 // Where the emitter writes the type into a docblock (a type argument, a
@@ -25,6 +28,10 @@ namespace App\Confusable {
 
         public function half(): double { return $this->count / 2; } // want P2001 "unknown class App\Confusable\double: PHP's type is written `float`"
     }
+
+    function scalars(scalar $s, ?numeric $n, number|null $m): void {} // want P2001 "unknown class App\Confusable\scalar: PHP's type is written `int|float|string|bool`", P2001 "App\Confusable\numeric: PHP's type is written `int|float|string`", P2001 "App\Confusable\number: PHP's type is written `int|float`"
+
+    function fails(resource $r): noreturn { throw new \RuntimeException(); } // want P2001 "unknown class App\Confusable\resource: PHP has no type for a resource", P2001 "unknown class App\Confusable\noreturn: PHP's type is written `never`"
 
     // A qualified name is a class's name, said so: it is unknown, nothing
     // more. real and binary are no type's words, in a docblock either.
@@ -57,8 +64,17 @@ namespace App\Confusable\Own {
     {
     }
 
+    final class number
+    {
+    }
+
     function own(double $d): \App\Confusable\Own\double
     {
         return $d;
+    }
+
+    function ownNumber(number $n): \App\Confusable\Own\number
+    {
+        return $n;
     }
 }

@@ -1,0 +1,45 @@
+// A type alias named like a docblock's type word, `type Number = string`, is
+// the alias in a declaration and in a type argument alike, found as a class
+// is (design/generics.md, D29): not the word, and no P2001 for a class PHP
+// would read instead. The emitter writes what the alias erases to.
+namespace App\ConfusableAliases;
+
+type Number = string;
+type scalar = int;
+type numeric = list<int>;
+
+function named(Number $n): string
+{
+    return $n;
+}
+
+function counted(scalar $s, numeric $l): int
+{
+    return $s + \count($l);
+}
+
+function listed(list<Number> $ns): string
+{
+    return $ns[0] ?? '';
+}
+
+// A name finds an alias in any letter case, as it finds a class.
+function lower(number $n): string
+{
+    return $n;
+}
+
+type Noreturn = int;
+type Resource<T> = list<T>;
+
+// So are noreturn in a type argument, and a generic alias, whose arity is
+// its own.
+function never(list<Noreturn> $l): string
+{
+    return $l[0]; // want P2202 "returns int"
+}
+
+function generic(Resource<string> $l): string
+{
+    return $l[0] ?? '';
+}

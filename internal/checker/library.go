@@ -125,7 +125,8 @@ func (x *fnCtx) declaredTypes(t ast.TypeExpr, erased bool) {
 		}
 		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
 			lower, otherCase := program.OtherCaseTypeName(t.Name.Parts[0])
-			if _, builtin := keywordArity[lower]; builtin && !otherCase {
+			_, confusable := program.ConfusableTypeName(lower)
+			if _, builtin := keywordArity[lower]; builtin && !otherCase && (erased || !confusable) {
 				if lower == "closure" && !erased {
 					x.bareClosure(t.Name)
 				}
@@ -180,15 +181,16 @@ func (x *fnCtx) declaredTypes(t ast.TypeExpr, erased bool) {
 	}
 }
 
-// confusableTypeName reports integer, double or boolean in a declared type
-// that reaches PHP as written, where no class of the name resolves
-// (resolved): a docblock's word for int, float or bool, which PHP reads as
-// a class's name there, so that every value fails the type. The resolver
-// read it as the type meant, so this is the one finding, P2001 as
-// PHPStan's class.notFound, its message naming PHP's spelling of the type.
-// Where the emitter writes the type into a docblock (a type argument, a
-// closure signature, a tuple, an alias), the word is the type it means
-// and the caller does not ask.
+// confusableTypeName reports a docblock's word for a type (integer,
+// double, boolean, scalar, numeric, number, noreturn, resource) in a
+// declared type that reaches PHP as written, where no class of the name
+// resolves (resolved): PHP reads it as a class's name there, so that every
+// value fails the type. The resolver read it as the type meant, so this is
+// the one finding, P2001 as PHPStan's class.notFound, its message naming
+// PHP's spelling of the type, or saying PHP has none. Where the emitter
+// writes the type into a docblock (a type argument, a closure signature, a
+// tuple, an alias), the word is the type it means and the caller does not
+// ask.
 func (x *fnCtx) confusableTypeName(n *ast.Name, resolved string) bool {
 	if n.Kind != ast.NameUnqualified || len(n.Parts) != 1 {
 		return false
@@ -196,6 +198,10 @@ func (x *fnCtx) confusableTypeName(n *ast.Name, resolved string) bool {
 	meant, ok := program.ConfusableTypeName(n.Parts[0])
 	if !ok {
 		return false
+	}
+	if meant == "" {
+		x.report(n.S, P2001, "unknown class %s: PHP has no type for a resource, and a docblock writes it", resolved)
+		return true
 	}
 	x.report(n.S, P2001, "unknown class %s: PHP's type is written `%s`", resolved, meant)
 	return true

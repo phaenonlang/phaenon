@@ -239,36 +239,34 @@ func (r *resolver) native(t ast.TypeExpr) types.Type {
 	return types.TMixed
 }
 
-// pseudoTypeNames are the docblock words PHPStan reads as a class where one
-// of that name is imported or declared in the namespace, and else as a
-// type (TypeNodeResolver::tryResolvePseudoTypeClassType).
-var pseudoTypeNames = map[string]bool{
-	"integer": true, "double": true, "boolean": true,
-	"scalar": true, "number": true, "numeric": true, "resource": true,
-}
-
 // namesClass reports whether a one-part name written in a Phaenon type
-// (lower, its lower case) names a class where the resolver would otherwise
-// read one of its type words. Where the type reaches PHP as written,
-// integer, double and boolean are class names, as PHP reads them, and the
-// class is the one PHP finds; without one the checker reports the name
-// (P2001) and the type is read as the one meant, so that nothing else is
-// reported. Where the emitter writes the type into a docblock (erased),
-// the docblock's words are read as PHPStan reads them: the class when a
-// `use` imports one of that name, in any letter case, or the namespace
-// declares one (not the global namespace), else the word.
+// (lower, its lower case) names a class or a type alias where the resolver
+// would otherwise read one of its type words. Where the type reaches PHP
+// as written, integer, double, boolean, scalar, numeric, number, noreturn
+// and resource are class names, as PHP reads them, and the class is the
+// one PHP finds; a type alias of the name is found as a class is
+// (design/generics.md, D29), and its declaration the checker judges.
+// Without either the checker reports the name (P2001) and the type is read
+// as the one meant, so that nothing else is reported. Where the emitter
+// writes the type into a docblock (erased), the docblock's words are read
+// as PHPStan reads them: the class when a `use` imports one of that name,
+// in any letter case, or the namespace declares one (not the global
+// namespace), an alias as anywhere else, else the word.
 func (r *resolver) namesClass(n *ast.Name, lower string) bool {
+	if _, confusable := ConfusableTypeName(lower); !confusable {
+		return false
+	}
 	if r.erased > 0 {
-		if !pseudoTypeNames[lower] {
-			return false
-		}
 		if _, imported := r.scope.classes[lower]; imported {
+			return true
+		}
+		if r.aliasNamed(r.scope.ResolveClass(n)) != nil {
 			return true
 		}
 		return r.scope.Namespace != "" && r.p.Class(r.scope.Namespace+"\\"+n.Parts[0]) != nil
 	}
-	_, confusable := ConfusableTypeName(lower)
-	return confusable && r.p.Class(r.scope.ResolveClass(n)) != nil
+	resolved := r.scope.ResolveClass(n)
+	return r.p.Class(resolved) != nil || r.aliasNamed(resolved) != nil
 }
 
 // nativeErased reads a type in a position that does not reach PHP as
@@ -369,10 +367,13 @@ func OtherCaseTypeName(name string) (string, bool) {
 }
 
 // ConfusableTypeName reports, in any letter case, a name a docblock reads
-// as one of PHP's types and a declaration as a class's name, and returns
-// the type's name in a declaration: integer, double and boolean, int,
-// float and bool. PHP warns of them in lower case and PHPStan reports them
-// in any case as classes that do not exist (class.notFound).
+// as a type and a declaration as a class's name, and returns how PHP
+// writes the type in a declaration: integer, double and boolean are int,
+// float and bool; scalar, numeric and number are int|float|string|bool,
+// int|float|string and int|float; noreturn is never. resource is a type
+// PHP cannot declare, and its spelling is "". PHP warns of some of them in
+// lower case, and PHPStan reports every one in any case as a class that
+// does not exist (class.notFound).
 func ConfusableTypeName(name string) (string, bool) {
 	switch strings.ToLower(name) {
 	case "integer":
@@ -381,6 +382,16 @@ func ConfusableTypeName(name string) (string, bool) {
 		return "float", true
 	case "boolean":
 		return "bool", true
+	case "scalar":
+		return "int|float|string|bool", true
+	case "numeric":
+		return "int|float|string", true
+	case "number":
+		return "int|float", true
+	case "noreturn":
+		return "never", true
+	case "resource":
+		return "", true
 	}
 	return "", false
 }
