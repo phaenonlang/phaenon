@@ -260,6 +260,34 @@ func collect(paths []string, skip func(string) bool, exts ...string) []string {
 	return files
 }
 
+// checkedFiles lists what a check reads and checks from paths, whichever
+// verb checks (phn check, phn build, phn fix, phn lsp, phn watch, phn build
+// --vendor): the .phn, and the plain .php that no .phn of the same name
+// stands beside, read as PHP (design/checker.md §1). A .php beside its .phn
+// is that .phn's output where the two compile side by side, and would only
+// declare its classes a second time. Any other .php is the PHP it is,
+// whatever wrote it: an output whose .phn is gone is source that someone
+// took over, or a leftover whose second declaration is worth reporting
+// (P2511 says so). Directories are walked; skip leaves out what it says
+// to, the outputs among them.
+func checkedFiles(paths []string, skip func(string) bool) []string {
+	var files []string
+	for _, f := range collect(paths, skip, ".phn", ".php") {
+		if filepath.Ext(f) == ".php" && phnBeside(f) {
+			continue
+		}
+		files = append(files, f)
+	}
+	return files
+}
+
+// phnBeside reports whether a .phn of the same name stands beside the .php
+// at path.
+func phnBeside(path string) bool {
+	_, err := os.Stat(strings.TrimSuffix(path, ".php") + ".phn")
+	return err == nil
+}
+
 // ------------------------------------------------------------------ build
 
 func build(args []string) {
@@ -319,16 +347,16 @@ func build(args []string) {
 	if job.mirror {
 		unguarded = proj.conflictFloor()
 	}
-	if unguarded != "" && (res.failed > 0 || *check && res.stale+res.copied+res.removed > 0) {
+	if unguarded != "" && (res.failed+res.plainFailed > 0 || *check && res.stale+res.copied+res.removed > 0) {
 		fmt.Fprintln(os.Stderr, unguarded)
 	}
 	switch {
-	case res.failed > 0:
-		fail("%d of %d files failed to compile", res.failed, res.files)
+	case res.failed+res.plainFailed > 0:
+		fail("%s", res.failedLine(*emitOnError))
 	case *check && res.stale+res.copied+res.removed > 0:
 		fail("%d outputs are stale, %d copies are stale, %d outputs have no source; run `phn build`", res.stale, res.copied, res.removed)
-	case *check && res.findings > 0:
-		fmt.Printf("%d files up to date, %d of them built with their errors (--emit-on-error)\n", res.files, res.findings)
+	case *check && res.findings+res.plainFindings > 0:
+		fmt.Println(res.upToDateLine())
 	case *check:
 		fmt.Printf("%d files up to date\n", res.files)
 	case proj != nil:
@@ -378,6 +406,10 @@ type buildResult struct {
 	files, failed, written, stale, copied, removed int
 	// findings counts the files --check --emit-on-error passed with errors.
 	findings int
+	// plain counts the plain .php files checked, plainFailed those of them
+	// with errors, whose copies are withheld but under --emit-on-error, and
+	// plainFindings those --check --emit-on-error passed with errors.
+	plain, plainFailed, plainFindings int
 }
 
 func (j buildJob) run() buildResult {
@@ -393,12 +425,32 @@ func (j buildJob) run() buildResult {
 		}
 		return dst
 	}
-	files := collect(j.roots, skip, ".phn")
-	res := buildResult{files: len(files)}
+	// What is checked is what phn check checks, the plain .php included: the
+	// .phn are compiled, and the .php copied as they are by the mirror. An
+	// excluded .phn is compiled all the same, its findings passed over; an
+	// excluded .php is only copied, and stays out of the program as it does
+	// in phn check, where what it declares would otherwise stand against
+	// the project's own declarations.
+	checked := checkedFiles(j.roots, func(path string) bool {
+		return skip(path) || filepath.Ext(path) == ".php" && excluded(path)
+	})
+	var files, plain []string
+	for _, f := range checked {
+		if filepath.Ext(f) == ".phn" {
+			files = append(files, f)
+		} else {
+			plain = append(plain, f)
+		}
+	}
+	res := buildResult{files: len(files), plain: len(plain)}
 	prog := j.prog
 	diags := append([]checker.Diagnostic(nil), j.target.Diags...)
 	if prog == nil {
-		diags = append(diags, typeCheck(files, j.target.Version, proj.checkerOptions(checker.Options{}))...)
+		// An installed package's plain PHP is read for what it declares and
+		// not checked: the package's tools judge it, and even its .phn's
+		// findings are only warnings here.
+		reported := func(path string) bool { return !j.dependency || filepath.Ext(path) == ".phn" }
+		diags = append(diags, typeCheck(checked, j.target.Version, proj.checkerOptions(checker.Options{}), reported)...)
 		prog = loadedProgram
 	} else {
 		diags = append(diags, j.diags...)
@@ -460,14 +512,62 @@ func (j buildJob) run() buildResult {
 		writeFile(dst, php)
 		res.written++
 	}
+	// A plain .php is never rewritten (D12): the mirror copies it. One with
+	// an error is held as a .phn is: its copy is withheld, or made all the
+	// same under --emit-on-error, and the build fails either way.
+	withheld := map[string]bool{}
+	for _, in := range plain {
+		if !broken[in] {
+			continue
+		}
+		switch {
+		case !j.emitOnError:
+			res.plainFailed++
+			withheld[in] = true
+		case j.check:
+			res.plainFindings++
+		default:
+			res.plainFailed++
+		}
+	}
 	if j.mirror {
 		for _, src := range j.roots {
-			c, r := proj.mirror(src, j.check)
+			c, r, shadowed := proj.mirror(src, j.check, withheld)
 			res.copied += c
 			res.removed += r
+			for _, php := range shadowed {
+				if !j.quiet {
+					fmt.Fprintf(os.Stderr, "%s: not copied: %s.phn beside it compiles to %s\n", php, strings.TrimSuffix(php, ".php"), proj.outputPath(strings.TrimSuffix(php, ".php")+".phn"))
+				}
+			}
 		}
 	}
 	return res
+}
+
+// upToDateLine is the last line of --check --emit-on-error when files with
+// errors pass as that build writes them: the compiled ones, as before
+// plain PHP was checked, and then the plain .php, counted apart.
+func (r buildResult) upToDateLine() string {
+	line := fmt.Sprintf("%d files up to date, %d of them built with their errors (--emit-on-error)", r.files, r.findings)
+	if r.plainFindings > 0 {
+		line += fmt.Sprintf(", and %d of %d plain .php files copied with theirs", r.plainFindings, r.plain)
+	}
+	return line
+}
+
+// failedLine is the build's last line when files failed: the compiled ones,
+// as before plain PHP was checked, and then the plain .php with errors.
+func (r buildResult) failedLine(emitOnError bool) string {
+	line := fmt.Sprintf("%d of %d files failed to compile", r.failed, r.files)
+	if r.plainFailed > 0 {
+		what := "and were not copied"
+		if emitOnError {
+			what = "and were copied with them"
+		}
+		line += fmt.Sprintf(", and %d of %d plain .php files have errors %s", r.plainFailed, r.plain, what)
+	}
+	return line
 }
 
 // mapSource is the path a compiled file's line map names: the source
@@ -567,25 +667,34 @@ func releaseLine(version string) string {
 }
 
 // typeCheck loads the stubs, the nearest Composer maps and the given files,
-// and returns the diagnostics of checking them for the target.
-func typeCheck(files []string, target phpversion.Version, opts checker.Options) []checker.Diagnostic {
-	p, diags := loadProgram(files, target, true)
+// and returns the diagnostics of checking them for the target: of those
+// checked says to check, the others read for their declarations alone.
+func typeCheck(files []string, target phpversion.Version, opts checker.Options, checked func(string) bool) []checker.Diagnostic {
+	p, diags := loadProgram(files, target, checked)
 	loadedProgram = p
 	loadedChecker = checker.New(p, opts)
 	return append(diags, loadedChecker.Check()...)
 }
 
+// everyFile checks every file a program is given.
+func everyFile(string) bool { return true }
+
+// noFile checks none of them: the program is a model to read.
+func noFile(string) bool { return false }
+
 // loadProgram builds the program model of the given files for the target:
 // the stubs, the local php's extensions, the nearest Composer maps (through
-// the project file's roots) and the files themselves, .php in PHP mode. A
-// file that does not parse is reported as P1000 and left out.
-func loadProgram(files []string, target phpversion.Version, checked bool) (*program.Program, []checker.Diagnostic) {
+// the project file's roots) and the files themselves, .php in PHP mode,
+// checked where checkedFile says so and otherwise read for what they
+// declare. A file that does not parse is reported as P1000 and left out.
+func loadProgram(files []string, target phpversion.Version, checkedFile func(string) bool) (*program.Program, []checker.Diagnostic) {
 	anchor := ""
 	if len(files) > 0 {
 		anchor = files[0]
 	}
 	p, diags := newProgram(anchor, target, files)
 	for _, in := range files {
+		checked := checkedFile(in)
 		src, err := os.ReadFile(in)
 		if err != nil {
 			fail("%v", err)
@@ -594,7 +703,10 @@ func loadProgram(files []string, target phpversion.Version, checked bool) (*prog
 		if filepath.Ext(in) == ".php" {
 			mode = lexer.ModePHP
 		}
-		if _, err := p.AddFile(in, src, mode, checked); err != nil {
+		if _, err := p.AddFile(in, src, mode, checked); err != nil && checked {
+			// A file read for its declarations alone, as an installed
+			// package's plain .php is, is not reported on: it declares
+			// nothing then, and its own tools judge it.
 			diags = append(diags, checker.SyntaxError(in, src, err))
 			p.NoteUnparsed(in, src)
 		}
@@ -699,18 +811,8 @@ func checkCmd(args []string) {
 		projectSources = proj.sources()
 	}
 	skip := func(path string) bool { return excluded(path) || (proj != nil && proj.isOutput(path)) }
-	// Plain PHP is checked too, in PHP mode — except the .php a .phn
-	// compiles to, which would only duplicate its declarations.
-	var files []string
-	for _, f := range collect(roots, skip, ".phn", ".php") {
-		if filepath.Ext(f) == ".php" {
-			if _, err := os.Stat(strings.TrimSuffix(f, ".php") + ".phn"); err == nil {
-				continue
-			}
-		}
-		files = append(files, f)
-	}
-	diags := append(tgt.Diags, typeCheck(files, tgt.Version, proj.checkerOptions(checker.Options{Deprecations: !*noDeprecations}))...)
+	files := checkedFiles(roots, skip)
+	diags := append(tgt.Diags, typeCheck(files, tgt.Version, proj.checkerOptions(checker.Options{Deprecations: !*noDeprecations}), everyFile)...)
 	errors, warnings := 0, 0
 	for _, d := range diags {
 		if d.Severity == checker.Error {
@@ -840,7 +942,7 @@ func migrateCmd(args []string) {
 		importers, known := aliasImporters(proj, files)
 		importersUnknown = !known
 		model = append(model, importers...)
-		prog, _ = loadProgram(model, target, false)
+		prog, _ = loadProgram(model, target, noFile)
 	}
 	// The files this run rewrites, as the model holds them: an alias one
 	// of them declares is lifted, and so is what imports it.

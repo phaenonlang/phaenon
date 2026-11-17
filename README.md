@@ -86,10 +86,14 @@ outputs, which are gitignored; the IDE and the repository hold the sources. The 
 at the same depth, not a nested mirror, so that a compiled file's `__DIR__` sits where its source's
 does: `__DIR__.'/../config/services.yaml'` and `\dirname(__DIR__, 3)` keep resolving. Every other
 file under a root (fixtures, YAML) is copied over, so `__DIR__.'/Fixture'` exists there too, and an
-output whose source is gone is removed. Roots and their outputs are separate directories, none of
+output whose source is gone is removed. A plain `.php` among them is checked first, as PHP, by
+`phn build` as by `phn check`, and copied as it is only without errors (or under
+`--emit-on-error`); a `.php` beside a `.phn` of the same name is neither checked nor copied, since
+the `.phn`'s output takes its path. Roots and their outputs are separate directories, none of
 them another or inside another, so that every file compiles into one place. `exclude` names the paths the checker leaves alone
-(fixtures another analyser owns); `phn build` compiles them all the same. `unused` narrows which
-attributes spare a private property the dead-code warnings (above).
+(fixtures another analyser owns); `phn build` compiles them all the same, and copies a plain `.php`
+among them without reading it. `unused` narrows which attributes spare a private property the
+dead-code warnings (above).
 
 The file is one JSON object, in UTF-8. A key `phn` does not know is an error of the project's own
 file, which catches a key misspelt; so are a known key in another letter case, a key written
