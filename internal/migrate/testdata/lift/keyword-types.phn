@@ -1,0 +1,21 @@
+namespace Lift\KeywordTypes;
+
+/**
+ * Psalm's `empty` is a keyword to PHP's lexer, no type's name a declaration
+ * reads: a tag that names it stays a tag, as webmozart/assert's Mixin has.
+ */
+final class Checks
+{
+    /** @return iterable<empty> */
+    static allEmpty(iterable<mixed> $value): iterable {
+        foreach ($value as $entry) {
+            if (!empty($entry)) {
+                throw new \InvalidArgumentException('not empty');
+            }
+        }
+
+        return $value;
+    }
+
+    static names(list<string> $names): list<string> => $names;
+}

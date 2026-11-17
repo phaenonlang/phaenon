@@ -28,6 +28,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -1222,6 +1223,22 @@ func anyKey(n *docblock.TypeNode) bool {
 	return false
 }
 
+// typeName reports whether a declaration reads name as a type's name. A
+// name PHP lexes as a keyword is no name there, but for the keywords a
+// type is written with (array, callable, static, list, Phaenon's class).
+func typeName(name string) bool {
+	if strings.Contains(name, "\\") {
+		return true // a qualified name: its segments may be keywords
+	}
+	switch k, ok := token.Keywords[strings.ToLower(name)]; {
+	case !ok:
+		return true
+	case k == token.T_ARRAY, k == token.T_CALLABLE, k == token.T_STATIC, k == token.T_LIST, k == token.T_CLASS:
+		return true
+	}
+	return false
+}
+
 // render spells a docblock type in Phaenon's syntax, where it has a
 // spelling in a declaration.
 func render(n *docblock.TypeNode) (string, bool) { return renderType(n, false) }
@@ -1270,6 +1287,9 @@ func renderType(n *docblock.TypeNode, alias bool) (string, bool) {
 			if !(c == '\\' || c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c >= 0x80) {
 				return "", false
 			}
+		}
+		if !typeName(name) {
+			return "", false // Psalm's `empty`: a keyword where a type's name is read
 		}
 		if len(n.Args) == 0 {
 			return name, true
