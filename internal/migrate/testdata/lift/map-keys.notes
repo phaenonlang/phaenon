@@ -1,0 +1,3 @@
+18: kept @param array<bool, string>: no Phaenon spelling for it
+19: kept @param array<float, string>: no Phaenon spelling for it
+20: kept @return array<int|null, int>: no Phaenon spelling for it
