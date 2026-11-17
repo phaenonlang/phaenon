@@ -1883,11 +1883,32 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 	switch {
 	case types.IsSubtype(t, types.TInt, nil):
 		result = types.TInt
-		if lit, ok := types.IsIntLit(t); ok && (e.Inc && lit == math.MaxInt64 || !e.Inc && lit == math.MinInt64) {
-			result = types.TFloat // one past the last integer
+		// One past the last integer is a float: from PHP_INT_MAX for
+		// certain, from PHP_INT_MAX|5 perhaps.
+		if vs, ok := fewInts(t); ok {
+			edge, past := int64(math.MinInt64), 0
+			if e.Inc {
+				edge = math.MaxInt64
+			}
+			for _, v := range vs {
+				if v == edge {
+					past++
+				}
+			}
+			switch past {
+			case 0:
+			case len(vs):
+				result = types.TFloat
+			default:
+				result = types.MakeUnion(types.TInt, types.TFloat)
+			}
 		}
 	case types.IsSubtype(t, types.TFloat, nil):
 		result = types.TFloat
+	case types.IsSubtype(t, types.MakeUnion(types.TInt, types.TFloat), nil):
+		// A counter that may have passed the last integer, or an int|float
+		// as declared: PHP steps either, and the result is one of the two.
+		result = types.MakeUnion(types.TInt, types.TFloat)
 	case types.IsSubtype(t, types.TString, nil):
 		result = types.TString
 	case types.IsSubtype(t, types.TNull, nil):
