@@ -25,6 +25,9 @@ type Code struct {
 }
 
 var (
+	// P1000: the file does not parse; reported at the token the parser
+	// stopped at, the file is left unchecked (SyntaxError).
+	P1000 = Code{"P1000", Error, "syntax error"}
 	// P1 — removed constructs, constructs the target PHP lacks, and syntax
 	// not designed yet.
 	// P1001 is `var`, a `concurrently` block or `spawn` (D25), the

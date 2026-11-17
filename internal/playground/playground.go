@@ -26,7 +26,6 @@ import (
 	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/emit"
 	"github.com/phaenonlang/phaenon/internal/lexer"
-	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 )
@@ -151,11 +150,7 @@ func Compile(req Request) (res Result) {
 		}
 		if _, err := p.AddFile(name, []byte(req.Files[name]), mode, true); err != nil {
 			// What phn's loadProgram reports for a file that does not parse.
-			line := 1
-			if pe, ok := err.(*parser.Error); ok {
-				line = pe.Line
-			}
-			diags = append(diags, checker.Diagnostic{File: name, Line: line, Col: 1, Severity: checker.Error, Code: "P1000", Message: err.Error()})
+			diags = append(diags, checker.SyntaxError(name, []byte(req.Files[name]), err))
 		}
 	}
 

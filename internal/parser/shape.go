@@ -155,7 +155,7 @@ func (p *Parser) statementInBraces() bool {
 func (p *Parser) shapeType(start int) ast.TypeExpr {
 	if !p.shapes && p.misplaced == nil {
 		t := p.tok()
-		p.misplaced = &Error{Offset: t.Start, Line: t.Line, Msg: misplacedShape}
+		p.misplaced = &Error{Offset: t.Start, End: t.End, Line: t.Line, Msg: misplacedShape}
 	}
 	p.expect(token.Kind('{'))
 	st := &ast.ShapeType{}

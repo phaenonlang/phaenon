@@ -15,7 +15,6 @@ import (
 	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/lsp"
-	"github.com/phaenonlang/phaenon/internal/parser"
 	"github.com/phaenonlang/phaenon/internal/program"
 )
 
@@ -203,11 +202,8 @@ func (h *projectHost) Program(files []string, read func(string) ([]byte, error),
 			mode = lexer.ModePHP
 		}
 		if _, err := p.AddFile(f, src, mode, check(f)); err != nil {
-			line := 1
-			if pe, ok := err.(*parser.Error); ok {
-				line = pe.Line
-			}
-			diags = append(diags, checker.Diagnostic{File: f, Line: line, Col: 1, Severity: checker.Error, Code: "P1000", Message: err.Error()})
+			diags = append(diags, checker.SyntaxError(f, src, err))
+			p.NoteUnparsed(f, src)
 		}
 	}
 	return p, diags, nil

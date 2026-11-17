@@ -64,6 +64,31 @@ type Program struct {
 	// expected are the absolute paths of the files the caller adds after
 	// the loaders (Expect), which no loader preloads.
 	expected map[string]bool
+	// unparsed holds, by path, the source of the files the caller gave
+	// this program that did not parse (NoteUnparsed).
+	unparsed map[string][]byte
+}
+
+// NoteUnparsed records the source of a file given to the program that did
+// not parse, so that its syntax error can be shown with its line: the
+// source this program was given, and gone with the program.
+func (p *Program) NoteUnparsed(path string, src []byte) {
+	if p.unparsed == nil {
+		p.unparsed = map[string][]byte{}
+	}
+	p.unparsed[path] = src
+}
+
+// SourceFile is the file at path as this program read it: one it holds,
+// or one that did not parse, with its source alone; nil for any other.
+func (p *Program) SourceFile(path string) *File {
+	if f := p.files[path]; f != nil {
+		return f
+	}
+	if src, ok := p.unparsed[path]; ok {
+		return &File{Path: path, Src: src}
+	}
+	return nil
 }
 
 // Problem is a finding attached to a declaration site.

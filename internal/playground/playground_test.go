@@ -66,8 +66,10 @@ func TestErrorWithheld(t *testing.T) {
 // A file that does not parse is P1000, at the end of the file here, and
 // never has an output.
 func TestParseError(t *testing.T) {
+	// The end of the file is past its last line: the error is put after the
+	// last text, on line 3.
 	res := Compile(Request{Files: map[string]string{"main.phn": "namespace App;\n\nfun (\n"}, Main: "main.phn", EmitOnError: true})
-	if res.OK || res.PHP != "" || strings.Join(codes(res.Findings), ",") != "P1000" || res.Findings[0].Line != 4 {
+	if res.OK || res.PHP != "" || strings.Join(codes(res.Findings), ",") != "P1000" || res.Findings[0].Line != 3 {
 		t.Errorf("ok %v, php %q, findings %+v", res.OK, res.PHP, res.Findings)
 	}
 }

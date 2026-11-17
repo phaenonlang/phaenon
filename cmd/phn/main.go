@@ -595,11 +595,8 @@ func loadProgram(files []string, target phpversion.Version, checked bool) (*prog
 			mode = lexer.ModePHP
 		}
 		if _, err := p.AddFile(in, src, mode, checked); err != nil {
-			line := 1
-			if pe, ok := err.(*parser.Error); ok {
-				line = pe.Line
-			}
-			diags = append(diags, checker.Diagnostic{File: in, Line: line, Col: 1, Severity: checker.Error, Code: "P1000", Message: err.Error()})
+			diags = append(diags, checker.SyntaxError(in, src, err))
+			p.NoteUnparsed(in, src)
 		}
 	}
 	return p, diags
@@ -750,7 +747,9 @@ func printDiag(d checker.Diagnostic) {
 	if loadedProgram == nil {
 		return
 	}
-	f := loadedProgram.File(d.File)
+	// The source the program that found it was given, a file that did not
+	// parse included.
+	f := loadedProgram.SourceFile(d.File)
 	if f == nil {
 		return
 	}
