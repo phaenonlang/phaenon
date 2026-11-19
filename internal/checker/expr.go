@@ -717,14 +717,11 @@ func upsert(entries []types.ShapeEntry, e types.ShapeEntry) []types.ShapeEntry {
 }
 
 func (x *fnCtx) constFetch(e *ast.ConstFetch) types.Type {
+	if t := x.specialConst(e.Name); t != nil {
+		return t
+	}
 	if len(e.Name.Parts) == 1 && e.Name.Kind == ast.NameUnqualified {
 		switch strings.ToLower(e.Name.Parts[0]) {
-		case "true":
-			return types.TTrue
-		case "false":
-			return types.TFalse
-		case "null":
-			return types.TNull
 		case "php_eol":
 			return types.String{NonEmpty: true}
 		case "__compiler_halt_offset__":
@@ -753,6 +750,35 @@ func (x *fnCtx) constFetch(e *ast.ConstFetch) types.Type {
 	}
 	x.report(e.S, P2003, "unknown constant %s", global)
 	return types.TError
+}
+
+// specialConst types true, false and null, which PHP's compiler replaces by
+// their value before it looks a constant up (zend_try_ct_eval_const): in
+// any letter case, unqualified in any namespace, and under a name that is
+// the global one, `\null` or `namespace\null` outside a namespace. nil for
+// every other name: `Foo\null`, and `namespace\null` inside a namespace,
+// are constants of that namespace.
+func (x *fnCtx) specialConst(n *ast.Name) types.Type {
+	if len(n.Parts) != 1 {
+		return nil
+	}
+	name := n.Parts[0]
+	if n.Kind != ast.NameUnqualified {
+		resolved, _ := x.res.Scope().ResolveConst(n)
+		if strings.Contains(strings.TrimPrefix(resolved, "\\"), "\\") {
+			return nil
+		}
+		name = strings.TrimPrefix(resolved, "\\")
+	}
+	switch strings.ToLower(name) {
+	case "true":
+		return types.TTrue
+	case "false":
+		return types.TFalse
+	case "null":
+		return types.TNull
+	}
+	return nil
 }
 
 // dynamicConstants are the constants whose value depends on the machine,

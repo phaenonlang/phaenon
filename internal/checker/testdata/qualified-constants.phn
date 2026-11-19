@@ -1,0 +1,84 @@
+namespace App\QualifiedConstants;
+
+// true, false and null written as global names, `\null`, in any letter
+// case: PHP's compiler substitutes the value before it looks a constant up,
+// wherever a constant may stand, so each is its literal. `namespace\null`
+// inside a namespace and `Sub\null` are constants of that namespace, which
+// nothing declares. Plain PHP, so that PHPStan reads this file as written.
+
+#[\Attribute]
+final class Marker
+{
+    public function __construct(public bool $on = \TRUE)
+    {
+    }
+}
+
+#[Marker(\true)]
+final class Defaults
+{
+    public const NONE = \null;
+    public const ON = \True;
+    public const OFF = \FALSE;
+
+    public ?int $count = \null;
+    public bool $flag = \false;
+
+    /** @param list<int>|null $ids */
+    public function __construct(public ?array $ids = \NULL)
+    {
+    }
+
+    public function cached(): ?string
+    {
+        static $value = \null;
+        if (is_string($value)) {
+            return $value;
+        }
+        $value = 'computed';
+        return \null;
+    }
+}
+
+const ENABLED = \true;
+
+function onlyTrue(true $value): void
+{
+}
+
+function onlyFalse(false $value): void
+{
+}
+
+function onlyNull(null $value): void
+{
+}
+
+/** @param list<int>|null $ids */
+function withDefaults(?array $ids = \null, bool $strict = \false, ?string $name = \Null): void
+{
+}
+
+function literals(?int $maybe): int
+{
+    onlyTrue(\true);
+    onlyTrue(\TrUe);
+    onlyFalse(\fAlSe);
+    onlyNull(\NULL);
+    onlyTrue(Defaults::ON);
+    onlyFalse(Defaults::OFF);
+    onlyNull(Defaults::NONE);
+    onlyTrue(ENABLED);
+    onlyTrue(\false); // want P2103 "false given"
+    onlyNull(\true); // want P2103 "true given"
+    if ($maybe !== \null) {
+        return $maybe;
+    }
+    return 0;
+}
+
+function namespaced(): void
+{
+    onlyTrue(namespace\true); // want P2003 "unknown constant App\QualifiedConstants\true"
+    onlyNull(Sub\null); // want P2003 "unknown constant App\QualifiedConstants\Sub\null"
+}
