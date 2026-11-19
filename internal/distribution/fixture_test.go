@@ -409,7 +409,7 @@ func (p *project) launch(php []string, args ...string) (stdout, stderr string, s
 func (p *project) environ() []string {
 	var env []string
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "COMPOSER") || strings.HasPrefix(kv, "PHN_BINARY=") {
+		if strings.HasPrefix(kv, "COMPOSER") || strings.HasPrefix(kv, "PHN_BINARY=") || strings.HasPrefix(kv, "PHN_BUILD=") {
 			continue
 		}
 		env = append(env, kv)

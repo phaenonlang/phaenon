@@ -129,6 +129,40 @@ func TestFailingBuildFailsTheCommand(t *testing.T) {
 	if finding < 0 || message < 0 || message < finding {
 		t.Errorf("want phn's finding, then the plugin's message naming `phn build`:\n%s", out)
 	}
+	// The last line says what comes next: the compiler is installed, and
+	// the command that ran runs without the build.
+	for _, command := range []string{"install", "dump-autoload"} {
+		if command != "install" {
+			out, _ = p.composer(command)
+		}
+		next := "phaenon/phn: vendor/bin/phn is installed: `vendor/bin/phn check` shows the findings, and `PHN_BUILD=0 composer " + command + "` runs it without building"
+		if lines := strings.Split(strings.TrimSpace(out), "\n"); !strings.Contains(lines[len(lines)-1], next) {
+			t.Errorf("the last line is not %q:\n%s", next, out)
+		}
+	}
+}
+
+// TestBuildOffForOneRun: under PHN_BUILD=0 the plugin builds nothing, the
+// installed packages nor the project, and says how to check and build; the
+// autoload maps are written, so that phn check, run next, reads vendor code.
+// The next run without it builds.
+func TestBuildOffForOneRun(t *testing.T) {
+	w := newWorld(t, "build")
+	p := w.newProject("app", project{phaenonJSON: true, libraries: []string{"acme/lib"}, override: true, environment: []string{"PHN_BUILD=0"}})
+
+	out := p.mustComposer("install")
+
+	w.expectRuns()
+	if !strings.Contains(out, "phaenon/phn: PHN_BUILD=0: nothing is built; vendor/bin/phn is installed") {
+		t.Errorf("composer's output lacks the plugin's line:\n%s", out)
+	}
+	if maps, err := os.ReadFile(filepath.Join(p.dir, "vendor", "composer", "autoload_psr4.php")); err != nil || !strings.Contains(string(maps), `'Acme\\Lib\\'`) {
+		t.Errorf("the autoload maps lack the installed package (%v):\n%s", err, maps)
+	}
+	p.environment = nil
+	if _, err := p.composer("dump-autoload"); err == nil {
+		t.Error("the dump without PHN_BUILD=0 should build, and fail on the fake's finding")
+	}
 }
 
 // TestBuildsAtTheDumpAfterNoAutoloader is the Dockerfile's order (§7.3): an

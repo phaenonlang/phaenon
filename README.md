@@ -522,6 +522,12 @@ same classes.
 - `"extra": {"phaenon": {"binary-url": "https://mirror/{version}/{file}"}}` fetches the binary from
   a mirror, with the credentials of `auth.json`.
 - `"extra": {"phaenon": {"build": false}}` leaves the project's own build to its workflow.
+- `PHN_BUILD=0`, for one run, installs the binary and writes the autoload maps and builds nothing,
+  neither the project nor its packages. A CI job can then report the findings before it builds:
+  `PHN_BUILD=0 composer install`, `vendor/bin/phn check --format=github`, then
+  `composer dump-autoload`, which builds the packages and the project.
+  A build that fails ends by saying that `vendor/bin/phn` is installed and `vendor/bin/phn check`
+  shows the findings.
 - `composer install --no-autoloader` builds nothing; the `dump-autoload` that follows does
   (`--no-scripts` does not skip the plugin).
 - Without dev mode (`composer install --no-dev`, and a `dump-autoload` after it, which keeps that
