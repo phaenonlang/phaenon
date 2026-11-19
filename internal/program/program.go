@@ -622,7 +622,9 @@ type PartialParam struct {
 	Native string
 	// Doc is its type for a docblock when the type says more than PHP can
 	// declare (list<int>, a literal, a generic class) or than the callee's
-	// parameter does (the type chosen for its type parameter); "" otherwise.
+	// parameter does (the type chosen for its type parameter), and every
+	// type of a callable value's parameter but mixed, which PHP does not
+	// check; "" otherwise.
 	Doc string
 	// DocArray says Doc is an array type, or holds one.
 	DocArray bool
@@ -648,6 +650,10 @@ type PartialParam struct {
 	Optional   bool
 	Variadic   bool
 	ByRef      bool
+	// Positional marks a parameter of a callable value's type that names
+	// none (`Closure(string): int`): an argument reaches it by position
+	// alone, and the closure names it $arg and its position ($arg1, …).
+	Positional bool
 	// Arg is the placeholder that creates the parameter (`?` or `name: ?`);
 	// nil for the parameters `...` stands for.
 	Arg *ast.Arg
