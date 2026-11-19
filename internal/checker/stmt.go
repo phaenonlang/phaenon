@@ -1046,21 +1046,35 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		if inner, ok := s.Body[lead].(*ast.Try); ok && x.trySeeds[inner] != nil {
 			seed = x.trySeeds[inner] // its body's first throw point is ours
 		} else {
-			var bound []string
-			x.refsBeforeCall(s.Body[lead], &bound)
-			for _, name := range bound {
-				after, ok := bodyEnv.get(name)
+			w := refWalk{plain: true}
+			x.refsBeforeCall(s.Body[lead], &w)
+			for _, b := range w.bound {
+				after, ok := bodyEnv.get(b.name)
 				if !ok {
 					continue
 				}
 				// Where the call throws, the variable holds what it held
-				// before (null when the binding created it) or what the
-				// callee wrote.
-				if was, ok := seed.get(name); ok && !was.maybe {
-					seed.set(name, types.MakeUnion(was.t, after.t))
-				} else {
-					seed.set(name, types.Nullable(after.t))
+				// before or what the callee wrote; the binding created it
+				// when it had no value, as null, or as the array holding
+				// null at the offset bound.
+				if was, ok := seed.get(b.name); ok && !was.maybe {
+					seed.set(b.name, types.MakeUnion(was.t, after.t))
+					continue
 				}
+				if _, itself := b.arg.(*ast.Variable); itself {
+					seed.set(b.name, types.Nullable(after.t))
+					continue
+				}
+				_, created := refBinding(b.arg, func(k *ast.Variable) types.Type {
+					if info, ok := seed.get(k.Name); ok {
+						return normaliseKey(info.t)
+					}
+					return types.StringLit{V: ""} // an undefined key is null, stored as ''
+				})
+				if was, ok := seed.get(b.name); ok {
+					created = types.MakeUnion(was.t, created) // where it had a value
+				}
+				seed.set(b.name, types.MakeUnion(created, after.t))
 			}
 		}
 	}
@@ -1217,51 +1231,260 @@ func cannotThrow(s ast.Stmt) bool {
 	return ok
 }
 
+// refBound is a variable an argument passed by reference binds, and the
+// argument (refBinding).
+type refBound struct {
+	name string
+	arg  ast.Expr
+}
+
+// refBinding is the variable a by-reference argument binds, `$m` itself or
+// the array `$m['k']`, `$m[$k][0]` and `$m[]` write into, with the value
+// the binding creates when the variable had none: PHP fetches the offsets
+// for writing before the call runs (SEND_REF, FETCH_DIM_W), which makes
+// the variable an array holding null there. A key that is neither a
+// literal nor a variable may throw before the binding (a call, a constant
+// PHP cannot find), and binds nothing here. keyOf types a variable key as
+// PHP stores it; nil when only the variable is asked for.
+func refBinding(e ast.Expr, keyOf func(*ast.Variable) types.Type) (*ast.Variable, types.Type) {
+	switch e := e.(type) {
+	case *ast.Paren:
+		return refBinding(e.Expr, keyOf)
+	case *ast.Variable:
+		if e.Name == "this" {
+			return nil, nil
+		}
+		return e, types.TNull
+	case *ast.Index:
+		v, inner := refBinding(e.Array, keyOf)
+		if v == nil {
+			return nil, nil
+		}
+		var entry types.ShapeEntry
+		switch k := e.Index.(type) {
+		case *ast.Variable:
+			var key types.Type = types.TArrayKey
+			if keyOf != nil {
+				key = keyOf(k)
+			}
+			if !storableKey(key) {
+				// An object or an array: PHP has made the variable an
+				// empty array when it refuses the offset.
+				return v, wrapCreated(inner, types.Shape{})
+			}
+			return v, wrapCreated(inner, types.Array{Key: key, Value: types.TNull})
+		case nil:
+			entry = types.ShapeEntry{IsInt: true, IntKey: 0}
+		default:
+			lit := literalKeyType(k)
+			if lit == nil {
+				return nil, nil
+			}
+			key := normaliseKey(lit)
+			if !isLiteralKey(key) {
+				return nil, nil
+			}
+			entry = arrayWithEntryKey(key, nil)
+		}
+		// The inner offsets were null, now arrays: what the binding makes
+		// is the shape of the outer offsets around this one.
+		entry.Type = types.TNull
+		return v, wrapCreated(inner, types.Shape{Entries: []types.ShapeEntry{entry}})
+	}
+	return nil, nil
+}
+
+// storableKey reports a key type every member of which PHP stores as
+// it is, an int or a string.
+func storableKey(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Int, types.String, types.StringLit:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// literalKeyType is the type of a key written as a literal: a number, a
+// string, true, false or null, a negative number; nil for any other key.
+func literalKeyType(e ast.Expr) types.Type {
+	switch e := e.(type) {
+	case *ast.Paren:
+		return literalKeyType(e.Expr)
+	case *ast.IntLit:
+		return intLitType(e.Raw)
+	case *ast.FloatLit:
+		if f, err := strconv.ParseFloat(strings.ReplaceAll(e.Raw, "_", ""), 64); err == nil {
+			return types.FloatLit{V: f}
+		}
+	case *ast.StringLit:
+		return types.StringLit{V: program.StringValue(e)}
+	case *ast.ConstFetch:
+		return literalKeyType(e.Name)
+	case *ast.Name:
+		if len(e.Parts) == 1 {
+			switch strings.ToLower(e.Parts[0]) {
+			case "true":
+				return types.TTrue
+			case "false":
+				return types.TFalse
+			case "null":
+				return types.TNull
+			}
+		}
+	case *ast.Unary:
+		if e.Op != token.Kind('-') {
+			return nil
+		}
+		switch t := literalKeyType(e.Expr).(type) {
+		case types.Int:
+			if t.Lo == t.Hi && t.Lo != math.MinInt64 {
+				return types.IntLit(-t.Lo)
+			}
+		case types.FloatLit:
+			return types.FloatLit{V: -t.V}
+		}
+	}
+	return nil
+}
+
+// plainOperand reports a literal (literalKeyType) or a plain variable:
+// what PHP evaluates without running code that may throw.
+func plainOperand(e ast.Expr) bool {
+	if _, ok := e.(*ast.Variable); ok {
+		return true
+	}
+	return literalKeyType(e) != nil
+}
+
+// plainPath reports a plain variable, or an offset of one whose keys are
+// literals or plain variables: an assignment's target of that form
+// evaluates nothing before the value.
+func plainPath(e ast.Expr) bool {
+	switch e := e.(type) {
+	case *ast.Variable:
+		return true
+	case *ast.Index:
+		return (e.Index == nil || plainOperand(e.Index)) && plainPath(e.Array)
+	}
+	return false
+}
+
+// wrapCreated puts the array an offset write creates where the null of
+// the enclosing write stood: `$m['a']['b']` is array{a: array{b: null}}.
+func wrapCreated(outer, inner types.Type) types.Type {
+	switch o := outer.(type) {
+	case types.Shape:
+		last := o.Entries[0]
+		last.Type = wrapCreated(last.Type, inner)
+		return types.Shape{Entries: []types.ShapeEntry{last}}
+	case types.Array:
+		return types.Array{Key: o.Key, Value: wrapCreated(o.Value, inner)}
+	}
+	return inner
+}
+
+// refWalk is what refsBeforeCall finds: the variables bound by reference
+// so far, in evaluation order, and whether everything evaluated so far is
+// a literal or a plain variable. An offset binds only while that holds:
+// a property's read before it may throw (an uninitialised property, a
+// __get), and so may a class constant's, a computed key, an assignment's
+// computed target.
+type refWalk struct {
+	bound []refBound
+	plain bool
+}
+
 // refsBeforeCall collects, in evaluation order, the variables an
 // expression statement passes by reference before any call in it runs:
 // PHP creates them as it binds the argument (SEND_REF). It reports whether
-// a call ran, after which it stops.
-func (x *fnCtx) refsBeforeCall(n ast.Node, out *[]string) (called bool) {
+// a call ran, or an offset was fetched, after which it stops.
+func (x *fnCtx) refsBeforeCall(n ast.Node, w *refWalk) (called bool) {
 	switch e := n.(type) {
 	case *ast.ExprStmt:
-		return x.refsBeforeCall(e.Expr, out)
+		return x.refsBeforeCall(e.Expr, w)
 	case *ast.Paren:
-		return x.refsBeforeCall(e.Expr, out)
+		return x.refsBeforeCall(e.Expr, w)
 	case *ast.Assign:
-		return x.refsBeforeCall(e.Value, out)
+		if !plainPath(e.Target) {
+			w.plain = false
+		}
+		return x.refsBeforeCall(e.Value, w)
 	case *ast.Call:
-		if _, named := e.Callee.(*ast.Name); !named && x.refsBeforeCall(e.Callee, out) {
-			return true
+		// A function, a method or a class is looked up before the
+		// arguments are bound, which throws for one PHP cannot find: a
+		// name it is written as is the checker's to resolve, a value's
+		// is not.
+		if _, named := e.Callee.(*ast.Name); !named {
+			w.plain = false
+			if x.refsBeforeCall(e.Callee, w) {
+				return true
+			}
 		}
-		return x.argsBeforeCall(e.Args, out)
+		return x.argsBeforeCall(e.Args, w)
 	case *ast.MethodCall:
-		if x.refsBeforeCall(e.Object, out) {
+		if _, ok := e.Name.(*ast.Ident); !ok {
+			w.plain = false
+		}
+		if x.refsBeforeCall(e.Object, w) {
 			return true
 		}
-		return x.argsBeforeCall(e.Args, out)
+		return x.argsBeforeCall(e.Args, w)
 	case *ast.StaticCall:
-		return x.argsBeforeCall(e.Args, out)
+		_, method := e.Name.(*ast.Ident)
+		if _, class := e.Class.(*ast.Name); !class || !method {
+			w.plain = false
+		}
+		return x.argsBeforeCall(e.Args, w)
 	case *ast.New:
-		return x.argsBeforeCall(e.Args, out)
+		if _, class := e.Class.(*ast.Name); !class {
+			w.plain = false
+		}
+		return x.argsBeforeCall(e.Args, w)
+	case *ast.Variable, *ast.StringLit, *ast.IntLit, *ast.FloatLit:
+		return false
+	case *ast.ConstFetch:
+		if literalKeyType(e) == nil {
+			w.plain = false // a constant PHP may not find
+		}
+		return false
 	case *ast.PropertyFetch:
-		return x.refsBeforeCall(e.Object, out)
-	case *ast.Variable, *ast.StringLit, *ast.IntLit, *ast.FloatLit, *ast.ConstFetch, *ast.ClassConstFetch:
+		w.plain = false
+		return x.refsBeforeCall(e.Object, w)
+	case *ast.ClassConstFetch:
+		w.plain = false
 		return false
 	}
 	return true // anything else may call
 }
 
-func (x *fnCtx) argsBeforeCall(args *ast.ArgList, out *[]string) bool {
+func (x *fnCtx) argsBeforeCall(args *ast.ArgList, w *refWalk) bool {
 	if args != nil {
 		for _, a := range args.Args {
 			if a.Value == nil {
+				w.plain = false // a partial application's placeholder
 				continue
+			}
+			if a.Unpack {
+				w.plain = false // the unpacking may iterate a Traversable
 			}
 			if v, ok := a.Value.(*ast.Variable); ok && x.c.refVars[v] {
-				*out = append(*out, v.Name)
+				w.bound = append(w.bound, refBound{v.Name, a.Value})
 				continue
 			}
-			if x.refsBeforeCall(a.Value, out) {
+			if ix, ok := a.Value.(*ast.Index); ok {
+				// An offset passed by reference binds its variable as PHP
+				// fetches it for writing, where an offset of a scalar
+				// throws and one of an ArrayAccess runs offsetGet(): the
+				// walk stops after it, as it does after an offset read.
+				if v, _ := refBinding(ix, nil); v != nil && x.c.refVars[v] && w.plain {
+					w.bound = append(w.bound, refBound{v.Name, a.Value})
+				}
+				return true
+			}
+			if x.refsBeforeCall(a.Value, w) {
 				return true
 			}
 		}

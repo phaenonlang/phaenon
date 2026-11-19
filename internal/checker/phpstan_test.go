@@ -90,6 +90,11 @@ func TestPHPStanParity(t *testing.T) {
 		// PHPStan 2.2 predates __debugInfo() on enums (PHP 8.6) and refuses
 		// it on every version.
 		"enum-magic.phn": {"enum.magicMethod": true},
+		// An offset passed by reference makes its variable an array before
+		// the call runs, which PHPStan's throw points do not see: in the
+		// catch block it reports the variable as one that might not be
+		// defined, where php has bound it.
+		"try-byref-offsets.phn": {"variable.undefined": true},
 		// unset($a[null]): PHP 8.5 neither deprecates nor refuses null there,
 		// as it does in a read or a write (P1101), and the golden holds the
 		// line to show it unreported; PHPStan reports the key's type.
