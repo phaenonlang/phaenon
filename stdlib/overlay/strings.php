@@ -61,6 +61,17 @@ function parse_url(string $url, int $component = -1): int|string|array|null|fals
 function version_compare(string $version1, string $version2, ?string $operator = null): int|bool {}
 
 /**
+ * What converts to a string: an array is "Array" with a warning, which
+ * PHPStan's function map leaves out. It leaves out an object without
+ * __toString() as well, an Error; here any object is taken, since the
+ * checker does not yet count a class that declares __toString() as the
+ * Stringable PHP makes it.
+ *
+ * @param string|int|float|bool|resource|object|null $value
+ */
+function strval(mixed $value): string {}
+
+/**
  * @return ($return is true ? string : null)
  */
 function var_export(mixed $value, bool $return = false): ?string {}

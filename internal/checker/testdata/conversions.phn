@@ -1,0 +1,38 @@
+namespace App\Conversions;
+
+use GMP;
+use Stringable;
+
+// strval(), intval() and floatval() take what PHP converts, as PHPStan's
+// function map has them: mixed is refused; an array is no string ("Array"
+// with a warning) and an object no number (1 with a warning), GMP's and
+// SimpleXMLElement's aside. boolval() and settype() take anything. Plain
+// PHP, so that PHPStan reads this file as written.
+
+final class Label
+{
+    public function __toString(): string
+    {
+        return 'label';
+    }
+}
+
+/**
+ * @param list<int> $list
+ * @param resource $handle
+ */
+function conversions(mixed $m, array $list, $handle, ?int $n, int|string $key, float $f, bool $b, Stringable $s, GMP $big, Label $label): void
+{
+    var_dump(strval($m)); // want P2103 "strval() expects bool|int|float|string|object|resource|null, mixed given"
+    var_dump(strval($list)); // want P2103 "list<int> given"
+    var_dump(strval($handle), strval($n), strval($key), strval($f), strval($b), strval($s), strval($big));
+    var_dump(intval($m)); // want P2103 "intval() expects bool|int|float|string|array|GMP|SimpleXMLElement|resource|null, mixed given"
+    var_dump(intval($s)); // want P2103 "Stringable given"
+    var_dump(intval($label)); // want P2103 "App\Conversions\Label given"
+    var_dump(intval($list), intval($handle), intval($n), intval($key, 16), intval($big));
+    var_dump(floatval($m)); // want P2103 "floatval() expects"
+    var_dump(floatval($label)); // want P2103
+    var_dump(floatval($list), floatval($key), floatval($big));
+    var_dump(boolval($m), boolval($label));
+    settype($m, 'int');
+}
