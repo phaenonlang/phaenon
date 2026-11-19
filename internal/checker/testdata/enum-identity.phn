@@ -1,0 +1,110 @@
+// Enum cases compared by identity. One case is never another, of its enum
+// or of any other, so a strict comparison of two is decided, in a function
+// body as in a constant expression (PHPStan: identical.alwaysFalse and
+// notIdentical.alwaysTrue), and so is a match arm that names a case its
+// subject cannot be (match.alwaysFalse). A case against a value its enum
+// types may go either way; against a class or an interface the enum does
+// not implement it never holds, an enum being final.
+namespace App\EnumIdentity;
+
+interface Colour
+{
+}
+
+interface Shape
+{
+}
+
+enum Suit: string implements Colour
+{
+    case Hearts = 'h';
+    case Spades = 's';
+}
+
+enum Flag
+{
+    case On;
+}
+
+const SAME = Suit::Hearts === Suit::Spades; // want P2305 "between App\EnumIdentity\Suit::Hearts and App\EnumIdentity\Suit::Spades is always false"
+
+final class Table
+{
+    public const SAME = Suit::Hearts === Suit::Spades; // want P2305
+    public const OTHER = Suit::Hearts === Flag::On; // want P2305
+
+    public function differ(): bool
+    {
+        return Suit::Hearts !== Suit::Spades; // want P2305 "is always true"
+    }
+}
+
+function same(): bool
+{
+    return Suit::Hearts === Suit::Spades; // want P2305
+}
+
+function otherEnum(): bool
+{
+    return Flag::On !== Suit::Spades; // want P2305
+}
+
+function typed(Suit $s, ?Suit $maybe, \UnitEnum $unit, \BackedEnum $backed, Colour $colour, object $o): bool
+{
+    return $s === Suit::Hearts
+        || $maybe === Suit::Spades
+        || $unit === Suit::Hearts
+        || Suit::Spades === $backed
+        || $colour === Suit::Hearts
+        || $o === Suit::Spades;
+}
+
+function apart(Shape $shape, \Countable $c): bool
+{
+    if ($shape === Suit::Hearts) { // want P2305
+        return true;
+    }
+    return Suit::Spades === $c; // want P2305
+}
+
+function narrowed(Suit $s): bool
+{
+    if ($s === Suit::Hearts) {
+        return false;
+    }
+    return $s === Suit::Hearts; // want P2305
+}
+
+function arms(Suit $s): int
+{
+    if ($s === Suit::Hearts) {
+        return 0;
+    }
+    return match ($s) {
+        Suit::Hearts => 1, // want P2305 "match arm App\EnumIdentity\Suit::Hearts can never match App\EnumIdentity\Suit::Spades"
+        Suit::Spades => 2,
+    };
+}
+
+function constantSubject(): int
+{
+    return match (Suit::Hearts) {
+        Suit::Spades => 2, // want P2305
+        Suit::Hearts => 1,
+    };
+}
+
+function flows(): bool
+{
+    $state = Suit::Hearts;
+    $flip = function () use (&$state): void {
+        $state = Suit::Spades;
+    };
+    $flip();
+    $seen = false;
+    foreach ([1, 2] as $_) {
+        $seen = $seen || $state === Suit::Hearts;
+        $state = Suit::Spades;
+    }
+    return $seen;
+}
