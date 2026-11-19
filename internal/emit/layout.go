@@ -197,13 +197,10 @@ func (e *emitter) planIndents(f *ast.File) {
 		var fn function
 		switch n := n.(type) {
 		case *ast.FunctionDecl:
-			fn = function{kwAt: n.Kw.Start, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, arrow: n.Arrow}
+			fn = function{kwAt: n.Kw.Start, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, throws: n.Throws, arrow: n.Arrow, hasBody: true, end: n.S.End}
 		case *ast.MethodDecl:
-			fn = function{kwAt: n.Kw.Start, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, arrow: n.Arrow}
+			fn = function{kwAt: n.Kw.Start, name: n.Name, tps: n.TypeParams, ret: n.ReturnType, throws: n.Throws, arrow: n.Arrow, hasBody: n.HasBody, end: n.S.End}
 		default:
-			return true
-		}
-		if fn.arrow == nil {
 			return true
 		}
 		closeParen := e.paramsClose(fn.name, fn.tps)
@@ -214,6 +211,12 @@ func (e *emitter) planIndents(f *ast.File) {
 		sigEnd := toks[closeParen].End
 		if fn.ret != nil {
 			sigEnd = fn.ret.Span().End
+		}
+		if fn.arrow == nil {
+			if fn.hasBody {
+				e.planOneLineBody(fn, sigEnd)
+			}
+			return true
 		}
 		first := e.nextCode(e.tokenAt(fn.arrow.Arrow.End))
 		if first >= len(toks) || e.hasComment(sigEnd, toks[first].Start) {
@@ -241,6 +244,37 @@ func (e *emitter) planIndents(f *ast.File) {
 		}
 		return true
 	})
+}
+
+// planOneLineBody registers the statements of a block body whose braces
+// share a line, `f(): int { return 1; }`, as an expression body's first
+// line is: oneLineBody moves them to a line of their own, one level in
+// from the declaration, and what a lowering lays out among them (a
+// closure's block) is indented from there.
+func (e *emitter) planOneLineBody(fn function, sigEnd int) {
+	toks := e.tokens()
+	tail := sigEnd
+	if fn.throws != nil {
+		tail = fn.throws.S.End
+	}
+	open := e.nextCode(e.tokenAt(tail))
+	if open >= len(toks) || toks[open].Kind != token.Kind('{') || e.hasComment(sigEnd, toks[open].Start) || e.emptyBody(open, fn.end) {
+		return
+	}
+	closeBrace := e.closeBrace(open, fn.end)
+	if closeBrace < 0 {
+		return
+	}
+	inside := ast.Span{Start: toks[open].End, End: toks[closeBrace].Start}
+	first := e.nextCode(open + 1)
+	if first == closeBrace || bytes.ContainsRune(e.src[inside.Start:inside.End], '\n') || e.hasComment(inside.Start, inside.End) {
+		return
+	}
+	level := "    "
+	if strings.Contains(e.lineIndent(fn.kwAt), "\t") {
+		level = "\t"
+	}
+	e.exprLines = append(e.exprLines, exprLine{Span: ast.Span{Start: toks[first].Start, End: inside.End}, kwAt: fn.kwAt, level: level})
 }
 
 // exprLine is the first line of an expression body's expression, from

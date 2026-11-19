@@ -1,0 +1,53 @@
+namespace Shop;
+
+// Partial applications of generic functions where a callable type is
+// expected and where none is (design/php-versions.md §5.2), compiled for
+// PHP 8.5 and run by run.php: the closure written for each takes what the
+// checker let its callers pass.
+
+function pick<T>(T $a, T $b): T { return $a ?? $b; }
+function label<T of \Stringable|string>(T $a, T $b): string { return "$a/$b"; }
+function last<T>(T $first, T ...$rest): T { return $rest === [] ? $first : $rest[array_key_last($rest)]; }
+function apply<A, B>(A $a, Closure(A): B $f): B { return $f($a); }
+
+final class Sku implements \Stringable {
+    public function __construct(private string $code) {}
+    public function __toString(): string { return $this->code; }
+}
+
+final class Picks {
+    public Closure(string): int|string $orZero;
+    /** @var array{pick: Closure(string): (int|string), last: Closure(string, float): (float|string)} */
+    public array $named;
+    /** @var list<Closure(?string): (int|string|null)> */
+    public array $listed;
+
+    public function __construct(private Sku $sku) {
+        $this->orZero = pick(?, 0);
+        $this->named = ['pick' => pick(b: ?, a: 1), 'last' => last(?, ...)];
+        $this->listed = [pick(?, 2), pick(null, ?)];
+    }
+
+    /** @return list<int|string> */
+    mapped(list<string> $codes): array => array_map(pick(?, 0), $codes);
+
+    labelled(list<string> $codes): list<string> {
+        $sku = $this->sku;
+        return array_map(label(?, $sku), $codes);
+    }
+
+    applied(string $code): int|string => apply($code, pick(?, 7));
+
+    made(): Closure(string): int|string => pick(?, 0);
+
+    /** @return array{Closure(string): (int|string), int} */
+    tuple(): array => [pick(?, 5), 1];
+
+    defaulted(string $code, Closure(string): int|string $f = pick(?, 4)): int|string => $f($code);
+
+    unexpected(int $n): int {
+        $f = pick(?, 0);
+        $rest = last(1, ?, ...);
+        return $f($n) + $rest(2, 3) + $f(?)($n);
+    }
+}

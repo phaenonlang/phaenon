@@ -1,0 +1,32 @@
+namespace App;
+
+use const Shop\MAX;
+use const Shop\SPAN;
+
+// A constant among a partial application's bound arguments is what it
+// stands for (design/php-versions.md §5.2): the literal its declaration
+// writes, read as its type, and its own type where the declaration writes
+// none. It is found as any constant is, however it is spelled: in the
+// namespace, by its full name, imported, or PHP's own by the global
+// fallback.
+
+const LOW = 1;
+const SUM = 1 + 2;
+const NAME = 'a' . 'b';
+
+function pick<T>(T $a, T $b): T { return $a; }
+function wantsNull(null $x): void {}
+
+function main(): void {
+    wantsNull(pick(?, LOW)); // want P2103 "Closure(int $a): int given"
+    wantsNull(pick(?, SUM)); // want P2103 "Closure(3 $a): 3 given"
+    wantsNull(pick(?, NAME)); // want P2103 "Closure('ab' $a): 'ab' given"
+    wantsNull(pick(?, \App\LOW)); // want P2103 "Closure(int $a): int given"
+    wantsNull(pick(?, \App\SUM)); // want P2103 "Closure(3 $a): 3 given"
+    wantsNull(pick(?, namespace\SUM)); // want P2103 "Closure(3 $a): 3 given"
+    wantsNull(pick(?, MAX)); // want P2103 "Closure(int $a): int given"
+    wantsNull(pick(?, SPAN)); // want P2103 "Closure(10 $a): 10 given"
+    wantsNull(pick(?, \Shop\SPAN)); // want P2103 "Closure(10 $a): 10 given"
+    wantsNull(pick(?, PHP_INT_SIZE)); // want P2103 "Closure(int $a): int given"
+    wantsNull(pick(?, \E_ALL)); // want P2103 "Closure(int $a): int given"
+}
