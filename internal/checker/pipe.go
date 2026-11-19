@@ -82,6 +82,15 @@ func pipeCall(e *ast.Binary) (ast.Expr, *ast.ArgList) {
 // A |> (fn (T $p) => f(B, $p, C)), whose closure runs at once, so that B
 // and C are evaluated after A as on 8.6 (§5.3). param is the parameter the
 // left side was bound to.
+//
+// The closure's parameter gets no inline @var: PHPStan types the parameter
+// of a closure that is called at once from the value it is called with,
+// here A, as it types A in the call f(B, A, C) the pipe is checked as. The
+// parameter's type as that call resolved it says less than A where the
+// result depends on A beyond it: array_map's `array<K, V> $array` resolved
+// for a list<string> is an array<int, string>, of which array_map's result
+// is no list. And PHPStan refuses a @var that is wider than what it knows
+// of A natively, a string where strtoupper() gave an uppercase-string.
 func (x *fnCtx) recordPipePartial(right ast.Expr, args *ast.ArgList, sig *signature, param *program.Param) {
 	var placeholder *ast.Arg
 	for _, a := range args.Args {
@@ -90,8 +99,7 @@ func (x *fnCtx) recordPipePartial(right ast.Expr, args *ast.ArgList, sig *signat
 		}
 	}
 	slot := pfaSlot{param: param, name: param.Name, required: true, arg: placeholder}
-	t := x.pipeParamType
-	x.recordPartial(right, args, sig, []pfaSlot{slot}, false, false, true, func(*program.Param) types.Type { return t })
+	x.recordPartial(right, args, sig, []pfaSlot{slot}, false, false, true, func(*program.Param) types.Type { return nil })
 }
 
 // recordFold records whether PHP evaluates the pipe exactly as the call

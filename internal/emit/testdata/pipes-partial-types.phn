@@ -1,0 +1,94 @@
+// targets: 8.5, 8.6
+// A stage that does not fold is lowered for PHP 8.5 to a closure called at
+// once with the piped value (design/php-versions.md §5.3), and the
+// checker types it as the call it becomes, from the piped value: a list
+// mapped is a list. The closure's parameter has no inline @var: PHPStan
+// types it from the piped value too. The parameter's type as the call
+// resolved it would say less (array_map's `array<K, V>` made an
+// array<int, string> of a list<string>, whose map is no list), and a @var
+// wider than what PHPStan knows of the piped value, the uppercase-string
+// of strtoupper(), is refused.
+
+function separator(): string => ', ';
+
+function firstOr<T>(T $default, list<T> $xs): T => $xs[0] ?? $default;
+
+final class Box<T> {
+    /** @var list<T> */
+    public array $items = [];
+
+    add(T $item): void {
+        $this->items[] = $item;
+    }
+}
+
+final class Shelf {
+    /** @var Box<int> */
+    public Box $box;
+
+    __construct() {
+        $this->box = new Box();
+    }
+
+    // A method of a property does not fold; T of the box is int.
+    put(int $n): void {
+        $n |> $this->box->add(?);
+    }
+}
+
+// A bound partial application is computed: the stage is a closure's.
+function shout(list<string> $names): list<string> => $names |> array_map(strtoupper(?), ?);
+
+// The placeholder named, after the bound argument.
+function shoutNamed(list<string> $names): list<string> => $names |> array_map(callback: strtoupper(?), array: ?);
+
+/**
+ * @param non-empty-list<string> $names
+ * @return non-empty-list<string>
+ */
+function shoutNonEmpty(array $names): array => $names |> array_map(strtoupper(?), ?);
+
+function shoutPair((string, string) $pair): list<string> => $pair |> array_map(strtoupper(?), ?);
+
+/**
+ * @param array{a: string, b: string} $row
+ * @return array<string>
+ */
+function shoutRow(array $row): array => $row |> array_map(strtoupper(?), ?);
+
+// Several stages: the second closure is given what the first returned.
+function shoutQuiet(list<string> $names): list<string> => $names
+    |> array_map(strtoupper(?), ?)
+    |> array_map(strtolower(?), ?);
+
+// The placeholder stands for array_merge's variadic parameter, whose @var
+// was the array<int, string> of one element of it: the merge of a
+// non-empty list was no non-empty list.
+/**
+ * @param non-empty-list<string> $names
+ * @return non-empty-list<string>
+ */
+function merged(array $names): array => $names |> array_merge(str_split(separator()), ?);
+
+// A pipe in a bound argument: its own stage's parameter, a string, was the
+// @var the outer stage's closure was given.
+function mergedNested(list<string> $names): list<string> => $names |> array_merge(separator() |> str_split(?), ?);
+
+// A generic function of the program: T comes from the piped list.
+function firstName(list<string> $names): string => $names |> firstOr(separator(), ?);
+
+function joined(list<string> $names): string => $names |> implode(separator(), ?);
+
+echo implode('|', shout(['ada', 'bob'])), "\n";
+echo implode('|', shoutNamed(['ada', 'bob'])), "\n";
+echo implode('|', shoutNonEmpty(['ada'])), "\n";
+echo implode('|', shoutPair(['x', 'y'])), "\n";
+echo json_encode(shoutRow(['a' => 'x', 'b' => 'y'])), "\n";
+echo implode('|', shoutQuiet(['Ada', 'Bob'])), "\n";
+echo implode('|', merged(['a', 'b'])), "\n";
+echo implode('|', mergedNested(['a', 'b'])), "\n";
+echo firstName([]), '|', firstName(['ada']), "\n";
+echo joined(['ada', 'bob']), "\n";
+$shelf = new Shelf();
+$shelf->put(3);
+echo implode('|', $shelf->box->items), "\n";

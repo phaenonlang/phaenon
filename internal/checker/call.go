@@ -3076,9 +3076,6 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		}
 		return t
 	}
-	if x.pipeSig == sig && x.pipeParam != nil {
-		x.pipeParamType = resolved(x.pipeParam)
-	}
 	if partial {
 		if sig.node != nil && shape.ok {
 			x.recordPartial(sig.node, args, sig, shape.slots, shape.rest, shape.named, false, resolved)
