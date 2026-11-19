@@ -1453,6 +1453,9 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 }
 
 func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) types.Type {
+	if x.lateStaticRefused(e) {
+		return types.TError
+	}
 	defer x.unresolvedCall(e.S, e.Args)
 	name, ok := identName(e.Name)
 	if !ok {
@@ -1707,6 +1710,10 @@ func (x *fnCtx) traitUserProperties(trait *program.Class, name string) (found []
 // ------------------------------------------------------------------ new
 
 func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type {
+	if x.lateStaticRefused(e) {
+		x.argsOnly(e.Args, env)
+		return types.TError
+	}
 	defer x.unresolvedCall(e.S, nil)
 	if e.Anon != nil {
 		cl := x.p().DeclareAnonymous(x.file, x.res.Scope(), e.Anon)
