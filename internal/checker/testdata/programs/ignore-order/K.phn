@@ -1,0 +1,7 @@
+namespace IgnoreOrder;
+
+final class K {
+    public const X = Missing::Y; // @phaenon-ignore P2001
+    public const Z = Missing::Y; // want P2001
+    public const W = 1; // @phaenon-ignore P2001 // want P4015 "no P2001 is reported on line 6"
+}

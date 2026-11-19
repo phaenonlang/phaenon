@@ -238,6 +238,14 @@ var (
 	// P4012: the php whose extensions are reflected is older than the
 	// target, so their newer signatures are unknown (php-versions.md §6).
 	P4012 = Code{"P4012", Warning, "local php older than the target"}
+	// P4015: a @phaenon-ignore comment that silences nothing: a code it
+	// names is not reported on its line, it names no code, or a
+	// -line/-next-line form finds nothing to silence (PHPStan's
+	// ignore.unmatchedIdentifier, ignore.unmatchedLine, ignore.parseError).
+	// A comment is held to the codes the run reports and no other
+	// (Checker.leftOut). No comment silences this code, and one that names
+	// it is reported for that.
+	P4015 = Code{"P4015", Warning, "ignore comment that silences nothing"}
 	// P4013 reported a `concurrently` block or a `spawn` in a project without
 	// phaenon/concurrent installed; retired with the syntax on 2026-11-08
 	// (design/roadmap.md D25). P4014 reported an installed phaenon/runtime of
