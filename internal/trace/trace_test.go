@@ -1,8 +1,11 @@
 package trace
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -55,6 +58,37 @@ func TestReadsEachFileOnce(t *testing.T) {
 	}
 	if reads != 1 {
 		t.Errorf("read the file %d times", reads)
+	}
+}
+
+// TestStreamsShareATracer: `phn trace -- command` rewrites stdout and
+// stderr in two goroutines with one tracer. The maps were written without
+// a lock, and a command that named compiled files on both streams could
+// end phn with "fatal error: concurrent map writes".
+func TestStreamsShareATracer(t *testing.T) {
+	var reads atomic.Int64
+	tr := New(nil)
+	tr.ReadFile = func(string) ([]byte, error) {
+		reads.Add(1)
+		return []byte("<?php\necho 1;\n// phaenon-map v1 Foo.phn 1-1=1 2:1\n"), nil
+	}
+	const streams, files = 8, 500
+	var wg sync.WaitGroup
+	for s := 0; s < streams; s++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < files; i++ {
+				if got := tr.Rewrite(fmt.Sprintf("dir%d/Foo.php:2", i)); got != fmt.Sprintf("dir%d/Foo.phn:1", i) {
+					t.Errorf("got %q", got)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if n := reads.Load(); n != files {
+		t.Errorf("read %d files %d times", files, n)
 	}
 }
 

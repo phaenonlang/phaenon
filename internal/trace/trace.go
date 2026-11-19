@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/phaenonlang/phaenon/internal/linemap"
 )
@@ -44,11 +45,14 @@ func ParseRoot(s string) (Root, bool) {
 	return Root{Prefix: filepath.Clean(prefix), Local: filepath.Clean(local)}, true
 }
 
-// Tracer rewrites positions, reading each compiled file once.
+// Tracer rewrites positions, reading each compiled file once. One tracer
+// serves several goroutines: `phn trace -- command` rewrites the command's
+// two streams at once, and both find their maps here.
 type Tracer struct {
 	roots []Root
 	// ReadFile reads a compiled file; os.ReadFile unless a test sets it.
 	ReadFile func(string) ([]byte, error)
+	mu       sync.Mutex
 	maps     map[string]*linemap.Map // by local path; nil: no map
 }
 
@@ -191,6 +195,10 @@ func (t *Tracer) local(path string) string {
 // mapOf is the line map of the compiled file at path, nil when it cannot be
 // read or carries no valid map.
 func (t *Tracer) mapOf(path string) *linemap.Map {
+	// Held over the read, so that a file two streams name at once is still
+	// read once.
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if m, seen := t.maps[path]; seen {
 		return m
 	}
