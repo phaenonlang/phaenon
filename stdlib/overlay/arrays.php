@@ -58,9 +58,14 @@ function array_values(array $array): array {}
 function array_merge(array ...$arrays): array {}
 
 /**
+ * String keys are kept, integer keys too where $preserve_keys says so: a
+ * list comes out where integer keys are renumbered, and where a list's
+ * keys are kept from offset 0.
+ *
+ * @template K of array-key
  * @template V
- * @param array<V> $array
- * @return list<V>
+ * @param array<K, V> $array
+ * @return ($preserve_keys is true ? ($offset is 0 ? ($array is list ? list<V> : array<K, V>) : array<K, V>) : (K is int ? list<V> : array<K, V>))
  */
 function array_slice(array $array, int $offset, ?int $length = null, bool $preserve_keys = false): array {}
 
@@ -164,9 +169,11 @@ function array_combine(array $keys, array $values): array {}
 function array_flip(array $array): array {}
 
 /**
+ * The keys count up from $start_index: a list where that is 0.
+ *
  * @template V
  * @param V $value
- * @return list<V>
+ * @return ($start_index is 0 ? list<V> : array<int, V>)
  */
 function array_fill(int $start_index, int $count, mixed $value): array {}
 
@@ -384,9 +391,12 @@ function array_change_key_case(array $array, int $case = CASE_LOWER): array {}
 function range(string|int|float $start, string|int|float $end, int|float $step = 1): array {}
 
 /**
+ * Each chunk is a list unless $preserve_keys keeps the keys.
+ *
+ * @template K of array-key
  * @template V
- * @param array<V> $array
- * @return list<list<V>>
+ * @param array<K, V> $array
+ * @return ($preserve_keys is true ? list<array<K, V>> : list<list<V>>)
  */
 function array_chunk(array $array, int $length, bool $preserve_keys = false): array {}
 

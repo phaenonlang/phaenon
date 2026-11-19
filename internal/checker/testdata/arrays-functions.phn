@@ -18,6 +18,11 @@ function takesMapOfLists(array $m): void
 {
 }
 
+/** @param list<list<string>> $xs */
+function takesChunks(array $xs): void
+{
+}
+
 /** @param array<string, int> $m */
 function takesCounts(array $m): void
 {
@@ -88,6 +93,61 @@ function values(array $a, array $m, array $keys, array $ints, array $floats, str
         takesString($pair[0]);
         takesInt($pair[1]);
     }
+}
+
+/**
+ * A list comes out where the keys are renumbered from 0, and only there:
+ * array_slice() keeps string keys, and integer keys where $preserve_keys
+ * says so; array_fill() counts the keys up from its first argument;
+ * array_chunk() keeps the keys in each chunk where $preserve_keys says so.
+ * PHPStan types a chunk as a list for a $preserve_keys that may be true,
+ * which PHP does not give.
+ *
+ * @param list<string> $a
+ * @param array<int, string> $byId
+ * @param array<string, string> $m
+ */
+function slices(array $a, array $byId, array $m, bool $keep, int $n): void
+{
+    takesStrings(array_slice($a, 1));
+    takesStrings(array_slice($byId, 1, 2));
+    takesStrings(array_slice($a, 1, null, true)); // want P2103
+    takesStrings(array_slice($a, 1, preserve_keys: $keep)); // want P2103
+    takesStrings(array_slice($m, 1)); // want P2103
+    takesMap(array_slice($m, 1));
+    takesStrings(array_fill(0, $n, 'x'));
+    takesStrings(array_fill(5, $n, 'x')); // want P2103
+    takesStrings(array_fill($n, 2, 'x')); // want P2103
+    takesChunks(array_chunk($a, 2));
+    takesChunks(array_chunk($m, 2));
+    takesChunks(array_chunk($a, 2, true)); // want P2103
+    takesChunks(array_chunk($a, 2, $keep)); // want P2103
+}
+
+/**
+ * A list's keys kept from offset 0 are 0, 1, and so on: the slice is a
+ * list still, as PHPStan has it. From another offset, one that may be
+ * another, or one counted from the end, the keys kept are no list's.
+ *
+ * @param list<string> $a
+ * @param array{string, string} $pair
+ * @param non-empty-list<string> $some
+ * @param array<int, string> $byId
+ */
+function slicesFromZero(array $a, array $pair, array $some, array $byId, int $n, int $offset, bool $keep): void
+{
+    takesStrings(array_slice($a, 0, $n, true));
+    takesStrings(array_slice($a, 0, null, true));
+    takesStrings(array_slice($a, 0, preserve_keys: true));
+    takesStrings(array_slice($pair, 0, 1, true));
+    takesStrings(array_slice($some, 0, 1, true));
+    takesStrings(array_slice($a, 0, $n, $keep));
+    takesStrings(array_slice($a, -1));
+    takesStrings(array_slice($pair, 1, 1, true)); // want P2103
+    takesStrings(array_slice($pair, $offset, 1, true)); // want P2103
+    takesStrings(array_slice($a, $offset, null, true)); // want P2103
+    takesStrings(array_slice($a, -1, null, true)); // want P2103
+    takesStrings(array_slice($byId, 0, null, true)); // want P2103
 }
 
 /**
