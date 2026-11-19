@@ -57,7 +57,10 @@ no code (`@phaenon-ignore-line` and `-next-line` silence a whole line). The line
 reports the finding on: in a call written over several lines, the argument's, not the line the
 call starts on. A comment is held only to the codes the run reports: `phn build` and `phn check
 --no-deprecations` leave the deprecations out (`P1101`, `P4006`), and hold no comment to them, nor
-a whole-line form to what it silenced. `P4015` itself is silenced by no comment. A `.phn` docblock
+a whole-line form to what it silenced. `P4015` itself is silenced by no comment, and neither are
+the codes about the run rather than a line of code (`P4005`, `P4007` to `P4010`, `P4012`, `P4016`),
+which phn prints on the first line of the first file checked where they have no file of their own:
+a comment that names one is `P4015`. A `.phn` docblock
 may use Phaenon's own spellings, as an array shape often does (`array{by: map<string, int>, pair:
 (int, int)}`); the emitter writes them in PHPStan's. A declared `array` names its element type
 (`array<V>` for a list or keyed array of `V`, `array<mixed>` for any), unless the method it

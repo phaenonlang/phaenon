@@ -28,10 +28,10 @@ function unmatched(): void {
     wantsInt('i'); // @phaenon-ignore P2202 // want P2103, P4015 "no P2202 is reported on line 28"
     wantsInt(1); // @phaenon-ignore P2103 // want P4015 "no P2103 is reported on line 29"
     wantsInt('j'); // @phaenon-ignore P2103, P2202 // want P4015 "no P2202"
-    wantsInt(2); // @phaenon-ignore-line // want P4015 "@phaenon-ignore-line: nothing is reported on line 31"
-    // @phaenon-ignore-next-line // want P4015 "nothing is reported on line 33"
+    wantsInt(2); // @phaenon-ignore-line // want P4015 "@phaenon-ignore-line: no finding a comment silences is reported on line 31"
+    // @phaenon-ignore-next-line // want P4015 "no finding a comment silences is reported on line 33"
     wantsInt(3);
-    wantsInt('k'); // @phaenon-ignore // want P2103, P4015 "names no code"
+    wantsInt('k'); // @phaenon-ignore // want P2103, P4015 "names no code, and silences nothing: name the codes it is for, here `@phaenon-ignore P2103`"
     wantsInt('l'); // @phaenon-ignore argument.type // want P2103, P4015 "names no code"
     wantsInt('m'); // @phaenon-ignore P2103 because the fixture says so
     wantsInt('n'); // @phaenon-ignore P2202, argument.type // want P2103, P4015 "no P2202 is reported on line 37"
@@ -63,10 +63,10 @@ function covered(): void {
 // starts on.
 function named(): void {
     wantsInt('t'); // @phaenon-ignore P2103!
-    wantsInt(6); /* @phaenon-ignore P2103 */ // @phaenon-ignore P4015 // want P4015 "no P2103 is reported", P4015 "P4015 cannot be silenced: remove the comment, or the code in it that matches nothing"
-    wantsInt(7); // @phaenon-ignore P2103, P4015 // want P4015 "no P2103 is reported", P4015 "P4015 cannot be silenced"
-    wantsInt('w'); // @phaenon-ignore P2103, P4015 // want P4015 "P4015 cannot be silenced"
-    wantsInt(8); // @phaenon-ignore-line P4015 // want P4015 "nothing is reported"
+    wantsInt(6); /* @phaenon-ignore P2103 */ // @phaenon-ignore P4015 // want P4015 "no P2103 is reported", P4015 "no comment silences P4015, or one that silences nothing could hide itself: remove the comment"
+    wantsInt(7); // @phaenon-ignore P2103, P4015 // want P4015 "no P2103 is reported", P4015 "remove the comment"
+    wantsInt('w'); // @phaenon-ignore P2103, P4015 // want P4015 "take P4015 out of the comment"
+    wantsInt(8); // @phaenon-ignore-line P4015 // want P4015 "no finding a comment silences is reported"
     wantsInt(
         'u' // @phaenon-ignore P2103
     );
@@ -82,4 +82,29 @@ function deprecations(): string {
     $a = \DATE_RFC7231; // @phaenon-ignore P4006
     $b = 'x'; // @phaenon-ignore P4006 // want P4015 "no P4006 is reported"
     return $a . $b;
+}
+
+// A code of the run, about the project file, composer.json, the vendor
+// directory or the local php, is no finding of a line: phn prints it on
+// the file it is about or, where it has none, on the first line of the
+// first file checked, beside whatever that line holds, and no comment
+// silences it. A comment that names one is told so, and held to its other
+// codes as ever. A comment that silences every finding of its line
+// silences neither these nor P4015, and where nothing else is reported on
+// its line, it silences nothing.
+function ofTheRun(): void {
+    wantsInt('x'); // @phaenon-ignore P2103, P4005 // want P4015 "P4005 is no finding of a line, and no comment silences it: take P4005 out of the comment"
+    wantsInt(9); // @phaenon-ignore P4007, P4008, P4009, P4010, P4012, P4016 // want P4015 "P4007 is no finding", P4015 "P4008 is no finding", P4015 "P4009 is no finding", P4015 "P4010 is no finding", P4015 "P4012 is no finding", P4015 "P4016 is no finding"
+    /* @phaenon-ignore P2103 */ wantsInt(10); // @phaenon-ignore-line // want P4015 "no P2103 is reported on line 98", P4015 "no finding a comment silences is reported on line 98"
+}
+
+// The advice P4015 gives is one that, followed, leaves no P4015: a comment
+// whose codes no comment silences, or silence nothing, is to be removed,
+// and so is one that names no code where nothing is reported; one that
+// names no code where findings are is to name theirs.
+function advice(): void {
+    wantsInt(11); // @phaenon-ignore P4005 // want P4015 "P4005 is no finding of a line, and no comment silences it: remove the comment"
+    wantsInt(12); // @phaenon-ignore P4005, P2103 // want P4015 "P4005 is no finding of a line, and no comment silences it: remove the comment", P4015 "no P2103 is reported"
+    wantsInt(13); // @phaenon-ignore // want P4015 "names no code, and silences nothing: no finding a comment silences is reported on line 108, so remove it"
+    wantsInt('y'); /* @phaenon-ignore P2202 */ // @phaenon-ignore // want P2103, P4015 "no P2202 is reported", P4015 "name the codes it is for, here `@phaenon-ignore P2103`"
 }
