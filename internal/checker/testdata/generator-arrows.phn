@@ -1,0 +1,80 @@
+namespace App\GeneratorArrows;
+
+use Closure;
+use Generator;
+
+// An arrow function whose body yields is a generator, as PHP has it: the
+// closure returns a Generator of what it yields, whose return is the
+// body's value, void for a body that is a yield or a yield from itself,
+// as PHPStan types it. A yield in a nested arrow function makes that one
+// the generator. Plain PHP, so that PHPStan reads this file as written.
+
+/** @return Generator<int, int, mixed, string> */
+function inner(): Generator
+{
+    yield 1;
+
+    return 'done';
+}
+
+/** @return list<int> */
+function collected(): array
+{
+    $one = fn () => yield 1;
+    $from = fn () => yield from inner();
+    $listed = fn () => yield from [2, 3];
+
+    return [...$one(), ...$from(), ...$listed()];
+}
+
+/** @return Closure(): Generator<string, int, mixed, void> */
+function keyed(): Closure
+{
+    return fn () => yield 'k' => 4;
+}
+
+/** @return Closure(): (Closure(): Generator<int, 5, mixed, void>) */
+function nested(): Closure
+{
+    return fn () => fn () => yield 5;
+}
+
+/** @return Closure(): Generator<int, string, mixed, void> */
+function declared(): Closure
+{
+    return fn (): Generator => yield 'a';
+}
+
+/** @return Closure(): Generator<int, string, mixed, void> */
+function wrong(): Closure
+{
+    return fn (): Generator => yield 1; // want P2202 "returns Closure(): Generator<int, 1, mixed, void>"
+}
+
+/** @return Closure(): iterable<int, null> */
+function bare(): Closure
+{
+    return fn (): iterable => yield;
+}
+
+final class Source
+{
+    /** @return Closure(): Generator<int, int, mixed, void> */
+    public function lines(): Closure
+    {
+        return fn () => yield from $this->numbers();
+    }
+
+    /** @return Generator<int, int, mixed, void> */
+    private function numbers(): Generator
+    {
+        yield 1;
+    }
+}
+
+function notOne(): int
+{
+    $gen = fn () => yield 1;
+
+    return $gen(); // want P2202 "returns Generator<int, 1, mixed, void>"
+}

@@ -1,0 +1,44 @@
+namespace App\GeneratorArrowsNested;
+
+use Closure;
+use Generator;
+
+// An arrow function whose body yields where the yield is not the whole
+// body is a generator all the same, as php runs it: `fn () => [yield 1]`
+// returns a Generator whose return is the array (generator-arrows.phn).
+// PHPStan types such a closure as the body's value, `Closure():
+// array<int, mixed>`, and reports the calls the Generator answers
+// (method.nonObject, which this file allows it); the checker types what
+// php returns. A body that is a match or a ternary each branch of which is
+// a yield returns void, as `fn () => yield 1` does. Plain PHP, so that
+// PHPStan reads this file as written.
+
+function current(): mixed
+{
+    $f = fn () => [yield 1];
+
+    return $f()->current();
+}
+
+function sent(): mixed
+{
+    $g = fn () => $x = yield 1;
+    $gen = $g();
+    $gen->send('s');
+
+    return $gen->getReturn();
+}
+
+/** @return Closure(): Generator<int, int, mixed, void> */
+function matched(int $x): Closure
+{
+    return fn () => match ($x) { 1 => yield 1, default => yield 2 };
+}
+
+/** @return list<mixed> */
+function listed(): array
+{
+    $f = fn () => [yield 1];
+
+    return $f(); // want P2202 "returns Generator<int, 1, mixed, list{mixed}>"
+}
