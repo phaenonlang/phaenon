@@ -527,7 +527,8 @@ func (p *Parser) switchStmt() ast.Stmt {
 			c.Cond = p.expr()
 		}
 		if !p.accept(token.Kind(':')) {
-			p.expect(token.Kind(';'))
+			semi := p.expect(token.Kind(';'))
+			c.Semi = ast.Span{Start: semi.Start, End: semi.End}
 		}
 		c.Body = p.statementList(token.T_CASE, token.T_DEFAULT, closer)
 		c.S = p.span(cstart)

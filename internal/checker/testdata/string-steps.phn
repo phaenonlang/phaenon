@@ -1,0 +1,109 @@
+namespace StringSteps;
+
+// ++ and -- on a string. A numeric string steps to the number it reads as,
+// a literal to its exact value. A string that is no number, or may be
+// none, PHP steps as text, which it deprecates, and PHPStan refuses the
+// operand (postInc.type, postDec.type): one P2301 at the step, whether the
+// deprecations are reported or not (this file is checked without them),
+// and the operand keeps its type, so that nothing follows on the lines
+// after. PHP 8.3 deprecated -- of such a string, and ++ of the empty string
+// and of one that is not alphanumeric; 8.5 deprecated ++ of an alphanumeric
+// one. The message names the release where a literal tells it.
+
+function takesInt(int $i): void {}
+
+/** @param numeric-string $numeric */
+function numeric(string $numeric): string {
+    $number = '5';
+    $number++;
+    $number++;
+    takesInt($number);
+    $numeric++;
+    $numeric++;
+    $down = '5';
+    $down--;
+    takesInt($down);
+    $top = '9223372036854775806';
+    $top++;
+    takesInt($top);
+    $top++;
+    takesInt($top); // want P2103 "expects int, float given"
+    return $number . $numeric;
+}
+
+function counted(): int {
+    $n = '0';
+    for ($k = 0; $k < 3; $k++) {
+        $n++;
+    }
+    ++$n;
+    return $n;
+}
+
+function refused(string $any, string $text): string {
+    $letter = 'a';
+    $letter++; // want P2301 "cannot increment 'a': the step of a string that is no number is deprecated since PHP 8.5; call str_increment()"
+    $any++; // want P2301 "cannot increment string: it may be a string that is no number, whose step is deprecated; call str_increment(), or make it a number first"
+    $text--; // want P2301 "cannot decrement string: it may be a string that is no number, whose step is deprecated since PHP 8.3"
+    $word = 'abc';
+    $word--; // want P2301 "cannot decrement 'abc': the step of a string that is no number is deprecated since PHP 8.3; call str_decrement()"
+    $empty = '';
+    $empty--; // want P2301 "cannot decrement ''"
+    $blank = ' ';
+    $blank++; // want P2301 "cannot increment ' ': the step of a string that is neither a number nor alphanumeric is deprecated since PHP 8.3"
+    $none = '';
+    $none++; // want P2301 "is deprecated since PHP 8.3"
+    $grouped = '1_000';
+    $grouped++; // want P2301 "neither a number nor alphanumeric is deprecated since PHP 8.3"
+    return $letter . $any . $text . $word . $empty . $blank . $none . $grouped;
+}
+
+/**
+ * @param '5'|'a' $five
+ * @param '5'|'a b' $spaced
+ * @param 'a'|'a b' $either
+ */
+function literals(string $five, string $spaced, string $either): void {
+    $five++; // want P2301 "it may be a string that is no number, whose step is deprecated since PHP 8.5; call str_increment(), or make it a number first"
+    $spaced++; // want P2301 "it may be a string that is neither a number nor alphanumeric, whose step is deprecated since PHP 8.3; make it a number first"
+    $either++; // want P2301 "the step of a string that is no number is deprecated; call str_increment()"
+}
+
+final class Named {
+    public string $name = 'a';
+}
+
+// A key of an array<array-key, V> is refused as an int|string is, which
+// PHPStan, to which such a key is a benevolent (int|string), lets pass.
+/** @param array<array-key, int> $counts */
+function unions(array $counts, int|string $id, int|float|string $n, Named $named): int {
+    $sum = 0;
+    foreach ($counts as $key => $count) {
+        $key++; // want P2301 "cannot increment int|string"
+        $sum += $count;
+    }
+    $id++; // want P2301 "cannot increment int|string"
+    $n--; // want P2301 "cannot decrement int|float|string"
+    $named->name++; // want P2301 "cannot increment string"
+    return $sum;
+}
+
+// The step of a numeric string is a number and no string any more, as php
+// makes it. PHPStan types it as a benevolent (float|int) and passes the
+// comparison and the return below.
+/** @param numeric-string $numeric */
+function stricter(string $numeric): string|int {
+    $numeric++;
+    if ($numeric === '6') { // want P2305 "always false"
+        return 0;
+    }
+    return $numeric; // want P2202 "returns int|float"
+}
+
+// An int beside a numeric string steps as an int alone does: the last
+// integer to a float.
+/** @param 9223372036854775807|'5' $edge */
+function edge(int|string $edge): void {
+    $edge++;
+    takesInt($edge); // want P2103 "float"
+}

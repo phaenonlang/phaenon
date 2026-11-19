@@ -70,6 +70,10 @@ func TestPHPStanParity(t *testing.T) {
 		// PHPStan 2.2 predates __debugInfo() on enums (PHP 8.6) and refuses
 		// it on every version.
 		"enum-magic.phn": {"enum.magicMethod": true},
+		// unset($a[null]): PHP 8.5 neither deprecates nor refuses null there,
+		// as it does in a read or a write (P1101), and the golden holds the
+		// line to show it unreported; PHPStan reports the key's type.
+		"deprecations-85.phn": {"offsetAccess.invalidOffset": true},
 		// A trait's body serves every user: a comparison that one user's
 		// declaration alone decides is not impossible in the trait
 		// (design/checker.md §9, "A trait sees its users"), where PHPStan,

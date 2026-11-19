@@ -76,6 +76,9 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 	case *ast.StringLit:
 		return types.StringLit{V: program.StringValue(e)}
 	case *ast.InterpolatedString:
+		if e.Kind == ast.StringBacktick {
+			x.c.deprecated(e.S, "the backtick operator is deprecated since PHP 8.5: call shell_exec()")
+		}
 		return x.interpolated(e, env)
 	case *ast.ArrayLit:
 		return x.arrayLit(e, env, expected)
@@ -464,6 +467,7 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 		var ev types.Type
 		if item.Key != nil {
 			kt, stored := x.keyExpr(item.Key, env)
+			x.nullOffset(kt, item.Key.Span())
 			var entryExpected types.Type = expectedValue
 			if sh, ok := expectedShapeEntry(expected, kt); ok {
 				entryExpected = sh
@@ -1375,6 +1379,9 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 		return types.TMixed
 	}
 	raw, idx := x.keyExpr(e.Index, env)
+	if mayBeArray(base) {
+		x.nullOffset(raw, e.Index.Span())
+	}
 	base = arrayBounds(base)
 	if types.IsMixed(base) {
 		if _, unknown := base.(types.Unknown); unknown {
@@ -2040,8 +2047,45 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 		// A counter that may have passed the last integer, or an int|float
 		// as declared: PHP steps either, and the result is one of the two.
 		result = types.MakeUnion(types.TInt, types.TFloat)
-	case types.IsSubtype(t, types.TString, nil):
-		result = types.TString
+	case numbersOrStrings(t):
+		// Each member as PHP turns it: a numeric string becomes the number
+		// it reads as, so `$n = '5'; $n++; $n++;` is 6 and then 7. A string
+		// that is no number, or may be none, PHP steps as text, which it
+		// deprecates, and PHPStan refuses the operand (postInc.type,
+		// postDec.type): one finding stands for the mistake, whichever way
+		// the deprecations are switched, and the operand keeps its type so
+		// that nothing else follows from the step.
+		var refused, all bool
+		var since string
+		if result, refused, all, since = x.stepMembers(t, e); refused {
+			// The message names the release that deprecated the step where
+			// the operand's literals tell it, and none where they do not: --
+			// is 8.3's, ++ is 8.3's of a string that is not alphanumeric,
+			// which str_increment() refuses too, and 8.5's of one that is.
+			verb, what, advice := "decrement", "a string that is no number", "call str_decrement()"
+			if e.Inc {
+				verb, advice = "increment", "call str_increment()"
+				if since == "8.3" {
+					what, advice = "a string that is neither a number nor alphanumeric", ""
+				}
+			}
+			if since != "" {
+				since = " since PHP " + since
+			}
+			msg := "the step of " + what + " is deprecated" + since
+			if !all {
+				msg = "it may be " + what + ", whose step is deprecated" + since
+				advice = strings.TrimPrefix(advice+", or make it a number first", ", or ")
+			}
+			if advice != "" {
+				msg += "; " + advice
+			}
+			x.report(e.S, P2301, "cannot %s %s: %s", verb, x.typeName(t), msg)
+			result = t
+			if types.IsSubtype(t, types.TString, nil) {
+				result = types.TString
+			}
+		}
 	case types.IsSubtype(t, types.TNull, nil):
 		if e.Inc {
 			result = types.IntLit(1)
@@ -3186,6 +3230,9 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 	var keyT, keyRaw types.Type
 	if t.Index != nil {
 		raw, key := x.keyExpr(t.Index, env)
+		if mayBeArray(base) || containsNull(base) {
+			x.nullOffset(raw, t.Index.Span()) // null becomes an array here
+		}
 		if types.IsMixed(raw) {
 			// PHPStan at level max: a mixed key may be anything PHP refuses.
 			x.report(t.Index.Span(), P2316, "possibly invalid array key type mixed")
@@ -3875,7 +3922,11 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 		}
 		var keyT types.Type
 		if item.Key != nil {
-			_, keyT = x.keyExpr(item.Key, env)
+			var raw types.Type
+			raw, keyT = x.keyExpr(item.Key, env)
+			if mayBeArray(vt) {
+				x.nullOffset(raw, item.Key.Span())
+			}
 		} else {
 			keyT = types.IntLit(pos)
 			pos++

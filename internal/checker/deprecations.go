@@ -1,10 +1,13 @@
 package checker
 
 import (
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -220,4 +223,166 @@ func mayBeString(t types.Type) bool {
 		}
 	}
 	return false
+}
+
+// numbersOrStrings reports a type whose every member is an int, a float or
+// a string: what ++ and -- take, a member at a time (stepMembers).
+func numbersOrStrings(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		if !types.IsSubtype(m, types.TInt, nil) && !types.IsSubtype(m, types.TFloat, nil) && !types.IsSubtype(m, types.TString, nil) {
+			return false
+		}
+	}
+	return true
+}
+
+// stepMembers is the type ++ or -- gives an operand whose every member is
+// an int, a float or a string, a member at a time, as PHP turns it: an int
+// as the sum or the difference with 1 (binaryTypes: 5 becomes 6, the last
+// integer a float), a float a float, and a string PHP reads as a number
+// (is_numeric()) that number, a literal its exact value. refused reports a
+// string member that is no number, or may be none: PHP steps it as text,
+// which it deprecates, and PHPStan refuses the operand (postInc.type,
+// postDec.type), so the result says nothing then. all reports that every
+// member is such a string. since is the release that deprecated the step
+// of the refused members, empty where they do not tell it: -- of any of
+// them is 8.3's, ++ is 8.3's or 8.5's by the string (incDeprecated), which
+// only a literal shows.
+func (x *fnCtx) stepMembers(t types.Type, e *ast.IncDec) (result types.Type, refused, all bool, since string) {
+	var out []types.Type
+	all = true
+	// refuse notes a refused member and the release that deprecated its
+	// step, "" where the member is no literal.
+	releases := map[string]bool{}
+	refuse := func(release string) {
+		refused = true
+		if !e.Inc {
+			release = "8.3"
+		}
+		releases[release] = true
+	}
+	op, delta := token.Kind('-'), int64(-1)
+	if e.Inc {
+		op, delta = token.Kind('+'), 1
+	}
+	for _, m := range types.Members(t) {
+		switch {
+		case types.IsSubtype(m, types.TInt, nil):
+			out = append(out, x.binaryTypes(op, m, types.IntLit(1), e))
+			all = false
+			continue
+		case types.IsSubtype(m, types.TFloat, nil):
+			out = append(out, types.TFloat)
+			all = false
+			continue
+		}
+		switch m := m.(type) {
+		case types.StringLit:
+			if !isNumericLiteral(m.V) {
+				refuse(incDeprecated(m.V))
+				continue
+			}
+			all = false
+			if n, err := strconv.ParseInt(strings.Trim(m.V, " \t\n\r\v\f"), 10, 64); err == nil && (delta > 0 && n < math.MaxInt64 || delta < 0 && n > math.MinInt64) {
+				out = append(out, types.IntLit(n+delta))
+			} else {
+				out = append(out, types.TFloat)
+			}
+		case types.String:
+			all = false
+			if !m.Numeric {
+				refuse("")
+				continue
+			}
+			out = append(out, types.TInt, types.TFloat)
+		case types.ClassString:
+			refuse("") // a class name is never a number
+		default:
+			refuse("")
+			all = false
+		}
+	}
+	if len(releases) == 1 {
+		for since = range releases {
+		}
+	}
+	return types.MakeUnion(out...), refused, refused && all, since
+}
+
+// incDeprecated is the release that deprecated ++ on a string literal that
+// is no number: PHP 8.3 the empty string and a string that is not
+// alphanumeric (' ', 'a b', '1_000'), whose step never was the next string
+// in order, and PHP 8.5 an alphanumeric one ('a', 'Az9'), which
+// str_increment() steps.
+func incDeprecated(s string) string {
+	if s == "" {
+		return "8.3"
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+			return "8.3"
+		}
+	}
+	return "8.5"
+}
+
+// mayBeArray reports whether a value of t may be a PHP array, where null as
+// an offset is deprecated: an ArrayAccess object's method gets the null as
+// it is, and a string's offset is cast with PHP's warning, not this.
+func mayBeArray(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		if types.IsSubtype(m, types.TArray, nil) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsNull reports a type with null among its members.
+func containsNull(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		if isNullType(m) {
+			return true
+		}
+	}
+	return false
+}
+
+// nullOffset reports null as an array's offset, which PHP 8.5 deprecates in
+// a read, a write, an isset(), a literal's key and a destructuring's (not in
+// unset()).
+func (x *fnCtx) nullOffset(raw types.Type, at ast.Span) {
+	if isNullType(raw) {
+		x.c.deprecated(at, "null as an array offset is deprecated since PHP 8.5: write ''")
+	}
+}
+
+// isNumericLiteral is PHP's is_numeric() of a string: optional whitespace,
+// a sign, digits with a decimal point or an exponent, trailing whitespace.
+func isNumericLiteral(s string) bool {
+	s = strings.Trim(s, " \t\n\r\v\f")
+	if s == "" {
+		return false
+	}
+	if s[0] == '+' || s[0] == '-' {
+		s = s[1:]
+	}
+	digits, dot, exp := false, false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9':
+			digits = true
+		case c == '.' && !dot && !exp:
+			dot = true
+		case (c == 'e' || c == 'E') && digits && !exp:
+			exp, digits = true, false
+			if i+1 < len(s) && (s[i+1] == '+' || s[i+1] == '-') {
+				i++
+			}
+		default:
+			return false
+		}
+	}
+	return digits
 }
