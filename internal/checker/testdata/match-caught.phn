@@ -1,0 +1,223 @@
+namespace App\MatchCaught;
+
+use UnhandledMatchError;
+use Error as Failure;
+
+// A match without a default whose arms leave values out throws
+// UnhandledMatchError for them: a try around it that catches the error,
+// or Error or Throwable, in the same function is its handling, and no
+// P2304. Its own catch and finally blocks are not inside the try, a
+// closure or an arrow function is a function of its own, and a caller's
+// catch or a @throws tag is no catch. A caught name is read as PHPStan
+// reads it too, as written: under an alias the match stays P2304. Plain
+// PHP, so that PHPStan reads this file as written.
+
+function lookup(int $id): string
+{
+    return (string) $id;
+}
+
+function caught(int $id): string
+{
+    try {
+        return match ($id) {
+            1 => 'one',
+            2 => 'two',
+        };
+    } catch (\UnhandledMatchError $e) {
+        return 'other';
+    }
+}
+
+function caughtImported(int $id): string
+{
+    try {
+        return match ($id) {
+            1 => 'one',
+        };
+    } catch (UnhandledMatchError $e) {
+        return 'other';
+    }
+}
+
+function caughtAsError(int $id): string
+{
+    try {
+        return match ($id) {
+            1 => 'one',
+        };
+    } catch (\Error $e) {
+        return 'other';
+    }
+}
+
+function caughtAsThrowable(int $id): string
+{
+    try {
+        $label = match ($id) {
+            1 => 'one',
+        };
+    } catch (\Throwable $e) {
+        $label = 'other';
+    }
+    return $label;
+}
+
+function caughtInUnion(int $id): string
+{
+    try {
+        return lookup($id) . match ($id) {
+            1 => 'one',
+        };
+    } catch (\InvalidArgumentException | \Error $e) {
+        return 'other';
+    }
+}
+
+function caughtFurtherOut(int $id): string
+{
+    try {
+        try {
+            if ($id > 0) {
+                return match ($id) {
+                    1 => 'one',
+                };
+            }
+            return lookup($id);
+        } catch (\RuntimeException $e) {
+            return 'runtime';
+        }
+    } catch (\UnhandledMatchError $e) {
+        return 'other';
+    }
+}
+
+function rethrown(int $id): string
+{
+    try {
+        return match ($id) {
+            1 => 'one',
+        };
+    } catch (\UnhandledMatchError $e) {
+        throw new \LogicException('no label', 0, $e);
+    }
+}
+
+function caughtUnderAlias(int $id): string
+{
+    try {
+        return match ($id) { // want P2304
+            1 => 'one',
+        };
+    } catch (Failure $e) {
+        return 'other';
+    }
+}
+
+function caughtOfTheNamespace(int $id): string
+{
+    try {
+        return match ($id) { // want P2304
+            1 => 'one',
+        };
+    } catch (namespace\Error $e) { // want P2001
+        return 'other';
+    }
+}
+
+function otherCatch(int $id): string
+{
+    try {
+        return lookup($id) . match ($id) { // want P2304
+            1 => 'one',
+        };
+    } catch (\Exception $e) {
+        return 'other';
+    }
+}
+
+function finallyAlone(int $id): string
+{
+    try {
+        return match ($id) { // want P2304
+            1 => 'one',
+        };
+    } finally {
+        echo 'done';
+    }
+}
+
+function inCatchBlock(int $id): string
+{
+    try {
+        return lookup($id);
+    } catch (\UnhandledMatchError $e) {
+        return match ($id) { // want P2304
+            1 => 'one',
+        };
+    }
+}
+
+function inFinallyBlock(int $id): string
+{
+    try {
+        $label = lookup($id);
+    } catch (\UnhandledMatchError $e) {
+        $label = 'other';
+    } finally {
+        echo match ($id) { // want P2304
+            1 => 'one',
+        };
+    }
+    return $label;
+}
+
+function inClosure(int $id): string
+{
+    try {
+        $label = function () use ($id): string {
+            return match ($id) { // want P2304
+                1 => 'one',
+            };
+        };
+        return $label();
+    } catch (\UnhandledMatchError $e) {
+        return 'other';
+    }
+}
+
+function inArrowFunction(int $id): string
+{
+    try {
+        $label = fn (): string => match ($id) { // want P2304
+            1 => 'one',
+        };
+        return $label();
+    } catch (\UnhandledMatchError $e) {
+        return 'other';
+    }
+}
+
+function callee(int $id): string
+{
+    return match ($id) { // want P2304
+        1 => 'one',
+    };
+}
+
+function caller(int $id): string
+{
+    try {
+        return callee($id);
+    } catch (\UnhandledMatchError $e) {
+        return 'other';
+    }
+}
+
+/** @throws \UnhandledMatchError */
+function declared(int $id): string
+{
+    return match ($id) { // want P2304
+        1 => 'one',
+    };
+}

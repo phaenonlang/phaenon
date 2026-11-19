@@ -1011,6 +1011,12 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 	x.throwEnvs = append(x.throwEnvs, none)
 	top := len(x.throwEnvs) - 1
 	x.pushThrows()
+	// The catches take what the body throws, not what they or the finally
+	// block throw: the count covers the body alone.
+	matchCaught := x.catchesUnhandledMatch(s)
+	if matchCaught {
+		x.matchCaught++
+	}
 	seed := bodyEnv.clone()
 	lead, thrower := 0, false
 	for lead < len(s.Body) && cannotThrow(s.Body[lead]) {
@@ -1028,6 +1034,9 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		seed = bodyEnv.clone()
 	}
 	x.stmts(s.Body[lead:], bodyEnv)
+	if matchCaught {
+		x.matchCaught--
+	}
 	original := x.popThrows()
 	if lead < len(s.Body) && !thrower {
 		if inner, ok := s.Body[lead].(*ast.Try); ok && x.trySeeds[inner] != nil {
@@ -1141,6 +1150,26 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		return
 	}
 	*env = *joinAll(ends...)
+}
+
+// catchesUnhandledMatch reports a try statement one of whose catches takes
+// the UnhandledMatchError a match without a matching arm throws: a catch
+// of that class, of Error or of Throwable. PHPStan reads a caught name as
+// it is written, as a global class (TryCatchTypeVisitor), where PHP
+// resolves it: a catch counts when both readings take the error, so that
+// a match PHPStan reports, under an alias, stays P2304, and one whose catch
+// names a class of the namespace, which takes nothing, stays P2304 too.
+func (x *fnCtx) catchesUnhandledMatch(s *ast.Try) bool {
+	for _, c := range s.Catches {
+		for _, n := range c.Types {
+			written := strings.Join(n.Parts, "\\")
+			resolved := x.res.Scope().ResolveClass(n)
+			if x.p().IsSubclassOf("UnhandledMatchError", written) && x.p().IsSubclassOf("UnhandledMatchError", resolved) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // cannotThrow reports a statement that calls nothing: an expression
@@ -2119,7 +2148,9 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 		if isTrue {
 			ends = append(ends, cur)
 		} else if !types.IsMixed(subject) {
-			if !done {
+			// A try around it that catches the error is the handling of the
+			// values no arm takes.
+			if !done && x.matchCaught == 0 {
 				x.report(e.S, P2304, "match does not handle %s", x.typeName(remaining))
 			}
 		}
