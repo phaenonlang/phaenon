@@ -176,8 +176,14 @@ func Compile(req Request) (res Result) {
 	if err != nil {
 		line := 1
 		msg := err.Error()
-		if ee, ok := err.(*emit.Error); ok {
+		ee, ok := err.(*emit.Error)
+		if ok {
 			line, msg = ee.Line, ee.Msg
+		}
+		for _, f := range res.Findings {
+			if ok && ee.Code != "" && f.File == req.Main && f.Line == ee.Line && f.Code == ee.Code {
+				return res // the checker's finding is the one of this mistake
+			}
 		}
 		res.Findings = append(res.Findings, Finding{File: req.Main, Line: line, Column: 1, Code: Internal,
 			Severity: checker.Error.String(), Message: "not compiled: " + msg})
