@@ -1,5 +1,5 @@
 // reflected-attributes: []
-// An empty unused.reflectedAttributes in phaenon.json (design/tooling.md
+// An empty unused.reflected-attributes in phaenon.json (design/tooling.md
 // §9.2) lets no attribute exempt a private property: PHPStan's findings
 // without framework extensions.
 

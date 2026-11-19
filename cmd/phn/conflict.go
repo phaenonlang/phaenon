@@ -50,13 +50,17 @@ const compilerPackage = "phaenon/phn"
 // `conflict` the key asks of a library does not keep out a project on the
 // main branch, which reads the key (TestBranchAliasCoversTheKeys).
 var keyReleases = map[string]string{
-	"roots":                      "0.1.0",
-	"exclude":                    "0.1.0",
-	"php":                        "0.1.0",
-	"fmt":                        "0.2.0",
-	"unused":                     "0.2.0",
-	"unused.reflectedAttributes": "0.2.0",
-	"committed":                  "0.5.0",
+	"roots":   "0.1.0",
+	"exclude": "0.1.0",
+	"php":     "0.1.0",
+	"fmt":     "0.2.0",
+	"unused":  "0.2.0",
+	// The key as it was spelt until 0.8.0, read until the first beta
+	// (design/roadmap.md D34): a file that still writes it is one the
+	// releases since 0.2.0 read.
+	"unused.reflectedAttributes":  "0.2.0",
+	"committed":                   "0.5.0",
+	"unused.reflected-attributes": "0.8.0",
 }
 
 // earlierReleases lists, oldest first, the releases of phaenon/phn from
@@ -65,11 +69,11 @@ var keyReleases = map[string]string{
 // from the main branch and so knows the keys merged before it; a new key
 // extends it up to the last release without the key. TestKeyReleases holds
 // it to CHANGELOG.md.
-var earlierReleases = []string{"0.1.0", "0.2.0", "0.2.1", "0.3.0", "0.4.0", "0.4.1"}
+var earlierReleases = []string{"0.1.0", "0.2.0", "0.2.1", "0.3.0", "0.4.0", "0.4.1", "0.5.0", "0.6.0", "0.7.0", "0.7.1", "0.7.2"}
 
 // usedKeys lists the keys the JSON object data writes of those a struct of
 // type t reads, in the order of its fields, a nested key under its path
-// ("unused.reflectedAttributes").
+// ("unused.reflected-attributes").
 func usedKeys(data []byte, t reflect.Type, prefix string) []string {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()

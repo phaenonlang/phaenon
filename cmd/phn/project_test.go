@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,22 +12,37 @@ import (
 	"github.com/phaenonlang/phaenon/internal/checker"
 )
 
-// phaenon.json's unused.reflectedAttributes: a missing key keeps the
+// phaenon.json's unused.reflected-attributes: a missing key keeps the
 // checker's default (nil), an empty list is kept as one, and names are
-// checked to be class names.
+// checked to be class names. The key as it was spelt before 0.8.0 is read
+// as the key and warned of on the file (design/roadmap.md D34); the two
+// together are refused.
 func TestReadProjectReflectedAttributes(t *testing.T) {
+	const earlier = `"unused.reflectedAttributes" is written "unused.reflected-attributes" since phn 0.8.0: ` +
+		`the keys of phaenon.json are lower-case words joined by dashes, and this spelling is read until the first beta`
 	for _, c := range []struct {
 		json string
 		want []string // nil: the default
 		err  string
+		warn string // the position of the warning of an earlier spelling
 	}{
+		{json: `{"unused": {"reflectedAttributes": []}}`, want: []string{}, warn: "1:13"},
+		{json: "{\n  \"roots\": {\"src\": \".src\"},\n  \"unused\": {\n    \"reflectedAttributes\": [\"App\\\\Mapping\"]\n  }\n}\n",
+			want: []string{`App\Mapping`}, warn: "4:5"},
+		{json: `{"unused": {"reflectedAttributes": null}}`, warn: "1:13"},
+		{json: `{"unused": {"reflectedAttributes": ["App/Mapping"]}}`, err: `"unused": {"reflected-attributes": [...]} lists attribute classes by their full name`},
+		{json: `{"unused": {"reflected-attributes": ["App\\A"], "reflectedAttributes": ["App\\B"]}}`,
+			err: `"unused" has both "reflected-attributes" and "reflectedAttributes", one key in two spellings: write "reflected-attributes" alone`},
+		{json: `{"unused": {"reflectedAttributes": null, "reflected-attributes": null}}`, err: `"unused" has both`},
+		{json: `{"unused": {"reflectedattributes": []}}`, err: `the key "reflectedattributes" is written "reflected-attributes"`},
+		{json: `{"unused": {"Reflected-Attributes": []}}`, err: `the key "Reflected-Attributes" is written "reflected-attributes"`},
 		{json: `{"roots": {"src": ".src"}}`},
 		{json: `{"roots": {"src": ".src"}, "unused": {}}`},
-		{json: `{"roots": {"src": ".src"}, "unused": {"reflectedAttributes": []}}`, want: []string{}},
-		{json: `{"unused": {"reflectedAttributes": ["App\\Mapping", "\\Doctrine\\ORM\\Mapping\\MappingAttribute"]}}`,
+		{json: `{"roots": {"src": ".src"}, "unused": {"reflected-attributes": []}}`, want: []string{}},
+		{json: `{"unused": {"reflected-attributes": ["App\\Mapping", "\\Doctrine\\ORM\\Mapping\\MappingAttribute"]}}`,
 			want: []string{`App\Mapping`, `\Doctrine\ORM\Mapping\MappingAttribute`}},
-		{json: `{"unused": {"reflectedAttributes": ["App\\"]}}`, err: `"App\\" is not one`},
-		{json: `{"unused": {"reflectedAttributes": ["App/Mapping"]}}`, err: "is not one"},
+		{json: `{"unused": {"reflected-attributes": ["App\\"]}}`, err: `"App\\" is not one`},
+		{json: `{"unused": {"reflected-attributes": ["App/Mapping"]}}`, err: "is not one"},
 		{json: `{"unused": {"reflected": []}}`, err: `unknown key "unused.reflected" (this is phn ` + version + `; a newer release may know it)`},
 	} {
 		path := filepath.Join(t.TempDir(), ProjectFile)
@@ -47,6 +63,16 @@ func TestReadProjectReflectedAttributes(t *testing.T) {
 		}
 		if (got.ReflectedAttributes == nil) != (c.want == nil) || !slices.Equal(got.ReflectedAttributes, c.want) {
 			t.Errorf("%s: ReflectedAttributes %#v, want %#v", c.json, got.ReflectedAttributes, c.want)
+		}
+		var warned []string
+		for _, d := range p.spellingDiags() {
+			if d.File != path || d.Code != "P4016" || d.Severity != checker.Warning || d.Message != earlier {
+				t.Errorf("%s: the warning is %s", c.json, d)
+			}
+			warned = append(warned, fmt.Sprintf("%d:%d", d.Line, d.Col))
+		}
+		if got := strings.Join(warned, " "); got != c.warn {
+			t.Errorf("%s: warned of an earlier spelling at %q, want %q", c.json, got, c.warn)
 		}
 	}
 	if got := (*project)(nil).checkerOptions(checker.Options{}); got.ReflectedAttributes != nil {
@@ -87,7 +113,7 @@ final class Entity {
 	return root
 }
 
-// phn check reads unused.reflectedAttributes, and so does phn build, which
+// phn check reads unused.reflected-attributes, and so does phn build, which
 // prints the same warnings.
 func TestCheckReflectedAttributes(t *testing.T) {
 	bin := phnBinary(t)
@@ -96,12 +122,20 @@ func TestCheckReflectedAttributes(t *testing.T) {
 		want   []string // the properties reported
 	}{
 		{"", []string{"plain"}},
-		{`{"reflectedAttributes": []}`, []string{"mapped", "marked", "plain"}},
+		{`{"reflected-attributes": []}`, []string{"mapped", "marked", "plain"}},
+		{`{"reflected-attributes": ["App\\Mapping"]}`, []string{"marked", "plain"}},
+		// The key as it was spelt before 0.8.0 is read as the key.
 		{`{"reflectedAttributes": ["App\\Mapping"]}`, []string{"marked", "plain"}},
 	} {
 		root := reflectedTree(t, c.unused)
 		for _, cmd := range []string{"check", "build"} {
-			stdout, stderr, _ := run(t, root, bin, cmd)
+			stdout, stderr, err := run(t, root, bin, cmd)
+			// And it is warned of, on the project file, by the commands
+			// that print the file's findings; a warning fails nothing.
+			const warning = `phaenon.json:1:39: warning P4016: "unused.reflectedAttributes" is written "unused.reflected-attributes" since phn 0.8.0`
+			if earlier := strings.Contains(c.unused, "reflectedAttributes"); strings.Contains(stderr, warning) != earlier || strings.Contains(stdout+stderr, "P4016") != earlier || err != nil {
+				t.Errorf("phn %s with unused %s (%v): the warning of the earlier spelling, want %v\n%s%s", cmd, c.unused, err, earlier, stdout, stderr)
+			}
 			var got []string
 			for _, name := range []string{"mapped", "marked", "plain"} {
 				if strings.Contains(stdout+stderr, "Entity::$"+name) {
@@ -118,7 +152,7 @@ func TestCheckReflectedAttributes(t *testing.T) {
 // phn lsp reads it too.
 func TestLSPReflectedAttributes(t *testing.T) {
 	bin := phnBinary(t)
-	root := reflectedTree(t, `{"reflectedAttributes": []}`)
+	root := reflectedTree(t, `{"reflected-attributes": []}`)
 	s := startLSP(t, bin, root, `{}`)
 	path := filepath.Join(root, "src/Entity.phn")
 	uri := fileURI(path)
@@ -142,5 +176,27 @@ func TestLSPReflectedAttributes(t *testing.T) {
 	}
 	if want := []string{"mapped", "marked", "plain"}; !slices.Equal(got, want) {
 		t.Errorf("phn lsp with an empty list: reported %v, want %v", got, want)
+	}
+}
+
+// phn lsp reads the key as it was spelt before 0.8.0, and shows the warning
+// of it on the project file.
+func TestLSPEarlierSpelling(t *testing.T) {
+	bin := phnBinary(t)
+	root := reflectedTree(t, `{"reflectedAttributes": []}`)
+	s := startLSP(t, bin, root, `{}`)
+	uri := fileURI(filepath.Join(root, ProjectFile))
+	m := s.next(func(m map[string]any) bool {
+		p, _ := m["params"].(map[string]any)
+		return m["method"] == "textDocument/publishDiagnostics" && p["uri"] == uri
+	})
+	var got []string
+	for _, d := range m["params"].(map[string]any)["diagnostics"].([]any) {
+		code, _ := d.(map[string]any)["code"].(string)
+		msg, _ := d.(map[string]any)["message"].(string)
+		got = append(got, code+" "+msg)
+	}
+	if len(got) != 1 || !strings.HasPrefix(got[0], `P4016 "unused.reflectedAttributes" is written "unused.reflected-attributes" since phn 0.8.0`) {
+		t.Errorf("phn lsp with the earlier spelling: %q on %s, want the one warning of it", got, ProjectFile)
 	}
 }

@@ -162,7 +162,10 @@ func resolveTarget(proj *project, composer *composerFile, anchor string) target 
 
 // projectTarget resolves the target of a build or check run: the project
 // file's directory (the working directory) or, without one, the first path
-// given locates composer.json.
+// given locates composer.json. The target's findings are the project
+// file's, and what the file's own keys draw goes before them: a key in an
+// earlier spelling (spellingDiags), wherever the file is read to check or
+// build, an installed package's included.
 func projectTarget(proj *project, paths []string) target {
 	dir := "."
 	anchor := ""
@@ -173,7 +176,9 @@ func projectTarget(proj *project, paths []string) target {
 		dir = paths[0]
 		anchor = paths[0]
 	}
-	return resolveTarget(proj, findComposerJSON(dir), anchor)
+	t := resolveTarget(proj, findComposerJSON(dir), anchor)
+	t.Diags = append(proj.spellingDiags(), t.Diags...)
+	return t
 }
 
 // jsonPosition returns the 1-based line and column of the value at path in

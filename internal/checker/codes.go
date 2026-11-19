@@ -244,4 +244,9 @@ var (
 	// another minor version than phn's, which the compiled code called;
 	// retired on 2026-11-08, when the output stopped depending on any package
 	// (design/roadmap.md D24, tooling.md T16). Both codes stay reserved.
+	// P4016: a key of phaenon.json written as it was spelt before the keys
+	// became lower-case words joined by dashes (design/roadmap.md D34),
+	// reported on the project file; the key is read as the one the message
+	// names, until the first beta.
+	P4016 = Code{"P4016", Warning, "project file key in an earlier spelling"}
 )

@@ -298,6 +298,13 @@ from the package by hand.
 - **A key of `phaenon.json` is added with its release** (`cmd/phn/conflict.go`): the next release
   in `keyReleases`, `earlierReleases` extended to the last release made, the alias moved as above.
   `TestKeyReleases` holds the three to the reader's keys and to `CHANGELOG.md`.
+  - **A key is lower-case words joined by dashes** (`reflected-attributes`;
+    `../design/roadmap.md` D34), as `composer.json`'s keys are and the command line's switches.
+    A key that is respelt is a new key with its own release; the earlier spelling stays a field
+    of the reader with a `spelt` tag naming the new one, is read as it with a warning (`P4016`)
+    until the release its comment names, keeps its own release in `keyReleases`, and the two in
+    one file are refused. The plugin's reader takes both spellings too, and the vectors hold
+    each case.
   - **What the tests cannot see is when a key was merged.** A key given a release that was
     already made passes them, although that release does not read the key and a library's
     `conflict` then lets it in. Whoever reviews a change that adds a key checks that the release

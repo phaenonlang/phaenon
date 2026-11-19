@@ -20,7 +20,7 @@ import (
 type Options struct {
 	// Deprecations reports calls to @deprecated declarations (P4006).
 	Deprecations bool
-	// ReflectedAttributes is phaenon.json's unused.reflectedAttributes: when
+	// ReflectedAttributes is phaenon.json's unused.reflected-attributes: when
 	// not nil, a private property escapes P2406–P2408 only through an
 	// attribute whose class is one of these or extends or implements one.
 	// Nil keeps the default, any attribute but PHP's own; an empty list lets

@@ -146,6 +146,10 @@ outputs with no source behind them are removed. "exclude" lists paths the checke
 check skips them, build compiles them without reporting their diagnostics (--exclude adds more).
 "php" is the target, the oldest PHP the output must run on (8.5 or 8.6); without it, the lowest
 version composer.json's require.php admits.
+"unused": {"reflected-attributes": ["App\\Mapping"]} names the attribute classes, their subclasses
+and implementations included, that spare a private property the warnings of unused members; without
+it any attribute but PHP's own does. The key's spelling before 0.8.0, reflectedAttributes, is read
+until the first beta, with a warning that names this one (P4016); both in one file are an error.
 "committed": ["src"] lists the roots whose outputs the project's repository tracks, each a key of
 "roots": a library installed as plain PHP by projects without phn. Here every command builds such
 a root as any other. Where the project is an installed package, build --vendor
@@ -153,9 +157,10 @@ leaves the root as installed, writing and removing nothing, and fails when it ca
 outputs: its output directory, or the .php of one of its .phn.
 A project that commits a root is installed by projects whose phn reads its phaenon.json, so its
 composer.json keeps out the releases that cannot: "conflict": {"phaenon/phn": "<0.5.0"} for
-"committed", which 0.5.0 is the first to know. build of the project, and its --check, fail while
-a release from before the newest key the file uses can be installed beside the package, or the
-constraint is one phn cannot judge; the outputs are written all the same.
+"committed", which 0.5.0 is the first to know, "<0.8.0" for "unused.reflected-attributes". build
+of the project, and its --check, fail while a release from before the newest key the file uses
+can be installed beside the package, or the constraint is one phn cannot judge; the outputs are
+written all the same.
 Without a project file, build writes Foo.php next to Foo.phn, or under DIR (mirroring the path
 given) with --out. A file with type errors is not written unless --emit-on-error is given (the
 exit status still reports the errors). --check writes nothing and fails when any output is

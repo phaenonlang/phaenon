@@ -67,10 +67,13 @@ final readonly class ProjectFile
     }
 
     /**
-     * The keys phn knows in a project file, and the one under `unused`.
+     * The keys phn knows in a project file, and those under `unused`: its one key, and that key
+     * as it was spelt before the keys became words joined by dashes (design/roadmap.md D34).
+     * phn reads the earlier spelling as the key, warning of it, until the first beta, when the
+     * second name here goes with phn's field for it; a file that writes both is refused.
      */
     private const array KEYS = ['roots', 'committed', 'exclude', 'php', 'fmt', 'unused'];
-    private const string UNUSED_KEY = 'reflectedAttributes';
+    private const array UNUSED_KEYS = ['reflected-attributes', 'reflectedAttributes'];
 
     /**
      * @return ?self null when there is no file to read, or its roots cannot be told: phn then
@@ -224,9 +227,10 @@ final readonly class ProjectFile
      * The key beside `roots` and `committed` for whose value phn refuses the file
      * (readProjectFile in cmd/phn/project.go), when there is one. phn reads `exclude` and `fmt`
      * as lists of strings, `php` as a string, `unused` as an object whose one key,
-     * `reflectedAttributes`, lists class names, and each of them as null. A key under `unused`
-     * that phn does not know is refused, not passed over: only a key of the file's own object
-     * is.
+     * `reflected-attributes`, lists class names, and each of them as null. The key's earlier
+     * spelling, `reflectedAttributes`, is read as the key, and the two in one object are
+     * refused. A key under `unused` that phn does not know is refused, not passed over: only a
+     * key of the file's own object is.
      */
     private static function keyPhnRefuses(\stdClass $data): ?string
     {
@@ -250,8 +254,13 @@ final readonly class ProjectFile
 
     private static function readsUnused(\stdClass $unused): bool
     {
+        $keys = array_map(strval(...), array_keys(get_object_vars($unused)));
+        // One setting in both its spellings, whatever the values: phn chooses neither.
+        if (array_diff(self::UNUSED_KEYS, $keys) === []) {
+            return false;
+        }
         foreach (get_object_vars($unused) as $key => $value) {
-            if ((string) $key !== self::UNUSED_KEY) {
+            if (!\in_array((string) $key, self::UNUSED_KEYS, true)) {
                 return false;
             }
             if ($value === null) {
