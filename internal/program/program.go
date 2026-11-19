@@ -602,6 +602,12 @@ type Partial struct {
 	// Void says the callee returns void: a closure body calls it without
 	// returning its result.
 	Void bool
+	// Direct marks an application called where it stands with arguments,
+	// `(f(B, ...))(X)`, that the lowering writes as the call it makes,
+	// `f(B, X)`, where its closure would pass on what it is given (a
+	// default not written): the checker refuses nothing of a closure for
+	// it.
+	Direct bool
 }
 
 // PartialParam is one parameter of the closure a partial application

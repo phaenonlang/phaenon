@@ -1,0 +1,37 @@
+// For a PHP 8.5 target, `f(B, ...)` copies the parameters `...` leaves into
+// the closure it is lowered to, with their defaults; where a default cannot
+// be written in another file, the closure passes on what it is given,
+// `mixed ...$args` (design/php-versions.md §5.3). A by-reference parameter
+// among them would then be passed on by value, its write lost, and a
+// by-reference variadic would refuse a literal for any other parameter: the
+// partial application is refused (P1002). A ? for each parameter `...`
+// leaves before a variadic one gives the closure those parameters, with no
+// default to write; called where it stands with arguments, the
+// application is the call it makes.
+
+final class Note {
+    const TEXT = 'note';
+}
+
+function noted(string $t, string &$out = Note::TEXT): string { $out = $t; return $t; }
+function kept(string $t, string &$out = 'o'): string { $out = $t; return $t; }
+function counted(string $t, string $k = Note::TEXT, int &...$refs): string { return $t . $k; }
+function both(string $t, string $k = Note::TEXT, ?string &$out = null): string { $out = $t; return $t . $k; }
+
+function leftByRef(): void {
+    $a = noted('x', ...); // want P1002 "`...` leaves the by-reference parameter $out, which the closure written for PHP 8.5 would pass on by value, as a default of the parameters it leaves cannot be written there: write a ? for $out in place of the `...`, or target PHP 8.6"
+    $b = noted('x', ?);
+    // Its default written in the closure, it stays by reference there.
+    $c = kept('x', ...);
+    $d = counted('x', ...); // want P1002 "leaves the by-reference parameter $refs, which the closure written for PHP 8.5 would pass on by value, as a default of the parameters it leaves cannot be written there: write a ? for $k before the `...`"
+    $e = counted('x', ?, ...);
+    $f = both('x', ...); // want P1002 "write a ? for each of $k, $out in place of the `...`"
+    $g = both('x', ?, ?);
+    $n = 1;
+    $out = null;
+    echo $b($out), $c(), $e('k', $n), $g('k', $out);
+    // Called where it stands, it is the call it makes, and nothing of a
+    // closure is refused.
+    $v = '';
+    echo (noted('y', ...))($v), (counted('z', ...))('k', $n);
+}
