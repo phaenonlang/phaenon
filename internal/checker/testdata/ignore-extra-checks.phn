@@ -15,5 +15,5 @@ function power(string $a, string $b, string $c, string $d, string $e, string $f,
     echo $d ** 2 + $e * 2; // @phaenon-ignore P2301 (the extra check and the parity finding of one code)
     echo $f ** 2; // @phaenon-ignore P2103 // want P2301 extra, P4015 "no P2103 is reported on line 16"
     echo $i ** 2; // @phaenon-ignore P2301 // want P4015 "no P2301 is reported on line 17"
-    echo $i ** 2; // @phaenon-ignore-line // want P4015 "nothing is reported on line 18"
+    echo $i ** 2; // @phaenon-ignore-line // want P4015 "is reported on line 18"
 }
