@@ -739,7 +739,7 @@ function shapeWider(array $github, array $session, array $short): void
     takesSignIn(static fn (string $o): array => ['token' => 'a', 'who' => 'b', 'expiresIn' => 1]);
     takesSignIn(static fn (string $o): array => $session);
     takesSignIn(static fn (string $o): array => $short); // want P2103
-    takesCalls($github); // want P2103
+    takesCalls($github); // want P2103 extra
     takesNone([]);
     takesNone(['a' => 1]); // want P2103
 }

@@ -28,6 +28,7 @@ func main() {
 	if len(os.Args) < 2 {
 		usage()
 	}
+	refuseExtraChecksFlag(os.Args[1], os.Args[2:])
 	switch os.Args[1] {
 	case "help", "-h", "--help":
 		fmt.Println(usageText())
@@ -60,6 +61,32 @@ func main() {
 	}
 }
 
+// refuseExtraChecksFlag ends phn, with what to do instead, when
+// --no-extra-checks is given to a command that is not one of the three
+// that report a run's findings: the flag turns the extra checks off for one
+// run of phn check, phn build or phn watch. Of the others, phn lsp, phn fix
+// and phn fmt check the project and go by its file; phn migrate checks with
+// the checker's defaults, and the rest do not check. What follows `--` is
+// another command's (phn fix).
+func refuseExtraChecksFlag(cmd string, args []string) {
+	switch cmd {
+	case "fix", "fmt", "lsp", "migrate", "stdlib", "trace", "lex", "print":
+	default:
+		return // check, build and watch take it; anything else is no command
+	}
+	for _, arg := range args {
+		if arg == "--" {
+			return
+		}
+		name, _, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if strings.HasPrefix(arg, "-") && name == "no-extra-checks" {
+			fmt.Fprintf(os.Stderr, "phn %s: --no-extra-checks is for one run of phn check, phn build or phn watch, which report the findings; "+
+				"\"extra-checks\": false in %s turns them off for the project, and phn lsp, phn fix and phn fmt go by it as those three do\n", cmd, ProjectFile)
+			os.Exit(2)
+		}
+	}
+}
+
 // usage prints the usage on standard error and ends phn with status 2: no
 // command, or one phn does not know. Asked for, with phn help, -h or
 // --help, it goes to standard output and phn succeeds (main).
@@ -72,7 +99,7 @@ func usageText() string {
 	return strings.TrimSpace(`
 usage:
   phn help                                                 print this usage (also -h, --help)
-  phn build [--out DIR] [--check] [--emit-on-error] [--exclude PATH]... [<path>...]
+  phn build [--out DIR] [--check] [--emit-on-error] [--no-extra-checks] [--exclude PATH]... [<path>...]
                                                            type-check and compile .phn files to .php
   phn build --no-dev [--check] [--emit-on-error]           the roots but the development ones, whose output
                                                            composer.json maps under autoload-dev alone, as the
@@ -81,7 +108,7 @@ usage:
                                                            phaenon.json, each for its own target, their findings as
                                                            warnings; a package nothing changed in is skipped, and a
                                                            root a package commits the outputs of is left as installed
-  phn check [--format=F] [--no-deprecations] [--exclude PATH]... [<path>...]
+  phn check [--format=F] [--no-deprecations] [--no-extra-checks] [--exclude PATH]... [<path>...]
                                                            type-check .phn files, write nothing; the findings as
                                                            text, json (an object per line, also --json), github
                                                            (workflow commands: annotations) or checkstyle (XML)
@@ -107,7 +134,8 @@ usage:
                                                            directory, on stdin and stdout: diagnostics, hover, go to
                                                            definition, symbols, completion, signature help,
                                                            formatting; the outputs built on save
-  phn watch [--no-build] [--interval D]                    check and build the project around the working directory
+  phn watch [--no-build] [--interval D] [--no-extra-checks]
+                                                           check and build the project around the working directory
                                                            each time one of its files changes
   phn migrate [--keep-docblocks] [--keep-public] [--keep-layout] [--keep-calls] [--pipes=N] [--list-types] [--php X.Y] <path>...
                                                            rewrite .php files as .phn; lift generic docblocks and bare
@@ -150,6 +178,14 @@ version composer.json's require.php admits.
 and implementations included, that spare a private property the warnings of unused members; without
 it any attribute but PHP's own does. The key's spelling before 0.8.0, reflectedAttributes, is read
 until the first beta, with a warning that names this one (P4016); both in one file are an error.
+"extra-checks": false leaves out the checker's extra checks, the findings PHPStan does not make at
+level max that are kept because the code can fail when it runs or a declared type says less than
+the code relies on; they are on without the key. --no-extra-checks does the same for one run of
+check, build or watch, whatever the file says; lsp, fix and fmt take no such flag and go by the
+file, and an installed package by its own. With them off such a finding is not reported: no line, no
+count, no part in the exit status. The language rules and what PHP or PHPStan report on the
+output stay. check --format=json names each finding's kind in its last member, "kind": "language",
+"parity" or "extra".
 "committed": ["src"] lists the roots whose outputs the project's repository tracks, each a key of
 "roots": a library installed as plain PHP by projects without phn. Here every command builds such
 a root as any other. Where the project is an installed package, build --vendor
@@ -157,10 +193,10 @@ leaves the root as installed, writing and removing nothing, and fails when it ca
 outputs: its output directory, or the .php of one of its .phn.
 A project that commits a root is installed by projects whose phn reads its phaenon.json, so its
 composer.json keeps out the releases that cannot: "conflict": {"phaenon/phn": "<0.5.0"} for
-"committed", which 0.5.0 is the first to know, "<0.8.0" for "unused.reflected-attributes". build
-of the project, and its --check, fail while a release from before the newest key the file uses
-can be installed beside the package, or the constraint is one phn cannot judge; the outputs are
-written all the same.
+"committed", which 0.5.0 is the first to know, "<0.8.0" for "unused.reflected-attributes" and for
+"extra-checks". build of the project, and its --check, fail while a release from before the newest
+key the file uses can be installed beside the package, or the constraint is one phn cannot judge;
+the outputs are written all the same.
 Without a project file, build writes Foo.php next to Foo.phn, or under DIR (mirroring the path
 given) with --out. A file with type errors is not written unless --emit-on-error is given (the
 exit status still reports the errors). --check writes nothing and fails when any output is
@@ -310,8 +346,12 @@ func build(args []string) {
 	vendor := fs.Bool("vendor", false, "compile the installed Composer packages that carry a phaenon.json")
 	noDev := fs.Bool("no-dev", false, "leave out the development roots, whose output composer.json maps under autoload-dev alone, as composer install --no-dev does")
 	excludeFlag(fs)
+	extraChecksFlag(fs)
 	fs.Parse(args)
 	if *vendor {
+		if noExtraChecks {
+			fail(`phn build --vendor takes no other options: each installed package is checked as its own %s says, "extra-checks" included`, ProjectFile)
+		}
 		if fs.NArg() > 0 || *out != "" || *check || *emitOnError || *noDev || len(excludes) > 0 {
 			fail("phn build --vendor takes no paths and no other options")
 		}
@@ -808,6 +848,7 @@ func checkCmd(args []string) {
 	asJSON := fs.Bool("json", false, "the same as --format=json")
 	noDeprecations := fs.Bool("no-deprecations", false, "do not report deprecated calls")
 	excludeFlag(fs)
+	extraChecksFlag(fs)
 	fs.Parse(args)
 	if *asJSON {
 		*format = "json"

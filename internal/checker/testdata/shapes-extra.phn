@@ -1,0 +1,163 @@
+// Two rules of array shapes are stricter here than in PHPStan, and a value
+// they alone refuse draws an extra check wherever a value is held to a
+// declared type: a list shape takes a list, not a general array, which may
+// lack its offset 0; and a tuple is exact (design/collections.md §2.4), so
+// a longer one is no shorter one. A value with other entries is refused by
+// both, a parity finding. One case of each for every place a value is
+// given: an argument, a return, a property (assigned and by default), a
+// constant, a parameter's default, a yield. Written as PHP with docblocks.
+// The value is an untouched parameter (untouched.phn), which its function
+// names once, or a literal: of those PHPStan knows what the checker knows.
+// The assignment of an offset is no such place at all: PHPStan holds it to
+// a rule of its own, stricter than the one for an argument.
+namespace ShpExtra;
+
+/** @param list{int, string} $pair */
+function takesPair(array $pair): void
+{
+}
+
+/** @param list{0?: int} $first */
+function takesFirst(array $first): void
+{
+}
+
+final class Holder
+{
+    /** @var list{int, string} */
+    public array $pair = [1, 'a'];
+
+    /** @var list{0?: int} */
+    public array $first = [];
+
+    /** @var list{int, string} */
+    public array $longer = [1, 'a', true]; // want P2201 extra
+
+    /** @var list{int, string} */
+    public array $other = ['a', 1]; // want P2201
+
+    /** @var list{int, string} */
+    public static array $shared = [1, 'a'];
+
+    /** @var list{int, string} */
+    public const array PAIR = [1, 'a', true]; // want P2211 extra
+
+    /** @var list{int, string} */
+    public const array OTHER = ['a', 1]; // want P2211
+
+    /**
+     * @param list{int, string, bool} $triple
+     * @param array<int, int> $byNumber
+     * @param list{int, string, bool} $other
+     * @param list{string, int} $swapped
+     */
+    public function assign(array $triple, array $byNumber, array $other, array $swapped): void
+    {
+        $this->pair = $triple; // want P2201 extra
+        $this->first = $byNumber; // want P2201 extra
+        self::$shared = $other; // want P2201 extra
+        $this->pair = $swapped; // want P2201
+        self::$shared = $swapped; // want P2201
+    }
+
+    /** @param list{int, string} $pair */
+    public function longerDefault(array $pair = [1, 'a', true]): void // want P2208 extra
+    {
+    }
+
+    /** @param list{int, string} $pair */
+    public function otherDefault(array $pair = ['a', 1]): void // want P2208
+    {
+    }
+}
+
+/**
+ * @param list{int, string, bool} $triple
+ * @param array<int, int> $byNumber
+ * @param list{string, int} $swapped
+ */
+function arguments(array $triple, array $byNumber, array $swapped): void
+{
+    takesPair([1, 'a', true]); // want P2103 extra
+    takesPair(pair: [1, 'a', true]); // want P2103 extra
+    takesPair($triple); // want P2103 extra
+    takesFirst($byNumber); // want P2103 extra
+    takesPair($swapped); // want P2103
+    takesPair(['a', 1]); // want P2103
+}
+
+/**
+ * @param list{int, string, bool} $triple
+ * @return list{int, string}
+ */
+function returnsLonger(array $triple): array
+{
+    return $triple; // want P2202 extra
+}
+
+/**
+ * @param array<int, int> $byNumber
+ * @return list{0?: int}
+ */
+function returnsGeneral(array $byNumber): array
+{
+    return $byNumber; // want P2202 extra
+}
+
+/**
+ * @param list{string, int} $swapped
+ * @return list{int, string}
+ */
+function returnsOther(array $swapped): array
+{
+    return $swapped; // want P2202
+}
+
+/**
+ * @param list{int, string, bool} $triple
+ * @return \Closure(): list{int, string}
+ */
+function arrow(array $triple): \Closure
+{
+    return static fn (): array => $triple; // want P2202
+}
+
+/**
+ * @param list{int, string, bool} $triple
+ * @param list{string, int} $swapped
+ * @return \Generator<int, list{int, string}>
+ */
+function yields(array $triple, array $swapped): \Generator
+{
+    yield $triple; // want P2202 extra
+    yield $swapped; // want P2202
+}
+
+/**
+ * @param array<int, int> $byNumber
+ * @return \Generator<int, list{0?: int}>
+ */
+function yieldsGeneral(array $byNumber): \Generator
+{
+    yield $byNumber; // want P2202 extra
+}
+
+/**
+ * @param list{int, string, bool} $triple
+ * @return \Generator<list{int, string}, int>
+ */
+function yieldsKey(array $triple): \Generator
+{
+    yield $triple => 1; // want P2202 extra
+}
+
+/**
+ * @param \ArrayAccess<int, list{int, string}> $store
+ * @param list{int, string, bool} $triple
+ * @param list{string, int} $swapped
+ */
+function offsetSet(\ArrayAccess $store, array $triple, array $swapped): void
+{
+    $store[0] = $triple; // want P2103
+    $store[1] = $swapped; // want P2103
+}

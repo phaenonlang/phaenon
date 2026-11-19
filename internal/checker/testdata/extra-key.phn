@@ -1,0 +1,19 @@
+// A class of the global namespace named `extra` makes a finding's message
+// end in `|extra`. The kind of a finding is a field of what makes two
+// findings one, and no text a message can spell: both operands are
+// reported, with the extra checks on and off.
+final class extra
+{
+}
+
+function power(string $s, string|extra $o): void
+{
+    echo $s ** $o; // want P2301 "operator ** on string", P2301 "operator ** on string|extra"
+}
+
+// The string is an extra check only where nothing else is wrong with the
+// expression, which PHPStan reports once for both operands.
+function beside(string $s, mixed $m): void
+{
+    echo $s ** $m; // want P2301 "operator ** on string"
+}

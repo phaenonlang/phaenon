@@ -88,7 +88,7 @@ function tuples((string, int) $pair, list<(string, int)> $pairs): (int, string)
 // A tuple is exact: a longer value is not one (collections.md §2.4).
 function longer((string, int) $pair, list<(string, int)> $pairs, list<(string, int, bool)> $triples): (string, int)
 {
-    tuples(['a', 1, true], $pairs); // want P2103
+    tuples(['a', 1, true], $pairs); // want P2103 extra
     tuples($pair, $triples); // want P2103
     // A tuple unpacks into its entries, one position each.
     tuples([...$pair], $pairs);
@@ -97,7 +97,7 @@ function longer((string, int) $pair, list<(string, int)> $pairs, list<(string, i
     takesInt([...$pair, 2][0]); // want P2103
     takesInt(count($triples));
 
-    return ['a', 1, 2]; // want P2202
+    return ['a', 1, 2]; // want P2202 extra
 }
 
 function bytesAreNotText(bytes $raw, string $text): void

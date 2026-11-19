@@ -1,0 +1,295 @@
+namespace App\Untouched;
+
+// What proves an extra check of a value is an untouched parameter
+// (design/checker.md §9): one declared by its function alone, whose only
+// occurrence in the body is the read the finding is about. With one
+// occurrence there is no other place where PHPStan could have learnt
+// anything, of the variable or of an expression that holds it, and it
+// passes each line of the first half. The second half has the functions
+// that name the parameter a second time, where PHPStan does learn
+// something and reports, and the places the one occurrence may not stand.
+
+function takesInt(int $x): void
+{
+}
+
+/** @param list{int, string} $pair */
+function takesPair(array $pair): void
+{
+}
+
+// An operand of an arithmetic operator, in an argument and returned.
+function operand(int $i): void
+{
+    takesInt($i ** -1); // want P2103 extra
+}
+
+function inParentheses(int $i): void
+{
+    takesInt(($i) ** -2); // want P2103 extra
+}
+
+function returned(int $i): int
+{
+    return $i ** -1; // want P2202 extra
+}
+
+// Under a condition, in a loop, a try, a branch and an arm that do not
+// hold the parameter, and in a generator.
+function underACondition(int $i, bool $c): void
+{
+    if ($c) {
+        takesInt($i ** -1); // want P2103 extra
+    }
+}
+
+function inALoop(int $i, bool $c): void
+{
+    while ($c) {
+        takesInt($i ** -2); // want P2103 extra
+        $c = false;
+    }
+}
+
+function inATry(int $i): void
+{
+    try {
+        echo \random_int(0, 1);
+    } catch (\Throwable $e) {
+        echo $e->getMessage();
+    } finally {
+        takesInt($i ** -1); // want P2103 extra
+    }
+}
+
+function inABranch(int $i, bool $c): void
+{
+    $c ? takesInt($i ** -1) : takesInt(0); // want P2103 extra
+}
+
+function passesInt(int $x): int
+{
+    return $x;
+}
+
+function inAnArm(int $i, bool $c): void
+{
+    echo match ($c) {
+        true => passesInt($i ** -1), // want P2103 extra
+        false => 0,
+    };
+}
+
+/** @return \Generator<int, int> */
+function inAGenerator(int $i): \Generator
+{
+    yield 1;
+    takesInt($i ** -1); // want P2103 extra
+}
+
+// The other operand is a number written out or another untouched
+// parameter, which a docblock may have typed and a default may follow.
+/** @param int<min, -1> $below */
+function besideAnother(int $i, int $below = -2): void
+{
+    takesInt($i ** $below); // want P2103 extra
+}
+
+function withADefault(int $i = 5): int
+{
+    return $i ** -1; // want P2202 extra
+}
+
+// `**` on a string: the string is typed by PHP alone.
+function onAString(string $s): void
+{
+    echo $s ** 2; // want P2301 extra
+}
+
+function onANullableString(?string $s = null): void
+{
+    echo $s ** 2; // want P2301 extra
+}
+
+function onAStringOrInt(int|string $s): void
+{
+    echo 2 ** $s; // want P2301 extra
+}
+
+function onTwoStrings(string $s, string $t, float $f): void
+{
+    $power = $s ** $f; // want P2301 extra
+    echo $power, 2.5 ** $t; // want P2301 extra
+}
+
+// An arrow function reads the parameter as its function does.
+function inAnArrow(int $i): \Closure
+{
+    return fn (): int => $i ** -1; // want P2202 extra
+}
+
+// The parameter itself: returned, yielded, assigned to a property, and
+// given as an argument, where PHPStan judges it before the callee's
+// assertion tags.
+/**
+ * @param list{int, string, bool} $triple
+ * @return list{int, string}
+ */
+function itselfReturned(array $triple): array
+{
+    return $triple; // want P2202 extra
+}
+
+/**
+ * @param list{int, string, bool} $triple
+ * @return \Generator<int, list{int, string}>
+ */
+function itselfYielded(array $triple): \Generator
+{
+    yield $triple; // want P2202 extra
+}
+
+final class Holder
+{
+    /** @var list{int, string} */
+    public array $pair = [1, 'a'];
+
+    /** @var list{int, string} */
+    public static array $shared = [1, 'a'];
+
+    /** @param list{int, string, bool} $triple */
+    public function keep(array $triple): void
+    {
+        $this->pair = $triple; // want P2201 extra
+    }
+
+    /** @param list{int, string, bool} $triple */
+    public function share(array $triple): void
+    {
+        self::$shared = $triple; // want P2201 extra
+    }
+}
+
+/** @param list{int, string, bool} $triple */
+function itselfGiven(array $triple): void
+{
+    takesPair($triple); // want P2103 extra
+}
+
+/**
+ * @param list{int, string} $pair
+ * @phpstan-assert list{int, non-empty-string} $pair
+ */
+function takesPairAsserting(array $pair): void
+{
+}
+
+/** @param list{int, string, bool} $triple */
+function itselfGivenToAnAssertion(array $triple): void
+{
+    takesPairAsserting($triple); // want P2103 extra
+}
+
+// A second occurrence ends the proof: PHPStan remembers what it was told
+// of the expression as well as of the variable.
+function toldOfTheExpression(int $i): int
+{
+    \assert(\is_float($i ** -1)); // want P2402
+
+    return $i ** -1; // want P2202
+}
+
+/** @phpstan-assert float $x */
+function isFloatish(mixed $x): void
+{
+}
+
+function toldByACallee(int $i): int
+{
+    isFloatish($i ** -1);
+
+    return $i ** -1; // want P2202
+}
+
+function toldByACondition(int $i): int
+{
+    $ok = \is_float($i ** -1);
+    if ($ok) {
+        return $i ** -1; // want P2202
+    }
+
+    return 0;
+}
+
+/** @phpstan-assert 1|2|3 $v */
+function oneOfThree(int $v): void
+{
+}
+
+function toldOfTheVariable(int $i): void
+{
+    oneOfThree($i);
+    takesInt($i ** -1); // want P2103
+}
+
+interface Checks
+{
+    /** @phpstan-assert 1|2|3 $v */
+    public function check(int $v): void;
+}
+
+final class Checker implements Checks
+{
+    public function check(int $v): void
+    {
+    }
+}
+
+function toldByAnInterface(Checker $checker, int $i): int
+{
+    $checker->check($i);
+
+    return $i ** -1; // want P2202
+}
+
+function narrowed(int $i): void
+{
+    if (\in_array($i, [1, 2, 3], true)) {
+        takesInt($i ** -1); // want P2103
+    }
+}
+
+function retyped(int $i): int
+{
+    /** @var 1|2|3 $i */
+    return $i ** -1; // want P2202
+}
+
+// Twice where PHPStan learns nothing: the price of the rule.
+function twice(string $s): void
+{
+    echo $s ** 2; // want P2301
+    echo $s ** 3; // want P2301
+}
+
+// A closure's parameter is typed from where the closure is passed.
+/** @return list<int> */
+function passed(): array
+{
+    return \array_map(fn (int $i): int => $i ** -1, [1, 2, 3]); // want P2202
+}
+
+// A method that another declaration of its hierarchy documents.
+interface Sized
+{
+    /** @param 1|2|3 $i */
+    public function width(int $i): int;
+}
+
+final class Box implements Sized
+{
+    public function width(int $i): int
+    {
+        return $i ** -1; // want P2202
+    }
+}

@@ -29,6 +29,12 @@ type Options struct {
 	// Nil keeps the default, any attribute but PHP's own; an empty list lets
 	// none (design/tooling.md §9.2).
 	ReflectedAttributes []string
+	// NoExtraChecks leaves out the extra checks, the findings PHPStan does
+	// not make at level max (Extra, kinds.go): phaenon.json's
+	// "extra-checks": false, or --no-extra-checks. The zero value keeps
+	// them, which is the default (design/roadmap.md D33). What is returned
+	// with it set is what is returned without it, less the extra checks.
+	NoExtraChecks bool
 	// Observe, when set, is called with the type given to each expression
 	// typed in a checked file, every time it is typed (a loop body, an
 	// argument inferred in two passes): the last call holds the type the
@@ -86,12 +92,16 @@ type Diagnostic struct {
 	EndCol   int
 	Severity Severity
 	Code     string
-	Message  string
+	// Kind says why the finding is reported: a language rule, a parity
+	// finding, or an extra check, which Options.NoExtraChecks leaves out
+	// (kinds.go).
+	Kind    Kind
+	Message string
 	// Related are the declarations the finding is about ("declared here"):
 	// the parameter an argument does not fit, the method an override
 	// breaks. phn lsp shows them beside the finding.
 	Related []Related
-	key     string // the dedupe key, so a rollback can forget the diagnostic
+	key     findingKey // the dedupe key, so a rollback can forget the diagnostic
 	// silencedBy is the ignore comment that silences the finding: it is
 	// kept, and rolled back as any finding is, until Check knows which
 	// comments silenced something, and then left out.
@@ -137,7 +147,10 @@ type Checker struct {
 	p     *program.Program
 	opts  Options
 	diags []Diagnostic
-	seen  map[string]bool
+	// seen are the classes checked; reported, the findings made, each
+	// once (findingKey).
+	seen     map[string]bool
+	reported map[findingKey]bool
 	// guards are the version guards around the code being checked
 	// (guards.go).
 	guards []libraryGuard
@@ -172,6 +185,10 @@ type Checker struct {
 	// type it tests against drew a finding of its own (testType).
 	testSeen     map[ast.Expr]testSeen
 	typeFindings map[ast.TypeExpr]bool
+	// intArith says of each arithmetic expression over integers how
+	// PHPStan types it, where that is proven wider than its type here
+	// (noteArithmetic, extra.go); reportUnfit reads it.
+	intArith map[*ast.Binary]intArith
 	// targetedLabels says, per file, which labels a goto names
 	// (labelTargeted).
 	targetedLabels map[*program.File]map[*ast.Label]bool
@@ -179,7 +196,7 @@ type Checker struct {
 
 // New creates a checker for the program.
 func New(p *program.Program, opts Options) *Checker {
-	c := &Checker{p: p, opts: opts, seen: map[string]bool{}, ignored: map[string]map[int][]*ignoreRule{}, judged: map[string]bool{}}
+	c := &Checker{p: p, opts: opts, seen: map[string]bool{}, reported: map[findingKey]bool{}, ignored: map[string]map[int][]*ignoreRule{}, judged: map[string]bool{}}
 	p.ConstType = c.constType
 	return c
 }
@@ -473,7 +490,11 @@ func (c *Checker) Check() []Diagnostic {
 		}
 		c.report(pr.Span, code, "%s", pr.Msg)
 	}
+	// The comments first, the extra checks after them: a comment that
+	// silences an extra check has silenced a finding of this program, and
+	// is held to it with the extra checks off as with them on.
 	c.settleIgnores()
+	c.settleExtraChecks()
 	sort.SliceStable(c.diags, func(i, j int) bool {
 		a, b := c.diags[i], c.diags[j]
 		if a.File != b.File {
@@ -487,7 +508,45 @@ func (c *Checker) Check() []Diagnostic {
 	return c.diags
 }
 
-// report records a diagnostic at a span of the current file.
+// settleExtraChecks is the last word on the extra checks, once every
+// finding is in: an extra check that a finding of another kind repeats, at
+// the same place in the same words, is that finding, and with
+// Options.NoExtraChecks the extra checks are left out.
+//
+// They are left out here and not where they are reported, so that a check
+// with the switch off is the check with it on, less its extra checks, and
+// nothing else: a pass that is rolled back, a finding that is reported
+// once, a decision taken from whether a type drew findings
+// (typeFindings) all see the same findings in both modes. Whatever else
+// reads the findings before they are returned comes before this call: an
+// ignore comment that silences an extra check has silenced something, with
+// the switch off too.
+func (c *Checker) settleExtraChecks() {
+	extra := 0
+	for _, d := range c.diags {
+		if d.Kind == Extra {
+			extra++
+		}
+	}
+	if extra == 0 {
+		return
+	}
+	kept := c.diags[:0]
+	for _, d := range c.diags {
+		twin := d.key
+		twin.extra = false
+		if d.Kind == Extra && (c.opts.NoExtraChecks || c.reported[twin]) {
+			continue
+		}
+		kept = append(kept, d)
+	}
+	c.diags = kept
+}
+
+// report records a finding at a span of the current file: a language rule
+// where its code is one (languageRules), a parity finding otherwise. A
+// finding PHPStan does not make is an extra check where the place that
+// reports it can prove that (extra.go).
 func (c *Checker) report(span ast.Span, code Code, format string, args ...any) {
 	c.reportRelated(span, code, nil, format, args...)
 }
@@ -509,6 +568,28 @@ func related(f *program.File, span ast.Span, format string, args ...any) *Relate
 
 // reportRelated is report with the declaration the finding is about.
 func (c *Checker) reportRelated(span ast.Span, code Code, rel *Related, format string, args ...any) {
+	c.reportOf(Parity, span, code, rel, format, args...)
+}
+
+// findingKey is what makes two findings one: the place, the code and the
+// words. An extra check is kept apart from a finding of another kind at the
+// same place in the same words, which is reported, rolled back and
+// reported again on its own (settleExtraChecks then leaves the extra one
+// out); the kind is a field of the key and no text in it, which a message
+// could spell.
+type findingKey struct {
+	file      string
+	line, col int
+	code, msg string
+	extra     bool
+}
+
+// reportOf records a finding of the kind its place gives it; a code that
+// is a language rule as a whole makes it one whatever the place says.
+func (c *Checker) reportOf(kind Kind, span ast.Span, code Code, rel *Related, format string, args ...any) {
+	if languageRules[code.ID] {
+		kind = LanguageRule
+	}
 	msg := fmt.Sprintf(format, args...)
 	line, col := c.file.Position(span.Start)
 	end := span.End
@@ -516,13 +597,13 @@ func (c *Checker) reportRelated(span ast.Span, code Code, rel *Related, format s
 		end--
 	}
 	endLine, endCol := c.file.Position(end)
-	key := fmt.Sprintf("%s:%d:%d:%s:%s", c.file.Path, line, col, code.ID, msg)
-	if c.seen[key] {
+	key := findingKey{file: c.file.Path, line: line, col: col, code: code.ID, msg: msg, extra: kind == Extra}
+	if c.reported[key] {
 		return
 	}
-	c.seen[key] = true
+	c.reported[key] = true
 	d := Diagnostic{File: c.file.Path, Line: line, Col: col, EndLine: endLine, EndCol: endCol + 1,
-		Severity: code.Severity, Code: code.ID, Message: msg, key: key}
+		Severity: code.Severity, Code: code.ID, Kind: kind, Message: msg, key: key}
 	if code != P4015 {
 		d.silencedBy = c.silencing(c.file, line, code.ID)
 	}
@@ -540,7 +621,7 @@ func (c *Checker) mark() int { return len(c.diags) }
 
 func (c *Checker) rollback(mark int) {
 	for _, d := range c.diags[mark:] {
-		delete(c.seen, d.key)
+		delete(c.reported, d.key)
 	}
 	c.diags = c.diags[:mark]
 }
@@ -679,7 +760,13 @@ type fnCtx struct {
 	// bindThis, when set, is the object the next closure literal is
 	// called with (`(fn () => $this->x)->call($o)`): child gives that
 	// closure $this and its class's scope, then clears it.
-	bindThis     *thisBinding
+	bindThis *thisBinding
+	// untouched are the parameters of the function or method being
+	// checked that its body names exactly once, in a read
+	// (untouched.go); arith holds the two sides of the arithmetic
+	// being typed. Both serve the proof an extra check needs (extra.go).
+	untouched    untouched
+	arith        arithOperands
 	static       bool // no $this
 	inConst      bool // checking a constant expression: an attribute argument, a constant, a default
 	constClosure bool // a closure inside a constant expression: static, capturing nothing (P2531)

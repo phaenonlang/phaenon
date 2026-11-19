@@ -1,0 +1,209 @@
+namespace App\DeclaredHereAlone;
+
+// An extra check on a parameter's value needs the parameter to have its type
+// from its own declaration and from nowhere else (design/checker.md §10).
+// PHPStan gives a method the docblock of whatever its hierarchy declares
+// under the same name, by more routes than the checker follows: here each
+// body computes with the 1|2|3 that some other declaration documents, and
+// PHPStan reports it. A method that anything in its hierarchy also declares
+// is therefore never the proof, a constructor included, and neither is a
+// trait's own method.
+
+function takesInt(int $x): void
+{
+}
+
+trait Sized
+{
+    /** @param 1|2|3 $i */
+    abstract public function width(int $i): int;
+}
+
+final class Box
+{
+    use Sized;
+
+    public function width(int $i): int
+    {
+        return $i ** -1; // want P2202
+    }
+}
+
+interface Shape
+{
+    /** @param 1|2|3 $i */
+    public function height(int $i): int;
+}
+
+trait Body
+{
+    public function height(int $i): int
+    {
+        return $i ** -1; // want P2202
+    }
+}
+
+final class Tall implements Shape
+{
+    use Body;
+}
+
+interface Outer
+{
+    /** @param 1|2|3 $i */
+    public function f(int $i): int;
+}
+
+interface Inner extends Outer
+{
+    public function f(int $i): int;
+}
+
+final class Through implements Inner
+{
+    public function f(int $i): int
+    {
+        return $i ** -1; // want P2202
+    }
+}
+
+class Documented
+{
+    /** @param 1|2|3 $i */
+    public function g(int $i): int
+    {
+        return $i;
+    }
+}
+
+trait Given
+{
+    public function g(int $i): int
+    {
+        return $i ** -1; // want P2202
+    }
+}
+
+final class FromBoth extends Documented
+{
+    use Given;
+}
+
+trait Deep
+{
+    /** @param 1|2|3 $i */
+    abstract public function h(int $i): int;
+}
+
+trait Deeper
+{
+    use Deep;
+}
+
+abstract class Uses
+{
+    use Deeper;
+}
+
+final class Below extends Uses
+{
+    public function h(int $i): int
+    {
+        return $i ** -1; // want P2202
+    }
+}
+
+trait StaticSized
+{
+    /** @param 1|2|3 $i */
+    abstract public static function s(int $i): int;
+}
+
+final class StaticBox
+{
+    use StaticSized;
+
+    public static function s(int $i): int
+    {
+        return $i ** -1; // want P2202
+    }
+}
+
+class Made
+{
+    /** @param 1|2|3 $i */
+    public function __construct(int $i)
+    {
+        takesInt($i);
+    }
+}
+
+final class MadeBelow extends Made
+{
+    public function __construct(int $i)
+    {
+        takesInt($i ** -1); // want P2103
+        parent::__construct(1);
+    }
+}
+
+interface Maker
+{
+    /** @param 1|2|3 $i */
+    public static function make(int $i): int;
+}
+
+final class Makes implements Maker
+{
+    public static function make(int $i): int
+    {
+        return $i ** -1; // want P2202
+    }
+}
+
+// Declared here and nowhere else, the parameter is the proof.
+final class Alone
+{
+    public function width(int $i): int
+    {
+        return $i ** -1; // want P2202 extra
+    }
+
+    public static function make(int $i): int
+    {
+        return $i ** -1; // want P2202 extra
+    }
+}
+
+// The rule asks no more than whether another declaration exists: one that
+// documents nothing takes the mark as well, and PHPStan passes the code.
+class Plain
+{
+    public function width(int $i): int
+    {
+        return $i;
+    }
+}
+
+final class OverPlain extends Plain
+{
+    public function width(int $i): int
+    {
+        return $i ** -1; // want P2202
+    }
+}
+
+/**
+ * @method void magic(int $i)
+ */
+class WithMagic
+{
+}
+
+final class UnderMagic extends WithMagic
+{
+    public function magic(int $i): void
+    {
+        takesInt($i ** -1); // want P2103
+    }
+}

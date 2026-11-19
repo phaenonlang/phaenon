@@ -130,6 +130,19 @@ type Diagnostic struct {
 	Source             string                         `json:"source"`
 	Message            string                         `json:"message"`
 	RelatedInformation []DiagnosticRelatedInformation `json:"relatedInformation,omitempty"`
+	// Data is what the protocol lets a server attach to a diagnostic for
+	// its own use: a client keeps it and hands it back with a request for
+	// code actions, and shows nothing of it.
+	Data *DiagnosticData `json:"data,omitempty"`
+}
+
+// DiagnosticData is a finding's kind (design/roadmap.md D33): "language"
+// for a language rule, "parity" for what PHP refuses or PHPStan reports
+// on the output, "extra" for an extra check, which the project's
+// "extra-checks": false leaves out. An editor's plugin may read it to say
+// which findings the switch would drop; none has to.
+type DiagnosticData struct {
+	Kind string `json:"kind"`
 }
 
 type DiagnosticRelatedInformation struct {

@@ -1,0 +1,292 @@
+// A static method is held to its parent's signature as any method is. Where
+// the native types the source writes fit as PHP compares them and the
+// documented ones are apart, the finding is an extra check: php declares
+// the class, and PHPStan compares the documented types of static methods
+// only with reportStaticMethodSignatures. Where the written native types
+// are apart, a missing one included, the finding is a parity finding
+// whatever the docblocks say, and stays with the extra checks off. PHP
+// would refuse those types as written. Compiled, some are rewritten until
+// they fit what they override (the override-erasure rule), and then
+// neither php nor PHPStan has anything to say of the signature: the
+// finding is about the source, and the parity run names its line.
+namespace App\OverrideStatic;
+
+class Base
+{
+    /** @return list<int> */
+    public static function widerReturn(): array
+    {
+        return [];
+    }
+
+    /** @param list<int> $x */
+    public static function documentedParam(array $x): void
+    {
+    }
+
+    /** @return list<int> */
+    public static function narrowerReturn(): iterable
+    {
+        return [];
+    }
+
+    /** @param list<int> $x */
+    public static function narrowerParam(iterable $x): void
+    {
+    }
+
+    /** @return int */
+    public static function documentedScalar(): int|string
+    {
+        return 1;
+    }
+
+    /** @param int|string $x */
+    public static function documentedScalarParam(int|string $x): void
+    {
+    }
+
+    /** @return list<int> */
+    public static function missingReturn(): array
+    {
+        return [];
+    }
+
+    /** @param list<int> $x */
+    public static function untypedParam($x): void
+    {
+    }
+
+    /** @param list<int> $x */
+    public static function typedParam(array $x): void
+    {
+    }
+
+    /** @return list<int> */
+    public static function sameTypes(): array
+    {
+        return [];
+    }
+
+    /** @return list<int> */
+    public function instance(): array
+    {
+        return [];
+    }
+}
+
+final class Child extends Base
+{
+    // As written, PHP: "Declaration of Child::widerReturn():
+    // Traversable|array must be compatible with Base::widerReturn(): array".
+    // Compiled, the return type is the parent's array.
+    /** @return list<string> */
+    public static function widerReturn(): iterable // want P2502
+    {
+        return [];
+    }
+
+    /** @param list<string> $x */
+    public static function documentedParam(array $x): void // want P2502 extra
+    {
+    }
+
+    // array for iterable is a return PHP accepts.
+    /** @return list<string> */
+    public static function narrowerReturn(): array // want P2502 extra
+    {
+        return [];
+    }
+
+    // array for iterable is a parameter PHP refuses as written. Compiled,
+    // it is the parent's iterable.
+    /** @param list<string> $x */
+    public static function narrowerParam(array $x): void // want P2502
+    {
+    }
+
+    /** @return string */
+    public static function documentedScalar(): int|string // want P2502 extra
+    {
+        return '';
+    }
+
+    /** @param int $x */
+    public static function documentedScalarParam(int|string $x): void // want P2502 extra
+    {
+    }
+
+    // No return type where the parent declares one: PHP refuses it.
+    /** @return list<string> */
+    public static function missingReturn() // want P2502
+    {
+        return [];
+    }
+
+    // A type where the parent's parameter takes anything: PHP refuses it as
+    // written. Compiled, the parameter is mixed.
+    /** @param list<string> $x */
+    public static function untypedParam(array $x): void // want P2502
+    {
+    }
+
+    // No type where the parent's parameter has one: PHP accepts it.
+    /** @param list<string> $x */
+    public static function typedParam($x): void // want P2502 extra
+    {
+    }
+
+    /** @return list<int> */
+    public static function sameTypes(): array
+    {
+        return [];
+    }
+
+    // Not static: PHPStan compares the documented types.
+    /** @return list<string> */
+    public function instance(): array // want P2502
+    {
+        return [];
+    }
+}
+
+// An extra check ends nothing: the interface is compared after the parent
+// class that drew one, and native types that are apart there are reported
+// beside it. As written, PHP: "Declaration of Wired::plug(array $x): void
+// must be compatible with Socket::plug(string $x): void". Compiled, the
+// parameter is string|array.
+interface Socket
+{
+    public static function plug(string $x): void;
+}
+
+class Plug
+{
+    /** @param list<int> $x */
+    public static function plug(array $x): void
+    {
+    }
+}
+
+final class Wired extends Plug implements Socket
+{
+    /** @param list<string> $x */
+    public static function plug(array $x): void // want P2502 extra "Plug::plug()", P2502 "Socket::plug() (string)"
+    {
+    }
+}
+
+// Two declarations whose documented types the method breaks, and PHP sees
+// fit both: one mistake, one extra check, against the first.
+interface Outlet
+{
+    /** @param list<int> $x */
+    public static function plug(array $x): void;
+}
+
+final class Twice extends Plug implements Outlet
+{
+    /** @param list<string> $x */
+    public static function plug(array $x): void // want P2502 extra "Plug::plug()"
+    {
+    }
+}
+
+// The interface alone: the same two kinds. Compiled, more() returns array.
+interface Feed
+{
+    /** @return list<int> */
+    public static function rows(): array;
+
+    /** @return list<int> */
+    public static function more(): array;
+}
+
+final class Fed implements Feed
+{
+    /** @return list<string> */
+    public static function rows(): array // want P2502 extra
+    {
+        return [];
+    }
+
+    /** @return list<string> */
+    public static function more(): iterable // want P2502
+    {
+        return [];
+    }
+}
+
+// PHP tells false and true from bool, in a native type too: `array|bool`
+// for `array|false` is a return PHP refuses, and `array|false` for
+// `array|true` a parameter it refuses, whatever the docblocks say. Both
+// fit where the child's is the narrower return and the wider parameter.
+class Truth
+{
+    /** @return list<int>|false */
+    public static function found(): array|false
+    {
+        return false;
+    }
+
+    /** @param list<int>|true $x */
+    public static function given(array|true $x): void
+    {
+    }
+
+    /** @return list<int>|true */
+    public static function narrowed(): array|bool
+    {
+        return true;
+    }
+
+    /** @param list<int>|false $x */
+    public static function widened(array|false $x): void
+    {
+    }
+}
+
+final class Untruth extends Truth
+{
+    /** @return list<string>|true */
+    public static function found(): array|bool // want P2502
+    {
+        return true;
+    }
+
+    /** @param list<string>|false $x */
+    public static function given(array|false $x): void // want P2502
+    {
+    }
+
+    /** @return list<string>|false */
+    public static function narrowed(): array|false // want P2502 extra
+    {
+        return false;
+    }
+
+    /** @param list<string>|true $x */
+    public static function widened(array|bool $x): void // want P2502 extra
+    {
+    }
+}
+
+// A default of null makes a parameter's type nullable to PHP: `array $x =
+// null` is `?array $x`, which a child's `array $x` does not take. (PHP 8.4
+// deprecates the spelling, which PHPStan says on the line and the checker
+// does not.)
+class Lenient
+{
+    /** @param list<int> $x */
+    public static function optional(array $x = null): void
+    {
+    }
+}
+
+final class Strict extends Lenient
+{
+    /** @param list<string> $x */
+    public static function optional(array $x = []): void // want P2502
+    {
+    }
+}

@@ -525,7 +525,7 @@ abstract class Child extends Base
     // PHP holds a static method to its parent's signature as it does any
     // other; PHPStan compares these only with reportStaticMethodSignatures.
     /** @return list<string> */
-    public static function staticReturn(): array // want P2502
+    public static function staticReturn(): array // want P2502 extra
     {
         return [];
     }

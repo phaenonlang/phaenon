@@ -66,7 +66,7 @@ class B extends A
     // The type parameter under another name is the same `object`.
     find<TObject of object>(class<TObject> $class): ?TObject => null;
 
-    static names(): list<int> => []; // want P2502
+    static names(): list<int> => []; // want P2502 extra
 }
 
 interface I

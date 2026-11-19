@@ -86,8 +86,9 @@ func arrayAccepted(a, p Type, h Hierarchy, depth int) bool {
 		return acceptsArray(arr.Key, p.Key, h, depth+1) && !IsMixed(arr.Value) && acceptsArray(arr.Value, p.Value, h, depth+1)
 	case Shape:
 		// A list shape takes a list, as list<V> does: stricter than
-		// PHPStan, which holds a general array to the entries alone.
-		if p.List && !arr.List {
+		// PHPStan, which holds a general array to the entries alone
+		// (ShapesAsPHPStan).
+		if p.List && !arr.List && !shapesAsPHPStan(h) {
 			return false
 		}
 		for _, e := range p.Entries {
@@ -449,7 +450,9 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 			if len(b.Entries) == 0 && !b.Unsealed && len(a.Entries) > 0 {
 				return false
 			}
-			if IsTuple(b) && (a.Unsealed || len(a.Entries) > len(b.Entries)) {
+			// PHPStan takes the longer shape for the tuple, as for any
+			// shape (ShapesAsPHPStan).
+			if IsTuple(b) && (a.Unsealed || len(a.Entries) > len(b.Entries) && !shapesAsPHPStan(h)) {
 				return false
 			}
 			if b.List && !a.List && !shapeIsList(a) {
@@ -785,6 +788,34 @@ func shapeNonEmpty(s Shape) bool {
 		}
 	}
 	return false
+}
+
+// phpstanShapes is a hierarchy under which array shapes are compared as
+// PHPStan compares them (ShapesAsPHPStan).
+type phpstanShapes struct{ Hierarchy }
+
+// ShapesAsPHPStan returns h, which is not nil, for a comparison that reads
+// two rules of array shapes as PHPStan reads them, where this package is
+// the stricter one:
+//
+//   - a list shape takes a general array whose entries fit: PHPStan holds
+//     `array<int, int>` for `list{0?: int}` to the entries alone;
+//   - a tuple takes a longer one: PHPStan accepts the shape with more
+//     entries, `list{int, string, bool}` for `list{int, string}`.
+//
+// Every other rule is the same. The checker compares a second time under
+// it where a value did not fit: one that fits here is a value PHPStan
+// accepts, and the finding an extra check (design/roadmap.md D33).
+func ShapesAsPHPStan(h Hierarchy) Hierarchy {
+	if shapesAsPHPStan(h) {
+		return h
+	}
+	return phpstanShapes{h}
+}
+
+func shapesAsPHPStan(h Hierarchy) bool {
+	_, ok := h.(phpstanShapes)
+	return ok
 }
 
 // IsTuple reports the shape a tuple `(A, B)` is: sealed, positional, two

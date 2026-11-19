@@ -61,6 +61,7 @@ var keyReleases = map[string]string{
 	"unused.reflectedAttributes":  "0.2.0",
 	"committed":                   "0.5.0",
 	"unused.reflected-attributes": "0.8.0",
+	"extra-checks":                "0.8.0",
 }
 
 // earlierReleases lists, oldest first, the releases of phaenon/phn from

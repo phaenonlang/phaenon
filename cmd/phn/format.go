@@ -23,11 +23,16 @@ var checkFormats = []string{"text", "json", "github", "checkstyle"}
 // as its \u escape and bytes that are no UTF-8 as U+FFFD, where Go's own
 // quoting (%q) writes \x00 and \U0001F600, which no JSON reader takes.
 // `<`, `>` and `&` stay as they are: the types in a message are read by
-// people too.
+// people too. "kind" is why the finding is reported (design/roadmap.md
+// D33): "language" for a language rule, "parity" for what PHP refuses or
+// PHPStan reports on the output, "extra" for an extra check, which
+// --no-extra-checks and phaenon.json's "extra-checks": false leave out. It
+// is the last member, so that a reader of the members before it reads the
+// lines as before.
 func writeJSON(w io.Writer, diags []checker.Diagnostic) {
 	for _, d := range diags {
-		fmt.Fprintf(w, `{"file":%s,"line":%d,"col":%d,"endLine":%d,"endCol":%d,"severity":%s,"code":%s,"message":%s}`+"\n",
-			jsonString(d.File), d.Line, d.Col, d.EndLine, d.EndCol, jsonString(d.Severity.String()), jsonString(d.Code), jsonString(d.Message))
+		fmt.Fprintf(w, `{"file":%s,"line":%d,"col":%d,"endLine":%d,"endCol":%d,"severity":%s,"code":%s,"message":%s,"kind":%s}`+"\n",
+			jsonString(d.File), d.Line, d.Col, d.EndLine, d.EndCol, jsonString(d.Severity.String()), jsonString(d.Code), jsonString(d.Message), jsonString(d.Kind.String()))
 	}
 }
 

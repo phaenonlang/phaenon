@@ -1350,7 +1350,13 @@ func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
 		return
 	}
 	if !types.IsAcceptable(t, expected, x.p()) {
-		x.report(s.Expr.Span(), P2202, "%s should return %s but returns %s", x.name, x.typeName(expected), x.typeName(t))
+		// With an inline @var the type held to the declaration is the
+		// tag's, of which the expression says nothing.
+		value := s.Expr
+		if declared != nil {
+			value = nil
+		}
+		x.c.reportUnfit(x.given(value), t, expected, s.Expr.Span(), P2202, nil, "%s should return %s but returns %s", x.name, x.typeName(expected), x.typeName(t))
 	}
 }
 
@@ -1406,13 +1412,13 @@ func (x *fnCtx) yield(e *ast.Yield, env *state) types.Type {
 	if e.Key != nil {
 		kt = x.expr(e.Key, env, k)
 		if x.hasReturn && !types.IsAcceptable(kt, k, x.p()) {
-			x.report(e.Key.Span(), P2202, "%s yields key %s, expected %s", x.name, x.typeName(kt), x.typeName(k))
+			x.c.reportUnfit(x.given(e.Key), kt, k, e.Key.Span(), P2202, nil, "%s yields key %s, expected %s", x.name, x.typeName(kt), x.typeName(k))
 		}
 	}
 	if e.Value != nil {
 		vt = x.expr(e.Value, env, v)
 		if x.hasReturn && !types.IsAcceptable(vt, v, x.p()) {
-			x.report(e.Value.Span(), P2202, "%s yields %s, expected %s", x.name, x.typeName(vt), x.typeName(v))
+			x.c.reportUnfit(x.given(e.Value), vt, v, e.Value.Span(), P2202, nil, "%s yields %s, expected %s", x.name, x.typeName(vt), x.typeName(v))
 		}
 	}
 	x.yieldKeys = append(x.yieldKeys, kt)
@@ -1476,6 +1482,7 @@ func variadicArray(elem types.Type) types.Type {
 // and a missing return is reported.
 func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.Stmt, span ast.Span) *state {
 	env := newEnv()
+	x.untouched = x.untouchedParams(params, decls, stmts)
 	// A method that overrides another compiles with the parameters the
 	// override-erasure rule widened (design/generics.md §4.3): a PHP caller
 	// may pass what the overridden method accepts.
@@ -1518,7 +1525,7 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 			// A default for a parameter typed by a template is held to the
 			// template's bound: `B $behavior = 1` with `B of 1|2`.
 			if !types.IsAcceptable(dt, paramsToBounds(p.Type), x.p()) {
-				x.report(decls[i].Default.Span(), P2208, "default value %s does not match parameter $%s of type %s", x.typeName(dt), p.Name, x.typeName(p.Type))
+				x.c.reportUnfit(given{expr: decls[i].Default}, dt, paramsToBounds(p.Type), decls[i].Default.Span(), P2208, nil, "default value %s does not match parameter $%s of type %s", x.typeName(dt), p.Name, x.typeName(p.Type))
 			}
 		}
 	}
@@ -1588,6 +1595,10 @@ func (c *Checker) labelTargeted(f *program.File, l *ast.Label) bool {
 func (x *fnCtx) child(static bool) *fnCtx {
 	c := &fnCtx{c: x.c, file: x.file, class: x.class, static: x.static || static, res: x.res, byRef: map[string]bool{}, thisType: x.thisType, inScope: x.inScope}
 	c.name = "closure"
+	// An arrow function reads the variables of its function, the untouched
+	// parameters among them (untouched.go); a closure that names one, in
+	// its `use` or as a variable of its own, has taken the property away.
+	c.untouched = x.untouched
 	if b := x.bindThis; b != nil {
 		x.bindThis = nil
 		if !static {
@@ -1940,7 +1951,7 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 		case isNever && c.constClosure:
 			x.report(e.Body.Span(), P2209, "arrow function is declared never and cannot return: in a constant expression it compiles to a closure that returns its expression")
 		case !types.IsAcceptable(bt, ret, x.p()):
-			x.report(e.Body.Span(), P2202, "arrow function should return %s but returns %s", x.typeName(ret), x.typeName(bt))
+			x.c.reportUnfit(x.given(e.Body), bt, ret, e.Body.Span(), P2202, nil, "arrow function should return %s but returns %s", x.typeName(ret), x.typeName(bt))
 		}
 		ret = refinedReturn(ret, []types.Type{bt}, false, false, x.p())
 	} else {

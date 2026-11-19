@@ -1,0 +1,19 @@
+// deprecations: on
+namespace IgnoreExtraChecks;
+// An ignore comment is held to the findings the checker makes of the line,
+// the extra checks among them, whether or not the run reports them. One
+// that silences an extra check silences it with the extra checks on; with
+// them off it still has something to silence, and is no P4015. One that
+// names a code nothing draws on its line is P4015 either way. Each string
+// is a parameter of its own: an extra check needs its only read.
+
+function power(string $a, string $b, string $c, string $d, string $e, string $f, int $i): void {
+    echo $a ** 2; // @phaenon-ignore P2301
+    echo $b ** 2; // @phaenon-ignore-line
+    // @phaenon-ignore-next-line
+    echo $c ** 2;
+    echo $d ** 2 + $e * 2; // @phaenon-ignore P2301 (the extra check and the parity finding of one code)
+    echo $f ** 2; // @phaenon-ignore P2103 // want P2301 extra, P4015 "no P2103 is reported on line 16"
+    echo $i ** 2; // @phaenon-ignore P2301 // want P4015 "no P2301 is reported on line 17"
+    echo $i ** 2; // @phaenon-ignore-line // want P4015 "is reported on line 18"
+}

@@ -252,6 +252,7 @@ func watchCmd(args []string) {
 	fs := flag.NewFlagSet("watch", flag.ExitOnError)
 	noBuild := fs.Bool("no-build", false, "check only; write no outputs")
 	every := fs.Duration("interval", 300*time.Millisecond, "how often to look for changes")
+	extraChecksFlag(fs)
 	fs.Parse(args)
 	if fs.NArg() > 0 {
 		fail("phn watch takes no paths: it watches the roots of %s", ProjectFile)
