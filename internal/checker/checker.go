@@ -192,6 +192,10 @@ type Checker struct {
 	// targetedLabels says, per file, which labels a goto names
 	// (labelTargeted).
 	targetedLabels map[*program.File]map[*ast.Label]bool
+	// atOnce maps the argument list of a partial application to the call
+	// that calls it where it stands with arguments, `(f(B, ...))(X)`
+	// (Partial.Direct).
+	atOnce map[*ast.ArgList]*ast.Call
 }
 
 // New creates a checker for the program.

@@ -2,6 +2,7 @@ package emit
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -34,7 +35,7 @@ func (e *emitter) lowerTarget(f *ast.File) error {
 	if e.opts.Program.Target().AtLeast(phpversion.PHP86) {
 		return nil
 	}
-	l := &targetLowering{e: e, bare: map[ast.Expr]bool{}, constExpr: map[ast.Expr]bool{}, pipes: map[ast.Expr]*ast.Binary{}, leftOf: map[ast.Expr]*ast.Binary{}}
+	l := &targetLowering{e: e, bare: map[ast.Expr]bool{}, constExpr: map[ast.Expr]bool{}, atOnce: map[ast.Expr]*ast.Call{}, pipes: map[ast.Expr]*ast.Binary{}, leftOf: map[ast.Expr]*ast.Binary{}}
 	for _, s := range f.Stmts {
 		if _, ok := s.(*ast.Namespace); ok {
 			l.namespaced = true
@@ -108,6 +109,9 @@ type targetLowering struct {
 	bare map[ast.Expr]bool
 	// constExpr marks the partial applications inside constant expressions.
 	constExpr map[ast.Expr]bool
+	// atOnce maps the expressions called where they stand with arguments,
+	// `(f(1, ...))(2)`, to that call.
+	atOnce map[ast.Expr]*ast.Call
 	// pipes maps a pipe's right side to the pipe, leftOf its left side.
 	pipes      map[ast.Expr]*ast.Binary
 	leftOf     map[ast.Expr]*ast.Binary
@@ -161,6 +165,18 @@ func (l *targetLowering) context(n ast.Node) bool {
 			l.pipes[n.Right] = n
 			l.leftOf[n.Left] = n
 		}
+	case *ast.Call:
+		callee := n.Callee
+		for {
+			p, ok := callee.(*ast.Paren)
+			if !ok {
+				break
+			}
+			callee = p.Expr
+		}
+		if n.Args != nil && len(n.Args.Args) > 0 {
+			l.atOnce[callee] = n
+		}
 	case *ast.Param:
 		if n.Default != nil {
 			l.bare[n.Default] = true
@@ -204,15 +220,17 @@ func (l *targetLowering) record(args *ast.ArgList, at ast.Node) (*program.Partia
 	return nil, l.e.errorf(at, "this partial application needs PHP 8.6, or the checker's types to be lowered for the target 8.5")
 }
 
-// params writes a closure's parameter list from the record.
-func params(rec *program.Partial, fallback bool) string {
+// params writes a closure's parameter list from the record, the
+// parameters `...` leaves passed on as `mixed ...$` + rest where fallback
+// says so.
+func params(rec *program.Partial, fallback bool, rest string) string {
 	var parts []string
-	rest := false
+	passed := false
 	for _, p := range rec.Params {
 		if fallback && p.Arg == nil {
-			if !rest {
-				parts = append(parts, "mixed ...$args")
-				rest = true
+			if !passed {
+				parts = append(parts, "mixed ...$"+rest)
+				passed = true
 			}
 			continue
 		}
@@ -238,6 +256,28 @@ func params(rec *program.Partial, fallback bool) string {
 
 // fallback reports whether the parameters `...` stands for have a default
 // no file can spell, so they are passed on as `mixed ...$args`.
+//
+// restName is the name of that variadic: args, or args2, args3, … where
+// the closure would hide a variable of that name its bound arguments read
+// (uses) or declare a parameter of it twice, a placeholder's named after
+// the callee's. PHP's own closure for the application has the callee's
+// parameters there, and no variadic to name.
+func restName(rec *program.Partial, uses []string) string {
+	taken := map[string]bool{}
+	for _, u := range uses {
+		taken[u] = true
+	}
+	for _, p := range rec.Params {
+		if p.Arg != nil {
+			taken[p.Name] = true
+		}
+	}
+	name := "args"
+	for i := 2; taken[name]; i++ {
+		name = fmt.Sprintf("args%d", i)
+	}
+	return name
+}
 func fallback(rec *program.Partial) bool {
 	for _, p := range rec.Params {
 		if p.Arg == nil && p.Unwritable {
@@ -249,7 +289,7 @@ func fallback(rec *program.Partial) bool {
 
 // fillPlaceholders replaces each placeholder by the closure parameter it
 // stands for, and `...` by the parameters it leaves.
-func (l *targetLowering) fillPlaceholders(args *ast.ArgList, rec *program.Partial, fb bool) {
+func (l *targetLowering) fillPlaceholders(args *ast.ArgList, rec *program.Partial, fb bool, rest string) {
 	for _, a := range args.Args {
 		if a.Placeholder == nil {
 			continue
@@ -264,7 +304,7 @@ func (l *targetLowering) fillPlaceholders(args *ast.ArgList, rec *program.Partia
 		}
 		var list []string
 		if fb {
-			list = []string{"...$args"}
+			list = []string{"...$" + rest}
 		} else {
 			for _, p := range rec.Params {
 				switch {
@@ -327,10 +367,31 @@ func (l *targetLowering) partial(call ast.Expr, args *ast.ArgList) error {
 	if rec.Refused != "" {
 		return l.e.errorf(call, "this partial application needs PHP 8.6 (target 8.5): %s", rec.Refused)
 	}
+	if at := l.atOnce[call]; at != nil && rec.Direct {
+		l.direct(call, args, at)
+		return nil
+	}
 	fb := fallback(rec)
-	l.e.wrapClosure(call.Span(), closureParts(rec, fb, l.constExpr[call], captured(call, args)), !l.bare[call])
-	l.fillPlaceholders(args, rec, fb)
+	uses := captured(call, args)
+	rest := restName(rec, uses)
+	// A closure called where it stands with arguments has them typed by
+	// PHPStan from that call, which a @var of $args may not be wider than
+	// (varTag.nativeType), and needs none.
+	l.e.wrapClosure(call.Span(), closureParts(rec, fb, l.atOnce[call] == nil, l.constExpr[call], rest, uses), !l.bare[call])
+	l.fillPlaceholders(args, rec, fb, rest)
 	return nil
+}
+
+// direct writes `(f(B, ...))(X, Y)`, called where it stands with
+// arguments, as the call it makes, `f(B, X, Y)` (program.Partial.Direct,
+// which the checker decides): the parentheses before the application and
+// the text from `...` to X go, which hold nothing else.
+func (l *targetLowering) direct(call ast.Expr, args *ast.ArgList, at *ast.Call) {
+	last := args.Args[len(args.Args)-1]
+	if open := (ast.Span{Start: at.S.Start, End: call.Span().Start}); open.Start < open.End {
+		l.e.replace(open, "")
+	}
+	l.e.replace(ast.Span{Start: last.S.Start, End: at.Args.Args[0].S.Start}, "")
 }
 
 // pipe lowers `A |> f(B, ?, C)` that does not fold to
@@ -355,7 +416,7 @@ func (l *targetLowering) pipe(p *ast.Binary, args *ast.ArgList) error {
 			placeholder = a
 		}
 	}
-	l.e.wrapClosure(p.Right.Span(), closureParts(rec, false, false, captured(p.Right, args)), true)
+	l.e.wrapClosure(p.Right.Span(), closureParts(rec, false, false, false, "", captured(p.Right, args)), true)
 	l.e.replace(placeholder.Placeholder.S, "$"+rec.Params[0].Name)
 	return nil
 }
@@ -374,8 +435,10 @@ type closure struct {
 // a function body and nowhere on a closure, so the closure is then
 // `function (T $p) use ($v) {` with the @var and `return` the call in its
 // block, capturing by value what the arrow function would. In a constant
-// expression it is the static closure PHP 8.5 accepts there.
-func closureParts(rec *program.Partial, fb, constExpr bool, uses []string) closure {
+// expression it is the static closure PHP 8.5 accepts there. With fb the
+// parameters `...` leaves are passed on as `mixed ...$args`, typed for
+// PHPStan where typeRest says so (restShape).
+func closureParts(rec *program.Partial, fb, typeRest, constExpr bool, rest string, uses []string) closure {
 	var vars []string
 	for _, p := range rec.Params {
 		switch {
@@ -388,19 +451,62 @@ func closureParts(rec *program.Partial, fb, constExpr bool, uses []string) closu
 			vars = append(vars, "/** @var "+p.Doc+" $"+p.Name+" */")
 		}
 	}
+	if shape := restShape(rec); fb && typeRest && shape != "" {
+		vars = append(vars, "/** @var "+shape+" $"+rest+" */")
+	}
 	if len(vars) == 0 && !constExpr {
-		return closure{head: "fn(" + params(rec, fb) + ") => "}
+		return closure{head: "fn(" + params(rec, fb, rest) + ") => "}
 	}
 	kw := "function"
 	if constExpr {
 		kw = "static function"
 		uses = nil
 	}
-	head := kw + " (" + params(rec, fb) + ")"
+	head := kw + " (" + params(rec, fb, rest) + ")"
 	if len(uses) > 0 {
 		head += " use ($" + strings.Join(uses, ", $") + ")"
 	}
 	return closure{head: head + " {", block: true, vars: vars, ret: !rec.Void}
+}
+
+// restShape is the type of what a closure that passes on `mixed ...$args`
+// is given (fallback): by position and by name, each the parameter's type,
+// none required, a variadic parameter taking the rest; "" where every one
+// takes mixed, which says nothing more. The closure takes mixed; the @var
+// holds the call to the callee's parameters for PHPStan, which mixed would
+// fail at every typed one.
+func restShape(rec *program.Partial) string {
+	var positional, named []string
+	tail := ""
+	typed := false
+	for _, p := range rec.Params {
+		if p.Arg != nil {
+			continue // a placeholder's parameter is the closure's own
+		}
+		t := p.Doc
+		switch {
+		case t != "":
+		case p.Native != "":
+			t = p.Native
+		default:
+			t = "mixed"
+		}
+		typed = typed || t != "mixed"
+		if p.Variadic {
+			tail = "...<int|string, " + t + ">"
+			continue
+		}
+		positional = append(positional, fmt.Sprintf("%d?: %s", len(positional), t))
+		named = append(named, p.Name+"?: "+t)
+	}
+	if !typed {
+		return ""
+	}
+	parts := append(positional, named...)
+	if tail != "" {
+		parts = append(parts, tail)
+	}
+	return "array{" + strings.Join(parts, ", ") + "}"
 }
 
 // wrapClosure writes c around the call at span, in parentheses when paren

@@ -83,6 +83,7 @@ func isStubFile(f *program.File) bool {
 
 func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	defer x.unresolvedCall(e.S, e.Args)
+	x.noteAtOnce(e)
 	n, isName := e.Callee.(*ast.Name)
 	if !isName {
 		return x.dynamicCall(e, env, expected)
