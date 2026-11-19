@@ -1,0 +1,11 @@
+// Global constants of the names the other files' defaults use: a default
+// copied into a closure in another file must not fall back to them where
+// the callee's namespace has its own, or imports another.
+
+const ON = 'global-on';
+
+const OTHER_ON = 'global-other-on';
+
+const ONLY_GLOBAL = 'global-only';
+
+const FLAG = 'global-flag';

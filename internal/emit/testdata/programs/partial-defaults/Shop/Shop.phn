@@ -1,0 +1,100 @@
+namespace Shop;
+
+use const Other\ON as OTHER_ON;
+
+// Defaults a partial application in App copies, for PHP 8.5, into the
+// closure it is lowered to: each must mean there what it means here,
+// where PHP 8.6 reads it.
+
+const ON = 'shop-on';
+
+const MAX = ON . '-max';
+
+enum Suit: string {
+    case Hearts = 'h';
+}
+
+class Base {
+    const X = 'base-x';
+}
+
+// A default that only define() makes may be the namespace's or the
+// global one when the call runs: it is not copied.
+if (getenv('SHOP_FLAG') !== false) {
+    define('Shop\\FLAG', 'shop-flag');
+}
+
+interface Shelved {
+    lit(string $t, mixed $v = 'shelved'): mixed;
+}
+
+class Shelf extends Base implements Shelved {
+    const X = 'shelf-x';
+
+    static ns(string $t, mixed $v = ON): mixed => $v;
+
+    static selfX(string $t, mixed $v = self::X): mixed => $v;
+
+    static parentX(string $t, mixed $v = parent::X): mixed => $v;
+
+    static suit(string $t, mixed $v = Suit::Hearts): mixed => $v;
+
+    static klass(string $t, mixed $v = __CLASS__): mixed => $v;
+
+    inst(string $t, mixed $v = ON): mixed => $v;
+
+    lit(string $t, mixed $v = 'shelf'): mixed => $v;
+
+    static late(string $t, mixed $v = 'shelf-late'): mixed => $v;
+
+    static viaStatic(): mixed => (static::late('t', ...))();
+}
+
+// The method that runs, and its defaults, are the object's class's, or
+// for static:: the called class's: an override's default is not the one
+// the type a caller sees declares.
+final class Corner extends Shelf {
+    inst(string $t, mixed $v = 'corner'): mixed => $v;
+
+    lit(string $t, mixed $v = 'corner-lit'): mixed => $v;
+
+    static late(string $t, mixed $v = 'corner-late'): mixed => $v;
+}
+
+// Final both, but a call on Left|Right runs the one of the object's class.
+final class Left {
+    side(string $t, mixed $v = 'left'): mixed => $v;
+}
+
+final class Right {
+    side(string $t, mixed $v = 'right'): mixed => $v;
+}
+
+function ns(string $t, mixed $v = ON): mixed => $v;
+
+function onlyGlobal(string $t, mixed $v = ONLY_GLOBAL): mixed => $v;
+
+function relative(string $t, mixed $v = namespace\ON): mixed => $v;
+
+function imported(string $t, mixed $v = OTHER_ON): mixed => $v;
+
+function listed(string $t, mixed $v = [ON, 'k' => ONLY_GLOBAL]): mixed => $v;
+
+function named(string $t, mixed $v = MAX): mixed => $v;
+
+function joined(string $t, mixed $v = ON . '!'): mixed => $v;
+
+function space(string $t, mixed $v = __NAMESPACE__): mixed => $v;
+
+function flagged(string $t, mixed $v = FLAG): mixed => $v;
+
+// PHP's own constants are written as such, though the name is unqualified
+// in a namespace: the closure then passes them, and takes a variable for
+// a by-reference parameter beside them.
+function eol(string $t, string $nl = PHP_EOL): string => $t . strlen($nl) . '/' . func_num_args();
+
+/** @param list<string> $errors */
+function parse(string $s, ?array &$errors = null, int $flags = JSON_PRETTY_PRINT): string {
+    $errors = $s === '' ? null : ['e'];
+    return $s . $flags;
+}

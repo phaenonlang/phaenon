@@ -1,0 +1,13 @@
+namespace Imp;
+
+use const Other\ON;
+
+trait Reads {
+    static fromTrait(string $t, mixed $v = ON): mixed => $v;
+}
+
+final class Reader {
+    use Reads;
+}
+
+function imported(string $t, mixed $v = ON): mixed => $v;
