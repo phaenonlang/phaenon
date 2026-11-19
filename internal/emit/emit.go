@@ -201,13 +201,21 @@ func compile(src []byte, f *ast.File, opts Options) ([]byte, *lineWriter, error)
 // File runs, the output discarded, so that the answer is the build's: the
 // checker reports each stage (P1002) through checker.Options.Unfolded. It
 // passes over a partial application the checker refused, and stops where
-// the build stops on another error, which the checker reports too.
-func UnfoldedBound(src []byte, opts Options) []ast.Expr {
+// the build stops on another error, which the checker reports too. A panic
+// of the passes answers every stage still pending (pendingBound): the
+// lowering cannot say which of them it would write as nested calls, and
+// the check must neither crash nor let one through that the build might
+// write as a closure.
+func UnfoldedBound(src []byte, opts Options) (unfolded []ast.Expr) {
 	if opts.File == nil || opts.File.AST == nil || opts.Program == nil || opts.Program.Target().AtLeast(phpversion.PHP86) {
 		return nil
 	}
 	f := opts.File.AST
-	var unfolded []ast.Expr
+	defer func() {
+		if r := recover(); r != nil {
+			unfolded = pendingBound(opts.File)
+		}
+	}()
 	e := &emitter{src: src, opts: opts, throwsWritten: map[ast.Node]bool{}, unfolded: &unfolded}
 	if w, _ := withdrawn(f); w != nil {
 		return nil
@@ -219,8 +227,40 @@ func UnfoldedBound(src []byte, opts Options) []ast.Expr {
 	e.lowerFunctions(f)
 	e.translateWrittenDocs()
 	e.lowerLine(f)
+	if unfoldedHook != nil {
+		unfoldedHook()
+	}
 	_ = e.lowerTarget(f)
 	return unfolded
+}
+
+// unfoldedHook, set by a test only, runs in UnfoldedBound between the
+// passes: a panic there stands for one of the emitter's.
+var unfoldedHook func()
+
+// pendingBound lists the pipe stages of f the checker keeps from a closure
+// (program.Partial.Bound) and has not refused: those UnfoldedBound
+// answers when it cannot run the lowering to its end.
+func pendingBound(f *program.File) []ast.Expr {
+	var stages []ast.Expr
+	ast.Inspect(f.AST, func(n ast.Node) bool {
+		var args *ast.ArgList
+		switch n := n.(type) {
+		case *ast.Call:
+			args = n.Args
+		case *ast.MethodCall:
+			args = n.Args
+		case *ast.StaticCall:
+			args = n.Args
+		default:
+			return true
+		}
+		if rec := f.Partials[args]; rec != nil && rec.Pipe && rec.Bound != "" && rec.Refused == "" {
+			stages = append(stages, n.(ast.Expr))
+		}
+		return true
+	})
+	return stages
 }
 
 // IsGenerated reports whether src is an emitted file: the marker comment is
