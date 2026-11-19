@@ -71,9 +71,7 @@ abstract class Doubled implements Named
 
     protected function reset(): void
     {
-        static $calls = static function (): int {
-            return 0;
-        };
+        static $calls = fn (): int => 0;
         $this->count = 0;
         self::$hits++;
     }
@@ -109,4 +107,4 @@ function &byRef(array &$a): array
 {
     return $a;
 }
-// phaenon-map v1 functions.phn 1-6=1 7:1 30-31=23 32:24 35-36=26 37:27 45-46=34 47:35 75-76=62 77:63 98-99=83 100:84 104-107=88 108:88
+// phaenon-map v1 functions.phn 1-6=1 7:1 30-31=23 32:24 35-36=26 37:27 45-46=34 47:35 96-97=83 98:84 102-105=88 106:88

@@ -1,0 +1,143 @@
+// targets: 8.5, 8.6
+// A static variable's initialiser is code that runs, since PHP 8.3, when
+// the declaration is first reached, and no constant expression: a closure
+// in it stays as written, an arrow function with what it captures, a
+// closure with its `use` and $this, and a partial application is lowered
+// for 8.5 as anywhere else in a body, capturing what it binds
+// (static-initialisers.php, static-initialisers.8.6.php). Every output
+// prints what the source prints under php.
+
+namespace StaticInitialisers;
+
+use ArrayObject;
+use Closure;
+
+function add(int $a, int $b): int
+{
+    return $a + $b;
+}
+
+final class Box
+{
+    public int $p = 5;
+
+    public function arrow(int $y): int
+    {
+        /** @var Closure(): int $s */
+        static $s = fn (): int => $y + $this->p;
+
+        return $s();
+    }
+
+    public function captured(int $y): int
+    {
+        /** @var Closure(): int $s */
+        static $s = function () use ($y): int {
+            return $y + $this->p;
+        };
+
+        return $s();
+    }
+
+    public function byReference(int $y): int
+    {
+        /** @var Closure(): int $s */
+        static $s = function () use (&$y): int {
+            return ++$y;
+        };
+
+        return $s();
+    }
+
+    public function plain(): int
+    {
+        /** @var Closure(): int $s */
+        static $s = function (): int {
+            return $this->p;
+        };
+
+        return $s();
+    }
+
+    public function nested(int $y): int
+    {
+        /** @var Closure(int): int $s */
+        static $s = static fn (int $n): int => $n + 3;
+
+        return $s($y);
+    }
+
+    public function callable(string $w): int
+    {
+        /** @var Closure(string): int<0, max> $s */
+        static $s = \strlen(...);
+
+        return $s($w);
+    }
+
+    public function made(int $y): int
+    {
+        /** @var ArrayObject<int, int> $s */
+        static $s = new ArrayObject([$y]);
+
+        return \count($s);
+    }
+
+    public function called(int $y): int
+    {
+        /** @var int $s */
+        static $s = add($y, 1);
+
+        return $s;
+    }
+
+    public function bound(int $y): int
+    {
+        /** @var Closure(int): int $s */
+        static $s = add($y, ?);
+
+        return $s(10);
+    }
+
+    public static function inStatic(int $y): int
+    {
+        /** @var Closure(): int $s */
+        static $s = fn (): int => $y * 2;
+
+        return $s();
+    }
+}
+
+function inFunction(int $y): int
+{
+    /** @var Closure(): int $s */
+    static $s = fn (): int => $y * 3;
+
+    return $s();
+}
+
+function inClosure(int $y): int
+{
+    $c = function () use ($y): int {
+        /** @var Closure(): int $s */
+        static $s = fn (): int => $y * 4;
+
+        return $s();
+    };
+
+    return $c();
+}
+
+$box = new Box();
+echo $box->arrow(2), ' ', $box->arrow(9), "\n";
+echo $box->captured(2), ' ', $box->captured(9), "\n";
+echo $box->byReference(2), ' ', $box->byReference(9), "\n";
+echo $box->plain(), "\n";
+echo $box->nested(2), "\n";
+echo $box->callable('abc'), "\n";
+echo $box->made(2), "\n";
+echo $box->called(2), ' ', $box->called(9), "\n";
+echo $box->bound(2), ' ', $box->bound(9), "\n";
+echo Box::inStatic(2), "\n";
+echo inFunction(2), "\n";
+echo inClosure(2), "\n";

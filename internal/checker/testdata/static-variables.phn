@@ -34,3 +34,50 @@ function flag(): bool
 
     return $first;
 }
+
+// The initialiser is code that runs, since PHP 8.3, when the declaration
+// is first reached, and no constant expression: a closure in it may
+// capture the scope and use $this, and an arrow function captures what it
+// reads, where a constant expression allows neither (P2531).
+final class Counter
+{
+    public int $p = 5;
+
+    public function captured(int $y): int
+    {
+        /** @var \Closure(): int $s */
+        static $s = function () use ($y): int {
+            return $y + $this->p;
+        };
+
+        return $s();
+    }
+
+    public function arrow(int $y): int
+    {
+        /** @var \Closure(): int $s */
+        static $s = fn (): int => $y + $this->p;
+
+        return $s();
+    }
+
+    public function byReference(int $y): int
+    {
+        /** @var \Closure(): int $s */
+        static $s = function () use (&$y): int {
+            return ++$y;
+        };
+
+        return $s();
+    }
+}
+
+function undefinedCapture(): int
+{
+    /** @var \Closure(): int $s */
+    static $s = function () use ($missing): int { // want P2008 "undefined variable $missing"
+        return 1;
+    };
+
+    return $s();
+}

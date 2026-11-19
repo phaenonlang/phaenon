@@ -187,9 +187,10 @@ func (l *targetLowering) context(n ast.Node) bool {
 			markConst(n.Value)
 		}
 	case *ast.StaticVar:
+		// The initialiser is code that runs (PHP 8.3), no constant
+		// expression: a partial application in it captures what it binds.
 		if n.Default != nil {
 			l.bare[n.Default] = true
-			markConst(n.Default)
 		}
 	}
 	return true
