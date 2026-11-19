@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/trace"
 )
 
@@ -120,4 +121,98 @@ func TestCheckFormatsInSubdirectory(t *testing.T) {
 	if stdout, _, _ := run(t, root, bin, "check", "--format=checkstyle"); !strings.Contains(stdout, `<file name="src/Bad.phn">`) {
 		t.Errorf("--format=checkstyle:\n%s", stdout)
 	}
+}
+
+// TestFormatsEscape: a finding's message and path reach every format as a
+// document of that format, whatever they hold: a NUL, a newline, a quote, a
+// backslash, bytes that are no UTF-8, a character beyond the basic plane
+// and the characters each format gives a meaning. Each format writes what
+// it can of them: JSON all but the invalid bytes, a workflow command all of
+// them on its one line, XML all but the NUL, which no XML document holds.
+func TestFormatsEscape(t *testing.T) {
+	const message = "a\x00b\nc\"d\\e\xff f\x1b g\U0001F600 <h> & 50%, i: j\r "
+	const file = "src/odd \"name\"\x01.phn"
+	diags := []checker.Diagnostic{
+		{File: file, Line: 3, Col: 5, EndLine: 3, EndCol: 9, Severity: checker.Error, Code: "P2103", Message: message},
+		{File: file, Line: 4, Col: 1, EndLine: 5, EndCol: 2, Severity: checker.Warning, Code: "P2013", Message: "plain"},
+	}
+	// What a reader gets back where the bytes are no UTF-8, or no character
+	// of the format.
+	replaced := func(s string, also ...string) string {
+		s = strings.ToValidUTF8(s, "�")
+		for _, c := range also {
+			s = strings.ReplaceAll(s, c, "�")
+		}
+		return s
+	}
+
+	t.Run("json", func(t *testing.T) {
+		var b strings.Builder
+		writeJSON(&b, diags)
+		lines := strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
+		if len(lines) != len(diags) {
+			t.Fatalf("want a line per finding:\n%q", b.String())
+		}
+		for i, l := range lines {
+			var v struct {
+				File, Severity, Code, Message string
+				Line, Col, EndLine, EndCol    int
+			}
+			if !json.Valid([]byte(l)) {
+				t.Fatalf("not JSON: %q", l)
+			}
+			if err := json.Unmarshal([]byte(l), &v); err != nil {
+				t.Fatalf("%v: %q", err, l)
+			}
+			d := diags[i]
+			if v.File != replaced(d.File) || v.Message != replaced(d.Message) || v.Code != d.Code || v.Severity != d.Severity.String() ||
+				v.Line != d.Line || v.Col != d.Col || v.EndLine != d.EndLine || v.EndCol != d.EndCol {
+				t.Errorf("read back %+v from %q", v, l)
+			}
+		}
+		if !strings.Contains(lines[0], `a\u0000b\nc\"d\\e`) || !strings.Contains(lines[0], "<h> & 50%") {
+			t.Errorf("a control character is a \\u escape, and <, > and & stay as they are: %q", lines[0])
+		}
+	})
+
+	t.Run("github", func(t *testing.T) {
+		var b strings.Builder
+		writeGitHub(&b, diags)
+		lines := strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
+		if len(lines) != len(diags) {
+			t.Fatalf("want a line per finding:\n%q", b.String())
+		}
+		for i, l := range lines {
+			c, ok := trace.ParseCommand(l)
+			if !ok || c.Message != diags[i].Message {
+				t.Errorf("read back %q (%v) from %q", c.Message, ok, l)
+			}
+			if got, _ := c.Get("file"); got != trace.AnnotationPath(diags[i].File) {
+				t.Errorf("file %q from %q", got, l)
+			}
+		}
+	})
+
+	t.Run("checkstyle", func(t *testing.T) {
+		var b strings.Builder
+		writeCheckstyle(&b, diags)
+		var doc struct {
+			Files []struct {
+				Name   string `xml:"name,attr"`
+				Errors []struct {
+					Message string `xml:"message,attr"`
+					Source  string `xml:"source,attr"`
+				} `xml:"error"`
+			} `xml:"file"`
+		}
+		if err := xml.Unmarshal([]byte(b.String()), &doc); err != nil {
+			t.Fatalf("not XML: %v\n%q", err, b.String())
+		}
+		// An attribute's line breaks are written as references, and read
+		// back as they were.
+		if len(doc.Files) != 1 || doc.Files[0].Name != replaced(file, "\x01") || len(doc.Files[0].Errors) != 2 ||
+			doc.Files[0].Errors[0].Message != replaced(message, "\x00", "\x1b") || doc.Files[0].Errors[0].Source != "P2103" {
+			t.Errorf("read back %+v from %q", doc, b.String())
+		}
+	})
 }
