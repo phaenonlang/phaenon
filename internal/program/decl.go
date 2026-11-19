@@ -208,6 +208,9 @@ type Param struct {
 	// overrides (implicit @inheritDoc), which may equal NativeType, as an
 	// inherited `mixed[]` equals `array`.
 	Inherited bool
+	// Sensitive marks a parameter declared #[\SensitiveParameter], whose
+	// argument a stack trace shows as a SensitiveParameterValue.
+	Sensitive bool
 }
 
 // Property is a property (declared, promoted, or from a trait).

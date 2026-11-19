@@ -613,6 +613,10 @@ type PartialParam struct {
 	Doc string
 	// DocArray says Doc is an array type, or holds one.
 	DocArray bool
+	// Sensitive marks the callee's #[\SensitiveParameter]: the closure's
+	// parameter carries it too, or a stack trace through the closure would
+	// show the argument PHP hides in the callee's frame.
+	Sensitive bool
 	// Typed marks a parameter PHPStan types by itself, and holds an inline
 	// @var to: the application is the callback of array_map or of another
 	// function PHPStan reads the callback's parameters for, and the
