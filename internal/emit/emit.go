@@ -43,6 +43,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/linemap"
 	"github.com/phaenonlang/phaenon/internal/parser"
+	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/token"
 )
@@ -193,6 +194,35 @@ func compile(src []byte, f *ast.File, opts Options) ([]byte, *lineWriter, error)
 	return out, w, nil
 }
 
+// UnfoldedBound lists the pipe stages the PHP 8.5 lowering of the file
+// would write as closures although their bound arguments may not be
+// computed in one (program.Partial.Bound): the stages of the runs it does
+// not write as nested calls, which the build refuses. It runs the passes
+// File runs, the output discarded, so that the answer is the build's: the
+// checker reports each stage (P1002) through checker.Options.Unfolded. It
+// passes over a partial application the checker refused, and stops where
+// the build stops on another error, which the checker reports too.
+func UnfoldedBound(src []byte, opts Options) []ast.Expr {
+	if opts.File == nil || opts.File.AST == nil || opts.Program == nil || opts.Program.Target().AtLeast(phpversion.PHP86) {
+		return nil
+	}
+	f := opts.File.AST
+	var unfolded []ast.Expr
+	e := &emitter{src: src, opts: opts, throwsWritten: map[ast.Node]bool{}, unfolded: &unfolded}
+	if w, _ := withdrawn(f); w != nil {
+		return nil
+	}
+	e.planIndents(f)
+	if err := e.lowerGenerics(f); err != nil {
+		return unfolded
+	}
+	e.lowerFunctions(f)
+	e.translateWrittenDocs()
+	e.lowerLine(f)
+	_ = e.lowerTarget(f)
+	return unfolded
+}
+
 // IsGenerated reports whether src is an emitted file: the marker comment is
 // the first thing after its open tag (on the open tag's line before D19, on
 // a line of its own since).
@@ -266,6 +296,10 @@ type emitter struct {
 	// toks is the source's token stream, read when an edit needs a
 	// position the tree does not keep (layout.go).
 	toks []token.Token
+	// unfolded, when set, collects the pipe stages the lowering writes as
+	// closures although program.Partial.Bound keeps them from one, where
+	// it would refuse the first (UnfoldedBound).
+	unfolded *[]ast.Expr
 	// docs are the declarations whose docblocks may name a type alias,
 	// each with its resolver (docalias.go); built on first use.
 	docs []docScope

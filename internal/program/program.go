@@ -585,6 +585,13 @@ type Partial struct {
 	// Refused says why the form has no exact 8.5 lowering; the checker
 	// reports it (P1002) when the target is 8.5. Empty when it lowers.
 	Refused string
+	// Bound says, for a pipe's stage, why the closure written for 8.5
+	// would not compute its bound arguments as the pipe does: one assigns,
+	// passes a variable by reference, or reads the function it stands in
+	// (func_get_args(), __FUNCTION__). Refused holds it too where the
+	// pipe does not fold; where it folds, no closure is written, unless
+	// the run's text cannot move, and the emitter then refuses it.
+	Bound string
 	// Pipe marks the right side of a pipe that PHP turns into a call
 	// (`A |> f(B, ?, C)` is f(B, A, C)); Params then holds the one
 	// parameter the left side goes to. Whether the pipe may be written as

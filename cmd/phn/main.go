@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/emit"
 	"github.com/phaenonlang/phaenon/internal/lexer"
@@ -730,8 +731,16 @@ func releaseLine(version string) string {
 func typeCheck(files []string, target phpversion.Version, opts checker.Options, checked func(string) bool) []checker.Diagnostic {
 	p, diags := loadProgram(files, target, checked)
 	loadedProgram = p
+	opts.Unfolded = unfolded
 	loadedChecker = checker.New(p, opts)
 	return append(diags, loadedChecker.Check()...)
+}
+
+// unfolded is the lowering's answer to the checker (checker.Options.Unfolded):
+// the pipe stages phn build refuses, so that phn check and phn lsp report
+// each where it does.
+func unfolded(p *program.Program, f *program.File) []ast.Expr {
+	return emit.UnfoldedBound(f.Src, emit.Options{SourceName: f.Path, StrictTypes: true, Program: p, File: f})
 }
 
 // everyFile checks every file a program is given.

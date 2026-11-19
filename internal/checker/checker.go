@@ -23,6 +23,13 @@ import (
 type Options struct {
 	// Deprecations reports calls to @deprecated declarations (P4006).
 	Deprecations bool
+	// Unfolded, when set, answers for a checked file what its PHP 8.5
+	// lowering answers (emit.UnfoldedBound): the pipe stages kept from
+	// their closure (program.Partial.Bound) whose run it does not write as
+	// nested calls, which the build refuses. The checker reports each
+	// (P1002), so that phn check refuses what phn build does whatever the
+	// layout of the run; without it they are left to the build.
+	Unfolded func(p *program.Program, f *program.File) []ast.Expr
 	// ReflectedAttributes is phaenon.json's unused.reflected-attributes: when
 	// not nil, a private property escapes P2406–P2408 only through an
 	// attribute whose class is one of these or extends or implements one.
@@ -172,9 +179,14 @@ type Checker struct {
 	recvs     map[ast.Node]types.Type
 	dynNames  map[ast.Node]types.Type
 	byRefArgs map[ast.Node]bool
-	// refVars are the variables passed by reference, which a try's catch
-	// blocks see bound (tryStmt).
+	// refVars are the variables passed by reference, or whose element is,
+	// which a try's catch blocks see bound (tryStmt) and a pipe's bound
+	// argument may not pass (boundInClosure).
 	refVars map[*ast.Variable]bool
+	// unknownCallee are the calls through a value whose type gives no
+	// parameter list (mixed, a callable or a Closure without a signature,
+	// a string, an array), which may take any argument by reference.
+	unknownCallee map[*ast.Call]bool
 	// inits and initClasses are what the readonly pass reads (readonly.go):
 	// the properties of $this each method body certainly assigns before it
 	// returns, and the classes checked, in order.
@@ -476,6 +488,7 @@ func (c *Checker) Check() []Diagnostic {
 		}
 		c.file = f
 		c.checkFile(f)
+		c.settleUnmoved(f)
 		c.judged[f.Path] = true
 	}
 	c.checkReadonlyInits()

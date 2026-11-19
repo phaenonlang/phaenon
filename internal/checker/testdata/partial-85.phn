@@ -4,6 +4,7 @@
 
 function pair(string $a, string $b): string { return $a . $b; }
 function refd(array<mixed> &$xs, int $n): void { $xs[] = $n; }
+function grab(array<mixed> &$xs): string { $xs[] = 1; return 'g'; }
 function wantsString(string $s): void {}
 
 final class Box {
@@ -52,9 +53,95 @@ function refused(Box $box, string $sep): void {
     $e = refd($xs, ?); // want P1002 "by reference"
     $f = 'a' |> pair($sep = 'x', ?); // want P1002 "writes"
     // Its constructor arguments are.
-    $g = 'a' |> pair(?, (new class ($sep = 'y') { __construct(public string $s) {} })->s); // want P1002 "writes"
-    $a = 'z';
-    $h = 'a' |> pair(?, (new class ($a) { __construct(public string $s) {} })->s); // want P1002 "rename the variable"
+    $g = 'a' |> pair((new class ($sep = 'y') { __construct(public string $s) {} })->s, ?); // want P1002 "writes"
+    $h = 'a' |> pair((new class ($b) { __construct(public string $s) {} })->s, ?); // want P1002 "rename the variable"
+}
+
+// A pipe's stage that does not fold computes its bound arguments inside
+// the closure written for PHP 8.5, after the left side as on 8.6, but in
+// the closure's own scope: what reads or writes the function's scope, its
+// variables, arguments, name or frame, is refused there.
+function scoped(string $sep, string $other): void {
+    $m = [];
+    $a = 'a' |> pair((string) preg_match('/(a)/', $sep, $m), ?); // want P1002 "passes $m by reference"
+    $b = 'a' |> pair((string) preg_match('/(a)/', $sep, $m['k']), ?); // want P1002 "passes $m by reference"
+    $c = 'a' |> pair(__FUNCTION__ . $sep, ?); // want P1002 "reads __FUNCTION__, which in the closure written for PHP 8.5 names the closure: assign it to a variable before the pipe"
+    $d = 'a' |> pair(json_encode(func_get_args()) ?: '', ?); // want P1002 "calls func_get_args()"
+    $e = 'a' |> pair((string) func_num_args(), ?); // want P1002 "calls func_num_args()"
+    $f = 'a' |> pair(gettype(func_get_arg(1)), ?); // want P1002 "calls func_get_arg()"
+    $g = 'a' |> pair(gettype(debug_backtrace()[0]['function'] ?? ''), ?); // want P1002 "calls debug_backtrace()"
+    $count = 0;
+    $h = 'a' |> pair((string) (function () use (&$count): int { return ++$count; })(), ?); // want P1002 "captures $count by reference"
+    $i = 'a' |> pair(gettype(include 'tail.php'), ?); // want P1002 "includes a file"
+    $j = 'a' |> pair((fn(): string => __FUNCTION__)(), ?); // want P1002 "reads __FUNCTION__"
+    // A callable called through a value whose type gives no parameters may
+    // take what it is given by reference: nothing says it does not. One
+    // whose type gives them takes by reference what they say.
+    $fn = 'preg_match';
+    $o = 'a' |> pair(gettype($fn('/(a)/', $sep, $m)), ?); // want P1002 "passes $sep, $m to a callable whose parameters are not known"
+    $up = strtoupper(...);
+    $q = 'a' |> pair($up($sep), ?);
+    $fill = fn(string $s, mixed &$out): string => $s;
+    $r = 'a' |> pair($fill($sep, $m), ?); // want P1002 "passes $m by reference"
+    // A superglobal is the function's in the closure too.
+    $p = 'a' |> pair(grab($GLOBALS['seen']), ?);
+    // What the closure computes as the function does is lowered: its
+    // class, $this's, a closure capturing by value, an arrow function's
+    // own body.
+    $k = 'a' |> pair(__CLASS__ . $sep, ?);
+    $l = 'a' |> pair((string) (function () use ($count): int { return ++$count; })(), ?);
+    $n = 'a' |> pair((string) (fn(): int => $count + 1)(), ?);
+}
+
+/** @param Closure(string): string $up */
+function callees(Closure $up, Closure $any, callable $call, string $v): void {
+    $a = 'a' |> pair($up($v), ?);
+    $b = 'a' |> pair(gettype($any($v)), ?); // want P1002 "passes $v to a callable whose parameters are not known"
+    $c = 'a' |> pair(gettype($call($v)), ?); // want P1002 "passes $v to a callable whose parameters are not known"
+}
+
+final class Scoped {
+    m(string $sep): void {
+        $a = 'a' |> pair(__METHOD__ . $sep, ?); // want P1002 "reads __METHOD__"
+        $b = 'a' |> pair(static::class . $sep, ?);
+    }
+}
+
+// A stage that folds is the call PHP makes, its bound arguments where they
+// stand: nothing is refused for them, nor for a by-reference one.
+function folded(string $sep): void {
+    $a = 'a' |> pair(?, ($sep = 'x') . __FUNCTION__);
+    $b = 'a' |> pair(?, (string) preg_match('/(a)/', $sep, $m));
+    $xs = [];
+    3 |> refd($xs, ?);
+    $d = 'a' |> pair(?, json_encode(func_get_args()) ?: '');
+    // A comment or an attribute inside an argument moves with it.
+    $g = 'a' |> pair(?, strval(/* how many */ func_num_args()));
+    $h = 'a' |> pair(?, (string) preg_match(/* subject */ '/(a)/', $sep, $m));
+    $i = 'a' |> pair(?, (fn(#[\SensitiveParameter] string $k): string => $k)(__FUNCTION__));
+    // Unless the lowering does not write the run as nested calls, as for a
+    // comment between its arguments or its stages, when it is written as
+    // a closure after all.
+    $e = 'a' |> pair(?, /* why */ ($sep = 'y')); // want P1002 "writes"
+    $f = 'a'
+        |> pair(?, 'b') // first
+        |> pair(?, __FUNCTION__); // want P1002 "reads __FUNCTION__"
+}
+
+// An array literal unpacked into a call gives values, not variables, also
+// written `&$xs`: a by-reference parameter refuses them, as PHPStan does.
+function unpacked(): void {
+    $xs = [];
+    refd(...[&$xs, 1]); // want P2112 "argument 1 of refd() is by reference"
+    $ys = [[], 2];
+    refd(...$ys);
+}
+
+// Bound in a closure that is not a pipe's, __FUNCTION__ and __METHOD__
+// would name the closure too.
+function named(): void {
+    $a = pair(__FUNCTION__, ?); // want P1002 "reads __FUNCTION__, which in the closure written for PHP 8.5 names the closure: assign it to a variable first"
+    $b = pair(__LINE__ . '', ?); // want P1002 "assign it to a variable first"
 }
 
 // Writing a property through a constant's object is PHP 8.6.

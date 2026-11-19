@@ -325,7 +325,7 @@ func (l *targetLowering) partial(call ast.Expr, args *ast.ArgList) error {
 		return err
 	}
 	if rec.Refused != "" {
-		return l.e.errorf(call, "this partial application needs PHP 8.6 (target 8.5): %s", rec.Refused)
+		return l.refused(call, rec.Refused)
 	}
 	fb := fallback(rec)
 	l.e.wrapClosure(call.Span(), closureParts(rec, fb, l.constExpr[call], captured(call, args)), !l.bare[call])
@@ -347,7 +347,16 @@ func (l *targetLowering) pipe(p *ast.Binary, args *ast.ArgList) error {
 		return l.partial(p.Right, args)
 	}
 	if rec.Refused != "" {
-		return l.e.errorf(p.Right, "this partial application needs PHP 8.6 (target 8.5): %s", rec.Refused)
+		return l.refused(p.Right, rec.Refused)
+	}
+	if rec.Bound != "" {
+		// The pipe folds, but its run is not written as nested calls
+		// (fold): the closure would compute the bound arguments in a scope
+		// of its own.
+		if l.e.unfolded == nil {
+			return l.refused(p.Right, rec.Bound)
+		}
+		*l.e.unfolded = append(*l.e.unfolded, p.Right)
 	}
 	var placeholder *ast.Arg
 	for _, a := range args.Args {
@@ -563,4 +572,15 @@ func (l *targetLowering) isOverride(a *ast.Attribute) bool {
 	default:
 		return n.Kind == ast.NameUnqualified && !l.namespaced
 	}
+}
+
+// refused is the error of a partial application with no exact 8.5
+// lowering, the checker's reason given. Listing the stages it does not
+// fold (UnfoldedBound), the lowering passes over it, as the checker has
+// reported it, to reach the stages after it.
+func (l *targetLowering) refused(at ast.Node, why string) error {
+	if l.e.unfolded != nil {
+		return nil
+	}
+	return l.e.errorf(at, "this partial application needs PHP 8.6 (target 8.5): %s", why)
 }

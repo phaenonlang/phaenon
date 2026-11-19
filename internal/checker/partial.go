@@ -3,6 +3,7 @@ package checker
 import (
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -783,7 +784,13 @@ func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature
 	}
 	rec.Pipe, rec.Rest, rec.Named = inPipe, rest, named
 	_, rec.Void = sig.ret.(types.Void)
-	rec.Refused = x.partialRefusal(callee, args, sig, rec, rest, named, inPipe)
+	if inPipe {
+		// What keeps a stage from its closure is reported once it is known
+		// that the pipe does not fold (settleBound).
+		rec.Bound = x.partialRefusal(callee, args, sig, rec, rest, named, inPipe)
+	} else {
+		rec.Refused = x.partialRefusal(callee, args, sig, rec, rest, named, inPipe)
+	}
 	if x.c.file.Partials == nil {
 		x.c.file.Partials = map[*ast.ArgList]*program.Partial{}
 	}
@@ -977,9 +984,11 @@ func (x *fnCtx) partialRefusal(callee ast.Expr, args *ast.ArgList, sig *signatur
 			return "it binds an argument by reference, which a closure written for PHP 8.5 cannot"
 		}
 		if inPipe {
-			if writes(a.Value) {
-				return "a bound argument writes to a variable, which the closure written for PHP 8.5 would do to its own copy"
+			if why := x.boundInClosure(a.Value); why != "" {
+				return why
 			}
+		} else if why := closureNamed(a.Value); why != "" {
+			return why + ": assign it to a variable first"
 		} else if !stableArg(a.Value) {
 			return "a bound argument is computed (a call, a property, an operator), which a closure written for PHP 8.5 would compute at every call: assign it to a variable first"
 		}
@@ -1085,22 +1094,211 @@ func stableReceiver(e ast.Expr) bool {
 	return false
 }
 
-// writes reports an expression that assigns: written inside a closure, the
-// assignment would change the closure's copy of the variable. What an
-// anonymous class's methods assign is theirs; its constructor arguments
-// are the expression's (ast.InspectScope).
-func writes(e ast.Expr) bool {
-	found := false
+// boundInClosure says why a pipe stage's bound argument, computed inside
+// the closure the stage is written as for PHP 8.5, would compute other
+// than PHP 8.6 does where the pipe is written, or "" when it would not.
+// The closure has its own variables, arguments and name: an assignment, a
+// variable passed by reference, a closure capturing one by reference and
+// an included file would write the closure's copies or read its scope,
+// func_get_args() and its kind read the closure's arguments,
+// debug_backtrace() sees its frame, __FUNCTION__ and __METHOD__ name it,
+// and a yield would make it a generator. What a closure or an arrow
+// function under the argument does in its own body is its own on both
+// targets, but for __FUNCTION__ and __METHOD__, whose name nests in the
+// closure's. An anonymous class's methods are theirs; its constructor
+// arguments are the expression's (ast.InspectScope).
+func (x *fnCtx) boundInClosure(e ast.Expr) string {
+	why := ""
 	ast.InspectScope(e, func(n ast.Node) bool {
-		switch n.(type) {
-		case *ast.Assign, *ast.IncDec, *ast.Yield, *ast.YieldFrom:
-			found = true
-		case *ast.Closure, *ast.ArrowFunc:
+		switch n := n.(type) {
+		case *ast.Assign, *ast.IncDec:
+			why = "a bound argument writes to a variable, which the closure written for PHP 8.5 would do to its own copy"
+			return false
+		case *ast.Yield, *ast.YieldFrom:
+			why = "a bound argument yields, which would make the closure written for PHP 8.5 a generator"
+		case *ast.Variable:
+			if x.c.refVars[n] && !superglobals[n.Name] {
+				why = fmt.Sprintf("a bound argument passes $%s by reference, which the closure written for PHP 8.5 would do with its own copy", n.Name)
+			}
+		case *ast.Include:
+			why = "a bound argument includes a file, which would run in the scope of the closure written for PHP 8.5"
+		case *ast.Call:
+			if v := passedVars(n); v != "" && x.c.unknownCallee[n] {
+				why = fmt.Sprintf("a bound argument passes %s to a callable whose parameters are not known, which may take them by reference and would then write the closure's copies", v)
+			}
+			if name, ok := n.Callee.(*ast.Name); ok && why == "" {
+				switch fn := strings.ToLower(name.Parts[len(name.Parts)-1]); fn {
+				case "func_get_args", "func_get_arg", "func_num_args":
+					why = fmt.Sprintf("a bound argument calls %s(), which in the closure written for PHP 8.5 reads the closure's arguments", fn)
+				case "debug_backtrace", "debug_print_backtrace":
+					why = fmt.Sprintf("a bound argument calls %s(), which in the closure written for PHP 8.5 sees the closure's frame first", fn)
+				}
+			}
+		case *ast.Closure:
+			for _, u := range n.Uses {
+				if u.ByRef && why == "" {
+					why = fmt.Sprintf("a bound argument captures $%s by reference, which in the closure written for PHP 8.5 is the closure's own copy", u.Var.Name)
+				}
+			}
+			return false
+		case *ast.ArrowFunc:
 			return false
 		}
-		return !found
+		return why == ""
 	})
-	return found
+	switch {
+	case strings.HasPrefix(why, "a bound argument writes"):
+		return why
+	case why == "":
+		why = closureNamed(e)
+	}
+	if why == "" {
+		return ""
+	}
+	return why + ": assign it to a variable before the pipe"
+}
+
+// unpackedByRef reports the values of an array literal unpacked into a
+// call, from argument position from, that land on a by-reference
+// parameter (P2112): an element is a value, not a variable, even written
+// `&$o`, and PHPStan refuses it (argument.byRef). One into a variadic
+// parameter is the argument the bindings check.
+func (x *fnCtx) unpackedByRef(lit *ast.ArrayLit, from int, sig *signature) {
+	n := from
+	for _, it := range lit.Items {
+		if it == nil || it.Unpack {
+			return
+		}
+		var p *program.Param
+		switch key := it.Key.(type) {
+		case nil:
+			if n < len(sig.params) {
+				p = sig.params[n]
+			}
+			n++
+		case *ast.StringLit:
+			for _, cand := range sig.params {
+				if cand.Name == program.StringValue(key) {
+					p = cand
+				}
+			}
+		default:
+			return
+		}
+		if p != nil && p.ByRef && !p.Variadic {
+			x.report(it.Value.Span(), P2112, "argument %d of %s is by reference and needs a variable", slices.Index(sig.params, p)+1, sig.name)
+		}
+	}
+}
+
+// superglobals are the variables every scope shares: a closure reads and
+// writes the function's.
+var superglobals = map[string]bool{
+	"GLOBALS": true, "_SERVER": true, "_GET": true, "_POST": true, "_FILES": true,
+	"_COOKIE": true, "_SESSION": true, "_REQUEST": true, "_ENV": true,
+}
+
+// passedVars names the variables a call passes, or whose elements it
+// passes, which a callee may take by reference.
+func passedVars(c *ast.Call) string {
+	if c.Args == nil {
+		return ""
+	}
+	var names []string
+	for _, a := range c.Args.Args {
+		if v := refRoot(a.Value); v != nil && !superglobals[v.Name] && !slices.Contains(names, "$"+v.Name) {
+			names = append(names, "$"+v.Name)
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+// settleUnmoved reports, once a file is checked, the stages that fold and
+// are kept from their closure (Partial.Bound) where the lowering does not
+// write their run as nested calls, as the build would refuse them: what it
+// writes depends on its own edits (erased generics, lowered closures, the
+// lines of an expression body) as well as on the source, so the lowering
+// answers (Options.Unfolded).
+func (c *Checker) settleUnmoved(f *program.File) {
+	if c.opts.Unfolded == nil || c.p.Target().AtLeast(phpversion.PHP86) {
+		return
+	}
+	pending := false
+	for _, rec := range f.Partials {
+		pending = pending || rec.Pipe && rec.Bound != "" && rec.Refused == ""
+	}
+	if !pending {
+		return
+	}
+	stages := c.opts.Unfolded(c.p, f)
+	sort.Slice(stages, func(i, j int) bool { return stages[i].Span().Start < stages[j].Span().Start })
+	for _, e := range stages {
+		var args *ast.ArgList
+		switch e := e.(type) {
+		case *ast.Call:
+			args = e.Args
+		case *ast.MethodCall:
+			args = e.Args
+		case *ast.StaticCall:
+			args = e.Args
+		}
+		rec := f.Partials[args]
+		if rec == nil || rec.Bound == "" || rec.Refused != "" {
+			continue
+		}
+		rec.Refused = rec.Bound
+		c.file = f
+		c.needsPHP(e.Span(), phpversion.PHP86, "this partial application", rec.Refused+", or target PHP 8.6")
+	}
+}
+
+// refRoot is the variable an argument passed by reference writes: the
+// variable itself, or the one whose element is passed; nil for anything
+// else, a property among it, whose object a closure shares.
+func refRoot(e ast.Expr) *ast.Variable {
+	for {
+		switch t := e.(type) {
+		case *ast.Variable:
+			return t
+		case *ast.Paren:
+			e = t.Expr
+		case *ast.Index:
+			e = t.Array
+		default:
+			return nil
+		}
+	}
+}
+
+// closureNamed says why a bound argument computed inside a closure would
+// name the closure, "" when it would not: __FUNCTION__ and __METHOD__ name
+// the function they are written in, a closure or an arrow function under
+// the argument included, whose name the closure's would enclose.
+func closureNamed(e ast.Expr) string {
+	why := ""
+	ast.Inspect(e, func(n ast.Node) bool {
+		if m, ok := n.(*ast.MagicConst); ok && why == "" {
+			switch m.Kind {
+			case token.T_FUNC_C, token.T_METHOD_C:
+				why = fmt.Sprintf("a bound argument reads %s, which in the closure written for PHP 8.5 names the closure", m.Raw)
+			}
+		}
+		return why == ""
+	})
+	return why
+}
+
+// settleBound reports what keeps a pipe's stage from its closure for PHP
+// 8.5 (Partial.Bound) once it is known whether the pipe folds: a stage
+// that folds is written as the call PHP makes of it, its bound arguments
+// in the function the pipe is written in, and needs no closure.
+func (x *fnCtx) settleBound(e *ast.Binary, args *ast.ArgList) {
+	rec := x.c.file.Partials[args]
+	if rec == nil || !rec.Pipe || rec.Bound == "" || x.c.file.Folds[e] {
+		return
+	}
+	rec.Refused = rec.Bound
+	x.c.needsPHP(e.Right.Span(), phpversion.PHP86, "this partial application", rec.Refused+", or target PHP 8.6")
 }
 
 // clash returns a variable the expression reads that has the name of one
