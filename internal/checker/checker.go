@@ -215,6 +215,10 @@ type Checker struct {
 	// where it does not (selfref.go).
 	refs   map[valueDecl][]valueRef
 	cycles map[valueDecl]*cycle
+	// atOnce maps the argument list of a partial application to the call
+	// that calls it where it stands with arguments, `(f(B, ...))(X)`
+	// (Partial.Direct).
+	atOnce map[*ast.ArgList]*ast.Call
 }
 
 // New creates a checker for the program.
