@@ -301,6 +301,42 @@ func parseIgnore(text string) *ignoreRule {
 	return r
 }
 
+// without is the advice to a comment that names a code no comment
+// silences (P4015, a code of the run): to take the code out where another
+// code it names silences something, or may in a run that reports the code
+// (leftOut), and otherwise to remove the comment, which silences nothing:
+// left with no code, or with codes that silence nothing, it is P4015 again.
+func (c *Checker) without(r *ignoreRule, code string) string {
+	for _, other := range r.codes {
+		if other != P4015.ID && !ofTheRun[other] && (r.used[other] || c.leftOut(other)) {
+			return "take " + code + " out of the comment"
+		}
+	}
+	return "remove the comment"
+}
+
+// codesFor is the advice to a comment that names no code: the codes still
+// reported on its line, which it is for; where there are none, to remove
+// it, unless the run leaves some code's findings out (leavesOut) and one
+// of those may be there. Advice that a comment followed would make P4015
+// again is not given: a code the line does not report, or none.
+func (c *Checker) codesFor(path string, line int, word string) string {
+	var codes []string
+	for _, d := range c.diags {
+		if d.File == path && d.Line == line && d.Code != P4015.ID && !slices.Contains(codes, d.Code) {
+			codes = append(codes, d.Code)
+		}
+	}
+	switch {
+	case len(codes) > 0:
+		sort.Strings(codes)
+		return fmt.Sprintf("name the codes it is for, here `%s %s`", word, strings.Join(codes, ", "))
+	case c.leavesOut():
+		return fmt.Sprintf("name the codes it is for, as in `%s P2103`, or remove it", word)
+	}
+	return fmt.Sprintf("no finding a comment silences is reported on line %d, so remove it", line)
+}
+
 // rules returns the ignore comments of a checked file by the line each
 // silences. They are read when the first finding is reported in the file
 // or when the file is checked, whichever comes first: a constant's value
@@ -391,17 +427,19 @@ func (c *Checker) settleIgnores() {
 				switch {
 				case r.all:
 					if len(r.used) == 0 && !c.leavesOut() {
-						c.report(r.at, P4015, "%s: nothing is reported on line %d", r.word, line)
+						c.report(r.at, P4015, "%s: no finding a comment silences is reported on line %d", r.word, line)
 					}
 				case r.codes == nil:
-					c.report(r.at, P4015, "%s names no code, and silences nothing: name the codes it silences, as in `%s P2103`", r.word, r.word)
+					c.report(r.at, P4015, "%s names no code, and silences nothing: %s", r.word, c.codesFor(f.Path, line, r.word))
 				default:
 					// One finding for each code that silences nothing, as PHPStan
 					// reports each identifier (ignore.unmatchedIdentifier).
 					for _, code := range r.codes {
 						switch {
 						case code == P4015.ID:
-							c.report(r.at, P4015, "%s: P4015 cannot be silenced: remove the comment, or the code in it that matches nothing", r.word)
+							c.report(r.at, P4015, "%s: no comment silences P4015, or one that silences nothing could hide itself: %s", r.word, c.without(r, code))
+						case ofTheRun[code]:
+							c.report(r.at, P4015, "%s: %s is no finding of a line, and no comment silences it: %s", r.word, code, c.without(r, code))
 						case !r.used[code] && !c.leftOut(code):
 							c.report(r.at, P4015, "%s: no %s is reported on line %d", r.word, code, line)
 						}

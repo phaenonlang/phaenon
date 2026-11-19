@@ -243,8 +243,8 @@ var (
 	// -line/-next-line form finds nothing to silence (PHPStan's
 	// ignore.unmatchedIdentifier, ignore.unmatchedLine, ignore.parseError).
 	// A comment is held to the codes the run reports and no other
-	// (Checker.leftOut). No comment silences this code, and one that names
-	// it is reported for that.
+	// (Checker.leftOut). No comment silences this code, nor a code of the
+	// run (ofTheRun), and one that names either is reported for that.
 	P4015 = Code{"P4015", Warning, "ignore comment that silences nothing"}
 	// P4013 reported a `concurrently` block or a `spawn` in a project without
 	// phaenon/concurrent installed; retired with the syntax on 2026-11-08
@@ -258,3 +258,15 @@ var (
 	// names, until the first beta.
 	P4016 = Code{"P4016", Warning, "project file key in an earlier spelling"}
 )
+
+// ofTheRun are the codes phn reports about the run, not about a line of
+// code: what the project file and composer.json say or lack (P4008–P4010,
+// P4016), the vendor directory (P4005) and the local php (P4007, P4012).
+// The command reports them on the file they are about or, where they have
+// none, at the first line of the first file checked, beside whatever that
+// line holds. No ignore comment silences them, and a comment that names
+// one is told so (P4015), not that the code is not reported on its line.
+var ofTheRun = map[string]bool{
+	P4005.ID: true, P4007.ID: true, P4008.ID: true, P4009.ID: true,
+	P4010.ID: true, P4012.ID: true, P4016.ID: true,
+}

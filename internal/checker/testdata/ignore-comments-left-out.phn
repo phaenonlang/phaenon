@@ -21,3 +21,10 @@ function leftOut(): string {
     wantsInt('b'); // @phaenon-ignore P4006 // want P2103
     return $a . $b;
 }
+
+// A comment that names no code, where nothing this run reports is, may be
+// for a finding the run leaves out: it is told to name the codes it is
+// for, or to go.
+function namesNone(): void {
+    wantsInt(5); // @phaenon-ignore // want P4015 "name the codes it is for, as in `@phaenon-ignore P2103`, or remove it"
+}
