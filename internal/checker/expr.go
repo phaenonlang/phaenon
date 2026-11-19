@@ -3293,13 +3293,23 @@ func (x *fnCtx) assignFrom(value ast.Expr, target ast.Expr, vt types.Type, env *
 			x.report(span, P2205, "result of a void function is used")
 			vt = types.TNull
 		}
+		// A copy of a value a write made the array written is that array:
+		// `$s = $a` holds what $a was written to be.
+		copied := rewrittenOf(value, env)
 		env.set(t.Name, vt)
+		if copied != nil && types.Overlaps(vt, copied.written, x.p()) {
+			env.rewrite(t.Name, copied)
+		}
 	case *ast.PropertyFetch:
 		x.assignProperty(t, vt, env, span, value)
 	case *ast.StaticPropertyFetch:
 		pt, pr := x.staticPropertyFetch(t, env)
 		if pr != nil && !types.IsAcceptable(vt, pr.Type, x.p()) {
-			x.c.reportUnfit(x.given(value), vt, pr.Type, span, P2201, nil, "property %s::$%s (%s) does not accept %s", pr.Class.Name, pr.Name, x.typeName(pt), x.typeName(vt))
+			if why, rel, ok := x.rewrittenWhy(value, vt, pr.Type, env, false); ok {
+				x.c.reportRelated(span, P2201, rel, "property %s::$%s (%s) does not accept %s: %s", pr.Class.Name, pr.Name, x.typeName(pt), x.typeName(vt), why)
+			} else {
+				x.c.reportUnfit(x.given(value), vt, pr.Type, span, P2201, nil, "property %s::$%s (%s) does not accept %s", pr.Class.Name, pr.Name, x.typeName(pt), x.typeName(vt))
+			}
 		}
 		if key, ok := x.pathKey(t); ok {
 			env.setPath(key, vt)
@@ -3351,7 +3361,7 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 			x.report(t.Name.Span(), P2005, "unknown property %s::$%s", lacking.Name, name)
 		}
 		for _, pr := range prs {
-			x.assignDeclared(t, pr, name, base, vt, span, value)
+			x.assignDeclared(t, pr, name, base, vt, span, value, env)
 		}
 	}
 	if v, ok := t.Object.(*ast.Variable); ok && v.Name == "this" && x.trackInits {
@@ -3364,7 +3374,7 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 }
 
 // assignDeclared checks an assignment of vt to the declared property pr.
-func (x *fnCtx) assignDeclared(t *ast.PropertyFetch, pr *program.Property, name string, base, vt types.Type, span ast.Span, value ast.Expr) {
+func (x *fnCtx) assignDeclared(t *ast.PropertyFetch, pr *program.Property, name string, base, vt types.Type, span ast.Span, value ast.Expr, env *state) {
 	if pr.Static {
 		x.report(t.Name.Span(), P2210, "static property %s::$%s accessed through an instance", pr.Class.Name, name)
 	}
@@ -3391,6 +3401,10 @@ func (x *fnCtx) assignDeclared(t *ast.PropertyFetch, pr *program.Property, name 
 	}
 	declared := x.bindReceiver(pr.Type, base, pr.Class)
 	if !types.IsAcceptable(vt, declared, x.p()) {
+		if why, rel, ok := x.rewrittenWhy(value, vt, declared, env, false); ok {
+			x.c.reportRelated(span, P2201, rel, "property %s::$%s (%s) does not accept %s: %s", pr.Class.Name, name, x.typeName(declared), x.typeName(vt), why)
+			return
+		}
 		x.c.reportUnfit(x.given(value), vt, declared, span, P2201, nil, "property %s::$%s (%s) does not accept %s", pr.Class.Name, name, x.typeName(declared), x.typeName(vt))
 	}
 }
@@ -3472,31 +3486,57 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 		}
 	}
 	base = boundedShapes(base)
-	var out []types.Type
+	// A type parameter with a bound is written as its bound: `T of
+	// array<string, int>` as that array, `T of list<int>` as that list,
+	// `T of Row` as the shape. What it holds afterwards is the array
+	// written, no longer T, whose argument may be narrower than the
+	// bound (design/generics.md §3.2): rewritten is that parameter. A
+	// `T of ArrayAccess<K, V>` is an object, whose offsetSet() takes the
+	// value and which stays the one T is. A write a member of the bound
+	// refuses, the int of `T of int|array<string, int>`, is that
+	// finding alone: the value stays the T it was, as PHPStan keeps it,
+	// and is no finding again where T is expected.
+	var out []boundMember
 	var shapes []types.Shape
-	for _, m := range types.Members(base) {
-		switch m := m.(type) {
+	var shapesFrom []*types.Param
+	var refused []types.Param
+	refuse := func(p *types.Param) {
+		if p != nil && !slices.ContainsFunc(refused, func(r types.Param) bool { return types.Equal(r, *p) }) {
+			refused = append(refused, *p)
+		}
+	}
+	for _, w := range boundMembers(base) {
+		named := w.member // the type a finding names: the parameter, where the member is its bound's
+		if w.from != nil {
+			named = *w.from
+		}
+		switch m := w.member.(type) {
 		case types.Null:
-			shapes = append(shapes, types.Shape{})
+			shapes, shapesFrom = append(shapes, types.Shape{}), append(shapesFrom, w.from)
 		case types.Shape:
-			shapes = append(shapes, m)
+			shapes, shapesFrom = append(shapes, m), append(shapesFrom, w.from)
 		case types.Array:
 			k := m.Key
 			list := m.List && (keyT == nil)
 			switch {
 			case existing:
 				list = m.List
+			case keyT != nil && types.Equal(keyT, types.IntLit(0)):
+				// Offset 0 of a list is its first value, or the one it
+				// gets: php keeps a list a list, and so does PHPStan.
+				list = m.List
+				k = types.MakeUnion(k, keyT)
 			case keyT != nil:
 				k = types.MakeUnion(k, keyT)
 			case !m.List:
 				k = types.MakeUnion(k, types.TInt)
 			}
-			out = append(out, types.Array{Key: widenKeys(k), Value: types.MakeUnion(m.Value, vt), List: list, NonEmpty: true})
+			out = append(out, boundMember{types.Array{Key: widenKeys(k), Value: types.MakeUnion(m.Value, vt), List: list, NonEmpty: true}, w.from})
 		case types.Mixed:
 			x.reportNoOffsets(t, m, keyRaw, env)
-			out = append(out, m)
+			out = append(out, boundMember{m, nil})
 		case types.Unknown:
-			out = append(out, m)
+			out = append(out, boundMember{m, nil})
 		case types.Class, types.Static, types.This, types.Intersection:
 			handled := false
 			for _, cl := range x.classesOf(m, t.Array.Span()) {
@@ -3514,37 +3554,204 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 				}
 			}
 			if !handled {
-				x.report(t.Array.Span(), P2302, "cannot use %s as an array", x.typeName(m))
+				x.report(t.Array.Span(), P2302, "cannot use %s as an array", x.typeName(named))
+				refuse(w.from)
 			}
-			out = append(out, m)
+			out = append(out, boundMember{named, nil})
 		case types.Param:
-			// `T of array{…}` is written as the shape it is known to be,
-			// and is that shape afterwards, no longer T, as PHPStan has
-			// it.
-			if b, ok := m.Bound.(types.Shape); ok {
-				out = append(out, arrayWithEntry(b, keyT, vt))
-				continue
-			}
+			// A parameter without a bound, or bounded by mixed or object,
+			// may be a value with no offsets.
 			x.report(t.Array.Span(), P2302, "cannot use %s as an array", x.typeName(m))
-			out = append(out, m)
-		case types.String, types.StringLit:
-			out = append(out, types.TString)
+			out = append(out, boundMember{m, nil})
+		case types.String:
+			// A string written at an offset is as long or longer: a
+			// non-empty-string stays one, as PHPStan types it.
+			out = append(out, boundMember{types.String{NonEmpty: m.NonEmpty}, w.from})
+		case types.StringLit:
+			out = append(out, boundMember{types.String{NonEmpty: m.V != ""}, w.from})
+		case types.Iterable:
+			// An iterable may be an object with no offsets; PHPStan
+			// reports the write, and types what is left of the value as
+			// what was written, which it holds to T where it is returned.
+			x.report(t.Array.Span(), P2302, "cannot use %s as an array", x.typeName(named))
+			out = append(out, boundMember{m, nil})
 		default:
-			x.report(t.Array.Span(), P2302, "cannot use %s as an array", x.typeName(m))
-			out = append(out, m)
+			x.report(t.Array.Span(), P2302, "cannot use %s as an array", x.typeName(named))
+			if w.from != nil {
+				refuse(w.from) // the parameter stands for the member below
+			} else {
+				out = append(out, boundMember{m, nil})
+			}
 		}
 	}
-	if len(shapes) > 0 {
-		out = append(out, writeShapes(shapes, keyT, vt, x.loopDepth == 0)...)
+	// What a refused parameter's other members would hold is left out:
+	// the value is that parameter's still.
+	isRefused := func(p *types.Param) bool {
+		return p != nil && slices.ContainsFunc(refused, func(r types.Param) bool { return types.Equal(r, *p) })
 	}
-	newT := types.MakeUnion(out...)
-	if len(out) == 0 {
+	var rewritten *types.Param
+	var members []types.Type
+	for _, o := range out {
+		if !isRefused(o.from) {
+			members = append(members, o.member)
+			rewritten = firstParam(rewritten, o.from)
+		}
+	}
+	var kept []types.Shape
+	for i, s := range shapes {
+		if !isRefused(shapesFrom[i]) {
+			kept = append(kept, s)
+			rewritten = firstParam(rewritten, shapesFrom[i])
+		}
+	}
+	if len(kept) > 0 {
+		members = append(members, writeShapes(kept, keyT, vt, x.loopDepth == 0)...)
+	}
+	for _, p := range refused {
+		members = append(members, p)
+	}
+	newT := types.MakeUnion(members...)
+	if len(members) == 0 {
 		newT = arrayWithEntry(types.Shape{}, keyT, vt)
 	}
+	before := rewrittenOf(t.Array, env)
 	x.assignTo(t.Array, newT, env, span)
+	x.keepRewritten(t.Array, before, rewritten, t.S, newT, env)
 	if key, ok := x.pathKey(t); ok {
 		env.setPath(key, vt)
 	}
+}
+
+// boundMember is a member of a type written to, and the type parameter
+// whose bound it is a member of; from is nil for a member of the type
+// itself.
+type boundMember struct {
+	member types.Type
+	from   *types.Param
+}
+
+// boundMembers is the members of t, each type parameter with a bound
+// (openParam's aside) read as the members of its bound, a bound that is
+// itself a parameter as that one's: `T of int|array<string, int>` is int
+// and the array, both from T. A parameter a test narrowed, `T&array`
+// after is_array() of `T of array<string, int>|string`, is the members
+// of its bound that meet the rest of the intersection.
+func boundMembers(t types.Type) []boundMember {
+	var out []boundMember
+	var add func(m types.Type, from *types.Param, depth int)
+	add = func(m types.Type, from *types.Param, depth int) {
+		if depth < 8 {
+			if p, ok := m.(types.Param); ok && !openParam(p) {
+				if from == nil {
+					from = &p
+				}
+				for _, b := range types.Members(p.Bound) {
+					add(b, from, depth+1)
+				}
+				return
+			}
+			if in, ok := m.(types.Intersection); ok {
+				if p, rest, ok := narrowedParam(in); ok {
+					if from == nil {
+						from = &p
+					}
+					for _, b := range types.Members(p.Bound) {
+						if meet := types.MakeIntersection(append([]types.Type{b}, rest...)...); !isNeverType(meet) {
+							for _, n := range types.Members(meet) {
+								add(n, from, depth+1)
+							}
+						}
+					}
+					return
+				}
+			}
+		}
+		out = append(out, boundMember{m, from})
+	}
+	for _, m := range types.Members(t) {
+		add(m, nil, 0)
+	}
+	return out
+}
+
+// narrowedParam is the type parameter of an intersection, one with a
+// bound, and the intersection's other members: `T&array` is T and array.
+func narrowedParam(in types.Intersection) (types.Param, []types.Type, bool) {
+	for i, m := range in.Types {
+		if p, ok := m.(types.Param); ok && !openParam(p) {
+			rest := append(append([]types.Type{}, in.Types[:i]...), in.Types[i+1:]...)
+			return p, rest, true
+		}
+	}
+	return types.Param{}, nil, false
+}
+
+// firstParam is the parameter already found, else p.
+func firstParam(found, p *types.Param) *types.Param {
+	if found != nil {
+		return found
+	}
+	return p
+}
+
+// rewrittenOf is the write that made the variable target names the array
+// written in place of a type parameter's value, nil for any other target.
+func rewrittenOf(target ast.Expr, env *state) *paramWrite {
+	if v, ok := unparen(target).(*ast.Variable); ok {
+		if info, defined := env.get(v.Name); defined {
+			return info.rewritten
+		}
+	}
+	return nil
+}
+
+// keepRewritten records on the variable target names, once a write into
+// it has given it the type now, the write that made it the array written
+// in place of a value of the type parameter p, at span: the one that
+// stands between every earlier way in and what follows, where a value
+// of p reached it. A write into the value that p had already left keeps
+// the write that did, before, with what the variable holds now. A
+// property or an offset holds no such record: the property is held to
+// its declared type as any assignment is.
+func (x *fnCtx) keepRewritten(target ast.Expr, before *paramWrite, p *types.Param, span ast.Span, now types.Type, env *state) {
+	v, ok := unparen(target).(*ast.Variable)
+	if !ok || v.Name == "this" {
+		return
+	}
+	var w *paramWrite
+	switch {
+	case p != nil:
+		w = &paramWrite{param: *p, at: span, written: writtenPart(now, *p)}
+	case before != nil:
+		w = &paramWrite{param: before.param, at: before.at, written: writtenPart(now, before.param)}
+	default:
+		return
+	}
+	env.rewrite(v.Name, w)
+}
+
+// writtenPart is t without the values of the type parameter p it holds,
+// p itself and a narrowed p (`T&null`): what writes made of it.
+func writtenPart(t types.Type, p types.Param) types.Type {
+	var out []types.Type
+	for _, m := range types.Members(t) {
+		if !holdsParam(m, p) {
+			out = append(out, m)
+		}
+	}
+	return types.MakeUnion(out...)
+}
+
+// holdsParam reports m, a member of a type, as p or an intersection with
+// p among its members.
+func holdsParam(m types.Type, p types.Param) bool {
+	if types.Equal(m, p) {
+		return true
+	}
+	if in, ok := m.(types.Intersection); ok {
+		return slices.ContainsFunc(in.Types, func(n types.Type) bool { return types.Equal(n, p) })
+	}
+	return false
 }
 
 // writeShapes writes key => vt into the shapes an array may be. A key that

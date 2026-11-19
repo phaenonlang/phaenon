@@ -3003,7 +3003,14 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			if b.arg.Unpack {
 				arg = given{}
 			}
-			x.c.reportUnfit(arg, at, pt, b.arg.S, P2103, related(sig.file, b.param.Span, "parameter $%s of %s declared here", b.param.Name, sig.name),
+			declaredAt := related(sig.file, b.param.Span, "parameter $%s of %s declared here", b.param.Name, sig.name)
+			if why, written, ok := x.rewrittenWhy(b.arg.Value, at, pt, env, false); ok && !b.arg.Unpack {
+				mark := x.c.mark()
+				x.c.reportRelated(b.arg.S, P2103, declaredAt, "argument %d ($%s) of %s expects %s, %s given: %s", b.idx+1, b.param.Name, sig.name, x.typeName(pt), x.typeName(at), why)
+				x.c.relateAlso(mark, written)
+				continue
+			}
+			x.c.reportUnfit(arg, at, pt, b.arg.S, P2103, declaredAt,
 				"argument %d ($%s) of %s expects %s, %s given", b.idx+1, b.param.Name, sig.name, x.typeName(pt), x.typeName(at))
 		}
 	}

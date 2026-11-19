@@ -1,0 +1,73 @@
+// The native spellings of bounded-writes.phn's bounds: the finding names
+// the bound in the words of its declaration, an alias by its name and a
+// map as a map, on one line and without comments. Each case is one
+// PHPStan reports on the compiled file (a list or a shape written, a
+// general array written in a branch), as the parity run does not read
+// this file: what PHPStan does not report is held, with its reason, in
+// bounded-writes.phn.
+namespace App\BoundedWritesNative;
+
+type AnB = array<string, int>;
+type Ints = list<int>;
+type Row = array{id: int};
+
+function inBranch<T of AnB>(T $a, bool $c): T
+{
+    if ($c) {
+        $a['x'] = 1;
+    }
+
+    return $a; // want P2202 "function App\BoundedWritesNative\inBranch() should return T but returns non-empty-array<string, int>|T: $a is no longer T after it was written on line 17, since the caller's T may be narrower than AnB; declare the return type as AnB"
+}
+
+function asMap<T of map<string, int>>(T $a, bool $c): T
+{
+    if ($c) {
+        $a['x'] = 1;
+    }
+
+    return $a; // want P2202 "since the caller's T may be narrower than map<string, int>; declare the return type as map<string, int>"
+}
+
+function written<T of array<
+    string,
+    /* the count */ int
+>>(T $a, bool $c): T
+{
+    if ($c) {
+        $a['x'] = 1;
+    }
+
+    return $a; // want P2202 "since the caller's T may be narrower than array<string, int>; declare the return type as array<string, int>"
+}
+
+function appended<T of Ints>(T $a): T
+{
+    $a[] = 1;
+
+    return $a; // want P2202 "declare the return type as Ints"
+}
+
+function shapeWritten<T of Row>(T $row): T
+{
+    $row['id'] = 2;
+
+    return $row; // want P2202 "returns array{id: 2}: $row is no longer T after it was written on line 53, since the caller's T may be narrower than Row; declare the return type as Row"
+}
+
+final class Holder<H of AnB>
+{
+    public function __construct(public H $held)
+    {
+    }
+
+    public function copied(bool $c): H
+    {
+        $h = $this->held;
+        if ($c) {
+            $h['x'] = 1;
+        }
+
+        return $h; // want P2202 "$h is no longer H after it was written on line 68, since the caller's H may be narrower than AnB; declare the return type as AnB"
+    }
+}

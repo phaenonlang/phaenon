@@ -474,6 +474,21 @@ var checkerAlone = map[string][]struct {
 	"override-types.phn": {{P2502, []int{834}, notToldApartYet, "a Traversable class is the iterable its @implements says; " +
 		"PHPStan reads getIterator()'s declared type, a bare Iterator"}},
 	"unset-offsets.phn": {{P2103, []int{233}, notToldApartYet, "the rows after unset($rows[$k]['name']) may lack the entry; PHPStan keeps it"}},
+	"bounded-writes.phn": {
+		{P2202, []int{31, 123, 135, 147, 159, 171, 184, 199, 502, 563, 616, 713, 725}, notToldApartYet, "a value of `T of array<string, int>` written under a key " +
+			"and returned where T is declared, where PHPStan keeps T through the write: in one straight line, in a try without a catch, under a test of null. " +
+			"Its own call then reads the argument back, array{a: 5} where php returns ['a' => 5, 'x' => 1]. The write and the return name the variable twice, " +
+			"and a parameter named more than once proves nothing"},
+		{P2202, []int{255}, notToldApartYet, "the same, of the optional entry unset() takes from `T of array{id: int, name?: string}`"},
+		{P2202, []int{920, 922}, notToldApartYet, "the same, yielded and then returned by a generator declared Generator<int, T, mixed, T>"},
+		{P2202, []int{1023}, notToldApartYet, "the same, returned from a copy of the variable"},
+		{P2201, []int{697, 970}, notToldApartYet, "the same, written into the property a class declares H, or assigned to it"},
+		{P2103, []int{963, 999}, notToldApartYet, "the same, given as the argument of a method or a callable whose parameter is the T"},
+		{P2302, []int{794}, falseFinding, "an append after !is_int() under `T of list<int>|int`: the checker keeps the whole T, int included, where PHPStan " +
+			"has T without its int, as on main"},
+		{P2202, []int{828}, falseFinding, "a value written and then found identical to another T is `X&T`, which the checker does not take for a T " +
+			"where PHPStan does (design/checker.md §10), as on main for `T&null`"},
+	},
 	"declared-here-alone.phn": {
 		{P2202, []int{192}, notToldApartYet, "a method its parent declares too, with no docblock: the rule asks only whether another declaration exists, not what it documents"},
 		{P2103, []int{207}, notToldApartYet, "a method the parent names in @method: the same"},

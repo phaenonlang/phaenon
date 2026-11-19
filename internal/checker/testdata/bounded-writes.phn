@@ -1,0 +1,1071 @@
+// A write into a value of a type parameter with a bound is a write into
+// the bound (design/generics.md §3.2): `T of array<string, int>` takes an
+// entry as that array does, `T of list<int>` an append, `T of
+// array{id: int}` the entry its shape has. What the variable holds
+// afterwards is the array written, no longer T: the caller's T may be
+// narrower than the bound, `array{a: 5}` for `array<string, int>`. Held
+// to T then (returned, yielded, given as an argument, assigned to a
+// property) it is a finding that names the write. PHPStan reports it
+// where the bound is a list or a shape, after an unset() of a general
+// array, and after a branch, a loop or a catch that wrote it; it keeps T
+// where a general array is written in one straight line, or a shape loses
+// an optional entry, and there the finding is the checker's alone
+// (checkerAlone in phpstan_test.go names those lines). A
+// `T of ArrayAccess<string, int>` is an object: offsetSet() takes the
+// value, and it stays the T it was. Written as PHP with docblocks, so
+// that PHPStan reads the file as written; bounded-writes-native.phn has
+// the bounds in Phaenon's syntax.
+namespace App\BoundedWrites;
+
+// A general array under a key: PHPStan keeps T. A caller's array{a: 5}
+// comes back with 'x' => 1 in it.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function withFlag(array $a): array
+{
+    $a['x'] = 1;
+
+    return $a; // want P2202 "$a is no longer T after it was written on line 29, since the caller's T may be narrower than array<string, int>; declare the return type as array<string, int>"
+}
+
+// The bound is what may be declared instead, and holds what was written.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return array<string, int>
+ */
+function asBound(array $a): array
+{
+    $a['x'] = 1;
+
+    return $a;
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ */
+function readAfterwards(array $a): int
+{
+    $a['x'] = 1;
+
+    return $a['x'] + count($a);
+}
+
+// A copy is written, and the value of T is returned as it came.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function copyWritten(array $a): array
+{
+    $b = $a;
+    $b['x'] = 1;
+    echo count($b);
+
+    return $a;
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @param T $other
+ * @return T
+ */
+function writtenThenReplaced(array $a, array $other): array
+{
+    $a['x'] = 1;
+    echo count($a);
+    $a = $other;
+
+    return $a;
+}
+
+// A value the bound does not take: PHPStan reports the return too.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function valueOutsideTheBound(array $a): array
+{
+    $a['x'] = 'no';
+
+    return $a; // want P2202 "and does not fit array<string, int> either"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function keyOutsideTheBound(array $a): array
+{
+    $a[5] = 1;
+
+    return $a; // want P2202 "and does not fit array<string, int> either"
+}
+
+// The other writes of an offset.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function plusAssigned(array $a): array
+{
+    $a['x'] += 1;
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function coalesceAssigned(array $a): array
+{
+    $a['x'] ??= 1;
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function incremented(array $a): array
+{
+    $a['x']++;
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function destructured(array $a): array
+{
+    [$a['x'], $a['y']] = [1, 2];
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of array<string, array<string, int>>
+ * @param T $a
+ * @return T
+ */
+function nested(array $a): array
+{
+    $a['x']['y'] = 1;
+
+    return $a; // want P2202 "after it was written on line 169, since the caller's T may be narrower than array<string, array<string, int>>"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function writtenTwice(array $a): array
+{
+    $a['x'] = 1;
+    $a['y'] = 2;
+
+    return $a; // want P2202 "after it was written on line 181,"
+}
+
+// Through a reference to the variable, and by a foreach by reference,
+// which PHPStan follows to the bound.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function throughReference(array $a): array
+{
+    $r = &$a;
+    $r['x'] = 1;
+
+    return $a; // want P2202 "after it was written on line 197,"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function foreachByReference(array $a): array
+{
+    foreach ($a as &$v) {
+        $v = 1;
+    }
+    unset($v);
+
+    return $a; // want P2202 "no longer T"
+}
+
+// Through a reference to an offset neither follows (design/checker.md
+// §10, What a test proves of an offset): the value is still T to both.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function throughOffsetReference(array $a): array
+{
+    $r = &$a['x'];
+    $r = 1;
+
+    return $a;
+}
+
+// unset() is a write: PHPStan reports a general array's, and keeps T
+// where a shape loses an optional entry.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function unsetOne(array $a): array
+{
+    unset($a['x']);
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of array{id: int, name?: string}
+ * @param T $a
+ * @return T
+ */
+function unsetFromShape(array $a): array
+{
+    unset($a['name']);
+
+    return $a; // want P2202 "declare the return type as array{id: int, name?: string}"
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return T
+ */
+function unsetFromList(array $a): array
+{
+    unset($a[0]);
+
+    return $a; // want P2202 "and does not fit list<int> either"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function writtenAndUnset(array $a): array
+{
+    $a['x'] = 1;
+    unset($a['x']);
+
+    return $a; // want P2202 "after it was written on line 277,"
+}
+
+// A shape bound: the entry is written as the shape has it, and PHPStan
+// reports the return.
+/**
+ * @template T of array{id: int}
+ * @param T $row
+ * @return T
+ */
+function shapeWritten(array $row): array
+{
+    $row['id'] = 2;
+
+    return $row; // want P2202 "returns array{id: 2}: $row is no longer T after it was written on line 292, since the caller's T may be narrower than array{id: int}; declare the return type as array{id: int}"
+}
+
+/**
+ * @template T of array{id: int}
+ * @param T $row
+ * @return array{id: int}
+ */
+function shapeAsBound(array $row): array
+{
+    $row['id'] = 2;
+
+    return $row;
+}
+
+// A list bound takes an append and offset 0, and stays a list, which
+// PHPStan holds to T all the same; offset 5 may leave a gap, and the value
+// is a list no longer.
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return T
+ */
+function appended(array $a): array
+{
+    $a[] = 1;
+
+    return $a; // want P2202 "returns non-empty-list<int>: $a is no longer T after it was written on line 319, since the caller's T may be narrower than list<int>; declare the return type as list<int>"
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return list<int>
+ */
+function appendedAsBound(array $a): array
+{
+    $a[] = 1;
+
+    return $a;
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return T
+ */
+function atZero(array $a): array
+{
+    $a[0] = 1;
+
+    return $a; // want P2202 "returns non-empty-list<int>"
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return list<int>
+ */
+function atZeroAsBound(array $a): array
+{
+    $a[0] = 1;
+
+    return $a;
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return list<int>
+ */
+function atFive(array $a): array
+{
+    $a[5] = 1;
+
+    return $a; // want P2202 "returns non-empty-array<int, int>"
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return T
+ */
+function atFiveAsT(array $a): array
+{
+    $a[5] = 1;
+
+    return $a; // want P2202 "and does not fit list<int> either"
+}
+
+// Over its own keys: the list stays a list, and the loop leaves the value
+// of T or what was written, as PHPStan joins them.
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return T
+ */
+function overOwnKeys(array $a): array
+{
+    foreach ($a as $k => $v) {
+        $a[$k] = $v + 1;
+    }
+
+    return $a; // want P2202 "returns non-empty-list<int>|T"
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return list<int>
+ */
+function overOwnKeysAsBound(array $a): array
+{
+    foreach ($a as $k => $v) {
+        $a[$k] = $v + 1;
+    }
+
+    return $a;
+}
+
+/**
+ * @template T of array{id: int}
+ * @param T $a
+ * @return T
+ */
+function shapeOverOwnKeys(array $a): array
+{
+    foreach ($a as $k => $v) {
+        $a[$k] = $v + 1;
+    }
+
+    return $a; // want P2202 "declare the return type as array{id: int}"
+}
+
+// Branches: the value after them is T where no branch wrote it, the
+// array written where one did, as PHPStan joins them.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function inBranch(array $a, bool $c): array
+{
+    if ($c) {
+        $a['x'] = 1;
+    }
+
+    return $a; // want P2202 "returns non-empty-array<string, int>|T: $a is no longer T after it was written on line 438,"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function inElse(array $a, bool $c): array
+{
+    if ($c) {
+        echo 1;
+    } else {
+        $a['x'] = 1;
+    }
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function inBothBranches(array $a, bool $c): array
+{
+    if ($c) {
+        $a['x'] = 1;
+    } else {
+        $a['y'] = 1;
+    }
+
+    return $a; // want P2202 "after it was written on line 468,"
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return T
+ */
+function listInBranch(array $a, bool $c): array
+{
+    if ($c) {
+        $a[] = 1;
+    }
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function returnedBeforeTheWrite(array $a, bool $c): array
+{
+    if ($c) {
+        return $a;
+    }
+    $a['x'] = 1;
+
+    return $a; // want P2202 "no longer T"
+}
+
+// Loops.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @param list<string> $keys
+ * @return T
+ */
+function inLoop(array $a, array $keys): array
+{
+    foreach ($keys as $k) {
+        $a[$k] = 1;
+    }
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return T
+ */
+function listInLoop(array $a, int $n): array
+{
+    for ($i = 0; $i < $n; $i++) {
+        $a[] = $i;
+    }
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function inWhile(array $a, int $n): array
+{
+    while ($n-- > 0) {
+        $a['k' . $n] = $n;
+    }
+
+    return $a; // want P2202 "no longer T"
+}
+
+// try, catch and finally.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function inTry(array $a): array
+{
+    try {
+        $a['x'] = 1;
+    } finally {
+        echo 1;
+    }
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function inCatch(array $a): array
+{
+    try {
+        risky();
+    } catch (\RuntimeException) {
+        $a['x'] = 1;
+    }
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return T
+ */
+function inFinally(array $a): array
+{
+    try {
+        echo 1;
+    } finally {
+        $a[] = 1;
+    }
+
+    return $a; // want P2202 "no longer T"
+}
+
+function risky(): void
+{
+    throw new \RuntimeException();
+}
+
+// A nullable T: the bound is what was written, and T|null is declared,
+// so the bound alone is no type to declare.
+/**
+ * @template T of array<string, int>
+ * @param T|null $a
+ * @return T|null
+ */
+function nullable(?array $a): ?array
+{
+    if ($a !== null) {
+        $a['x'] = 1;
+    }
+
+    return $a; // want P2202 "since the caller's T may be narrower than array<string, int>"
+}
+
+// A string bound: an offset written is a string, no longer T.
+/**
+ * @template T of string
+ * @param T $s
+ * @return T
+ */
+function stringBound(string $s): string
+{
+    $s[0] = 'a';
+
+    return $s; // want P2202 "no longer T"
+}
+
+// Without an array in the bound there is nothing to write into.
+/**
+ * @template T
+ * @param T $a
+ */
+function unbounded($a): void
+{
+    $a['x'] = 1; // want P2302 "cannot use T as an array"
+}
+
+/**
+ * @template T of int|array<string, int>
+ * @param T $a
+ */
+function intOrArray(int|array $a): int
+{
+    $a['x'] = 1; // want P2302 "cannot use T as an array"
+
+    return 1;
+}
+
+// An object: offsetSet() takes the value, and the object stays T.
+/**
+ * @template T of \ArrayAccess<string, int>
+ * @param T $a
+ * @return T
+ */
+function access(\ArrayAccess $a): \ArrayAccess
+{
+    $a['x'] = 1;
+
+    return $a;
+}
+
+/**
+ * @template T of \ArrayAccess<string, int>
+ * @param T $a
+ * @return T
+ */
+function accessRefuses(\ArrayAccess $a): \ArrayAccess
+{
+    $a['x'] = 'no'; // want P2103 "ArrayAccess::offsetSet() expects int, 'no' given"
+
+    return $a;
+}
+
+// A class's parameter: the property declared H holds what was written,
+// which is no H, and a copy returned is the same finding as a variable's.
+// A method's own parameter bounded by the class's alias: the message
+// names the alias.
+/**
+ * @phpstan-type AnB array<string, int>
+ * @template H of array<string, int>
+ */
+final class Holder
+{
+    /**
+     * @param H $held
+     */
+    public function __construct(public array $held)
+    {
+    }
+
+    public function add(): void
+    {
+        $this->held['x'] = 1; // want P2201 "property App\BoundedWrites\Holder::$held (H) does not accept non-empty-array<string, int>"
+    }
+
+    public function remove(): void
+    {
+        unset($this->held['x']); // want P2201 "property App\BoundedWrites\Holder::$held (H) does not accept array<string, int>"
+    }
+
+    /**
+     * @return H
+     */
+    public function copied(): array
+    {
+        $h = $this->held;
+        $h['x'] = 1;
+
+        return $h; // want P2202 "$h is no longer H after it was written on line 711, since the caller's H may be narrower than array<string, int>; declare the return type as array<string, int>"
+    }
+
+    /**
+     * @template T of AnB
+     * @param T $a
+     * @return T
+     */
+    public function own(array $a): array
+    {
+        $a['x'] = 1;
+
+        return $a; // want P2202 "App\BoundedWrites\Holder::own() should return T but returns non-empty-array<string, int>: $a is no longer T after it was written on line 723, since the caller's T may be narrower than AnB; declare the return type as AnB"
+    }
+}
+
+/**
+ * @template A of \ArrayAccess<string, int>
+ */
+final class Box
+{
+    /**
+     * @param A $access
+     */
+    public function __construct(public \ArrayAccess $access)
+    {
+    }
+
+    /**
+     * @return A
+     */
+    public function put(): \ArrayAccess
+    {
+        $a = $this->access;
+        $a['x'] = 1;
+
+        return $a;
+    }
+}
+
+// A write a member of the bound refuses is that finding alone: the value
+// stays the T it was, as PHPStan has it, and is no second finding where T
+// is returned.
+/**
+ * @template T of int|array<string, int>
+ * @param T $a
+ * @return T
+ */
+function refusedThenReturned(int|array $a): int|array
+{
+    $a['x'] = 1; // want P2302 "cannot use T as an array"
+
+    return $a;
+}
+
+// A test narrows T to a part of its bound, and the write is one into that
+// part: `T&array` after is_array(). After !is_int() the checker still
+// has the whole T, int included, and refuses the write as main does,
+// where PHPStan has T without its int and is silent.
+/**
+ * @template T of array<string, int>|string
+ * @param T $a
+ * @return array<string, int>|string
+ */
+function isArrayThenWrite(array|string $a): array|string
+{
+    if (is_array($a)) {
+        $a['x'] = 2;
+    }
+
+    return $a;
+}
+
+/**
+ * @template T of list<int>|int
+ * @param T $a
+ * @return list<int>|int
+ */
+function notIntThenAppend(array|int $a): array|int
+{
+    if (!is_int($a)) {
+        $a[] = 2; // want P2302 "cannot use T as an array"
+    }
+
+    return $a;
+}
+
+/**
+ * @template T of array<string, int>|null
+ * @param T $a
+ * @return array<string, int>|null
+ */
+function isArrayOnNullable(?array $a): ?array
+{
+    if (is_array($a)) {
+        $a['x'] = 2;
+    }
+
+    return $a;
+}
+
+// A value found identical to another T after the write is `X&T`, which
+// the checker does not take for a T where PHPStan does (design/checker.md
+// §10): the finding names no write, the value holding none of what was
+// written.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @param T $b
+ * @return T
+ */
+function comparedBackToT(array $a, array $b): array
+{
+    $a['x'] = 1;
+    if ($a === $b) {
+        return $a; // want P2202 "returns non-empty-array<string, int>&T"
+    }
+
+    return $b;
+}
+
+// Null assigned on another way: the write fits the bound, and the
+// value returned is no bound either; the advice is not given.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function nullElsewhere(array $a, bool $c, bool $d): array
+{
+    if ($d) {
+        $a['x'] = 1;
+    }
+    if ($c) {
+        $a = null;
+    }
+
+    return $a; // want P2202 "returns non-empty-array<string, int>|T|null: $a is no longer T after it was written on line 844, since the caller's T may be narrower than array<string, int>"
+}
+
+// The write every way to the return passes is the one named.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function laterWriteOnEveryWay(array $a, bool $c): array
+{
+    if ($c) {
+        $a['x'] = 1;
+    }
+    $a['y'] = 2;
+
+    return $a; // want P2202 "returns non-empty-array<string, int>: $a is no longer T after it was written on line 864,"
+}
+
+// A foreach by reference over an array in the value writes the value.
+/**
+ * @template T of array<string, list<int>>
+ * @param T $a
+ * @return T
+ */
+function foreachByReferenceOverOffset(array $a): array
+{
+    foreach ($a['inner'] as &$v) {
+        $v = 2;
+    }
+    unset($v);
+
+    return $a; // want P2202 "after it was written on line 877, since the caller's T may be narrower than array<string, list<int>>"
+}
+
+// An offset written into a non-empty-string leaves one, as PHPStan types
+// it.
+/**
+ * @param non-empty-string $s
+ * @return non-empty-string
+ */
+function nonEmptyStringWritten(string $s): string
+{
+    $s[3] = 'a';
+
+    return $s;
+}
+
+/**
+ * @template T of non-empty-string
+ * @param T $s
+ * @return T
+ */
+function nonEmptyStringBound(string $s): string
+{
+    $s[3] = 'a';
+
+    return $s; // want P2202 "returns non-empty-string: $s is no longer T after it was written on line 905, since the caller's T may be narrower than non-empty-string; declare the return type as non-empty-string"
+}
+
+// A generator yields the value and returns it: each is held to T, and
+// PHPStan reports each where the bound is a list.
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return \Generator<int, T, mixed, T>
+ */
+function yieldedAndReturned(array $a): \Generator
+{
+    $a['x'] = 1;
+    yield $a; // want P2202 "yields non-empty-array<string, int>, expected T: $a is no longer T after it was written on line 919, since the caller's T may be narrower than array<string, int>"
+
+    return $a; // want P2202 "no longer T"
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @return \Generator<int, T, mixed, T>
+ */
+function listYieldedAndReturned(array $a): \Generator
+{
+    $a[] = 1;
+    yield $a; // want P2202 "no longer T"
+
+    return $a; // want P2202 "no longer T"
+}
+
+// Given where T is expected: an argument, a property, a copy.
+/**
+ * @template H of array<string, int>
+ */
+final class Kept
+{
+    /**
+     * @param H $held
+     */
+    public function __construct(private array $held)
+    {
+    }
+
+    /**
+     * @param H $h
+     */
+    public function set(array $h): void
+    {
+        $this->held = $h;
+    }
+
+    public function writeAndSet(): void
+    {
+        $h = $this->held;
+        $h['x'] = 1;
+        $this->set($h); // want P2103 "expects H, non-empty-array<string, int> given: $h is no longer H after it was written on line 962, since the caller's H may be narrower than array<string, int>"
+    }
+
+    public function writeAndAssign(): void
+    {
+        $h = $this->held;
+        $h['x'] = 1;
+        $this->held = $h; // want P2201 "does not accept non-empty-array<string, int>: $h is no longer H after it was written on line 969,"
+    }
+
+    public function writeInBranchAndSet(bool $c): void
+    {
+        $h = $this->held;
+        if ($c) {
+            $h['x'] = 1;
+        }
+        $this->set($h); // want P2103 "no longer H"
+    }
+
+    /**
+     * @return H
+     */
+    public function get(): array
+    {
+        return $this->held;
+    }
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @param callable(T): void $f
+ */
+function passedToCallable(array $a, callable $f): void
+{
+    $a['x'] = 1;
+    $f($a); // want P2103 "no longer T"
+}
+
+/**
+ * @template T of list<int>
+ * @param T $a
+ * @param \Closure(T): void $f
+ */
+function listPassedToClosure(array $a, \Closure $f): void
+{
+    $a[] = 1;
+    $f($a); // want P2103 "no longer T"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $a
+ * @return T
+ */
+function copied(array $a): array
+{
+    $a['x'] = 1;
+    $s = $a;
+
+    return $s; // want P2202 "$s is no longer T after it was written on line 1020,"
+}
+
+// A foreach over a T yields what its bound yields, a bound of several
+// arrays and a T a test narrowed included.
+/**
+ * @template T of list<int>|array<string, int>
+ * @param T $a
+ * @return array<int|string, int>
+ */
+function overUnionBound(array $a): array
+{
+    $out = [];
+    foreach ($a as $k => $v) {
+        $out[$k] = $v;
+    }
+
+    return $out;
+}
+
+/**
+ * @template T of array<string, int>|null
+ * @param T $a
+ * @return array<string, int>
+ */
+function overNarrowedBound(?array $a): array
+{
+    $out = [];
+    if ($a !== null) {
+        foreach ($a as $k => $v) {
+            $out[$k] = $v;
+        }
+    }
+
+    return $out;
+}
+
+// unset() of a key the shape bound does not have, as PHPStan refuses it.
+/**
+ * @template T of array{id: int, name?: string}
+ * @param T $a
+ * @return array{id: int, name?: string}
+ */
+function unsetAbsent(array $a): array
+{
+    unset($a['other']); // want P2313 "offset 'other' does not exist on array{id: int, name?: string}"
+
+    return $a;
+}

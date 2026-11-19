@@ -588,6 +588,16 @@ func (c *Checker) reportRelated(span ast.Span, code Code, rel *Related, format s
 	c.reportOf(Parity, span, code, rel, format, args...)
 }
 
+// relateAlso adds rel to the related positions of the finding reported
+// since mark, where one was: a finding that was already reported, in the
+// same words at the same place, keeps what it has.
+func (c *Checker) relateAlso(mark int, rel *Related) {
+	if rel != nil && len(c.diags) > mark {
+		d := &c.diags[len(c.diags)-1]
+		d.Related = append(d.Related, *rel)
+	}
+}
+
 // findingKey is what makes two findings one: the place, the code and the
 // words. An extra check is kept apart from a finding of another kind at the
 // same place in the same words, which is reported, rolled back and
@@ -811,6 +821,10 @@ type fnCtx struct {
 	// method/function being checked (for @phpstan-assert, by-ref params)
 	method   *program.Method
 	function *program.Function
+	// enclosing is the context a closure is written in, nil for a
+	// function's or a method's own: the type parameters it names are
+	// declared there (boundText).
+	enclosing *fnCtx
 	// thisType caches the $this type for the class.
 	thisType types.Type
 	// loopCond is set while a loop condition is evaluated: `while (true)`
