@@ -55,10 +55,7 @@ final class Totals
      */
     public function sum(array $xs): int
     {
-        return $xs |> (function (array $xs) {
-            /** @var list<int> $xs */
-            return total($this->base(), $xs);
-        });
+        return $xs |> (fn(array $xs) => total($this->base(), $xs));
     }
 
     // The same written over lines.
@@ -68,10 +65,7 @@ final class Totals
     public function sumLong(array $xs): int
     {
         return $xs
-            |> (function (array $xs) {
-                /** @var list<int> $xs */
-                return total($this->base(), $xs);
-            });
+            |> (fn(array $xs) => total($this->base(), $xs));
     }
 
     // An expression body in a class written on the line of another: the
@@ -93,4 +87,4 @@ echo ($t->totaller())([1, 2]), "\n";
 echo $t->sum([3, 4]), "\n";
 echo $t->sumLong([5, 6]), "\n";
 echo ($t->anon()->m())([7, 8]), "\n";
-// phaenon-map v1 expression-body-closures.phn 1-6=1 7:1 24-24=17 25-27=18 28:18 32-32=21 33:22 36-38=24 39:25 41-43=27 44:27 45-50=27 51:28 57-62=33 63:34 69-70=39 71:40 72-75=40 76:41 80-88=44 89:45
+// phaenon-map v1 expression-body-closures.phn 1-6=1 7:1 24-24=17 25-27=18 28:18 32-32=21 33:22 36-38=24 39:25 41-43=27 44:27 45-50=27 51:28 57-59=33 60:34 66-67=39 68:40 69-69=40 70:41 74-82=44 83:45

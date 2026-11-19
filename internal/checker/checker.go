@@ -795,8 +795,6 @@ type fnCtx struct {
 	pipeOperand ast.Expr
 	pipeParam   *program.Param
 	pipeSig     *signature
-	// pipeParamType is pipeParam's type as the call resolved it.
-	pipeParamType types.Type
 	// pipeLeft counts the pipes whose left side is being checked; while
 	// it is above zero, the arguments bound to a parameter that is not by
 	// reference are noted in byValue, for the fold of the pipe (pipeFolds).
