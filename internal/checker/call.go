@@ -952,6 +952,7 @@ func (x *fnCtx) dynamicCall(e *ast.Call, env *state, expected types.Type) types.
 		return ct
 	}
 	if types.IsMixed(ct) {
+		x.unknownCallee(e)
 		x.argsOnly(e.Args, env)
 		return types.TMixed
 	}
@@ -964,6 +965,7 @@ func (x *fnCtx) dynamicCall(e *ast.Call, env *state, expected types.Type) types.
 				sig.node = e
 				out = append(out, x.checkCall(sig, e.Args, env, e.S, expected))
 			} else {
+				x.unknownCallee(e)
 				x.argsOnly(e.Args, env)
 				out = append(out, types.TMixed)
 			}
@@ -975,6 +977,7 @@ func (x *fnCtx) dynamicCall(e *ast.Call, env *state, expected types.Type) types.
 					out = append(out, x.checkCall(sig, e.Args, env, e.S, expected))
 					handled = true
 				} else if strings.EqualFold(cl.Name, "Closure") {
+					x.unknownCallee(e)
 					x.argsOnly(e.Args, env)
 					out = append(out, types.TMixed)
 					handled = true
@@ -986,6 +989,7 @@ func (x *fnCtx) dynamicCall(e *ast.Call, env *state, expected types.Type) types.
 				out = append(out, types.TMixed)
 			}
 		case types.String, types.StringLit, types.ClassString, types.Array, types.Shape, types.Object, types.Unknown, types.Param:
+			x.unknownCallee(e)
 			x.argsOnly(e.Args, env)
 			out = append(out, types.TMixed)
 		default:
@@ -995,6 +999,15 @@ func (x *fnCtx) dynamicCall(e *ast.Call, env *state, expected types.Type) types.
 		}
 	}
 	return types.MakeUnion(out...)
+}
+
+// unknownCallee notes a call through a value whose type gives no parameter
+// list (Checker.unknownCallee).
+func (x *fnCtx) unknownCallee(e *ast.Call) {
+	if x.c.unknownCallee == nil {
+		x.c.unknownCallee = map[*ast.Call]bool{}
+	}
+	x.c.unknownCallee[e] = true
 }
 
 // sigOfCallable turns a callable type into a signature. The type
@@ -2482,6 +2495,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				continue
 			}
 			if a.Unpack {
+				if lit, ok := unparen(a.Value).(*ast.ArrayLit); ok && !unpacked {
+					x.unpackedByRef(lit, i, sig)
+				}
 				unpacked = true
 				if n := len(sig.params); n > 0 && sig.params[n-1].Variadic && a.Name == nil {
 					// `f(...$xs)` into `X ...$values`: the elements are the
@@ -2630,7 +2646,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		}
 		if b.param.ByRef {
 			x.noteByRef(b.arg.Value)
-			if v, ok := b.arg.Value.(*ast.Variable); ok {
+			// The variable, or the one an element passed is of: a pipe's
+			// bound argument may not pass it (boundInClosure).
+			if v := refRoot(b.arg.Value); v != nil {
 				if x.c.refVars == nil {
 					x.c.refVars = map[*ast.Variable]bool{}
 				}
@@ -3624,6 +3642,7 @@ func (x *fnCtx) pipe(e *ast.Binary, left types.Type, env *state, expected types.
 			x.recordPipePartial(e.Right, args, x.pipeSig, x.pipeParam)
 		}
 		x.recordFold(e, args)
+		x.settleBound(e, args)
 		return t
 	}
 	operand := &ast.Arg{S: e.Left.Span(), Value: e.Left}

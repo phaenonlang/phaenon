@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/checker"
 	"github.com/phaenonlang/phaenon/internal/emit"
 	"github.com/phaenonlang/phaenon/internal/lexer"
@@ -157,7 +158,10 @@ func Compile(req Request) (res Result) {
 	enter("checking")
 	// phn check's options: deprecations are reported. phn build leaves them
 	// out, but they are warnings, which withhold no output.
-	diags = append(diags, checker.New(p, checker.Options{Deprecations: true}).Check()...)
+	unfolded := func(p *program.Program, f *program.File) []ast.Expr {
+		return emit.UnfoldedBound(f.Src, emit.Options{SourceName: f.Path, StrictTypes: true, Program: p, File: f})
+	}
+	diags = append(diags, checker.New(p, checker.Options{Deprecations: true, Unfolded: unfolded}).Check()...)
 	broken := false
 	for _, d := range diags {
 		res.Findings = append(res.Findings, finding(d))

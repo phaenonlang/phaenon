@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/phaenonlang/phaenon/internal/ast"
+	"github.com/phaenonlang/phaenon/internal/emit"
 	"github.com/phaenonlang/phaenon/internal/lexer"
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
@@ -41,9 +43,15 @@ var reWantItem = regexp.MustCompile(`(P\d{4})(\s+extra\b)?(?:\s+"([^"]*)")?`)
 // is phaenon.json's unused.reflected-attributes, a JSON list.
 var reHeader = regexp.MustCompile(`^//\s*(target|deprecations|reflected-attributes):\s*(\d+\.\d+|on|\[.*\])\s*$`)
 
+// unfolded is the lowering's answer for Options.Unfolded, as phn check
+// asks it.
+func unfolded(p *program.Program, f *program.File) []ast.Expr {
+	return emit.UnfoldedBound(f.Src, emit.Options{SourceName: f.Path, StrictTypes: true, Program: p, File: f})
+}
+
 func goldenSetup(t *testing.T, src []byte) (phpversion.Version, Options) {
 	t.Helper()
-	target, opts := phpversion.Floor, Options{}
+	target, opts := phpversion.Floor, Options{Unfolded: unfolded}
 	for _, line := range strings.Split(string(src), "\n") {
 		if !strings.HasPrefix(line, "//") {
 			break

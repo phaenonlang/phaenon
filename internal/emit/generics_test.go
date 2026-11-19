@@ -266,3 +266,85 @@ func loadOutput(t *testing.T, php string, target phpversion.Version, path, wantP
 	}
 	t.Errorf("php loads the output (target %s): %v\n%s", target, err, text)
 }
+
+// TestBoundOfAnUnmovedFold: a pipe that folds computes the arguments after
+// its placeholder where they stand, and nothing is refused for them; where
+// the lowering does not write the run as nested calls, the stage is a
+// closure after all, in which an assignment would write the closure's copy
+// and __FUNCTION__ name the closure. phn check asks the lowering
+// (UnfoldedBound, checker.Options.Unfolded), so that it reports the stage
+// (P1002) where phn build refuses it, and neither where the run folds:
+// whatever in the source or in the lowering's own edits decides that.
+func TestBoundOfAnUnmovedFold(t *testing.T) {
+	cases := map[string]struct {
+		body  string
+		moves bool
+	}{
+		"one line":           {"return ($s |> str_replace(?, 'b', ($t = 'xa'))) . $t;", true},
+		"over lines":         {"return ($s\n        |> str_replace(?, 'b', 'c')\n        |> str_replace(?, 'd', ($t = 'xa'))) . $t;", true},
+		"comment in args":    {"return ($s |> str_replace(?, 'b', /* why */ ($t = 'xa'))) . $t;", false},
+		"comment before |>":  {"return ($s /* the subject */ |> str_replace(?, 'b', ($t = 'xa'))) . $t;", false},
+		"heredoc":            {"return ($s |> str_replace(?, <<<EOT\n        b\n        EOT, ($t = 'xa'))) . $t;", false},
+		"string over lines":  {"return ($s |> str_replace(?, 'b\nc', ($t = 'xa'))) . $t;", false},
+		"callee over lines":  {"return ($s |> $r\n        ->rep(?, ($t = 'xa'))) . $t;", false},
+		"comment on a stage": {"return ($s\n        |> str_replace(?, 'b', 'c') // first\n        |> str_replace(?, 'd', __FUNCTION__)) . $t;", false},
+	}
+	files := map[string]struct {
+		src   string
+		moves bool
+	}{
+		"block closure in an argument":            {"/** @param list<int> $xs */\nfunction tot(array $xs): int => array_sum($xs);\nfunction three(string $a, Closure $f, string $c): string => $a . strval($f([1, 2])) . $c;\nfunction c(string $s): string {\n    $r = $s\n        |> three(?, tot(?), __FUNCTION__);\n    return $r;\n}\necho c('a'), \"\\n\";\n", true},
+		"crlf":                                    {"function three(string $a, string $b, string $c): string => $a . $b . $c;\r\nfunction c(string $s): string {\r\n    return $s\r\n        |> three(?, 'b', __FUNCTION__);\r\n}\r\necho c('a'), \"\\n\";\r\n", true},
+		"erased generic":                          {"/** @return list<T> */\nfunction make<T>(): array => [];\n/** @param list<int> $xs */\nfunction three(string $a, array $xs, string $c): string => $a . count($xs) . $c;\nfunction c(string $s): string => $s |> three(?, make<int>(), __FUNCTION__);\necho c('a'), \"\\n\";\n", true},
+		"heredoc piped into an expression body":   {"function three(string $a, string $b, string $c): string => $a . $b . $c;\nfunction c(): string => <<<EOT\n    left\n    EOT |> three(?, 'b', __FUNCTION__);\necho c(), \"\\n\";\n", false},
+		"match over lines":                        {"function three(string $a, string $b, string $c): string => $a . $b . $c;\nfunction c(string $s, int $n): string {\n    return $s |> three(?, match ($n) {\n        1 => 'one',\n        default => 'many',\n    }, __FUNCTION__);\n}\necho c('a', 1), \"\\n\";\n", true},
+		"match on a stage's line":                 {"function three(string $a, string $b, string $c): string => $a . $b . $c;\nfunction c(string $s, int $n): string {\n    return $s\n        |> three(?, match ($n) {\n            1 => 'one',\n            default => 'many',\n        }, __FUNCTION__);\n}\necho c('a', 1), \"\\n\";\n", true},
+		"pipe in an argument":                     {"function three(string $a, string $b, string $c): string => $a . $b . $c;\nfunction c(string $s): string => $s |> three(?, ('x' |> three(?, 'y', __FUNCTION__)), __FUNCTION__);\necho c('a'), \"\\n\";\n", true},
+		"attribute in an argument":                {"function three(string $a, Closure $f, string $c): string => $a . strval($f('k')) . $c;\nfunction c(string $s): string => $s |> three(?, fn(#[\\SensitiveParameter] string $k): string => $k, __FUNCTION__);\necho c('a'), \"\\n\";\n", true},
+		"trailing comma":                          {"function three(string $a, string $b, string $c): string => $a . $b . $c;\nfunction c(string $s): string => $s |> three(?, 'b', __FUNCTION__,);\necho c('a'), \"\\n\";\n", true},
+		"tuple type":                              {"/** @param callable((int, int)): int $f */\nfunction three(string $a, callable $f, string $c): string => $a . $f([1, 2]) . $c;\nfunction c(string $s): string => $s |> three(?, fn((int, int) $p): int => $p[0] + $p[1], __FUNCTION__);\necho c('a'), \"\\n\";\n", true},
+		"yield and arrow function":                {"function three(string $a, string $b, string $c): string => $a . $b . $c;\n/** @return Generator<int, string> */\nfunction g(string $s): Generator {\n    yield $s |> three(?, 'b', __FUNCTION__);\n}\n$f = fn(string $s): string => $s |> three(?, 'c', __FUNCTION__);\necho implode(',', iterator_to_array(g('a'))), $f('z'), \"\\n\";\n", true},
+		"comment in an inner call":                {"function pair(string $a, string $b): string => $a . '|' . $b;\n\nfunction inner(string $s, string $x): string => $s |> pair(?, strval(/* how many */ func_num_args()));\n", true},
+		"string over lines in an expression body": {"function pair(string $a, string $b): string => $a . '|' . $b;\n\nfunction multi(string $s): string => $s |> pair(?, 'two\nlines' . __FUNCTION__);\n", false},
+		"comment in a call passing by reference":  {"function pair(string $a, string $b): string => $a . '|' . $b;\n\nfunction byRef(string $s): string {\n    $r = $s |> pair(?, (string) preg_match(/* subject */ '/(a)/', $s, $m));\n    return $r . json_encode($m);\n}\n", true},
+	}
+	for name, c := range cases {
+		files[name] = struct {
+			src   string
+			moves bool
+		}{"final class R {\n    rep(string $s, string $t): string => $s . $t;\n}\n\nfunction c(string $s, R $r): string {\n    $t = 'o';\n    " + c.body + "\n}\n", c.moves}
+	}
+	for name, c := range files {
+		t.Run(name, func(t *testing.T) {
+			src := []byte(c.src)
+			p := program.New()
+			if err := p.LoadStubs(); err != nil {
+				t.Fatal(err)
+			}
+			p.SetTarget(phpversion.PHP85)
+			f, err := p.AddFile("A.phn", src, lexer.ModePhaenon, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			unfolded := func(p *program.Program, f *program.File) []ast.Expr {
+				return UnfoldedBound(f.Src, Options{SourceName: f.Path, StrictTypes: true, Program: p, File: f})
+			}
+			refused := false
+			for _, d := range checker.New(p, checker.Options{Unfolded: unfolded}).Check() {
+				switch {
+				case d.Code == "P1002":
+					refused = true
+				case d.Severity == checker.Error:
+					t.Errorf("checker: %d: %s: %s", d.Line, d.Code, d.Message)
+				}
+			}
+			_, err = File(src, Options{SourceName: "A.phn", StrictTypes: true, Program: p, File: f})
+			switch {
+			case refused == c.moves:
+				t.Errorf("phn check refuses the stage: %v; its run folds: %v", refused, c.moves)
+			case (err != nil) != refused:
+				t.Errorf("phn check refuses the stage: %v; phn build: %v", refused, err)
+			}
+		})
+	}
+}

@@ -204,7 +204,9 @@ func (h *projectHost) Program(files []string, read func(string) ([]byte, error),
 func (h *projectHost) Options(opts checker.Options) checker.Options {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.proj.checkerOptions(opts)
+	opts = h.proj.checkerOptions(opts)
+	opts.Unfolded = unfolded
+	return opts
 }
 
 func (h *projectHost) ProjectDiagnostics(p *program.Program, files []string) []checker.Diagnostic {
