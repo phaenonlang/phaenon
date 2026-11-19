@@ -494,6 +494,10 @@ var checkerAlone = map[string][]struct {
 		{P2305, []int{97}, notToldApartYet, "the step of a numeric-string is a number, and no '6'; PHPStan has a benevolent (float|int) and passes the comparison"},
 		{P2202, []int{100}, notToldApartYet, "the same, returned where string|int is declared"},
 	},
+	"arrays-functions.phn": {{P2103, []int{124}, notToldApartYet, "array_chunk() with a $preserve_keys that may be true is a list of arrays, not of lists: " +
+		"php gives [['a', 'b'], [2 => 'c']] for true, where PHPStan has a list<non-empty-list<string>> whatever the bool. The argument is a call's result, no value the place proves"}},
+	"match-caught.phn": {{P2304, []int{120, 155, 168, 220}, notToldApartYet, "a match PHPStan takes as caught where nothing catches its error: PHPStan gives a try's catch names " +
+		"to its catch and finally blocks too, reads `namespace\\Error` as the global Error, and takes a @throws tag for a catch. The subject of a match is no place an untouched parameter proves"}},
 
 	"constructor-visibility.phn": {{P2502, []int{264}, phpRefuses, "a constructor narrower than the abstract one a trait of the parent declares: " +
 		"\"Access level to …::__construct() must be public\" when the class is declared"}},
@@ -510,10 +514,14 @@ var checkerAlone = map[string][]struct {
 		"it has Io\\Poll's parameters as bare arrays, where the stubs say non-empty-array<Io\\Poll\\Event>"}},
 	"readonly-defaults.phn": {{P2206, []int{21}, artifact, "PHPStan predates readonly property defaults (allowIn) and reports the default itself, not the assignment PHP 8.6 refuses"}},
 
-	"narrowing.phn": {{P2103, []int{269}, falseFinding, "`$loose = $before instanceof stdClass && … ? … : null` and `null !== $loose` leave $before a stdClass, " +
-		"which PHPStan keeps with the variable and the checker does not"}},
-	"throw-analysis.phn": {{P2304, []int{184}, falseFinding, "a match without a default inside a try that catches \\UnhandledMatchError: " +
-		"the catch is the handling of the other values, and nothing fails; PHPStan is silent because of the catch"}},
+	"kept-conditions.phn": {
+		{P2103, []int{333, 349}, notToldApartYet, "a condition kept in a variable, ended by a write PHPStan does not follow: array_walk_recursive() with a callback " +
+			"that takes the value by reference, array_multisort() on an int key it renumbers. php gives takesStd() an int and a null, PHPStan keeps the stdClass; " +
+			"the argument is an offset, no value the place proves"},
+		{P2103, []int{381, 386, 391, 394, 402}, falseFinding, "$before is a stdClass wherever the kept condition holds, as PHPStan narrows it and the checker does not yet: " +
+			"through a match assigned to the variable, in a closure that captures both, after `$loose > 0`, through the assignment inside the test, " +
+			"after an if whose branches assign the variable each"},
+	},
 }
 
 // thrownWhenRun is, for a line checkerAlone says PHP refuses and php
