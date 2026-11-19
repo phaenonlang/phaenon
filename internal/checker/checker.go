@@ -207,6 +207,10 @@ type Checker struct {
 	// attrFlags caches the flags of PHP's attribute classes, -1 for a
 	// class that is none (attributeFlags).
 	attrFlags map[*program.Class]int
+	// atOnce maps the argument list of a partial application to the call
+	// that calls it where it stands with arguments, `(f(B, ...))(X)`
+	// (Partial.Direct).
+	atOnce map[*ast.ArgList]*ast.Call
 }
 
 // New creates a checker for the program.
