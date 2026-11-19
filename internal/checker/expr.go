@@ -891,6 +891,18 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 			continue
 		}
 		k := cl.FindConst(name)
+		if cl.Kind == ast.KindTrait && cl == x.class && (k == nil || lateBound) && !writtenClassName(e.Class) {
+			// self::X, static::X and $this::X in a trait's body read the
+			// constant of the class the body runs in.
+			if ts, lacking := x.traitUserConstants(cl, name, lateBound); len(ts) > 0 {
+				if lacking != nil {
+					x.report(e.Name.Span(), P2004, "unknown constant %s::%s", lacking.Name, name)
+					return types.TError
+				}
+				out = append(out, ts...)
+				continue
+			}
+		}
 		if k == nil {
 			x.report(e.Name.Span(), P2004, "unknown constant %s::%s", cl.Name, name)
 			return types.TError
@@ -912,6 +924,83 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 		out = append(out, x.bindReceiver(t, recv, k.Class))
 	}
 	return types.MakeUnion(out...)
+}
+
+// writtenClassName reports a class reference written as a class's name, not
+// self, static or parent, nor an expression.
+func writtenClassName(e ast.Expr) bool {
+	n, ok := e.(*ast.Name)
+	return ok && specialClassName(n) == ""
+}
+
+// traitUserConstants types a constant a trait's body reads through self,
+// static or $this in each class that uses the trait, anonymous ones
+// included, as PHPStan types the body in the context of each, a user that
+// is a trait passing the question on to its users: the constant's value
+// read through self, its declared type read late bound in a class a
+// subclass may override it in (classConstFetch), an enum case as itself.
+// A parent's private constant is none of the user's. A user whose own
+// method replaces the one being checked does not run its body, and does
+// not count. lacking is a user without the constant; nothing is returned
+// when no user has it.
+func (x *fnCtx) traitUserConstants(trait *program.Class, name string, lateBound bool) (out []types.Type, lacking *program.Class) {
+	seen := map[string]bool{}
+	var walk func(t *program.Class)
+	walk = func(t *program.Class) {
+		if seen[strings.ToLower(t.Name)] {
+			return
+		}
+		seen[strings.ToLower(t.Name)] = true
+		for _, u := range x.p().TraitUsers(t.Name) {
+			u.Signature()
+			if x.method != nil && !runsBody(u, x.method) {
+				continue // the user's own method runs instead of the trait's
+			}
+			if u.Kind == ast.KindTrait {
+				walk(u)
+				continue
+			}
+			if cs := u.FindCase(name); cs != nil {
+				out = append(out, types.EnumCase{Class: u.Name, Case: cs.Name})
+				continue
+			}
+			k := u.FindConst(name)
+			if k != nil && k.Vis == program.Private && k.Class != nil && !strings.EqualFold(k.Class.Name, u.Name) {
+				k = nil // a parent's private constant: php has none for the user
+			}
+			if k == nil {
+				if lacking == nil {
+					lacking = u
+				}
+				continue
+			}
+			ct := x.p().ConstantType(k)
+			if lateBound && !u.Final && !k.Final && u.Kind != ast.KindEnum {
+				ct = k.Type
+				if ct == nil {
+					ct = types.TMixed
+				}
+			}
+			out = append(out, x.bindReceiver(ct, types.Class{Name: u.Name}, k.Class))
+		}
+	}
+	walk(trait)
+	return out, lacking
+}
+
+// runsBody reports a class whose methods hold a trait method's body,
+// under the method's name or an alias (`use T { read as readT; }`): what
+// a class copies from a trait keeps its declaration.
+func runsBody(c *program.Class, m *program.Method) bool {
+	if m.Decl == nil {
+		return true
+	}
+	for _, own := range c.Methods {
+		if own.Decl == m.Decl {
+			return true
+		}
+	}
+	return false
 }
 
 // ------------------------------------------------------------------ members

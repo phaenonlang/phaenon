@@ -348,6 +348,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 		return
 	}
 	c.seen[key] = true
+	c.seenLog = append(c.seenLog, key)
 	cl.Signature()
 	savedFile := c.file
 	c.file = cl.File

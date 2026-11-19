@@ -1,0 +1,249 @@
+namespace App\TraitConstants;
+
+// A trait's body runs in each class using it: a constant it reads through
+// self, static or $this is the user's, as PHPStan analyses a trait once per
+// user (design/checker.md §9, "A trait sees its users"). Through self the
+// constant is its value; through static the value in a final class, its
+// declared type in a class a subclass may override it in. A user without
+// the constant is P2004 naming that user; a constant no user has stays
+// P2004 on the trait. Plain PHP, so that PHPStan reads this file as
+// written.
+
+interface Named
+{
+    public const KIND = 'named';
+}
+
+class Base
+{
+    public const ROOT = 'base';
+}
+
+trait Labels
+{
+    public const PREFIX = 'label:';
+
+    public function own(): string
+    {
+        return self::PREFIX . self::NAME;
+    }
+
+    public function late(): string
+    {
+        return static::PREFIX . static::NAME;
+    }
+
+    public function inherited(): string
+    {
+        return self::ROOT . static::KIND;
+    }
+
+    public function viaThis(): string
+    {
+        return $this::NAME;
+    }
+
+    public function secret(): string
+    {
+        return self::SECRET;
+    }
+
+    public function byDefault(string $name = self::NAME): string
+    {
+        return $name;
+    }
+}
+
+final class Product extends Base implements Named
+{
+    use Labels;
+
+    public const NAME = 'product';
+    private const SECRET = 'p';
+}
+
+// A user through a trait that uses the trait.
+trait Relabels
+{
+    use Labels;
+}
+
+final class Order extends Base implements Named
+{
+    use Relabels;
+
+    public const NAME = 'order';
+    private const SECRET = 'o';
+}
+
+// A class a subclass may override the constant in: through static it is
+// the declared type, mixed for an untyped one.
+trait Sized
+{
+    public function size(): int
+    {
+        return static::SIZE;
+    }
+
+    public function width(): int
+    {
+        return static::WIDTH; // want P2202 "returns mixed"
+    }
+}
+
+class Box
+{
+    use Sized;
+
+    public const int SIZE = 2;
+    public const WIDTH = 3;
+}
+
+// A user without the constant is the one named.
+trait Coded
+{
+    public function code(): string
+    {
+        return self::CODE; // want P2004 "unknown constant App\TraitConstants\Uncoded::CODE"
+    }
+}
+
+final class Coded1
+{
+    use Coded;
+
+    public const CODE = 'c1';
+}
+
+final class Uncoded
+{
+    use Coded;
+}
+
+// An enum's case is itself.
+trait Picks
+{
+    public function first(): Suit
+    {
+        return self::Hearts;
+    }
+}
+
+enum Suit
+{
+    use Picks;
+
+    case Hearts;
+}
+
+// A parent's private constant is not the user's: php has no U::HIDDEN.
+class Hiding
+{
+    private const HIDDEN = 'hidden'; // want P2406
+}
+
+trait Reveals
+{
+    public function reveal(): string
+    {
+        return self::HIDDEN; // want P2004 "unknown constant App\TraitConstants\Reveals::HIDDEN"
+    }
+}
+
+final class Revealing extends Hiding
+{
+    use Reveals;
+}
+
+// An anonymous class is a user as well.
+trait Greets
+{
+    public function greeting(): string
+    {
+        return self::GREETING; // want P2004 "unknown constant class@anonymous"
+    }
+}
+
+final class Greeter
+{
+    use Greets;
+
+    public const GREETING = 'hello';
+}
+
+function greeters(): string
+{
+    $anonymous = new class {
+        use Greets;
+    };
+
+    return (new Greeter())->greeting() . $anonymous->greeting();
+}
+
+// A user whose own method replaces the trait's does not run its body.
+trait Describes
+{
+    public function describe(): string
+    {
+        return self::DESCRIPTION;
+    }
+}
+
+final class Described
+{
+    use Describes;
+
+    public const DESCRIPTION = 'described';
+}
+
+final class SelfDescribed
+{
+    use Describes;
+
+    public function describe(): string
+    {
+        return 'its own';
+    }
+}
+
+// A user that keeps the trait's method under an alias runs its body under
+// that name, beside its own method of the trait's name.
+trait Titles
+{
+    public function title(): string
+    {
+        return self::TITLE; // want P2004 "unknown constant App\TraitConstants\Retitled::TITLE"
+    }
+}
+
+final class Titled
+{
+    use Titles;
+
+    public const TITLE = 'titled';
+}
+
+final class Retitled
+{
+    use Titles {
+        title as baseTitle;
+    }
+
+    public function title(): string
+    {
+        return 'own';
+    }
+}
+
+// A user through a trait that uses the trait, without the constant.
+trait Subtitles
+{
+    use Titles;
+}
+
+final class Subtitled
+{
+    use Subtitles;
+
+    public const TITLE = 'subtitled';
+}

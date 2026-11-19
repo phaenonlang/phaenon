@@ -543,7 +543,7 @@ func (x *fnCtx) testType(t ast.TypeExpr) (target, narrow types.Type, ok bool) {
 	}
 	found, known := x.c.typeFindings[t]
 	if !known {
-		found = len(x.c.diags) > mark
+		found = len(x.c.diags) > mark.diags
 		x.c.typeFindings[t] = found
 	}
 	ok = !found

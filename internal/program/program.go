@@ -43,6 +43,12 @@ type Program struct {
 	// earlier ones instead of being ignored.
 	override bool
 	anon     int
+	// anonymous holds the class each anonymous declaration was given, so
+	// that it is declared once however often its body is checked;
+	// anonymousUsers says the checked files' anonymous classes that use a
+	// trait have been declared (TraitUsers).
+	anonymous      map[*ast.ClassDecl]*Class
+	anonymousUsers bool
 	// patches are overlay declarations of classes the stubs already
 	// declare, applied on top of them (see declareClass).
 	patches map[string]*ast.ClassDecl
@@ -528,8 +534,11 @@ func (p *Program) SuperArgs(c types.Class, super string) ([]types.Type, bool) {
 	return cl.SuperArgs(super, c.Args)
 }
 
-// TraitUsers returns the loaded classes that use the trait, sorted by name.
+// TraitUsers returns the loaded classes that use the trait, sorted by
+// name: an anonymous class of a checked file among them, whether or not its
+// body has been checked yet.
 func (p *Program) TraitUsers(trait string) []*Class {
+	p.declareAnonymousUsers()
 	var out []*Class
 	for _, c := range p.classes {
 		c.ensureHeader()
@@ -542,6 +551,32 @@ func (p *Program) TraitUsers(trait string) []*Class {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// declareAnonymousUsers declares, once, every anonymous class of the
+// checked files that uses a trait, so that the trait's users include it
+// before the code around it is checked.
+func (p *Program) declareAnonymousUsers() {
+	if p.anonymousUsers {
+		return
+	}
+	p.anonymousUsers = true
+	for _, f := range p.order {
+		if !f.Checked || f.AST == nil {
+			continue
+		}
+		ast.Inspect(f.AST, func(n ast.Node) bool {
+			if e, ok := n.(*ast.New); ok && e.Anon != nil {
+				for _, m := range e.Anon.Members {
+					if _, uses := m.(*ast.TraitUse); uses {
+						p.DeclareAnonymous(f, f.ScopeAt(e.Anon.S.Start), e.Anon)
+						break
+					}
+				}
+			}
+			return true
+		})
+	}
 }
 
 // PropertyType implements types.Hierarchy.

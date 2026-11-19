@@ -154,9 +154,11 @@ type Checker struct {
 	p     *program.Program
 	opts  Options
 	diags []Diagnostic
-	// seen are the classes checked; reported, the findings made, each
-	// once (findingKey).
+	// seen are the classes checked, in the order of seenLog, which a
+	// rollback forgets them by; reported, the findings made, each once
+	// (findingKey).
 	seen     map[string]bool
+	seenLog  []string
 	reported map[findingKey]bool
 	// guards are the version guards around the code being checked
 	// (guards.go).
@@ -626,17 +628,28 @@ func (c *Checker) reportOf(kind Kind, span ast.Span, code Code, rel *Related, fo
 	c.diags = append(c.diags, d)
 }
 
-// mark returns the number of diagnostics so far; rollback(mark) discards
-// the ones reported since and forgets them, so a later pass over the same
-// code — a loop's next iteration, the real evaluation after a lenient one —
-// can report them again.
-func (c *Checker) mark() int { return len(c.diags) }
+// checkMark is a point of the check rollback returns to: the number of
+// diagnostics and of classes checked so far.
+type checkMark struct{ diags, seen int }
 
-func (c *Checker) rollback(mark int) {
-	for _, d := range c.diags[mark:] {
+// mark returns the point the check has reached; rollback(mark) discards
+// the diagnostics reported since and forgets them, so a later pass over
+// the same code — a loop's next iteration, the real evaluation after a
+// lenient one — can report them again. It forgets the classes checked
+// since as well: an anonymous class in that code is the same class in
+// the later pass (Program.DeclareAnonymous), whose body is to be checked
+// again for its findings to be kept.
+func (c *Checker) mark() checkMark { return checkMark{len(c.diags), len(c.seenLog)} }
+
+func (c *Checker) rollback(m checkMark) {
+	for _, d := range c.diags[m.diags:] {
 		delete(c.reported, d.key)
 	}
-	c.diags = c.diags[:mark]
+	c.diags = c.diags[:m.diags]
+	for _, key := range c.seenLog[m.seen:] {
+		delete(c.seen, key)
+	}
+	c.seenLog = c.seenLog[:m.seen]
 }
 
 // ------------------------------------------------------------------ per file
@@ -1196,7 +1209,7 @@ func (c *Checker) constType(k *program.Constant) types.Type {
 	// Diagnostics inside vendor constants are not reported: suppress by
 	// checking silently.
 	silent := !k.File.Checked
-	savedDiags := 0
+	var savedDiags checkMark
 	if silent {
 		savedDiags = c.mark()
 	}
