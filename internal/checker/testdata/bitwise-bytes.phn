@@ -1,0 +1,37 @@
+// The bitwise operators on bytes combine them byte by byte, as PHP does
+// on any string: a mask of bytes is bytes, text with bytes is bytes, since
+// what comes out is no text, and text with text stays a string.
+namespace App\BitwiseBytes;
+
+function takesBytes(bytes $b): void
+{
+}
+
+function takesString(string $s): void
+{
+}
+
+function masks(bytes $a, bytes $b, string $s): void
+{
+    takesBytes($a & $b);
+    takesBytes($a | $b);
+    takesBytes($a ^ $b);
+    takesBytes(~$a);
+    takesBytes($a & $s);
+    takesBytes($s ^ $a);
+    $m = $a;
+    $m &= $b;
+    takesBytes($m);
+    takesString($s & 'x');
+    takesString($a & $s); // want P2103 "expects string, bytes given"
+}
+
+/**
+ * @param bytes|int $bi
+ * @param bytes|float $bf
+ */
+function flipped($bi, $bf): int|bytes
+{
+    $f = ~$bf;
+    return $f === 0 ? $f : ~$bi;
+}
