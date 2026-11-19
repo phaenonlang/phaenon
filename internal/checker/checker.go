@@ -204,6 +204,17 @@ type Checker struct {
 	// targetedLabels says, per file, which labels a goto names
 	// (labelTargeted).
 	targetedLabels map[*program.File]map[*ast.Label]bool
+	// caseTypes are the types of backed enum cases' values, each typed
+	// once where its enum is declared (caseValue), as a constant's is
+	// (program.ConstantType); caseTyping are the cases whose value is being
+	// typed, which a value that reads itself meets again.
+	caseTypes  map[*program.EnumCase]types.Type
+	caseTyping map[*program.EnumCase]bool
+	// refs are, per class constant and enum case, the references its value
+	// follows whenever PHP evaluates it, and cycles how it reads itself, nil
+	// where it does not (selfref.go).
+	refs   map[valueDecl][]valueRef
+	cycles map[valueDecl]*cycle
 }
 
 // New creates a checker for the program.
@@ -1194,8 +1205,9 @@ func (c *Checker) constType(k *program.Constant) types.Type {
 	c.file = k.File
 	defer func() { c.file = saved }()
 	// Diagnostics inside vendor constants are not reported: suppress by
-	// checking silently.
-	silent := !k.File.Checked
+	// checking silently. Nor are those of a value that reads itself, which
+	// is reported once as such (P2016), in its class's check.
+	silent := !k.File.Checked || k.Class != nil && c.cycleOf(valueDecl{k: k}) != nil
 	savedDiags := 0
 	if silent {
 		savedDiags = c.mark()
