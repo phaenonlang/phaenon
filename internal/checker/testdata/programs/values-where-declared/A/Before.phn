@@ -1,0 +1,38 @@
+namespace Before;
+
+use Shop\Limits;
+use Shop\Pick;
+use Shop\Suit;
+
+// What Shop declares, read from another namespace that has a PREFIX and
+// an ON of its own and a class with a BASE: the values are Shop's, and
+// nothing they draw is reported in this file, where a comment cannot
+// silence it either.
+
+const PREFIX = 'reader-';
+
+const ON = false;
+
+final class Reader {
+    const BASE = 1;
+
+    hearts(): int => Suit::Hearts->value; // want P2202 "returns 'suit-h'"
+
+    spades(): int => Suit::Spades->value; // want P2202 "returns 'bs'"
+
+    clubs(): string => Suit::Clubs->value;
+
+    diamonds(): string => Suit::Diamonds->value; // @phaenon-ignore P2003 // want P4015 "no P2003 is reported on line 25"
+
+    max(): mixed => Limits::MAX;
+
+    size(Limits $l): int => $l->size;
+
+    made(): int => Limits::make();
+
+    one(): int => Pick::one();
+
+    two(): string => Pick::two();
+
+    three(): int => \Shop\three();
+}

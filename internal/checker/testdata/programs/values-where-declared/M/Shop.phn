@@ -1,0 +1,42 @@
+namespace Shop;
+
+// Values that other files read: a backed enum case's, a class constant's,
+// a property's default and a parameter's default. Each is typed as this
+// file reads it, in this namespace and with self naming its class,
+// whichever file reads it, and what it draws is reported here, once, in
+// whichever order the files are checked: a reader is checked before this
+// file (A/Before.phn) and another after it (Z/After.phn).
+
+const PREFIX = 'suit-';
+
+const ON = true;
+
+enum Suit: string {
+    const BASE = 'b';
+
+    case Hearts = PREFIX . 'h';
+    case Spades = self::BASE . 's';
+    case Clubs = MISSING_C; // want P2003 "unknown constant MISSING_C"
+    case Diamonds = MISSING_D; // @phaenon-ignore P2003
+}
+
+final class Limits {
+    const MAX = MISSING_K; // want P2003
+
+    public int $size = MISSING_P; // want P2003
+
+    static make(int $n = MISSING_N): int => $n; // want P2003
+}
+
+final class Pick {
+    const OFF = false;
+
+    /** @return ($flag is true ? int : string) */
+    static one(bool $flag = ON): int|string => $flag ? 1 : 'x';
+
+    /** @return ($flag is true ? int : string) */
+    static two(bool $flag = self::OFF): int|string => $flag ? 1 : 'x';
+}
+
+/** @return ($flag is true ? int : string) */
+function three(bool $flag = ON): int|string => $flag ? 1 : 'x';
