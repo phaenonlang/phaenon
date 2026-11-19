@@ -467,7 +467,10 @@ func (j buildJob) run() buildResult {
 	} else {
 		diags = append(diags, j.diags...)
 	}
-	broken := map[string]bool{}
+	// unparsed are the broken files whose error is that they do not parse:
+	// no build writes one, --emit-on-error included, and its P1000 has said
+	// why, so the emitter is not asked to fail on it and say it again.
+	broken, unparsed := map[string]bool{}, map[string]bool{}
 	for _, d := range diags {
 		if excluded(d.File) {
 			continue
@@ -480,12 +483,15 @@ func (j buildJob) run() buildResult {
 		}
 		if d.Severity == checker.Error {
 			broken[d.File] = true
+			if d.Code == checker.P1000.ID {
+				unparsed[d.File] = true
+			}
 		}
 	}
 	for _, in := range files {
 		if broken[in] {
 			switch {
-			case !j.emitOnError:
+			case !j.emitOnError || unparsed[in]:
 				res.failed++
 				continue
 			case j.check:

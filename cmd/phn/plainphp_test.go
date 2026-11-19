@@ -305,3 +305,39 @@ func TestInstalledPackagePlainPHP(t *testing.T) {
 		t.Errorf("the package's plain .php is not copied as it is: %v", err)
 	}
 }
+
+// TestBuildCountsAFailedFileOnce: under --emit-on-error a file that does
+// not parse is one file that failed, reported once. It was counted as a
+// file with errors and again when the emitter could not write it ("3 of 3
+// files failed to compile" for two), and its syntax error was printed a
+// second time without its code.
+func TestBuildCountsAFailedFileOnce(t *testing.T) {
+	bin := phnBinary(t)
+	root := plainTree(t)
+	writeTree(t, root, map[string]string{
+		"src/Bad.phn":   "namespace App;\n\nfunction bad(: int => 1;\n",
+		"src/Typed.phn": "namespace App;\n\nfunction typed(): int => 'x';\n",
+	})
+	for _, args := range [][]string{{"build"}, {"build", "--emit-on-error"}} {
+		_, stderr, status := run(t, root, bin, args...)
+		if status == nil {
+			t.Errorf("phn %s should fail", strings.Join(args, " "))
+		}
+		if !strings.Contains(stderr, "\n2 of 3 files failed to compile\n") {
+			t.Errorf("phn %s:\n%s\nwant 2 of 3 files failed to compile", strings.Join(args, " "), stderr)
+		}
+		if n := strings.Count(stderr, "unexpected token"); n != 1 {
+			t.Errorf("phn %s says the syntax error %d times:\n%s", strings.Join(args, " "), n, stderr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".src", "Typed.php")); err != nil {
+		t.Errorf("--emit-on-error writes the file with a type error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".src", "Bad.php")); err == nil {
+		t.Errorf("a file that does not parse was written")
+	}
+	_, stderr, status := run(t, root, bin, "build", "--check", "--emit-on-error")
+	if status == nil || !strings.Contains(stderr, "\n1 of 3 files failed to compile\n") {
+		t.Errorf("phn build --check --emit-on-error (%v):\n%s\nwant the unparsed file alone to fail", status, stderr)
+	}
+}
