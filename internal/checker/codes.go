@@ -197,6 +197,11 @@ var (
 	// (design/roadmap.md), the code is not reused.
 	P2530 = Code{"P2530", Error, "bytes used as text"}
 	P2531 = Code{"P2531", Error, "closure in a constant expression captures its scope"}
+	// P2533: an attribute class of PHP's own on a declaration its flags
+	// leave out, or repeated where it is not repeatable, which PHP refuses
+	// when it compiles the file (ownAttributes); a user's attribute is
+	// checked only by ReflectionAttribute::newInstance().
+	P2533 = Code{"P2533", Error, "PHP's attribute on a target it refuses, or repeated"}
 
 	// P2601–P2606 belonged to `concurrently` blocks and `spawn`, which left
 	// the language on 2026-11-08 (design/roadmap.md D25, concurrency.md

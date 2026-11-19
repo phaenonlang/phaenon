@@ -1,0 +1,57 @@
+namespace App\AttributeTargetsRuntime;
+
+// The targets PHP checks only when ReflectionAttribute::newInstance() runs,
+// which PHPStan reports as written (attribute-targets.phn): a user's
+// attribute class's, and those of PHP's own attributes beside
+// #[\DelayedTargetValidation], which puts the check off to that call. The
+// repetition of PHP's own is checked when the file compiles all the same.
+
+use Attribute;
+
+#[Attribute(Attribute::TARGET_METHOD)]
+final class OnMethods
+{
+}
+
+#[OnMethods]
+function user(): void
+{
+}
+
+#[\DelayedTargetValidation]
+#[\ReturnTypeWillChange]
+function delayed(): void
+{
+}
+
+#[\ReturnTypeWillChange, \DelayedTargetValidation]
+function delayedAfter(): void
+{
+}
+
+#[\DelayedTargetValidation, \NoDiscard, \NoDiscard] // want P2533 "#[\NoDiscard] must not be repeated"
+function delayedTwice(): int
+{
+    return 1;
+}
+
+final class Settings
+{
+    #[\DelayedTargetValidation, \SensitiveParameter]
+    public const KEY = 'key';
+
+    #[\SensitiveParameter] // want P2533 "cannot target a class constant"
+    public const OTHER = 'other';
+}
+
+// php-src's test extension declares attribute classes too, which a php
+// runs without: they are not judged, and PHPStan does not know them.
+#[\ZendTestParameterAttribute('x')]
+function testExtension(): void
+{
+}
+
+#[\ZendTestAttribute, \ZendTestAttribute]
+function testExtensionTwice(): void
+{
+}
