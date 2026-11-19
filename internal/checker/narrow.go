@@ -71,6 +71,7 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 			x.idleNullsafe(v, env, "isset()", "in isset()")
 			t := x.exprLenient(v, env)
 			x.narrowPath(then, v, types.StripNull(t), true)
+			x.excluded(then, v, types.TNull)
 			x.issetChain(then, v)
 		}
 		x.condValueType = types.TBool
@@ -88,6 +89,7 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		then, els = env.clone(), env.clone()
 		x.narrowPath(then, e.Expr, types.Falsy(t), false)
 		x.narrowPath(els, e.Expr, types.Truthy(t), true)
+		x.excluded(els, e.Expr, falsyValues)
 		x.issetChain(els, e.Expr)
 		x.condValueType = types.TBool
 		return then, els
@@ -125,6 +127,7 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 	then, els = env.clone(), env.clone()
 	x.narrowPath(then, e, types.Truthy(t), true)
 	x.narrowPath(els, e, types.Falsy(t), false)
+	x.excluded(then, e, falsyValues)
 	if c, ok := pregMatchCall(e); ok {
 		x.pregNarrow(c, then)
 	}
@@ -158,6 +161,26 @@ func (x *fnCtx) alwaysCheck(e ast.Expr, t types.Type) {
 		x.report(e.Span(), P2402, "condition is always false (%s)", x.typeName(t))
 	} else if _, ok := types.Falsy(t).(types.Never); ok {
 		x.report(e.Span(), P2402, "condition is always true (%s)", x.typeName(t))
+	}
+}
+
+// falsyValues are PHP's falsy values, which a test of truthiness rules out.
+var falsyValues = types.MakeUnion(types.TNull, types.TFalse, types.IntLit(0), types.FloatLit{V: 0},
+	types.StringLit{V: ""}, types.StringLit{V: "0"}, types.Shape{})
+
+// excluded tells the conditions remembered with a variable, e, that the
+// branch being narrowed ruled every value of values out of it, which the
+// variable's type cannot show when it is mixed (state.applyExclusion).
+func (x *fnCtx) excluded(env *state, e ast.Expr, values types.Type) {
+	for {
+		p, ok := e.(*ast.Paren)
+		if !ok {
+			break
+		}
+		e = p.Expr
+	}
+	if v, ok := e.(*ast.Variable); ok && v.Name != "this" {
+		env.applyExclusion(v.Name, values, x.p())
 	}
 }
 
@@ -967,9 +990,10 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 	x.coalesceCompared(then, els, e.Left, rt, strict, env)
 	x.coalesceCompared(then, els, e.Right, lt, strict, env)
 	narrowBy := func(target ast.Expr, targetT, other types.Type) {
-		if !isLiteralLike(other) || len(types.Members(other)) > 1 {
+		if !oneValue(other) {
 			// `$x === $y` with a non-literal, or with one of several values
-			// (`$kind !== $person` where $person is null|A|B): the then
+			// (`$kind !== $person` where $person is null|A|B, `$v !== $flag`
+			// where $flag is a bool, true or false): the then
 			// branch intersects, the else branch learns nothing — $x may
 			// still be any one value $y is not.
 			if strict {
@@ -984,6 +1008,7 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 			}
 			x.narrowPathNative(then, target, types.Intersect(targetT, other, x.p()), nthen, true)
 			x.narrowPathNative(els, target, x.subtract(targetT, other, x.p()), nels, false)
+			x.excluded(els, target, other)
 			if !strict {
 				// == null is truthiness-like.
 				x.narrowPath(then, target, types.Falsy(targetT), true)
@@ -1143,7 +1168,7 @@ func (x *fnCtx) coalesceCompared(then, els *state, side ast.Expr, other types.Ty
 		side = p.Expr
 	}
 	co, ok := side.(*ast.Binary)
-	if !ok || co.Op != token.T_COALESCE || !strict || !isLiteralLike(other) || len(types.Members(other)) > 1 {
+	if !ok || co.Op != token.T_COALESCE || !strict || !oneValue(other) {
 		return
 	}
 	saved := x.c.mark() // both operands were typed with the comparison already
@@ -1154,7 +1179,7 @@ func (x *fnCtx) coalesceCompared(then, els *state, side ast.Expr, other types.Ty
 	case types.IsMixed(def) || types.IsMixed(inner):
 	case !types.Overlaps(def, other, x.p()):
 		x.narrowPath(then, co.Left, types.Intersect(inner, other, x.p()), true)
-	case isLiteralLike(def) && len(types.Members(def)) == 1:
+	case oneValue(def):
 		x.narrowPath(els, co.Left, x.subtract(inner, other, x.p()), true)
 	}
 }
@@ -1180,6 +1205,24 @@ func isLiteralLike(t types.Type) bool {
 		default:
 			return false
 		}
+	}
+	return true
+}
+
+// oneValue reports a literal-like type of one value, which a strict
+// comparison that fails rules out: a literal, null, an enum case, the
+// empty array. bool is two values, true and false, and NAN is no value a
+// comparison finds: NAN !== NAN.
+func oneValue(t types.Type) bool {
+	ms := types.Members(t)
+	if len(ms) != 1 || !isLiteralLike(t) {
+		return false
+	}
+	switch m := ms[0].(type) {
+	case types.Bool:
+		return false
+	case types.FloatLit:
+		return !math.IsNaN(m.V)
 	}
 	return true
 }
@@ -1776,6 +1819,11 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 	}
 	x.narrowPathNative(then, arg, types.Intersect(at, target, x.p()), nthen, true)
 	x.narrowPathNative(els, arg, x.subtract(at, target, x.p()), nels, false)
+	if isNullType(target) {
+		// Where is_null() fails the value is not null. Other predicates are
+		// not exact both ways: is_resource() fails on a closed resource.
+		x.excluded(els, arg, target)
+	}
 	if nt := x.nativeOr(arg, at, env); !types.IsMixed(at) {
 		if _, isNever := types.Intersect(at, target, x.p()).(types.Never); isNever {
 			x.condValueType = types.TFalse

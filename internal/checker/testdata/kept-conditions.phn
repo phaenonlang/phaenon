@@ -1,0 +1,404 @@
+namespace App\KeptConditions;
+
+// A ternary assigned to a variable keeps its condition with it: where the
+// variable holds a value the other branch cannot give, the branch was
+// taken, and what its condition narrowed holds (PHPStan's conditional
+// expressions). A branch's values are its type less the other branch's;
+// mixed less null is no type, so a mixed branch is known where a test rules
+// out every value of the other branch: null for `null !== $v`, isset() and
+// is_null(), the falsy values for truthiness. Plain PHP, so that PHPStan
+// reads this file as written.
+
+function takesStd(\stdClass $o): void
+{
+}
+
+function takesInt(int $n): void
+{
+}
+
+function mixedBranch(mixed $before): void
+{
+    $loose = $before instanceof \stdClass ? $before->services : null;
+    if (null !== $loose) {
+        takesStd($before);
+    }
+    if ($loose !== null) {
+        takesStd($before);
+    }
+    if (isset($loose)) {
+        takesStd($before);
+    }
+    if (!\is_null($loose)) {
+        takesStd($before);
+    }
+    if ($loose != null) {
+        takesStd($before);
+    }
+    if ($loose) {
+        takesStd($before);
+    }
+    if (!empty($loose)) {
+        takesStd($before);
+    }
+    if (\is_string($loose)) {
+        takesStd($before);
+    }
+    if ($loose instanceof \Countable) {
+        takesStd($before);
+    }
+    if (null === $loose) {
+        takesStd($before); // want P2103 "mixed given"
+        return;
+    }
+    takesStd($before);
+}
+
+function nullFirst(mixed $before): void
+{
+    $loose = !$before instanceof \stdClass ? null : $before->services;
+    if (null === $loose) {
+        return;
+    }
+    takesStd($before);
+}
+
+function nullableBranch(mixed $before, ?int $n): void
+{
+    $loose = $before instanceof \stdClass ? $n : null;
+    if (null !== $loose) {
+        takesStd($before);
+        takesInt($loose);
+    }
+}
+
+function falseBranch(mixed $before, mixed $value): void
+{
+    $loose = $before instanceof \stdClass ? $value : false;
+    if (false !== $loose) {
+        takesStd($before);
+    }
+    // null is not the other branch's value: it may be this one's.
+    if (null !== $loose) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+}
+
+function literalBranch(mixed $before, string $s): void
+{
+    // string less 'a' is no type: the value may be 'a' from either branch.
+    $loose = $before instanceof \stdClass ? $s : 'a';
+    if ('a' !== $loose) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+}
+
+function boolBranch(mixed $before, bool $flag, bool $other): void
+{
+    // A bool is true or false: `!== $flag` rules out one of them.
+    $loose = $before instanceof \stdClass ? $before->services : $other;
+    if ($loose !== $flag) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    $always = $before instanceof \stdClass ? $before->services : true;
+    if ($always !== $flag) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    if ($always !== true) {
+        takesStd($before);
+    }
+}
+
+function nanBranch(mixed $before): void
+{
+    // NAN !== NAN: no comparison rules NAN out.
+    $loose = $before instanceof \stdClass ? $before->services : \NAN;
+    if ($loose !== \NAN) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+}
+
+function reassigned(mixed $before, mixed $other): void
+{
+    $loose = $before instanceof \stdClass ? $before->services : null;
+    $before = $other;
+    if (null !== $loose) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    $kept = $other instanceof \stdClass ? $other->services : null;
+    $kept = $before;
+    if (null !== $kept) {
+        takesStd($other); // want P2103 "mixed given"
+    }
+}
+
+function coalesced(mixed $before): void
+{
+    $loose = ($before instanceof \stdClass ? $before->services : null) ?? null;
+    if (null !== $loose) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+}
+
+/** @param array<mixed> $items */
+function inLoop(array $items, mixed $before): void
+{
+    foreach ($items as $item) {
+        $loose = $item instanceof \stdClass ? $item->services : null;
+        if (null !== $loose) {
+            takesStd($item);
+        }
+    }
+    // $item is mixed before the loop as in it: the body changes no type at
+    // the loop head, but what the conditions say of $before.
+    $loose = $before instanceof \stdClass ? $before->services : null;
+    $isStd = $before instanceof \stdClass;
+    foreach ($items as $item) {
+        if (null !== $loose) {
+            takesStd($before); // want P2103 "mixed given"
+        }
+        if ($isStd) {
+            takesStd($before); // want P2103 "mixed given"
+        }
+        $before = $item;
+    }
+}
+
+/** @param list<mixed> $items */
+function inWhileLoop(array $items, mixed $before): void
+{
+    $isStd = $before instanceof \stdClass;
+    while (\count($items) > 0) {
+        if ($isStd) {
+            takesStd($before); // want P2103 "mixed given"
+        }
+        $before = \array_pop($items);
+    }
+}
+
+function rotatedInNestedLoops(bool $go, bool $more, mixed $b0, mixed $b1, mixed $b2): void
+{
+    // From the second pass on, $ok0 says $b1 is an object, not $b0, and
+    // $ok1 says nothing of $b1.
+    $ok0 = $b0 instanceof \stdClass;
+    $ok1 = $b1 instanceof \stdClass;
+    $ok2 = $b2 instanceof \stdClass;
+    while ($go) {
+        while ($more) {
+            if ($ok0) {
+                takesStd($b0); // want P2103 "mixed given"
+            }
+            $ok0 = $ok1 && $b1 instanceof \stdClass;
+            $ok1 = $ok2 && $b2 instanceof \stdClass;
+            $ok2 = $ok0 && $b0 instanceof \stdClass;
+        }
+    }
+}
+
+// A write the checker does not follow ends what a condition said, of the
+// variable that holds it and of those it narrowed: a `@var` tag retypes,
+// a by-reference argument writes, include and extract() may write any
+// variable, a by-reference foreach and array_walk() any element.
+function retypedByTag(mixed $before): void
+{
+    $loose = $before instanceof \stdClass ? $before->services : null;
+    /** @var string $loose */
+    if (null !== $loose) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    $tested = $before instanceof \stdClass ? $before->services : null;
+    /** @var mixed $before */
+    if (null !== $tested) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    $isStd = $before instanceof \stdClass;
+    /** @var true $isStd */
+    takesStd($before); // want P2103 "mixed given"
+}
+
+function writtenByReference(mixed $before, string $query): void
+{
+    $loose = $before instanceof \stdClass ? $before->services : null;
+    \settype($loose, 'int');
+    if ($loose) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    $parsed = $before instanceof \stdClass ? $before->services : null;
+    \parse_str($query, $parsed);
+    if ($parsed) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    $isStd = $before instanceof \stdClass;
+    \parse_str($query, $isStd);
+    if ($isStd) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+}
+
+function testedWrittenByReference(mixed $before, mixed $other, mixed $third, string $query): void
+{
+    $loose = $before instanceof \stdClass ? $before->services : null;
+    \settype($before, 'int');
+    if (null !== $loose) {
+        takesStd($before); // want P2103 "given"
+    }
+    $kept = $other instanceof \stdClass ? $other->services : null;
+    \similar_text('a', 'b', $other);
+    if (null !== $kept) {
+        takesStd($other); // want P2103 "given"
+    }
+    $isStd = $third instanceof \stdClass;
+    \parse_str($query, $third);
+    if ($isStd) {
+        takesStd($third); // want P2103 "given"
+    }
+}
+
+function writtenByInclude(mixed $before, string $file): void
+{
+    $loose = $before instanceof \stdClass ? $before->services : null;
+    $isStd = $before instanceof \stdClass;
+    include $file;
+    if (null !== $loose) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    if ($isStd) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+}
+
+/** @param array<string, mixed> $vars */
+function writtenByExtract(mixed $before, array $vars, string $name): void
+{
+    $isStd = $before instanceof \stdClass;
+    \extract($vars); // want P1001
+    if ($isStd) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    $loose = $before instanceof \stdClass ? $before->services : null;
+    $$name = 1; // want P1001
+    if (null !== $loose) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+}
+
+/** @param array<string, mixed> $values */
+function writtenByForeach(array $values): void
+{
+    $loose = $values['k'] instanceof \stdClass ? $values['k']->s : null;
+    $isStd = $values['k'] instanceof \stdClass;
+    foreach ($values as &$value) {
+        $value = 1;
+    }
+    unset($value);
+    if (null !== $loose) {
+        takesStd($values['k']); // want P2103 "mixed given"
+    }
+    if ($isStd) {
+        takesStd($values['k']); // want P2103 "mixed given"
+    }
+}
+
+/** @param array<string, mixed> $values */
+function writtenByArrayWalk(array $values): void
+{
+    $loose = $values['k'] instanceof \stdClass ? $values['k']->s : null;
+    $isStd = $values['k'] instanceof \stdClass;
+    \array_walk($values, function (mixed &$value): void {
+        $value = 1;
+    });
+    if (null !== $loose) {
+        takesStd($values['k']); // want P2103 "mixed given"
+    }
+    if ($isStd) {
+        takesStd($values['k']); // want P2103 "mixed given"
+    }
+}
+
+/** @param array<string, mixed> $values */
+function walkedByValue(array $values): void
+{
+    // A callback that takes the value by value writes nothing back.
+    $loose = $values['k'] instanceof \stdClass ? 1 : null;
+    \array_walk($values, function (mixed $value): void {
+    });
+    \array_walk_recursive($values, fn (mixed $value): bool => \is_int($value));
+    if (null !== $loose) {
+        takesStd($values['k']);
+    }
+    \array_walk_recursive($values, function (mixed &$value): void {
+        $value = 1;
+    });
+    if (null !== $loose) {
+        takesStd($values['k']); // want P2103 "mixed given"
+    }
+}
+
+/** @param array<mixed> $values */
+function multisorted(array $values): void
+{
+    // array_multisort() renumbers int keys and keeps a string key with its
+    // value.
+    $named = $values['k'] instanceof \stdClass ? 1 : null;
+    $numbered = $values[3] instanceof \stdClass ? 1 : null;
+    \array_multisort($values);
+    if (null !== $named) {
+        takesStd($values['k']);
+    }
+    if (null !== $numbered) {
+        takesStd($values[3]); // want P2103 "mixed given"
+    }
+}
+
+/** @param array<string, mixed> $values */
+function pointerMoved(array $values): void
+{
+    // end() moves the internal pointer: the values stay.
+    $loose = $values['k'] instanceof \stdClass ? $values['k']->s : null;
+    \end($values);
+    if (null !== $loose) {
+        takesStd($values['k']);
+    }
+}
+
+function inArrowFunction(mixed $before): void
+{
+    $loose = $before instanceof \stdClass ? $before->services : null;
+    $check = fn () => null !== $loose ? takesStd($before) : null;
+    $check();
+}
+
+// PHPStan narrows these too; the checker does not yet: a match, a closure
+// that captures both variables, an ordering, an assignment inside the
+// test, and branches of an if that assign the variable each.
+function notYet(mixed $before, bool $flag): void
+{
+    $matched = match (true) {
+        $before instanceof \stdClass => $before->services,
+        default => null,
+    };
+    if (null !== $matched) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    $loose = $before instanceof \stdClass ? $before->services : null;
+    $check = function () use ($loose, $before): void {
+        if (null !== $loose) {
+            takesStd($before); // want P2103 "mixed given"
+        }
+    };
+    $check();
+    if ($loose > 0) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    if (null !== ($inside = $before instanceof \stdClass ? $before->services : null)) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    if ($flag) {
+        $joined = $before instanceof \stdClass ? $before->services : null;
+    } else {
+        $joined = null;
+    }
+    if (null !== $joined) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+}

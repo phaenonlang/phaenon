@@ -265,6 +265,9 @@ func (x *fnCtx) varTags(doc *docblock.Doc, env *state, target string) {
 			if native == nil {
 				native = info.t // what PHP knew stays the PHP type
 			}
+			// The tag retypes the variable, as an assignment would: it
+			// applies none of the conditions about it, and they are gone.
+			env.written(vt.Name)
 			x.narrowPathNative(env, v, x.res.Doc(vt.Type), native, false)
 		}
 	}
@@ -826,6 +829,7 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 		if vv, isVar := s.Value.(*ast.Variable); isVar {
 			x.byRef[vv.Name] = true
 		}
+		x.writtenThrough(s.Expr, env) // the body may write any element
 	}
 	nonEmpty := false
 	empty := ok // an array that holds nothing never runs the body
@@ -2121,8 +2125,13 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 					armEnv = joinAll(thens...)
 				}
 			}
-			if isLiteralLike(ct) {
-				remaining = x.subtract(remaining, ct, x.p())
+			// An arm takes the values its conditions are; a condition of
+			// several values, a bool, is one of them, which says nothing of
+			// what is left, and the arm's other conditions take theirs.
+			for _, t := range ts {
+				if oneValue(t) {
+					remaining = x.subtract(remaining, t, x.p())
+				}
 			}
 			if classOf != nil && classRemaining != nil {
 				var classes []types.Type

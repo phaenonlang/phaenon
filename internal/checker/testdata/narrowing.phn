@@ -266,7 +266,7 @@ function viaVariable(mixed $value, mixed $before, mixed $other): void
     takesString($value);
     $loose = $before instanceof \stdClass && property_exists($before, 'services') ? $before->services : null;
     if (null !== $loose) {
-        takesStd($before); // want P2103 "mixed"
+        takesStd($before);
     }
     $services = $before instanceof \stdClass && property_exists($before, 'services') && $before->services instanceof \stdClass ? $before->services : null;
     if (null === $services) {
@@ -336,4 +336,62 @@ function scriptArguments(): void
             takesString($arg);
         }
     }
+}
+
+// A bool is two values: a strict comparison that fails against one says
+// nothing of which, and a match arm on one leaves the other.
+function againstBool(bool|int $v, bool $flag, mixed $before, ?bool $maybe): void
+{
+    if ($v !== $flag) {
+        takesInt($v); // want P2103 "bool|int given"
+    }
+    if ($v !== true) {
+        takesInt($v); // want P2103 "false|int given"
+    }
+    $kept = $before instanceof \stdClass ? null : true;
+    if ($kept !== $flag) {
+        takesStd($before); // want P2103 "mixed given"
+    }
+    if (($maybe ?? true) !== $flag) {
+        takesInt($maybe); // want P2103 "bool|null given"
+    }
+}
+
+function matchAgainstBool(bool $v, bool $flag): int
+{
+    return match ($v) { // want P2304 "bool"
+        $flag => 1,
+    };
+}
+
+// An arm takes each of its conditions that is one value, whatever the
+// others are.
+/** @param 'a'|'b'|'c' $v */
+function matchArmWithVariable(string $v, string $w): string
+{
+    return match ($v) {
+        'c', $w => 'x',
+        'a', 'b' => 'y',
+    };
+}
+
+/**
+ * @param 'a'|'b'|'c' $v
+ * @param 'a'|'b' $w
+ */
+function matchArmWithTwoValues(string $v, string $w): string
+{
+    return match ($v) {
+        'c', $w => 'x',
+        'a', 'b' => 'y',
+    };
+}
+
+/** @param 1|2|bool $v */
+function matchArmWithBool(int|bool $v, bool $flag): string
+{
+    return match ($v) {
+        1, $flag => 'a',
+        2, true, false => 'b',
+    };
 }

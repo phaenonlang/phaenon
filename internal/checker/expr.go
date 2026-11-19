@@ -140,6 +140,7 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 	case *ast.Include:
 		x.expr(e.Expr, env, nil)
 		x.implicitThrow()
+		env.forgetConds() // the included file runs in this scope and may write any variable
 		return types.TMixed
 	case *ast.Eval:
 		x.expr(e.Expr, env, nil)
@@ -3292,6 +3293,7 @@ func (x *fnCtx) assignTo(target ast.Expr, vt types.Type, env *state, span ast.Sp
 	case *ast.VariableVariable:
 		x.expr(t.Expr, env, nil)
 		x.removed(t.S, "variable variables ($$x)", "a map<string, mixed>")
+		env.forgetConds() // it may write any variable
 	default:
 		x.expr(target, env, nil)
 	}
@@ -4553,13 +4555,36 @@ func (x *fnCtx) rememberCondition(name string, value ast.Expr, env *state) {
 		whenThen, whenElse = types.TTrue, types.TFalse
 	}
 	x.c.rollback(saved)
-	// Only values that tell the branches apart carry information: PHPStan
-	// records nothing for `$b instanceof X ? $b->s : null` when $b->s is
-	// mixed, since null is one of its values.
-	if _, never := types.Intersect(whenThen, whenElse, x.p()).(types.Never); !never {
-		return
-	}
 	delete(then.vars, name)
 	delete(els.vars, name)
-	env.setConds(name, condBranch(whenThen, then, before), condBranch(whenElse, els, before))
+	env.setConds(name, x.armHolder(whenThen, whenElse, then, before), x.armHolder(whenElse, whenThen, els, before))
+}
+
+// armHolder is the branch of a condition whose value is of type arm, held
+// where the variable assigned it has a value the other branch, of type
+// other, cannot give, as PHPStan has it: arm less other, when nothing of
+// it is a value of other. `$b instanceof X ? $b->n : null` with $b->n an
+// ?int says $b is an X where the value is an int. Mixed less a type is no
+// type the checker has: that branch is held where a test rules out every
+// value of other (condHolder.unless), `$b instanceof X ? $b->s : null`
+// with $b->s mixed says $b is an X where the value is not null. nil where
+// the variable tells nothing of the branch.
+func (x *fnCtx) armHolder(arm, other types.Type, branch, before *state) *condHolder {
+	if types.IsMixed(arm) {
+		if types.IsMixed(other) {
+			return nil
+		}
+		h := condBranch(nil, branch, before)
+		if h != nil {
+			h.unless = other
+		}
+		return h
+	}
+	if !isNeverType(types.Intersect(arm, other, x.p())) {
+		arm = x.subtract(arm, other, x.p())
+		if isNeverType(arm) || types.Overlaps(arm, other, x.p()) {
+			return nil
+		}
+	}
+	return condBranch(arm, branch, before)
 }
