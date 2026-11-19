@@ -63,6 +63,18 @@ type signature struct {
 	removed bool
 }
 
+// magicSig is the callee of a partial application of a method that
+// __call or __callStatic (magic) serves: PHP 8.6 makes the closure over
+// its trampoline, `mixed ...$arguments`, so a placeholder stands for one
+// argument of the list ($arguments0, …) and `...` for the rest. The
+// closure returns mixed, as the call it makes is typed, and as PHPStan,
+// which knows no method __call serves, types it.
+func magicSig(e ast.Expr, magic *program.Method, recv types.Type, name string) *signature {
+	arguments := &program.Param{Name: "arguments", Type: types.TMixed, NativeType: types.TMixed, Variadic: true}
+	return &signature{name: magic.Class.Name + "::" + name + "()", params: []*program.Param{arguments}, ret: types.TMixed,
+		file: methodFile(magic), recv: recv, decl: magic.Class, node: e, meth: magic}
+}
+
 // methodFile is the file that declares a method: its trait's when a trait
 // brought it in.
 func methodFile(m *program.Method) *program.File {
@@ -1361,7 +1373,11 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 					meth = x.traitUserMethod(cl, name)
 				}
 				if meth == nil {
-					if cl.FindMethod("__call") != nil {
+					if magic := cl.FindMethod("__call"); magic != nil {
+						if e.Args.Partial() {
+							out = append(out, x.checkCall(magicSig(e, magic, m, name), e.Args, env, e.S, expected))
+							continue
+						}
 						x.argsOnly(e.Args, env)
 						out = append(out, types.TMixed)
 						continue
@@ -1509,7 +1525,15 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 			meth = x.traitUserMethod(cl, name)
 		}
 		if meth == nil {
-			if cl.FindMethod("__callStatic") != nil || (!x.static && cl.FindMethod("__call") != nil && (viaParent || viaSelf)) {
+			magic := cl.FindMethod("__callStatic")
+			if !x.static && (viaParent || viaSelf) && cl.FindMethod("__call") != nil {
+				magic = cl.FindMethod("__call") // PHP calls __call from an object of the class
+			}
+			if magic != nil {
+				if e.Args.Partial() {
+					out = append(out, x.checkCall(magicSig(e, magic, recv, name), e.Args, env, e.S, expected))
+					continue
+				}
 				x.argsOnly(e.Args, env)
 				out = append(out, types.TMixed)
 				continue

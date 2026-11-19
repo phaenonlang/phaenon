@@ -1,0 +1,35 @@
+// A partial application of a method __call or __callStatic serves is a
+// closure over PHP 8.6's trampoline, `mixed ...$arguments`: a placeholder
+// stands for one argument of the list ($arguments0, …), `...` for the
+// rest, and a name stands for none (design/php-versions.md §5.2). The
+// closure returns mixed, as the call it makes does. For PHP 8.5 it is
+// lowered as any method's is (§5.3).
+
+final class Magic
+{
+    public ?Magic $next = null;
+
+    __call(string $name, list<mixed> $arguments): string => $name;
+
+    static __callStatic(string $name, list<mixed> $arguments): string => $name;
+
+    // From an object of the class, self:: reaches __call.
+    viaSelf(): Closure(mixed): mixed => self::fromSelf(?);
+
+    // A computed receiver is refused for 8.5, as for any method.
+    computed(): Closure(mixed): mixed => $this->other()->whatever(?); // want P1002 "its receiver is computed"
+
+    other(): Magic => $this;
+}
+
+function wantsString(Closure(mixed): string $c): string => $c(1);
+
+function partials(Magic $m): void {
+    $rest = $m->whatever('x', ...);
+    $two = $m->two(?, ?);
+    $static = Magic::stat(?);
+    var_dump($rest(), $rest(1, 2), $two(1, 2), $static('s'));
+    var_dump($two(1)); // want P2101 "expects at least 2 arguments, 1 given"
+    $named = $m->named(k: ?); // want P2010 "a variadic one cannot be named"
+    wantsString($m->one(?)); // want P2103 "Closure(mixed $arguments0): mixed given"
+}
