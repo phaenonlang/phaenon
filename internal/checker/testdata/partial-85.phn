@@ -68,17 +68,17 @@ function scoped(string $sep, string $other): void {
     $c = 'a' |> pair(__FUNCTION__ . $sep, ?); // want P1002 "reads __FUNCTION__, which in the closure written for PHP 8.5 names the closure: assign it to a variable before the pipe"
     $d = 'a' |> pair(json_encode(func_get_args()) ?: '', ?); // want P1002 "calls func_get_args()"
     $e = 'a' |> pair((string) func_num_args(), ?); // want P1002 "calls func_num_args()"
-    $f = 'a' |> pair(strval(func_get_arg(1)), ?); // want P1002 "calls func_get_arg()"
-    $g = 'a' |> pair(strval(debug_backtrace()[0]['function'] ?? ''), ?); // want P1002 "calls debug_backtrace()"
+    $f = 'a' |> pair(gettype(func_get_arg(1)), ?); // want P1002 "calls func_get_arg()"
+    $g = 'a' |> pair(gettype(debug_backtrace()[0]['function'] ?? ''), ?); // want P1002 "calls debug_backtrace()"
     $count = 0;
     $h = 'a' |> pair((string) (function () use (&$count): int { return ++$count; })(), ?); // want P1002 "captures $count by reference"
-    $i = 'a' |> pair(strval(include 'tail.php'), ?); // want P1002 "includes a file"
+    $i = 'a' |> pair(gettype(include 'tail.php'), ?); // want P1002 "includes a file"
     $j = 'a' |> pair((fn(): string => __FUNCTION__)(), ?); // want P1002 "reads __FUNCTION__"
     // A callable called through a value whose type gives no parameters may
     // take what it is given by reference: nothing says it does not. One
     // whose type gives them takes by reference what they say.
     $fn = 'preg_match';
-    $o = 'a' |> pair(strval($fn('/(a)/', $sep, $m)), ?); // want P1002 "passes $sep, $m to a callable whose parameters are not known"
+    $o = 'a' |> pair(gettype($fn('/(a)/', $sep, $m)), ?); // want P1002 "passes $sep, $m to a callable whose parameters are not known"
     $up = strtoupper(...);
     $q = 'a' |> pair($up($sep), ?);
     $fill = fn(string $s, mixed &$out): string => $s;
@@ -96,8 +96,8 @@ function scoped(string $sep, string $other): void {
 /** @param Closure(string): string $up */
 function callees(Closure $up, Closure $any, callable $call, string $v): void {
     $a = 'a' |> pair($up($v), ?);
-    $b = 'a' |> pair(strval($any($v)), ?); // want P1002 "passes $v to a callable whose parameters are not known"
-    $c = 'a' |> pair(strval($call($v)), ?); // want P1002 "passes $v to a callable whose parameters are not known"
+    $b = 'a' |> pair(gettype($any($v)), ?); // want P1002 "passes $v to a callable whose parameters are not known"
+    $c = 'a' |> pair(gettype($call($v)), ?); // want P1002 "passes $v to a callable whose parameters are not known"
 }
 
 final class Scoped {
