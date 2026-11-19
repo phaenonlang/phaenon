@@ -1,0 +1,59 @@
+namespace App\DocblockClosingLine;
+
+// The tags a generic declaration gets (@template, the types its signature
+// erases) go into its docblock wherever its first and last lines stand: a
+// tag or text beside the `/**`, a tag or text beside the `*/`, one line.
+
+/** @param list<T> $xs
+ *  @return list<T> */
+function append<T>(array $xs, T $x): array { return [...$xs, $x]; }
+
+/**
+ * Prepends.
+ * @param list<T> $xs
+ * @return list<T> */
+function prepend<T>(array $xs, T $x): array { return [$x, ...$xs]; }
+
+/**
+ * The first of them.
+ * @return T|null */
+function first<T>(list<T> $xs): mixed { return $xs[0] ?? null; }
+
+/** @return T|null */
+function last<T>(list<T> $xs): mixed { return $xs === [] ? null : $xs[count($xs) - 1]; }
+
+/**
+ * Gives back what it is given,
+ * whatever that is. */
+function same<T>(T $x): mixed { return $x; }
+
+/** Gives it back, twice:
+ * in a list. */
+function twice<T>(T $x): list<T> { return [$x, $x]; }
+
+final class Stack<T> {
+    /** @var list<T> */
+    private array $items = [];
+
+    /** @param T $item
+     *  @return static */
+    public function push(mixed $item): static { $this->items[] = $item; return $this; }
+
+    /**
+     * The one on top,
+     * or what is given. */
+    public function top<D>(D $or): mixed { return $this->items === [] ? $or : $this->items[count($this->items) - 1]; }
+
+    /** Each through a function.
+     *  @return list<R> */
+    public function map<R>(Closure(T): R $f): array throws \LengthException {
+        if ($this->items === []) {
+            throw new \LengthException('empty');
+        }
+        return array_map($f, $this->items);
+    }
+
+    /** The one below them all.
+     *  @return T|null */
+    public function bottom(): mixed { return $this->items[0] ?? null; }
+}
