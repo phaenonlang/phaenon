@@ -146,8 +146,8 @@ func (h *projectHost) Reload() error {
 
 func (h *projectHost) Root() string { return h.root }
 
-// Files lists what phn check checks: the roots' .phn, and their plain .php
-// that no .phn compiles to.
+// Files lists what phn check checks (checkedFiles): the roots' .phn, and
+// their plain .php that no .phn compiles to.
 func (h *projectHost) Files() []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -155,21 +155,12 @@ func (h *projectHost) Files() []string {
 		return nil
 	}
 	skip := func(path string) bool { return excluded(path) || h.proj.isOutput(path) }
-	var files []string
-	for _, f := range collectQuiet(h.roots, skip) {
-		if filepath.Ext(f) == ".php" {
-			if _, err := os.Stat(strings.TrimSuffix(f, ".php") + ".phn"); err == nil {
-				continue
-			}
-		}
-		files = append(files, f)
-	}
-	return files
+	return checkedQuiet(h.roots, skip)
 }
 
-// collectQuiet is collect for a server: a root that is gone lists nothing
-// rather than ending the process.
-func collectQuiet(roots []string, skip func(string) bool) (files []string) {
+// checkedQuiet is checkedFiles for a server: a root that is gone lists
+// nothing rather than ending the process.
+func checkedQuiet(roots []string, skip func(string) bool) (files []string) {
 	defer func() {
 		if r := recover(); r != nil {
 			if _, ok := r.(failure); !ok {
@@ -178,7 +169,7 @@ func collectQuiet(roots []string, skip func(string) bool) (files []string) {
 			files = nil
 		}
 	}()
-	return collect(roots, skip, ".phn", ".php")
+	return checkedFiles(roots, skip)
 }
 
 func (h *projectHost) Program(files []string, read func(string) ([]byte, error), check func(string) bool) (p *program.Program, diags []checker.Diagnostic, err error) {
@@ -239,7 +230,7 @@ func (h *projectHost) Build(p *program.Program, diags []checker.Diagnostic) (res
 	}
 	job := buildJob{proj: h.proj, roots: h.roots, target: h.tgt, quiet: true, mirror: true, prog: p, diags: diags}
 	r := job.run()
-	return lsp.BuildParams{Files: r.files, Written: r.written + r.copied + r.removed, Withheld: r.failed}, nil
+	return lsp.BuildParams{Files: r.files, Written: r.written + r.copied + r.removed, Withheld: r.failed + r.plainFailed}, nil
 }
 
 func (h *projectHost) ClassNames() []string {

@@ -174,7 +174,7 @@ func withdrawnTests(proj *project, files []string) map[string]format.Options {
 	tgt := projectTarget(proj, proj.roots())
 	excludes = append(excludes, proj.Exclude...)
 	projectSources = proj.sources()
-	p, _ := loadProgram(holding, tgt.Version, true)
+	p, _ := loadProgram(holding, tgt.Version, everyFile)
 	checker.New(p, proj.checkerOptions(checker.Options{})).Check()
 	out := map[string]format.Options{}
 	for _, path := range holding {

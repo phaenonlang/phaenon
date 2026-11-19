@@ -257,7 +257,7 @@ type WorkspaceEdit struct {
 type BuildParams struct {
 	Files      int    `json:"files"`
 	Written    int    `json:"written"`
-	Withheld   int    `json:"withheld"` // files with errors, not compiled (D10)
+	Withheld   int    `json:"withheld"` // files with errors whose output was not written: not compiled (D10), or a plain .php not copied
 	DurationMs int64  `json:"durationMs"`
 	Error      string `json:"error,omitempty"`
 }

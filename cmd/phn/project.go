@@ -788,7 +788,13 @@ func under(path, dir string) (string, bool) {
 // Removed, a tracked stamp shows in `git status`, so the library's gate,
 // which is the state of the tree (design/tooling.md §3.7), fails until the
 // removal is committed.
-func (p *project) mirror(src string, check bool) (copied, removed int) {
+//
+// A plain .php the build withholds, for an error found in it, is not
+// copied, and a copy made earlier stays, as a .phn's output does. A .php
+// beside a .phn of the same name is not copied either: the .phn's output
+// has its path, and the copy would replace it. It is returned in shadowed,
+// for the build to say so.
+func (p *project) mirror(src string, check bool, withheld map[string]bool) (copied, removed int, shadowed []string) {
 	out := p.Roots[src]
 	filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -800,7 +806,11 @@ func (p *project) mirror(src string, check bool) (copied, removed int) {
 			}
 			return nil
 		}
-		if filepath.Ext(path) == ".phn" {
+		if filepath.Ext(path) == ".phn" || withheld[path] {
+			return nil
+		}
+		if filepath.Ext(path) == ".php" && phnBeside(path) {
+			shadowed = append(shadowed, path)
 			return nil
 		}
 		rel, _ := under(path, src)
@@ -821,7 +831,7 @@ func (p *project) mirror(src string, check bool) (copied, removed int) {
 		return nil
 	})
 	if _, err := os.Stat(out); err != nil {
-		return copied, removed
+		return copied, removed, shadowed
 	}
 	var dirs []string
 	filepath.WalkDir(out, func(path string, d fs.DirEntry, err error) error {
@@ -860,7 +870,7 @@ func (p *project) mirror(src string, check bool) (copied, removed int) {
 			os.Remove(dir) // fails, harmlessly, while the directory holds files
 		}
 	}
-	return copied, removed
+	return copied, removed, shadowed
 }
 
 // sourcesBehind names, relative to a root, the files that can stand behind

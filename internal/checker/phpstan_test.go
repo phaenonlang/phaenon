@@ -300,3 +300,11 @@ func usesPhaenonSyntax(src []byte) bool {
 	}
 	return false
 }
+
+// TestGeneratedHeader: the opening the checker takes for a compiled output
+// left behind (declaredAt) is the one the emitter writes.
+func TestGeneratedHeader(t *testing.T) {
+	if want := "<?php\n\n/* " + emit.Marker; generatedHeader != want {
+		t.Errorf("generatedHeader is %q, the emitter writes %q", generatedHeader, want)
+	}
+}
