@@ -213,9 +213,10 @@ func (x *fnCtx) namedCallable(name string) types.Type {
 	return x.callableOf(&signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File)})
 }
 
-// defaultType is the type of a parameter's default value as far as it can
-// be read without the callee's scope: a literal, a constant, a class
-// constant of the declaring class (`self::X`) or of a named class.
+// defaultType is the type of a parameter's default value as far as it is
+// read here: a literal, a constant, named as the callee's own namespace
+// names it (valueWhereDeclared), a class constant of the declaring class
+// (`self::X`) or of a fully qualified class.
 func (x *fnCtx) defaultType(e ast.Expr, sig *signature) types.Type {
 	saved := x.c.mark()
 	defer x.c.rollback(saved) // a default the callee's scope alone can read is not this call's problem
@@ -231,6 +232,9 @@ func (x *fnCtx) defaultType(e ast.Expr, sig *signature) types.Type {
 		}
 		if len(n.Parts) == 1 && n.Parts[0] == "UNKNOWN" {
 			return nil // php-src's placeholder
+		}
+		if f, scope, cl := sig.declaredAt(); f != nil {
+			return x.c.valueWhereDeclared(f, scope, cl, e, x)
 		}
 		return x.constFetch(&ast.ConstFetch{S: e.Span(), Name: n})
 	case *ast.ClassConstFetch:
@@ -257,6 +261,24 @@ func (x *fnCtx) defaultType(e ast.Expr, sig *signature) types.Type {
 		}
 	}
 	return nil
+}
+
+// declaredAt is where the callee is declared, whose parameters' defaults
+// are read there: its file, namespace and class, a trait's file and
+// namespace for a method copied from one; no file where the callee is not
+// known (a closure type's).
+func (sig *signature) declaredAt() (*program.File, *program.Scope, *program.Class) {
+	switch {
+	case sig.fn != nil:
+		return sig.fn.File, sig.fn.Scope, nil
+	case sig.meth != nil:
+		at := sig.meth.Class
+		if sig.meth.FromTrait != nil {
+			at = sig.meth.FromTrait
+		}
+		return at.File, at.Scope, sig.meth.Class
+	}
+	return nil, nil, nil
 }
 
 // arrayMapOverSeveral adapts array_map's signature to a call with several
@@ -2927,7 +2949,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 	}
 	for _, p := range sig.params {
 		// An omitted argument is its default, when that is a literal or a
-		// global constant (anything else would need the callee's scope).
+		// constant, named as the callee's own namespace names it.
 		if _, given := argByName[p.Name]; given || p.Default == nil {
 			continue
 		}
@@ -2936,9 +2958,8 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			continue
 		}
 		if isConst || isLiteralExpr(p.Default) {
-			saved := x.c.mark()
-			argByName[p.Name] = x.expr(p.Default, newEnv(), nil)
-			x.c.rollback(saved)
+			f, scope, cl := sig.declaredAt()
+			argByName[p.Name] = x.c.valueWhereDeclared(f, scope, cl, p.Default, x)
 		}
 	}
 	// By-reference parameters define or retype their arguments.

@@ -1033,12 +1033,34 @@ func (x *fnCtx) enumCaseProperty(obj types.Type, name string) (types.Type, bool)
 		if cs == nil || cs.Value == nil {
 			return nil, false
 		}
-		out = append(out, x.expr(cs.Value, newEnv(), nil))
+		out = append(out, x.c.valueWhereDeclared(cl.File, cl.Scope, cl, cs.Value, x))
 	}
 	if len(out) == 0 {
 		return nil, false
 	}
 	return types.MakeUnion(out...), true
+}
+
+// valueWhereDeclared types an expression of a declaration in another
+// place, a backed enum case's value or a parameter's default, as the file
+// that declares it reads it: in that file's namespace and imports, self
+// and static naming cl. Typed in the reader, `PREFIX . 'h'` would look for
+// the reader's PREFIX and `self::BASE` read the reader's class. What it
+// draws is the declaration's own check's to report, once, in the
+// declaring file, however many files read it, and is not reported here.
+// Where the declaration has no file to read it in, the reader types it.
+func (c *Checker) valueWhereDeclared(f *program.File, scope *program.Scope, cl *program.Class, e ast.Expr, reader *fnCtx) types.Type {
+	mark := c.mark()
+	defer c.rollback(mark)
+	if f == nil {
+		return reader.expr(e, newEnv(), nil)
+	}
+	saved := c.file
+	c.file = f
+	defer func() { c.file = saved }()
+	ctx := c.newCtx(f, scope, cl, true)
+	ctx.inConst = true
+	return ctx.expr(e, newEnv(), nil)
 }
 
 // objectShapeProperty finds name in an object shape, or in the object
