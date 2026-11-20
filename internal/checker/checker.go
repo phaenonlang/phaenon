@@ -496,6 +496,7 @@ func (c *Checker) Check() []Diagnostic {
 		c.judged[f.Path] = true
 	}
 	c.checkReadonlyInits()
+	c.settleUnrecorded()
 	for _, pr := range c.p.Problems {
 		if pr.File == nil || !pr.File.Checked {
 			continue

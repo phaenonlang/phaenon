@@ -35,6 +35,17 @@ func localArgs(name string, env *state) bool {
 
 // expr types an expression in env, with an optional expected type for
 // contextual typing. It updates env for assignments and other side effects.
+// partialResult is a call's type, a Closure where it is a partial
+// application whose callee the checker could not type: PHP creates a
+// closure of whatever it is, and nothing is reported of a mixed it would
+// otherwise be.
+func partialResult(args *ast.ArgList, t types.Type) types.Type {
+	if args.Partial() && types.IsMixed(t) {
+		return types.NewClass("Closure")
+	}
+	return t
+}
+
 func (x *fnCtx) expr(e ast.Expr, env *state, expected types.Type) types.Type {
 	t := x.exprType(e, env, expected)
 	if c, ok := t.(types.Callable); ok && expected != nil && e != nil {
@@ -96,11 +107,11 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 	case *ast.Index:
 		return x.index(e, env)
 	case *ast.Call:
-		return x.call(e, env, expected)
+		return partialResult(e.Args, x.call(e, env, expected))
 	case *ast.MethodCall:
-		return x.methodCall(e, env, expected)
+		return partialResult(e.Args, x.methodCall(e, env, expected))
 	case *ast.StaticCall:
-		return x.staticCall(e, env, expected)
+		return partialResult(e.Args, x.staticCall(e, env, expected))
 	case *ast.New:
 		return x.newExpr(e, env, expected)
 	case *ast.Clone:
