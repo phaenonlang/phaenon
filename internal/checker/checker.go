@@ -224,6 +224,9 @@ type Checker struct {
 	// that calls it where it stands with arguments, `(f(B, ...))(X)`
 	// (Partial.Direct).
 	atOnce map[*ast.ArgList]*ast.Call
+	// refusedStatic holds the static references in constant expressions
+	// reported before the file is typed (lateStatic).
+	refusedStatic map[ast.Expr]bool
 }
 
 // New creates a checker for the program.
@@ -698,6 +701,7 @@ func (c *Checker) checkFile(f *program.File) {
 		c.checkTabs(f)
 		c.checkWords(f)
 	}
+	c.lateStatic(f)
 	// Top-level code runs in a context without a class.
 	scope := f.ScopeAt(0)
 	ctx := c.newCtx(f, scope, nil, true)

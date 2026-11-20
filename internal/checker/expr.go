@@ -834,6 +834,9 @@ func (x *fnCtx) magicConst(e *ast.MagicConst) types.Type {
 }
 
 func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
+	if x.lateStaticRefused(e) {
+		return types.TError
+	}
 	var recv types.Type
 	var classes []*program.Class
 	if n, ok := e.Class.(*ast.Name); ok {

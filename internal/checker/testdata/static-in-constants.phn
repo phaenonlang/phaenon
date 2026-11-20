@@ -1,0 +1,380 @@
+namespace App\StaticInConstants;
+
+// PHP evaluates a constant expression for the class that declares it,
+// without late static binding, and refuses `static` in one when it
+// compiles the file ("static::" is not allowed in compile-time constants):
+// in a parameter's default, a property's, a constant's value, an enum
+// case's and an attribute's argument. A static variable's initialiser and
+// a closure's body are code, which may name static. Plain PHP, so that
+// PHPStan reads this file as written; each refusal stands in a
+// declaration of its own, as php stops at the first.
+
+use Attribute;
+use Closure;
+
+#[Attribute]
+final class Tag
+{
+    public function __construct(public mixed $value)
+    {
+    }
+}
+
+// php places an attribute's error on the line of its declaration, which
+// is the attribute's here.
+#[Tag(static::NAME)] class OnClass // want P2532 "static::NAME in a constant expression"
+{
+    public const NAME = 'class';
+}
+
+class Copied
+{
+    public const NAME = 'copied';
+    public const COPY = static::NAME; // want P2532 "write self::NAME"
+}
+
+class Listed
+{
+    public const NAME = 'listed';
+    public const LISTED = [static::NAME]; // want P2532
+}
+
+class Named
+{
+    public const CLASS_NAME = static::class; // want P2532 "static::class in a constant expression"
+}
+
+// The default is the one finding: it is typed as reported, not as the
+// mixed a late-bound untyped constant is.
+class Defaulted
+{
+    public const NAME = 'defaulted';
+    public string $name = static::NAME; // want P2532
+}
+
+class Shared
+{
+    public const NAME = 'shared';
+    public static string $shared = static::NAME; // want P2532
+}
+
+class OnMethod
+{
+    public const NAME = 'method';
+
+    #[Tag(static::NAME)] public function named(): string // want P2532
+    {
+        return self::NAME;
+    }
+}
+
+class OnParameter
+{
+    public const NAME = 'parameter';
+
+    public function named(#[Tag(static::NAME)] string $name = static::NAME): string // want P2532, P2532
+    {
+        return $name;
+    }
+}
+
+class Promoted
+{
+    public const NAME = 'promoted';
+
+    public function __construct(public string $promoted = static::NAME) // want P2532
+    {
+    }
+}
+
+class Made
+{
+    public static function made(object $made = new static()): object // want P2532 "new static in a constant expression"
+    {
+        return $made;
+    }
+}
+
+class Callables
+{
+    public static function made(): string
+    {
+        return 'made';
+    }
+
+    public static function callable(Closure $made = static::made(...)): Closure // want P2532 "static::made(…) in a constant expression"
+    {
+        return $made;
+    }
+}
+
+class Boxed
+{
+    public const NAME = 'boxed';
+
+    public static function boxed(object $box = new \ArrayObject([static::NAME])): object // want P2532
+    {
+        return $box;
+    }
+}
+
+// A closure's own parameters are a constant expression again.
+class Inner
+{
+    public const NAME = 'inner';
+
+    public static function inner(): Closure
+    {
+        return static function (string $name = static::NAME): string { return $name; }; // want P2532
+    }
+}
+
+// An enum is final, and PHP refuses static there all the same.
+enum Suit: string
+{
+    public const PREFIX = 's';
+
+    case Spades = static::PREFIX; // want P2532
+}
+
+enum Marked: string
+{
+    public const PREFIX = 'm';
+
+    #[Tag(static::PREFIX)] case Hearts = 'h'; // want P2532
+}
+
+trait Labelled
+{
+    public string $labelled = static::DEFAULT; // want P2532
+}
+
+final class UsesLabelled
+{
+    use Labelled;
+
+    public const DEFAULT = 'labelled';
+}
+
+interface Sized
+{
+    public const SIZE = 1;
+
+    public function size(int $size = static::SIZE): int; // want P2532
+}
+
+// Code, not a constant expression: a static variable's initialiser runs
+// (PHP 8.3), and so does a closure's body. self is the class that
+// declares the expression, as PHP has it.
+class Accepted
+{
+    public const NAME = 'accepted';
+
+    public static function cached(): string
+    {
+        /** @var string $name */
+        static $name = static::NAME;
+
+        return $name;
+    }
+
+    public static function later(Closure $read = static function (): mixed { return static::NAME; }): mixed
+    {
+        return $read();
+    }
+
+    public function own(string $name = self::NAME): string
+    {
+        return $name;
+    }
+}
+
+// PHP folds an operand that is a constant before it compiles the rest: the
+// side it drops is not compiled, and its static not refused; the side a
+// folded operand leads to is.
+class Folded
+{
+    public const ONE = 1;
+
+    public const KEPT = true ? self::ONE : static::ONE; // want P2402
+}
+
+class FoldedElse
+{
+    public const ONE = 1;
+
+    public const TAKEN = false ? self::ONE : static::ONE; // want P2402, P2532
+}
+
+class FoldedNull
+{
+    public const ONE = 1;
+
+    public const TAKEN = null ?? static::ONE; // want P2532
+}
+
+class FoldedOr
+{
+    public const ONE = 1;
+
+    public const TAKEN = false || static::ONE; // want P2402, P2532
+}
+
+class FoldedOwn
+{
+    public const ONE = 1;
+
+    public const TAKEN = self::ONE ? static::ONE : 2; // want P2402, P2532
+}
+
+// PHP folds a constant of the class once it has compiled it: one the class
+// declares after the expression is compiled as a fetch, and both sides
+// with it. The attributes of a constant are compiled after the first
+// constant of its group, a class's before its body.
+class FoldedLater
+{
+    public const TAKEN = self::ONE ? 1 : static::ONE; // want P2402, P2532
+
+    public const ONE = 1;
+}
+
+class FoldedAttribute
+{
+    #[Tag(self::TWO ? 1 : static::ONE)] // want P2532
+    public const ONE = 1, TWO = 2;
+}
+
+#[Tag(self::ONE ? 1 : static::ONE)] class FoldedBeforeBody // want P2402, P2532
+{
+    public const ONE = 1;
+}
+
+// Where PHP may fold the condition or not, static on each side it may
+// keep is compiled whatever it folds the condition to.
+class FoldedEither
+{
+    public const ONE = 1;
+
+    public const TAKEN = PHP_VERSION_ID ? static::ONE : static::ONE; // want P2532
+}
+
+// A parameter's default folds no constant, of its own class declared
+// above it, of another class or PHP's own: PHP compiles it without
+// constant substitution, which ReflectionParameter needs. Literals, true,
+// false and null still fold.
+class DefaultTernary
+{
+    public const ONE = 1;
+
+    public function read(int $a = self::ONE ? 1 : static::ONE): int // want P2402, P2532
+    {
+        return $a;
+    }
+}
+
+class DefaultShort
+{
+    public const ONE = 1;
+
+    public function read(int $a = self::ONE ?: static::ONE): int // want P2402, P2532
+    {
+        return $a;
+    }
+}
+
+class DefaultCompared
+{
+    public const ONE = 1;
+
+    public function read(string $a = self::ONE === 1 ? 'one' : static::class): string // want P2532
+    {
+        return $a;
+    }
+}
+
+class DefaultCoalesce
+{
+    public const ONE = 1;
+
+    public function read(int $a = self::ONE ?? static::ONE): int // want P2532
+    {
+        return $a;
+    }
+}
+
+class DefaultOfStatic
+{
+    public const ONE = 1;
+
+    public static function read(int $a = self::ONE ? 1 : static::ONE): int // want P2402, P2532
+    {
+        return $a;
+    }
+}
+
+class DefaultPromoted
+{
+    public const ONE = 1;
+
+    public function __construct(public int $a = self::ONE ? 1 : static::ONE) // want P2402, P2532
+    {
+    }
+}
+
+class DefaultLiteral
+{
+    public const ONE = 1;
+
+    public function read(int $a = true ? 1 : static::ONE): int // want P2402
+    {
+        return $a;
+    }
+}
+
+// An unqualified constant in a namespace is looked up there, where PHP's
+// own constants are not: it folds nothing. Written fully qualified, it
+// folds.
+class NamespacedConstant
+{
+    public const ONE = 1;
+
+    public const TAKEN = PHP_EOL ? 1 : static::ONE; // want P2532
+}
+
+class NamespacedCoalesce
+{
+    public const ONE = 1;
+
+    public const TAKEN = PHP_EOL ?? static::ONE; // want P2532
+}
+
+class QualifiedConstant
+{
+    public const ONE = 1;
+
+    public const KEPT = \PHP_INT_SIZE ? 1 : static::ONE; // want P2402
+}
+
+// One expression is one refusal, however often it names static.
+class Twice
+{
+    public const X = 1;
+
+    public static function made(object $made = new static(static::X)): object // want P2532 "new static in a constant expression"
+    {
+        return $made;
+    }
+}
+
+// The class of an expression is refused as well: `self::M::class` is no
+// way out.
+class Nested
+{
+    public const M = 'm';
+    public const K = static::M::class; // want P2532 "static::M::class in a constant expression: PHP evaluates the expression for the class that declares it and refuses static there at compile time"
+}
+
+// Outside a class static is P2012, an attribute's argument included.
+#[Tag(static::X)] function outside(): void // want P2012
+{
+}
