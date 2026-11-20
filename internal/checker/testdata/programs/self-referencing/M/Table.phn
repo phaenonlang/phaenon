@@ -1,0 +1,7 @@
+namespace Middle;
+
+use Cards\Rank;
+
+final class Table {
+    const ACE = Rank::Ace->value; // want P2016 "constant Middle\Table::ACE refers to itself through Cards\Rank::Ace, Rules\Limit::TOP: PHP throws"
+}

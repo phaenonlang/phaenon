@@ -1,0 +1,24 @@
+namespace Cards;
+
+use Rules\Limit as Cap;
+
+// Values that read themselves through other files: each declaration on a
+// cycle is reported in its own file, at its fetch into the cycle, named as
+// PHP names it (the class the import gives, self as written), whichever
+// file is checked first and however many files read the value.
+
+enum Suit: string {
+    case Hearts = Cap::HIGH . 'h'; // want P2016 "case Cards\Suit::Hearts refers to itself through Rules\Limit::HIGH: PHP throws"
+}
+
+enum Rank: int {
+    case Ace = Cap::TOP + 1; // want P2016 "through Rules\Limit::TOP, Middle\Table::ACE"
+}
+
+final class Reader {
+    // Read before the files that declare them are checked: a value on a
+    // cycle draws nothing but its P2016, and that in its own file.
+    high(): string => Cap::HIGH;
+
+    low(): mixed => Cap::LOW;
+}
