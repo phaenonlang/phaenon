@@ -170,6 +170,15 @@ func overlap2(x, y Type, h Hierarchy) bool {
 		return true
 	}
 	if kx == kindObject && ky == kindObject {
+		// One enum case is never another, of its enum or of any other
+		// (subtype has said they differ). A case is its enum's, which is
+		// final, against a class.
+		_, casex := x.(EnumCase)
+		_, casey := y.(EnumCase)
+		if casex && casey {
+			return false
+		}
+		x, y = classOfCase(x), classOfCase(y)
 		// Two class types overlap unless one is final and unrelated, or
 		// both are classes (not interfaces) on different branches; we only
 		// know finality here.
