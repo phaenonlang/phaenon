@@ -1,0 +1,92 @@
+namespace App\AnonymousInLoops;
+
+// An anonymous class declared in a loop's body or in a callback is one
+// class, however often the code around it is checked: a loop's passes are
+// checked until the types settle, and the findings of the last are kept,
+// its classes' among them, each once.
+
+interface Shape
+{
+    public function area(): int;
+}
+
+trait Sides
+{
+    public function sides(): int
+    {
+        return self::SIDES;
+    }
+}
+
+/** @return list<Shape> */
+function inForeach(): array
+{
+    $all = [];
+    foreach ([1, 2] as $i) {
+        $all[] = new class ($i) implements Shape {
+            public function __construct(private int $side)
+            {
+            }
+
+            public function area(): int
+            {
+                return 'side ' . $this->side; // want P2202 "class@anonymous"
+            }
+        };
+    }
+
+    return $all;
+}
+
+function inWhile(): int
+{
+    $n = 0;
+    $total = 0;
+    while ($n < 2) {
+        $shape = new class implements Shape {
+            public function area(): int
+            {
+                return strlen(42); // want P2103
+            }
+        };
+        $total += $shape->area();
+        $n++;
+    }
+
+    return $total;
+}
+
+/** @return list<Shape> */
+function inFor(): array
+{
+    $all = [];
+    for ($i = 0; $i < 3; $i++) {
+        $all[] = new class implements Shape {
+            use Sides;
+
+            public const SIDES = 4;
+
+            public function area(): int
+            {
+                return strlen($this->sides()); // want P2103
+            }
+        };
+    }
+
+    return $all;
+}
+
+/** @return list<Shape> */
+function inCallback(): array
+{
+    return array_map(static fn (int $i): Shape => new class ($i) implements Shape {
+        public function __construct(private int $side)
+        {
+        }
+
+        public function area(): int
+        {
+            return strlen($this->side); // want P2103
+        }
+    }, [1, 2]);
+}

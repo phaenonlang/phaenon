@@ -441,9 +441,22 @@ func filepathBase(path string) string {
 	return path
 }
 
-// DeclareAnonymous registers an anonymous class found inside a body.
+// DeclareAnonymous registers an anonymous class found inside a body, once:
+// a declaration checked again, a loop's or one TraitUsers declared before
+// its body was reached, is the class it was given the first time.
 func (p *Program) DeclareAnonymous(f *File, scope *Scope, d *ast.ClassDecl) *Class {
-	return p.declareClass(f, scope, d)
+	if d.Name != nil {
+		return p.declareClass(f, scope, d)
+	}
+	if c := p.anonymous[d]; c != nil {
+		return c
+	}
+	c := p.declareClass(f, scope, d)
+	if p.anonymous == nil {
+		p.anonymous = map[*ast.ClassDecl]*Class{}
+	}
+	p.anonymous[d] = c
+	return c
 }
 
 func (p *Program) declareFunction(f *File, scope *Scope, d *ast.FunctionDecl) *Function {
