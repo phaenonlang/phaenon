@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -346,5 +347,42 @@ func TestBoundOfAnUnmovedFold(t *testing.T) {
 				t.Errorf("phn check refuses the stage: %v; phn build: %v", refused, err)
 			}
 		})
+	}
+}
+
+// TestUnfoldedBoundRecovers: a panic of the lowering that UnfoldedBound
+// runs for the checker does not end phn check. Its answer is every stage
+// still pending, folded or not, so that the check refuses each (P1002)
+// rather than let through one the build might write as a closure.
+func TestUnfoldedBoundRecovers(t *testing.T) {
+	src := []byte("function c(string $s): string {\n    $t = 'o';\n" +
+		"    $a = ($s |> str_replace(?, 'b', ($t = 'xa'))) . $t;\n" +
+		"    $b = ($s |> str_replace(?, 'b', /* why */ ($t = 'xa'))) . $t;\n" +
+		"    $c = $s |> str_replace(?, 'b', 'c');\n" +
+		"    return $a . $b . $c;\n}\n")
+	unfoldedHook = func() { panic("emit: a lowering's mistake") }
+	t.Cleanup(func() { unfoldedHook = nil })
+	p := program.New()
+	if err := p.LoadStubs(); err != nil {
+		t.Fatal(err)
+	}
+	p.SetTarget(phpversion.PHP85)
+	if _, err := p.AddFile("A.phn", src, lexer.ModePhaenon, true); err != nil {
+		t.Fatal(err)
+	}
+	unfolded := func(p *program.Program, f *program.File) []ast.Expr {
+		return UnfoldedBound(f.Src, Options{SourceName: f.Path, StrictTypes: true, Program: p, File: f})
+	}
+	var lines []int
+	for _, d := range checker.New(p, checker.Options{Unfolded: unfolded}).Check() {
+		switch {
+		case d.Code == "P1002":
+			lines = append(lines, d.Line)
+		case d.Severity == checker.Error:
+			t.Errorf("checker: %d: %s: %s", d.Line, d.Code, d.Message)
+		}
+	}
+	if !slices.Equal(lines, []int{3, 4}) {
+		t.Errorf("P1002 on lines %v, want the two stages that bind an assignment, [3 4]", lines)
 	}
 }
