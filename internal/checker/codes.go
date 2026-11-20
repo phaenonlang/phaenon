@@ -124,6 +124,10 @@ var (
 	P2210 = Code{"P2210", Error, "static property accessed through an instance"}
 	P2211 = Code{"P2211", Error, "constant value does not match its type"}
 	P2212 = Code{"P2212", Error, "the @var type is not a subtype of the assigned value's type"}
+	// P2213: a by-reference parameter documented @param-out is written a
+	// value of another type, or the body ends with it holding one, unwritten
+	// on some way there (paramout.go).
+	P2213 = Code{"P2213", Error, "by-reference parameter does not hold its @param-out type"}
 
 	// P2 — expressions
 	P2301 = Code{"P2301", Error, "invalid operand types"}

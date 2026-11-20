@@ -366,6 +366,9 @@ type state struct {
 	// the way here (readonly.go): unlike a path, nothing a call does takes
 	// one away, and a meet keeps those assigned on every way in.
 	inits map[string]bool
+	// outs are the parameters documented @param-out the body has written
+	// on the way here (paramout.go): true on every way in, false on some.
+	outs map[string]bool
 	// refs are the variables each variable is a reference to, `$alias = &$r`
 	// both ways: a write to one is a write to the others (set), as
 	// PHPStan's IntertwinedVariableByReferenceWithExpr has it, and as it has
@@ -390,6 +393,12 @@ func (e *state) clone() *state {
 		n.inits = make(map[string]bool, len(e.inits))
 		for k := range e.inits {
 			n.inits[k] = true
+		}
+	}
+	if e.outs != nil {
+		n.outs = make(map[string]bool, len(e.outs))
+		for k, every := range e.outs {
+			n.outs[k] = every
 		}
 	}
 	for k, others := range e.refs {
@@ -687,6 +696,7 @@ func join(a, b *state) *state {
 			n.initialise(k)
 		}
 	}
+	joinOuts(n, a, b)
 	for k, others := range a.refs {
 		for o := range others {
 			if b.refs[k][o] {

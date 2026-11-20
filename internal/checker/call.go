@@ -384,7 +384,13 @@ func (x *fnCtx) arrayPush(e *ast.Call, env *state) {
 		}
 		return m
 	})
+	// The overlay's @param-out wrote the array already, with the values
+	// as given, and held a parameter documented @param-out to its tag
+	// there: this retyping is no second write of it (paramout.go).
+	unchecked := x.outUnchecked
+	x.outUnchecked = true
 	x.assignTo(target, result, env, e.S)
+	x.outUnchecked = unchecked
 }
 
 // specialReturn refines the return type of a few core functions whose
@@ -2391,6 +2397,21 @@ func movesPointerOnly(sig *signature) bool {
 	return false
 }
 
+// keepsTheKeys reports a sort of php-src's with no @param-out in the
+// overlay that writes back the array it is given with its keys and values,
+// in another order (sortKeepingKeys). sort(), rsort() and usort(), which
+// leave a list, and uasort() and uksort() are in the overlay.
+func keepsTheKeys(sig *signature) bool {
+	if sig.fn == nil {
+		return false
+	}
+	switch strings.ToLower(sig.fn.Name) {
+	case "asort", "arsort", "ksort", "krsort", "natsort", "natcasesort":
+		return true
+	}
+	return false
+}
+
 // writtenThrough forgets the conditions about the variable e is, or whose
 // offset it is, which a write the checker does not follow changed: a
 // by-reference argument, a by-reference foreach over the array.
@@ -3150,6 +3171,13 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				// callback that takes it by reference): what a condition
 				// said of the old one is gone. array_multisort() renumbers
 				// int keys and keeps a string key with its value.
+				// Of a parameter documented @param-out (paramout.go), a pointer
+				// moved or a walk by value is no write, and neither is
+				// array_multisort(), as PHPStan has them: the end of the body
+				// is held to what the parameter holds. A sort that keeps the
+				// type of the array writes it, held to the tag at the call;
+				// any other write is one the checker does not type, held to
+				// nothing.
 				v, isVar := b.arg.Value.(*ast.Variable)
 				switch {
 				case movesPointerOnly(sig) || walksByValue:
@@ -3157,6 +3185,11 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 					env.reordered(v.Name)
 				default:
 					x.writtenThrough(b.arg.Value, env)
+					if keepsTheKeys(sig) {
+						x.sortWrite(b.arg.Value, env, b.arg.S)
+					} else {
+						x.handedOver(b.arg.Value, env)
+					}
 				}
 				continue // php-src reads and writes the reference (sort, end, ksort): the type stays
 			}

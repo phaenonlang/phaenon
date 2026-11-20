@@ -26,6 +26,12 @@ function str_replace(array|string $search, array|string $replace, string|array $
 function str_ireplace(array|string $search, array|string $replace, string|array $subject, &$count = null): string|array {}
 
 /**
+ * @return array<int, mixed>|int|null
+ * @param-out string|int|float|null $vars
+ */
+function sscanf(string $string, string $format, mixed &...$vars): array|int|null {}
+
+/**
  * @return ($string is array ? array<string> : string)
  */
 function substr_replace(array|string $string, array|string $replace, array|int $offset, array|int|null $length = null): string|array {}

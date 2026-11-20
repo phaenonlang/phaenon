@@ -2215,6 +2215,7 @@ func (x *fnCtx) stringCast(e *ast.Cast, t types.Type) []types.Type {
 
 func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 	t := x.expr(e.Expr, env, nil)
+	since := len(x.c.diags)
 	var result types.Type
 	switch {
 	case types.IsSubtype(t, types.TInt, nil):
@@ -2293,7 +2294,10 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 		x.report(e.S, P2301, "cannot increment or decrement %s", x.typeName(t))
 		result = t
 	}
+	unchecked := x.outUnchecked
+	x.outUnchecked = unchecked || x.refusedSince(since) // the refused step is the one finding (paramout.go)
 	x.assignTo(e.Expr, result, env, e.S)
+	x.outUnchecked = unchecked
 	if e.Prefix {
 		return result
 	}
@@ -3265,6 +3269,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		if v, ok := e.Value.(*ast.Variable); ok {
 			x.byRef[v.Name] = true
 		}
+		x.handedOver(e.Value, env)
 		target, isVar := e.Target.(*ast.Variable)
 		if isVar {
 			x.byRef[target.Name] = true
@@ -3309,6 +3314,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 	cur := x.expr(e.Target, env, nil)
 	vt := x.expr(e.Value, env, nil)
 	op := compoundOp(e.Op)
+	since := len(x.c.diags)
 	var res types.Type
 	if op == token.T_COALESCE {
 		res = types.MakeUnion(types.StripNull(cur), vt)
@@ -3325,7 +3331,10 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 			env.setPath(key, cur)
 		}
 	}
+	unchecked := x.outUnchecked
+	x.outUnchecked = unchecked || x.refusedSince(since) // the refused operation is the one finding (paramout.go)
 	x.assignTo(e.Target, res, env, e.S)
+	x.outUnchecked = unchecked
 	return res
 }
 
@@ -3439,6 +3448,7 @@ func (x *fnCtx) assignFrom(value ast.Expr, target ast.Expr, vt types.Type, env *
 		if copied != nil && types.Overlaps(vt, copied.written, x.p()) {
 			env.rewrite(t.Name, copied)
 		}
+		x.wroteOut(t.Name, vt, env, span)
 	case *ast.PropertyFetch:
 		x.assignProperty(t, vt, env, span, value)
 	case *ast.StaticPropertyFetch:

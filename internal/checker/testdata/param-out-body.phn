@@ -1,0 +1,966 @@
+namespace ParamOutBody;
+
+// A function's body is held to the @param-out types of its by-reference
+// parameters, as PHPStan holds it (paramOut.type): every write to such a
+// parameter, and the places the body ends where it may still hold the
+// value it was passed (paramout.go).
+
+/** @param-out string $s */
+function writer(mixed &$s): void
+{
+    $s = 's';
+}
+
+function mayThrow(): int
+{
+    return random_int(0, 1) === 1 ? throw new \RuntimeException('no') : 1;
+}
+
+function fail(): never
+{
+    throw new \RuntimeException('failed');
+}
+
+// ---- held: what the caller is promised is what it gets
+
+/** @param-out int $x */
+function writesTheType(mixed &$x): void
+{
+    $x = 1;
+}
+
+/** @param-out int $x */
+function passedTheType(int &$x): void
+{
+    echo $x;
+}
+
+/** @param-out int $x */
+function narrowedToTheType(int|string &$x): void
+{
+    if (!\is_int($x)) {
+        throw new \RuntimeException('not an int');
+    }
+}
+
+/** @param-out int $x */
+function writtenOnEveryWay(int|string &$x, bool $b): void
+{
+    if ($b) {
+        $x = 1;
+    } else {
+        $x = 2;
+    }
+}
+
+/** @param-out int $x */
+function writesTheRestOfTheType(int|string &$x): void
+{
+    if (\is_string($x)) {
+        $x = 1;
+    }
+}
+
+/** @param-out int $x */
+function returnsAfterWriting(mixed &$x): int
+{
+    return $x = 1;
+}
+
+/** @param-out int $x */
+function endsByThrowing(int|string &$x): void
+{
+    throw new \RuntimeException('no');
+}
+
+/** @param-out int $x */
+function endsByANeverCall(int|string &$x): void
+{
+    fail();
+}
+
+/**
+ * An early return is no place the body ends: PHPStan holds the body's last
+ * statement to the tag, and the checker is no stricter.
+ *
+ * @param-out int $x
+ */
+function earlyReturn(int|string &$x, bool $b): void
+{
+    if ($b) {
+        return;
+    }
+    $x = 1;
+}
+
+/**
+ * @template T
+ * @param T $x
+ * @param T $y
+ * @param-out T $x
+ */
+function keepsTheTemplate(mixed &$x, mixed $y): void
+{
+    $x = $y;
+}
+
+/**
+ * The conditional type is both its branches inside the body.
+ *
+ * @param-out ($asInt is true ? int : string) $x
+ */
+function conditional(mixed &$x, bool $asInt): void
+{
+    $x = $asInt ? 1 : 'one';
+}
+
+/** @phpstan-param-out int $x */
+function prefixedTag(mixed &$x): void
+{
+    $x = 1;
+}
+
+function closuresAreNotHeld(): void
+{
+    $f = /** @param-out int $x */ function (mixed &$x): void {
+        $x = 'closure';
+    };
+    $g = /** @param-out int $y */ fn (mixed &$y): string => $y = 'arrow';
+}
+
+/**
+ * A reference to the parameter hands it over: what the alias writes is
+ * held to nothing.
+ *
+ * @param-out int $x
+ */
+function aliased(int|string &$x): void
+{
+    $alias = &$x;
+    $alias = 'alias';
+    echo 1;
+}
+
+/**
+ * php-src's settype() reads and writes the reference: the type stays what
+ * it was, and the write is not held to the tag.
+ *
+ * @param-out int $x
+ */
+function throughSettype(mixed &$x): void
+{
+    settype($x, 'string');
+    echo 1;
+}
+
+/**
+ * @param-out int $x
+ * @return \Generator<int, int>
+ */
+function generatorWrites(mixed &$x): \Generator
+{
+    yield 1;
+    $x = 2;
+}
+
+interface Counter
+{
+    /** @param-out int $count */
+    public function count(mixed &$count): void;
+}
+
+abstract class Base
+{
+    /** @param-out int $count */
+    abstract public function count(mixed &$count): void;
+}
+
+final class Counts implements Counter
+{
+    /** @param-out positive-int $count */
+    public function count(mixed &$count): void
+    {
+        $count = 1;
+    }
+}
+
+final class Inherits extends Base
+{
+    public function count(mixed &$count): void
+    {
+        $count = 2;
+    }
+}
+
+/**
+ * @template T
+ */
+final class Box
+{
+    /**
+     * @param T $value
+     * @param-out T $x
+     */
+    public function put(mixed &$x, mixed $value): void
+    {
+        $x = $value;
+    }
+
+    /** @param-out T $x */
+    public function wrong(mixed &$x): void
+    {
+        $x = 1; // want P2213 "$x is documented @param-out T, and ParamOutBody\Box::wrong() writes 1 to it here: write a value of type T, or declare the @param-out type the body writes"
+    }
+}
+
+// ---- a write that does not leave the type
+
+/** @param-out int $x */
+function writesAString(mixed &$x): void
+{
+    $x = 'a'; // want P2213 "writes 'a' to it here"
+}
+
+/** @param-out int $x */
+function writesOnTheWayOut(mixed &$x, bool $b): void
+{
+    if ($b) {
+        $x = 'early'; // want P2213 "writes 'early'"
+        return;
+    }
+    $x = 1;
+}
+
+/** @param-out int $x */
+function writesThenFixes(mixed &$x): void
+{
+    $x = 'first'; // want P2213 "writes 'first'"
+    $x = 1;
+}
+
+/** @param-out int $x */
+function writesThroughACall(mixed &$x): void
+{
+    writer($x); // want P2213 "writes string to it here"
+    echo 1;
+}
+
+/**
+ * @param list<int> $xs
+ * @param-out list<int> $xs
+ */
+function appends(array &$xs): void
+{
+    $xs[] = 'a'; // want P2213 "@param-out list<int>"
+}
+
+/**
+ * @param array{id: int, name: string} $row
+ * @param-out array{id: int, name: string} $row
+ */
+function unsetsAnOffset(array &$row): void
+{
+    unset($row['name']); // want P2213 "writes array{id: int} to it here"
+}
+
+/** @param-out int $x */
+function concatenates(int &$x): void
+{
+    $x .= '!'; // want P2213
+}
+
+/** @param-out positive-int $n */
+function steps(int &$n): void
+{
+    $n++; // want P2213 "@param-out int<1, max>, and function ParamOutBody\steps() writes int"
+}
+
+/** @param-out int $x */
+function destructures(mixed &$x): void
+{
+    [$x] = ['a']; // want P2213
+}
+
+/** @param-out int $x */
+function iteratesValues(mixed &$x): void
+{
+    foreach (['a'] as $x) { // want P2213
+    }
+    echo 1;
+}
+
+/** @param-out int $x */
+function iteratesKeys(mixed &$x): void
+{
+    foreach (['k' => 1] as $x => $v) { // want P2213
+        echo $v;
+    }
+    echo 1;
+}
+
+/** @param-out int $x */
+function refersToAString(mixed &$x): void
+{
+    $s = 'a';
+    $x = &$s; // want P2213
+}
+
+/** @param-out int $x */
+function writesInALoop(mixed &$x): void
+{
+    $x = 1;
+    for ($i = 0; $i < 3; $i++) {
+        $x = 'a'; // want P2213
+    }
+    echo 1;
+}
+
+/** @param-out float $x */
+function intIsNoFloat(mixed &$x): void
+{
+    $x = 1; // want P2213 "writes 1 to it here: write a value of type float"
+}
+
+/** @param-out int $x */
+function writesEither(mixed &$x, bool $b): void
+{
+    $x = $b ? 1 : 'a'; // want P2213 "writes 1|'a'"
+}
+
+/** @param-out int $x */
+function matches(mixed &$x): void
+{
+    \preg_match('/a/', 'a', $x); // want P2213
+    echo 1;
+}
+
+/**
+ * @template T of list<int>
+ * @param T $xs
+ * @param-out T $xs
+ */
+function replacesTheTemplate(array &$xs): void
+{
+    $xs = [1]; // want P2213 "@param-out T"
+}
+
+/**
+ * @template T
+ * @param T $x
+ * @param-out T $x
+ */
+function writesMixedForTheTemplate(mixed &$x, mixed $y): void
+{
+    $x = $y; // want P2213 "writes mixed"
+}
+
+/**
+ * @param-out int $x
+ * @return \Generator<int, int>
+ */
+function generatorWritesAString(mixed &$x): \Generator
+{
+    $x = 'a'; // want P2213
+    yield 1;
+}
+
+final class Methods
+{
+    /** @param-out int $x */
+    public function instance(mixed &$x): void
+    {
+        $x = 'a'; // want P2213 "ParamOutBody\Methods::instance() writes 'a'"
+    }
+
+    /** @param-out int $x */
+    public static function static(mixed &$x): int
+    {
+        $x = 'a'; // want P2213
+        return 1;
+    }
+}
+
+trait Writes
+{
+    /** @param-out int $x */
+    public function inTrait(mixed &$x): void
+    {
+        $x = 'a'; // want P2213
+    }
+}
+
+final class UsesWrites
+{
+    use Writes;
+}
+
+// ---- the body ends with the parameter as it was passed
+
+/** @param-out int $x */
+function emptyBody(mixed &$x): void // want P2213 "ends here with $x holding mixed: write a value of type int to it before the function ends, or declare the @param-out type it holds"
+{
+}
+
+/** @param-out int $x */
+function neverWritten(int|string &$x): void
+{
+    echo 1; // want P2213 "holding int|string"
+}
+
+/** @param-out int $x */
+function narrowedToNull(?int &$x): void
+{
+    if ($x === null) {
+        return; // want P2213 "holding null"
+    }
+}
+
+/** @param-out int $x */
+function eachBranch(int|string &$x, int $k): void
+{
+    if ($k === 1) {
+        $x = 1;
+    } elseif ($k === 2) {
+        echo 2; // want P2213
+    } else {
+        if ($k === 3) {
+            return;
+        }
+        echo 3; // want P2213
+    }
+}
+
+/** @param-out int $x */
+function emptyBranch(int|string &$x, bool $b): void
+{
+    if ($b) { // want P2213
+    } else {
+        $x = 1;
+    }
+}
+
+/** @param-out int $x */
+function writtenInOneBranch(int|string &$x, bool $b): void
+{
+    if ($b) { // want P2213 "holding int|string"
+        $x = 1;
+    }
+}
+
+/** @param-out int $x */
+function writtenWrongInOneBranch(int &$x, bool $b): void
+{
+    if ($b) {
+        $x = 'a'; // want P2213 "writes 'a'"
+    }
+    echo 1; // want P2213 "holding int|'a'"
+}
+
+/**
+ * The comment stands inside the return: after it, php-parser would hold it
+ * in a statement of its own, the body's last, which PHPStan never reaches
+ * and so does not hold to the tag.
+ *
+ * @param-out int $x
+ */
+function returnsLast(int|string &$x): int
+{
+    return // want P2213
+        1;
+}
+
+/** @param-out int $x */
+function returnsAMatch(int|string &$x, int $k): int
+{
+    return match ($k) { // want P2213
+        1 => 1,
+        default => 2,
+    };
+}
+
+/** @param-out int $x */
+function inABlock(int|string &$x): void
+{
+    { // want P2213
+        echo 1;
+    }
+}
+
+/** @param-out int $x */
+function triesAndReturns(int|string &$x): int
+{
+    try { // want P2213
+        return mayThrow();
+    } catch (\RuntimeException) {
+        return 0;
+    }
+}
+
+/** @param-out int $x */
+function writesInTheTry(mixed &$x): int
+{
+    try { // want P2213 "holding mixed"
+        $x = mayThrow();
+        return 1;
+    } catch (\RuntimeException) {
+        return 0;
+    }
+}
+
+/** @param-out int $x */
+function switchesAndReturns(int|string &$x, int $k): int
+{
+    switch ($k) { // want P2213
+        case 1:
+            return 1;
+        default:
+            return 2;
+    }
+}
+
+/** @param-out int $x */
+function loopsAndReturns(int|string &$x): int
+{
+    while (true) { // want P2213
+        return 1;
+    }
+}
+
+/** @param-out int $x */
+function closureUsesIt(int|string &$x): void
+{
+    $f = function () use (&$x): void {
+        $x = 'a';
+    };
+    $f();
+    echo 1; // want P2213 "holding int|string"
+}
+
+/**
+ * @param list<string> $words
+ * @param-out int $x
+ */
+function iteratesMaybeNothing(int|string &$x, array $words): void
+{
+    foreach ($words as $x) { // want P2213 "writes string"
+    }
+    echo 1; // want P2213 "holding int|string"
+}
+
+/**
+ * @param-out int $x
+ * @return \Generator<int, int>
+ */
+function generatorNeverWrites(int|string &$x): \Generator
+{
+    yield 1; // want P2213
+}
+
+/** @param-out int $x */
+function withADefault(int|string &$x = 0): void
+{
+    echo 1; // want P2213
+}
+
+/**
+ * @param-out int $x
+ * @param-out string $y
+ */
+function writesOneOfTwo(mixed &$x, mixed &$y): void
+{
+    $x = 1; // want P2213 "$y is documented @param-out string, and function ParamOutBody\writesOneOfTwo() ends here with $y holding mixed"
+}
+
+final class Ends
+{
+    /** @param-out int $x */
+    public function method(int|string &$x): void
+    {
+        echo 1; // want P2213 "ParamOutBody\Ends::method() ends here"
+    }
+}
+
+/**
+ * A @param-out never says the function does not return.
+ *
+ * @param-out never $x
+ */
+function documentedNever(mixed &$x): void
+{
+    $x = 1; // want P2213 "writes 1 to it here: a @param-out never says the function does not return; declare the @param-out type the body writes"
+}
+
+/** @param-out int $x */
+#[\Deprecated] // want P2213 "ends here with $x holding mixed"
+function emptyWithAnAttribute(mixed &$x): void
+{
+}
+
+/**
+ * A lone semicolon is no statement: the body is empty.
+ *
+ * @param-out int $x
+ */
+function onlyASemicolon(mixed &$x): void // want P2213
+{
+    ;
+}
+
+/** @param-out int $x */
+function lastIfAlwaysTrue(int|string &$x): void
+{
+    if (true) { // want P2402
+        return; // want P2213
+    }
+}
+
+/**
+ * A step the checker refuses is that finding alone; a refused operation
+ * inside the value written is not the write's own.
+ *
+ * @param-out int $x
+ */
+function stepsANull(?int &$x): void
+{
+    $x--; // want P2301
+}
+
+/**
+ * @param array<int> $arr
+ * @param-out int $x
+ */
+function writesAfterARefusal(mixed &$x, array $arr): void
+{
+    $x = $arr + 1 > 0 ? 'yes' : 'no'; // want P2301, P2213 "writes 'yes'|'no'"
+}
+
+/** @param-out int $x */
+function lastIfAlwaysOne(int|string &$x): void
+{
+    if (1) { // want P2402
+        return; // want P2213
+    }
+}
+
+/**
+ * `static` and `global` bind another value to the name: what it holds then
+ * is held to nothing.
+ *
+ * @param-out int $x
+ */
+function staticOfItsName(int|string &$x): void
+{
+    static $x = 0;
+}
+
+/** @param-out int $x */
+function globalOfItsName(int|string &$x): void
+{
+    global $x; // want P1001
+}
+
+/**
+ * A loop whose first test is always true runs its body at least once: the
+ * write in it is on every way out.
+ *
+ * @param-out int $x
+ */
+function writesInAForLoop(int|string &$x): void
+{
+    for ($i = 0; $i < 3; $i++) {
+        $x = $i;
+    }
+}
+
+// ---- php-src's functions that take the parameter by reference
+
+/**
+ * A sort writes the array back: what it leaves, its keys and values kept,
+ * is held to the tag at the call. Any other function of
+ * php-src's that writes a reference without a @param-out in the overlay
+ * writes what the checker does not type, held to nothing.
+ *
+ * @param array<string, int> $m
+ * @param-out list<int> $m
+ */
+function sortsKeepingKeys(array &$m): void
+{
+    \ksort($m); // want P2213 "writes array<string, int> to it here"
+}
+
+/**
+ * @param array<string, int> $m
+ * @param-out array<string, int> $m
+ */
+function sortsAsDocumented(array &$m): void
+{
+    \asort($m);
+}
+
+/**
+ * Keeping the keys, a sort leaves a list in another order, no list.
+ *
+ * @param list<int> $xs
+ * @param-out list<int> $xs
+ */
+function sortsAList(array &$xs): void
+{
+    \asort($xs); // want P2213 "writes array<int<0, max>, int> to it here"
+}
+
+/**
+ * Moving the pointer writes nothing: the end of the body holds the
+ * parameter as it was passed.
+ *
+ * @param array<string, int> $m
+ * @param-out list<int> $m
+ */
+function movesThePointer(array &$m): void
+{
+    \reset($m);
+    echo 1; // want P2213 "ends here with $m holding array<string, int>"
+}
+
+/**
+ * @param array<string, int> $m
+ * @param-out list<int> $m
+ */
+function walksByValue(array &$m): void
+{
+    \array_walk($m, function (int $v): void {
+        echo $v;
+    });
+    echo 1; // want P2213
+}
+
+/**
+ * @param array<string, int> $m
+ * @param-out list<int> $m
+ */
+function multisorts(array &$m): void
+{
+    \array_multisort($m);
+    echo 1; // want P2213
+}
+
+/**
+ * array_push() is one write, of what it appends.
+ *
+ * @param list<int> $xs
+ * @param-out list<int> $xs
+ */
+function pushes(array &$xs): void
+{
+    \array_push($xs, 'a'); // want P2213 "writes non-empty-list<int|'a'> to it here"
+}
+
+/** @param-out int $x */
+function scans(mixed &$x): void
+{
+    \sscanf('1', '%d', $x); // want P2213 "writes int|float|string|null"
+}
+
+/** @param-out int $errno */
+function opens(string $host, mixed &$errno): void
+{
+    $socket = \fsockopen($host, 80, $errno);
+    if ($socket !== false) {
+        \fclose($socket);
+    }
+    $errno = 0;
+}
+
+// ---- finally blocks and statements that only return
+
+/**
+ * A finally block runs on the way out of the return before it: what it
+ * writes is what the caller gets.
+ *
+ * @param callable(): int $f
+ * @param-out float $elapsed
+ */
+function timed(callable $f, ?float &$elapsed = null): int
+{
+    $start = \microtime(true);
+    try {
+        return $f();
+    } finally {
+        $elapsed = \microtime(true) - $start;
+    }
+}
+
+/**
+ * What the parameter holds at the return is what the finally block leaves.
+ *
+ * @param-out int $x
+ */
+function finallyNarrows(int|string &$x): int
+{
+    try {
+        return \random_int(0, 1);
+    } finally {
+        if (\is_string($x)) {
+            $x = 0;
+        }
+    }
+}
+
+/** @param-out int $x */
+function finallyWritesAString(mixed &$x): void
+{
+    try {
+        $x = 1;
+    } finally {
+        $x = 'a'; // want P2213 "writes 'a'"
+    }
+}
+
+/**
+ * A statement that only returns is held to its returns, each to what the
+ * ways that did not write the parameter leave: a write was held where it
+ * was made.
+ *
+ * @param-out int $x
+ */
+function switchWritesWrongThenReturns(int &$x, int $k): int
+{
+    switch ($k) {
+        case 1:
+            $x = 'a'; // want P2213
+            return 1;
+        default:
+            return 2;
+    }
+}
+
+/** @param-out int $x */
+function loopWritesWrongThenReturns(int &$x, bool $b): int
+{
+    while (true) {
+        if ($b) {
+            $x = 'a'; // want P2213
+            return 1;
+        }
+        return 2;
+    }
+}
+
+/** @param-out int $x */
+function nestedIfWritesWrongThenReturns(int &$x, bool $a, bool $b): void
+{
+    if ($a) {
+        if ($b) {
+            $x = 'a'; // want P2213
+            return;
+        } else {
+            return;
+        }
+    } else {
+        $x = 3;
+    }
+}
+
+// ---- where PHPStan holds the state a statement was entered with
+//
+// PHPStan holds a statement after which the body cannot go on to the state
+// it was entered with, and reports the value passed in although no way
+// out leaves it. The parity run names these lines (allowAt).
+
+/** @param-out int $x */
+function switchWritesEveryWay(int|string &$x, int $k): int
+{
+    switch ($k) {
+        case 1:
+            $x = 1;
+            return 1;
+        default:
+            $x = 2;
+            return 2;
+    }
+}
+
+/** @param-out int $x */
+function returnsANeverCall(int|string &$x): int
+{
+    return fail();
+}
+
+/** @param-out int $x */
+function loopsForever(int|string &$x): void
+{
+    for (;;) {
+        \usleep(1);
+    }
+}
+
+/**
+ * A comment after the body's last statement is a statement of its own to
+ * php-parser: PHPStan reports the end at the comment, and the checker at
+ * the statement.
+ *
+ * @param-out int $x
+ */
+function trailingComment(int|string &$x): void
+{
+    echo // want P2213
+        1;
+    // the end, to PHPStan
+}
+
+// A write into a value of a type parameter bounded by an array leaves the
+// array written, no longer the parameter: the append, the unset and the
+// loop by reference each leave less than the `@param-out T` promises.
+
+/**
+ * @template T of list<int>
+ * @param T $xs
+ * @param-out T $xs
+ */
+function appendsToTheTemplate(array &$xs): void
+{
+    $xs[] = 1; // want P2213 "writes non-empty-list<int>"
+}
+
+/**
+ * @template T of array<string, int>
+ * @param T $xs
+ * @param-out T $xs
+ */
+function unsetsOfTheTemplate(array &$xs): void
+{
+    unset($xs['a']); // want P2213 "writes array<string, int>"
+}
+
+/**
+ * @template T of list<int>
+ * @param T $xs
+ * @param-out T $xs
+ */
+function iteratesTheTemplateByReference(array &$xs): void
+{
+    foreach ($xs as &$v) { // want P2213 "holding list<int>"
+        $v = 2;
+    }
+}
+
+/**
+ * The bound is what the body writes, and the tag may say so.
+ *
+ * @template T of list<int>
+ * @param T $xs
+ * @param-out list<int> $xs
+ */
+function appendsAndDeclaresTheBound(array &$xs): void
+{
+    $xs[] = 1;
+}
+
+/**
+ * @template T of list<int>
+ * @param T $xs
+ * @param-out T $xs
+ */
+function readsTheTemplate(array &$xs): void
+{
+    echo \count($xs);
+}
