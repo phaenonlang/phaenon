@@ -1,7 +1,9 @@
 package checker
 
 import (
+	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -386,8 +388,10 @@ func (x *fnCtx) unsetOffsetCheck(t *ast.Index, base, raw types.Type, env *state)
 		x.report(t.Array.Span(), P2302, "cannot unset %s on %s", what, x.typeName(base))
 		return
 	}
-	if raw != nil && unsetMissing(base, normaliseKey(raw)) {
-		x.report(t.Index.Span(), P2313, "offset %s does not exist on %s, so unset cannot remove it", x.typeName(raw), x.typeName(base))
+	// A value of `T of array{…}` is held to its bound's keys, as PHPStan
+	// holds it.
+	if bounded, _ := writtenBound(base); raw != nil && unsetMissing(bounded, normaliseKey(raw)) {
+		x.report(t.Index.Span(), P2313, "offset %s does not exist on %s, so unset cannot remove it", x.typeName(raw), x.typeName(bounded))
 	}
 }
 
@@ -413,17 +417,88 @@ func (x *fnCtx) unsetIndex(t *ast.Index, base types.Type, env *state, span ast.S
 	switch a := t.Array.(type) {
 	case *ast.Variable:
 		if info, defined := env.get(a.Name); defined {
-			env.set(a.Name, unsetOffset(boundedShapes(info.t), keyT))
+			// A value of `T of array<…>` is its bound without the entry,
+			// no longer T (assignIndex).
+			bounded, p := writtenBound(info.t)
+			now := unsetOffset(boundedShapes(bounded), keyT)
+			env.set(a.Name, now)
+			x.keepRewritten(a, info.rewritten, p, t.S, now, env)
 		}
 	case *ast.PropertyFetch, *ast.StaticPropertyFetch, *ast.Index:
 		// Removing an element writes the property that holds the array,
 		// whether or not its type changes: a readonly property refuses it
 		// as it refuses an assignment. An object's offsetUnset() changes no
 		// property, so a property holding none but objects is not written.
-		if holdsArray(base) {
-			x.writeExisting(t.Array, unsetOffset(base, keyT), env, span)
+		// A value of `T of array<…>` is written as its bound.
+		if bounded, _ := writtenBound(base); holdsArray(bounded) {
+			x.writeExisting(t.Array, unsetOffset(bounded, keyT), env, span)
 		}
 	}
+}
+
+// iteratedBounds is t with each type parameter with a bound, narrowed or
+// not, read as the members of its bound a foreach takes (boundMembers):
+// what a foreach over it yields. The null of `T of array<string, int>|null`
+// is left out, as a test may have, which the type of T does not show; a
+// parameter without a bound, or bounded by mixed or object, stays as it
+// is.
+func iteratedBounds(t types.Type, h types.Hierarchy) types.Type {
+	var out []types.Type
+	for _, w := range boundMembers(t) {
+		if _, _, ok := types.IterableKV(w.member, h); ok || w.from == nil {
+			out = append(out, w.member)
+		}
+	}
+	if len(out) == 0 {
+		return t
+	}
+	return types.MakeUnion(out...)
+}
+
+// offsetRootVar is the variable an expression is or holds an offset of,
+// `$a` of `$a['inner'][0]`, parentheses aside; nil for any other
+// expression and for $this.
+func offsetRootVar(e ast.Expr) *ast.Variable {
+	for {
+		switch v := unparen(e).(type) {
+		case *ast.Index:
+			e = v.Array
+		case *ast.Variable:
+			if v.Name == "this" {
+				return nil
+			}
+			return v
+		default:
+			return nil
+		}
+	}
+}
+
+// writtenBound is t with each type parameter whose bound holds an array,
+// narrowed or not, read as its bound, as a write reads it (boundMembers),
+// and the first such parameter; t and nil where none is.
+func writtenBound(t types.Type) (types.Type, *types.Param) {
+	var p *types.Param
+	var out []types.Type
+	for _, m := range types.Members(t) {
+		read := boundMembers(m)
+		if len(read) > 0 && read[0].from != nil {
+			bound := types.TNever
+			for _, w := range read {
+				bound = types.MakeUnion(bound, w.member)
+			}
+			if holdsArray(bound) {
+				p = firstParam(p, read[0].from)
+				out = append(out, bound)
+				continue
+			}
+		}
+		out = append(out, m)
+	}
+	if p == nil {
+		return t, nil
+	}
+	return types.MakeUnion(out...), p
 }
 
 // writeExisting gives the array at target, which holds the offset unset()
@@ -453,11 +528,14 @@ func (x *fnCtx) writeExisting(target ast.Expr, vt types.Type, env *state, span a
 		if keyed {
 			env.invalidatePrefix(key)
 		}
-		base := x.pathType(t.Array, env)
+		base, p := writtenBound(x.pathType(t.Array, env))
 		if !holdsArray(base) {
 			return
 		}
-		x.writeExisting(t.Array, withExistingOffset(base, normaliseKey(x.pathType(t.Index, env)), vt), env, span)
+		before := rewrittenOf(t.Array, env)
+		now := withExistingOffset(base, normaliseKey(x.pathType(t.Index, env)), vt)
+		x.writeExisting(t.Array, now, env, span)
+		x.keepRewritten(t.Array, before, p, t.S, now, env)
 		// What was known of this array, an is_array() of `$a['k']` that
 		// a general array's type cannot hold, stays known of what is left
 		// of it, as PHPStan keeps it through the write.
@@ -811,7 +889,13 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 	if mayBeObject(it) {
 		x.implicitThrow() // the iterator's methods run
 	}
-	k, v, ok := types.IterableKV(it, x.p())
+	// `T of list<int>` yields what its bound yields, as PHPStan iterates
+	// it: its keys are ints, and a write under one is a write under a key
+	// the list has. So does a T of a union or of iterable, and a T a test
+	// narrowed (`T&array`). Whether the value may be iterated at all is
+	// asked of it as it is.
+	_, _, ok := types.IterableKV(it, x.p())
+	k, v, _ := types.IterableKV(iteratedBounds(it, x.p()), x.p())
 	if !ok || mayNotIterate(it) {
 		x.report(s.Expr.Span(), P2303, "foreach over %s", x.typeName(it))
 	}
@@ -831,6 +915,18 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 			x.byRef[vv.Name] = true
 		}
 		x.writtenThrough(s.Expr, env) // the body may write any element
+		// The body may write any element of a value of `T of array<…>`,
+		// or of an array in it (`foreach ($a['inner'] as &$v)`): what the
+		// variable holds is its bound, no longer T, as PHPStan has it
+		// after the loop.
+		if a := offsetRootVar(s.Expr); a != nil {
+			if info, defined := env.get(a.Name); defined {
+				if bounded, p := writtenBound(info.t); p != nil {
+					env.set(a.Name, bounded)
+					x.keepRewritten(a, info.rewritten, p, s.Expr.Span(), bounded, env)
+				}
+			}
+		}
 	}
 	nonEmpty := false
 	empty := ok // an array that holds nothing never runs the body
@@ -1159,7 +1255,7 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		// Assignments in finally apply on every path.
 		for k, v := range fEnv.vars {
 			if _, ok := after.vars[k]; !ok || !types.Equal(after.vars[k].t, v.t) {
-				after.vars[k] = varInfo{t: v.t, maybe: v.maybe && after.vars[k].maybe}
+				after.vars[k] = varInfo{t: v.t, maybe: v.maybe && after.vars[k].maybe, rewritten: v.rewritten}
 			}
 		}
 		if fEnv.dead {
@@ -1580,8 +1676,111 @@ func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
 		if declared != nil {
 			value = nil
 		}
+		if declared == nil && x.reportRewritten(s.Expr, t, expected, env) {
+			return
+		}
 		x.c.reportUnfit(x.given(value), t, expected, s.Expr.Span(), P2202, nil, "%s should return %s but returns %s", x.name, x.typeName(expected), x.typeName(t))
 	}
+}
+
+// reportRewritten reports a variable returned where its type parameter is
+// declared, after a write made it the array written (rewrittenWhy), with
+// the write as the finding's related position. False where the value is
+// no such variable, or the declared type does not name its parameter:
+// the plain finding stands.
+func (x *fnCtx) reportRewritten(value ast.Expr, got, want types.Type, env *state) bool {
+	why, rel, ok := x.rewrittenWhy(value, got, want, env, true)
+	if !ok {
+		return false
+	}
+	x.c.reportRelated(value.Span(), P2202, rel, "%s should return %s but returns %s: %s", x.name, x.typeName(want), x.typeName(got), why)
+	return true
+}
+
+// rewrittenWhy says why value, of type got, does not fit want, which names
+// a type parameter, where a write made the variable value is the array
+// written (paramWrite): the caller's argument for the parameter may be
+// narrower than the bound, array{a: 5} for `T of array<string, int>`,
+// and a value written into is that no longer. rel is the write. It holds
+// where got holds what was written, not only a value of the parameter a
+// test narrowed or one another assignment gave; and the advice to declare
+// the bound, for a return (returned), where the value read so fits it and
+// T is what is declared.
+//
+// Each finding so explained is a parity one in both modes. PHPStan
+// reports the place where the bound is a list or a shape, or the write an
+// unset() or one in a branch, and keeps T where a general array is
+// written under a key in one straight line; no proof at the place tells
+// those apart (extra.go): the variable is named by the write and by the
+// place, and a variable named more than once proves nothing.
+func (x *fnCtx) rewrittenWhy(value ast.Expr, got, want types.Type, env *state, returned bool) (string, *Related, bool) {
+	v, ok := unparen(value).(*ast.Variable)
+	if !ok {
+		return "", nil, false
+	}
+	info, defined := env.get(v.Name)
+	if !defined || info.rewritten == nil {
+		return "", nil, false
+	}
+	w := info.rewritten
+	if !slices.ContainsFunc(types.Members(want), func(m types.Type) bool { return types.Equal(m, w.param) }) {
+		return "", nil, false
+	}
+	holds := false
+	for _, m := range types.Members(writtenPart(got, w.param)) {
+		holds = holds || !isNeverType(m) && types.Overlaps(m, w.written, x.p())
+	}
+	if !holds {
+		return "", nil, false
+	}
+	p := w.param.Name
+	bound := x.boundText(w.param)
+	line, _ := x.file.Position(w.at.Start)
+	why := fmt.Sprintf("$%s is no longer %s after it was written on line %d", v.Name, p, line)
+	switch {
+	case !types.IsAcceptable(w.written, w.param.Bound, x.p()):
+		// What the write produced leaves the bound.
+		why += fmt.Sprintf(", and does not fit %s either", bound)
+	default:
+		why += fmt.Sprintf(", since the caller's %s may be narrower than %s", p, bound)
+		asBound := types.Map(got, func(m types.Type) types.Type {
+			if holdsParam(m, w.param) {
+				return w.param.Bound
+			}
+			return m
+		})
+		if returned && types.Equal(want, w.param) && types.IsAcceptable(asBound, w.param.Bound, x.p()) {
+			why += fmt.Sprintf("; declare the return type as %s", bound)
+		}
+	}
+	return why, related(x.file, w.at, "written here"), true
+}
+
+// boundText is the bound of a type parameter of the function, the method
+// or the class being checked, or of one a closure is written in, as its
+// declaration writes it; as the lattice prints it where the declaration
+// is not at hand.
+func (x *fnCtx) boundText(p types.Param) string {
+	for c := x; c != nil; c = c.enclosing {
+		var lists [][]*program.TypeParam
+		if c.function != nil {
+			lists = append(lists, c.function.TypeParams)
+		}
+		if c.method != nil {
+			lists = append(lists, c.method.TypeParams)
+		}
+		if c.class != nil && strings.EqualFold(c.class.Name, p.Owner) {
+			lists = append(lists, c.class.TypeParams)
+		}
+		for _, tps := range lists {
+			for _, tp := range tps {
+				if tp.Name == p.Name && tp.BoundText != "" {
+					return tp.BoundText
+				}
+			}
+		}
+	}
+	return x.typeName(p.Bound)
 }
 
 // generatorReturn is the R of Generator<K, V, S, R> (or mixed).
@@ -1636,13 +1835,21 @@ func (x *fnCtx) yield(e *ast.Yield, env *state) types.Type {
 	if e.Key != nil {
 		kt = x.expr(e.Key, env, k)
 		if x.hasReturn && !types.IsAcceptable(kt, k, x.p()) {
-			x.c.reportUnfit(x.given(e.Key), kt, k, e.Key.Span(), P2202, nil, "%s yields key %s, expected %s", x.name, x.typeName(kt), x.typeName(k))
+			if why, rel, ok := x.rewrittenWhy(e.Key, kt, k, env, false); ok {
+				x.c.reportRelated(e.Key.Span(), P2202, rel, "%s yields key %s, expected %s: %s", x.name, x.typeName(kt), x.typeName(k), why)
+			} else {
+				x.c.reportUnfit(x.given(e.Key), kt, k, e.Key.Span(), P2202, nil, "%s yields key %s, expected %s", x.name, x.typeName(kt), x.typeName(k))
+			}
 		}
 	}
 	if e.Value != nil {
 		vt = x.expr(e.Value, env, v)
 		if x.hasReturn && !types.IsAcceptable(vt, v, x.p()) {
-			x.c.reportUnfit(x.given(e.Value), vt, v, e.Value.Span(), P2202, nil, "%s yields %s, expected %s", x.name, x.typeName(vt), x.typeName(v))
+			if why, rel, ok := x.rewrittenWhy(e.Value, vt, v, env, false); ok {
+				x.c.reportRelated(e.Value.Span(), P2202, rel, "%s yields %s, expected %s: %s", x.name, x.typeName(vt), x.typeName(v), why)
+			} else {
+				x.c.reportUnfit(x.given(e.Value), vt, v, e.Value.Span(), P2202, nil, "%s yields %s, expected %s", x.name, x.typeName(vt), x.typeName(v))
+			}
 		}
 	}
 	x.yieldKeys = append(x.yieldKeys, kt)
@@ -1818,7 +2025,7 @@ func (c *Checker) labelTargeted(f *program.File, l *ast.Label) bool {
 }
 
 func (x *fnCtx) child(static bool) *fnCtx {
-	c := &fnCtx{c: x.c, file: x.file, class: x.class, static: x.static || static, res: x.res, byRef: map[string]bool{}, thisType: x.thisType, inScope: x.inScope}
+	c := &fnCtx{c: x.c, file: x.file, class: x.class, static: x.static || static, res: x.res, byRef: map[string]bool{}, thisType: x.thisType, inScope: x.inScope, enclosing: x}
 	c.name = "closure"
 	// An arrow function reads the variables of its function, the untouched
 	// parameters among them (untouched.go); a closure that names one, in
@@ -2181,7 +2388,11 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 		case isNever && c.constClosure:
 			x.report(e.Body.Span(), P2209, "arrow function is declared never and cannot return: in a constant expression it compiles to a closure that returns its expression")
 		case !types.IsAcceptable(bt, ret, x.p()):
-			x.c.reportUnfit(x.given(e.Body), bt, ret, e.Body.Span(), P2202, nil, "arrow function should return %s but returns %s", x.typeName(ret), x.typeName(bt))
+			if why, rel, ok := c.rewrittenWhy(e.Body, bt, ret, cenv, true); ok {
+				x.c.reportRelated(e.Body.Span(), P2202, rel, "arrow function should return %s but returns %s: %s", x.typeName(ret), x.typeName(bt), why)
+			} else {
+				x.c.reportUnfit(x.given(e.Body), bt, ret, e.Body.Span(), P2202, nil, "arrow function should return %s but returns %s", x.typeName(ret), x.typeName(bt))
+			}
 		}
 		ret = refinedReturn(ret, []types.Type{bt}, false, false, x.p())
 	} else {

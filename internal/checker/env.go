@@ -1,7 +1,9 @@
 package checker
 
 import (
+	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +29,54 @@ type varInfo struct {
 	// PHPStan's conditional expressions do. Dropped when the variable or
 	// one the condition narrowed is assigned again.
 	conds []condHolder
+	// rewritten is the write that made a value of a type parameter bounded
+	// by an array the array written (assignIndex): the variable holds no
+	// value of the parameter's type since, and a finding where that type
+	// is expected says where it stopped being one. An assignment of the
+	// whole variable forgets it, as it forgets the rest.
+	rewritten *paramWrite
+}
+
+// paramWrite is a write into a value of a type parameter: the parameter,
+// the span of the offset written (or unset, or iterated by reference),
+// and what the variable held after it and the writes into the same value
+// since, the parameter's own values left out (writtenPart).
+type paramWrite struct {
+	param   types.Param
+	at      ast.Span
+	written types.Type
+}
+
+// earlierWrite is the write of the two that came first in the source, the
+// one there is where only one is: after a branch that wrote the variable
+// and one that did not, it may hold the array written. The same write met
+// from two ways holds what either way wrote.
+func earlierWrite(a, b *paramWrite) *paramWrite {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	case a.at == b.at:
+		if types.Equal(a.written, b.written) {
+			return a
+		}
+		return &paramWrite{param: a.param, at: a.at, written: types.MakeUnion(a.written, b.written)}
+	case b.at.Start < a.at.Start:
+		return b
+	}
+	return a
+}
+
+// rewrite records w on the variable and on each variable it is a
+// reference to, which hold the one value.
+func (e *state) rewrite(name string, w *paramWrite) {
+	for _, n := range append([]string{name}, slices.Collect(maps.Keys(e.refs[name]))...) {
+		if info, ok := e.vars[n]; ok {
+			info.rewritten = w
+			e.vars[n] = info
+		}
+	}
 }
 
 // condHolder is one branch of a condition a variable was assigned from:
@@ -601,14 +651,15 @@ func join(a, b *state) *state {
 	n := newEnv()
 	for k, va := range a.vars {
 		if vb, ok := b.vars[k]; ok {
-			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds)}
+			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds),
+				rewritten: earlierWrite(va.rewritten, vb.rewritten)}
 		} else {
-			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native}
+			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native, rewritten: va.rewritten}
 		}
 	}
 	for k, vb := range b.vars {
 		if _, ok := a.vars[k]; !ok {
-			n.vars[k] = varInfo{t: vb.t, maybe: true, native: vb.native}
+			n.vars[k] = varInfo{t: vb.t, maybe: true, native: vb.native, rewritten: vb.rewritten}
 		}
 	}
 	for k, ta := range a.paths {
@@ -713,7 +764,7 @@ func equalOrNil(a, b types.Type) bool {
 func (e *state) widen(prev *state) {
 	for k, v := range e.vars {
 		if pv, ok := prev.vars[k]; ok && !types.Equal(pv.t, v.t) {
-			e.vars[k] = varInfo{t: generalize(pv.t, v.t, 0), maybe: v.maybe}
+			e.vars[k] = varInfo{t: generalize(pv.t, v.t, 0), maybe: v.maybe, rewritten: v.rewritten}
 		}
 	}
 	for k, t := range e.paths {

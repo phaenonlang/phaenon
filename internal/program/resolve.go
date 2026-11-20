@@ -8,6 +8,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/docblock"
 	"github.com/phaenonlang/phaenon/internal/lexer"
+	"github.com/phaenonlang/phaenon/internal/printer"
 	"github.com/phaenonlang/phaenon/internal/types"
 )
 
@@ -844,6 +845,7 @@ func nativeTypeParams(tps []*ast.TypeParam, r *resolver) []*TypeParam {
 		// A bound and a default compile into @template, a docblock.
 		if tp.Bound != nil {
 			out[i].Bound = rr.nativeErased(tp.Bound)
+			out[i].BoundText = printer.Type(tp.Bound)
 		}
 		if tp.Default != nil {
 			out[i].Default = rr.nativeErased(tp.Default)
@@ -997,6 +999,7 @@ func templatesOf(doc *docblock.Doc, r *resolver) []*TypeParam {
 	for i, t := range doc.Templates {
 		if t.Bound != nil {
 			tps[i].Bound = rr.docType(t.Bound)
+			tps[i].BoundText = t.Bound.String()
 		}
 		if t.Default != nil {
 			tps[i].Default = rr.docType(t.Default)
