@@ -101,11 +101,12 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 			// The value outlives the call: the initialiser is only what the
 			// first call starts from, so without a `@var` (the declaration
 			// PHP leaves a static variable) it is mixed, as PHPStan has it.
+			// The initialiser is code that runs, since PHP 8.3, and no
+			// constant expression: a closure in it may capture and use
+			// $this.
 			t := types.TMixed
 			if v.Default != nil {
-				x.inConst = true
 				x.expr(v.Default, env, nil)
-				x.inConst = false
 			}
 			if doc != nil {
 				for _, vt := range doc.Vars {
