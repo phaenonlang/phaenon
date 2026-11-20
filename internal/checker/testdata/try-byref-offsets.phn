@@ -1,0 +1,215 @@
+namespace TryByRefOffsets;
+
+// An offset passed by reference, `$m['k']`, `$m[$key][0]` or `$m[]`, makes
+// its variable an array before the call runs: PHP fetches the offsets for
+// writing as it binds the argument (SEND_REF, FETCH_DIM_W), so a catch
+// block sees the array holding null there, or what the callee wrote
+// (try-byref.phn for a variable passed itself). PHPStan's throw points do
+// not see the binding, and it reports the variable as one that might not
+// be defined. The offset binds where its keys are literals of any kind or
+// plain variables and everything the statement evaluates before it is a
+// literal or a plain variable; anything else first, a call, a computed
+// key, a property's or a class constant's read, an assignment's computed
+// target, leaves the variable unbound at the call, as a read that may
+// throw before the binding.
+
+/** @param-out int $x */
+function fill(mixed &$x): void
+{
+    $x = random_int(0, 1) === 1 ? throw new \RuntimeException('no') : 1;
+}
+
+function key(): string
+{
+    return random_int(0, 1) === 1 ? throw new \RuntimeException('no') : 'k';
+}
+
+function matched(string $subject): int
+{
+    try {
+        preg_match('/(b)/', $subject, $m['k']);
+    } catch (\Throwable) {
+    }
+
+    return count($m);
+}
+
+/** @return array{k: int|null} */
+function offset(): array
+{
+    try {
+        fill($m['k']);
+    } catch (\RuntimeException) {
+        return $m;
+    }
+
+    return $m;
+}
+
+/** @return array<string, array<int, int|null>> */
+function nested(string $key): array
+{
+    try {
+        fill($m[$key][0]);
+    } catch (\RuntimeException) {
+    }
+
+    return $m;
+}
+
+/** @return array<int, int|null> */
+function appended(): array
+{
+    try {
+        fill($m[]);
+    } catch (\RuntimeException) {
+    }
+
+    return $m;
+}
+
+/** @return array<string, int> */
+function computedKey(): array
+{
+    try {
+        fill($m[key()]);
+    } catch (\RuntimeException) {
+        return []; // the key threw before $m was bound, or fill() after
+    }
+
+    return $m;
+}
+
+function calledFirst(): int
+{
+    try {
+        fill($m[key()]);
+    } catch (\RuntimeException) {
+        return count($m); // want P2009
+    }
+
+    return count($m);
+}
+
+final class Holder
+{
+    public int $unset;
+    public int $set = 0;
+
+    /** @return array{k: int|null} */
+    public function own(string $subject): array
+    {
+        try {
+            $this->capture($subject, $m['k']);
+        } catch (\RuntimeException) {
+            return $m;
+        }
+
+        return $m;
+    }
+
+    /** @param-out int $x */
+    private function capture(string $subject, mixed &$x): void
+    {
+        $x = $subject === '' ? throw new \RuntimeException('empty') : 1;
+    }
+}
+
+function afterProperty(Holder $holder): int
+{
+    try {
+        both($holder->unset, $m['k']);
+    } catch (\Error) {
+        return count($m); // want P2009
+    }
+
+    return count($m);
+}
+
+function afterPropertyNested(Holder $holder): void
+{
+    try {
+        try {
+            both($holder->unset, $m['k']);
+        } catch (\RuntimeException) {
+        }
+    } catch (\Error) {
+        echo count($m); // want P2009
+    }
+}
+
+function afterPropertyFinally(Holder $holder): void
+{
+    try {
+        both($holder->unset, $m['k']);
+    } finally {
+        echo count($m); // want P2009
+    }
+}
+
+// A variable passed itself is bound after a property's read, as it was:
+// this one cannot throw.
+function afterPropertyItself(Holder $holder): ?int
+{
+    try {
+        both($holder->set, $n);
+    } catch (\Error) {
+        return $n;
+    }
+
+    return $n;
+}
+
+/** @param-out int $bound */
+function both(int $first, mixed &$bound): void
+{
+    $bound = $first;
+}
+
+/** @param array<int, int> $into */
+function afterTarget(array $into): int
+{
+    try {
+        $into[position()] = keep($m['k']);
+    } catch (\RuntimeException) {
+        return count($m); // want P2009
+    }
+
+    return count($m) + count($into);
+}
+
+/** @param-out int $x */
+function keep(mixed &$x): int
+{
+    $x = 1;
+
+    return 1;
+}
+
+function position(): int
+{
+    return random_int(0, 1) === 1 ? throw new \RuntimeException('no') : 0;
+}
+
+/** @return list<array<int|string, int|null>> */
+function literalKeys(): array
+{
+    try {
+        fill($float[1.5]);
+    } catch (\RuntimeException) {
+    }
+    try {
+        fill($bool[true]);
+    } catch (\RuntimeException) {
+    }
+    try {
+        fill($null[null]);
+    } catch (\RuntimeException) {
+    }
+    try {
+        fill($negative[-1]);
+    } catch (\RuntimeException) {
+    }
+
+    return [$float, $bool, $null, $negative];
+}
