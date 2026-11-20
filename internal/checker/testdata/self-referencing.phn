@@ -1,0 +1,119 @@
+namespace App\SelfReferencing;
+
+// A class constant's value, or a backed enum case's, that reads itself,
+// directly or through other constants and cases. PHP evaluates the value
+// when it is first needed and throws "Cannot declare self-referencing
+// constant …" at the fetch that closes the cycle, in the declaration it
+// evaluated first, naming the constant as written there. Each declaration
+// on a cycle is reported at that fetch (P2016), once; a declaration that
+// only leads into a cycle is not, and a fetch PHP skips whatever the
+// values is no reference: a ternary's branches, the right side of ??, &&
+// and ||, a closure's body. The value read on a cycle is mixed, as PHPStan
+// has it, and what the declaration's own value draws besides is not
+// reported. Plain PHP, so that PHPStan reads this file as written.
+
+enum Itself: string
+{
+    case Z = self::Z->value; // want P2016 "case App\SelfReferencing\Itself::Z refers to itself: PHP throws"
+}
+
+enum ItsName: string
+{
+    case N = self::N->name; // want P2016 "constant self::N"
+}
+
+enum ItsCondition: string
+{
+    case A = 'a';
+    case B = self::B === self::A ? 'x' : 'y'; // want P2016 "constant self::B"
+}
+
+enum ItsSum: int
+{
+    case S = self::S->value + 1; // want P2016 "case App\SelfReferencing\ItsSum::S refers to itself"
+}
+
+enum First: string
+{
+    case X = Second::Y->value . '1'; // want P2016 "case App\SelfReferencing\First::X refers to itself through App\SelfReferencing\Second::Y"
+}
+
+enum Second: string
+{
+    case Y = First::X->value . '2'; // want P2016 "constant App\SelfReferencing\First::X"
+}
+
+final class Left
+{
+    public const X = Right::Y . 'l'; // want P2016 "constant App\SelfReferencing\Left::X refers to itself through App\SelfReferencing\Right::Y"
+}
+
+final class Right
+{
+    public const Y = Left::X . 'r'; // want P2016 "constant App\SelfReferencing\Left::X"
+}
+
+enum Crossed: string
+{
+    public const K = self::X->value . 'k'; // want P2016 "constant App\SelfReferencing\Crossed::K refers to itself through App\SelfReferencing\Crossed::X"
+
+    case X = self::K . 'x'; // want P2016 "constant self::K"
+}
+
+class Base
+{
+    public const X = Derived::Y; // want P2016 "constant App\SelfReferencing\Derived::Y"
+}
+
+final class Derived extends Base
+{
+    public const Y = self::X . 'd'; // want P2016 "through App\SelfReferencing\Base::X"
+}
+
+interface Sides
+{
+    public const UP = self::DOWN; // want P2016 "constant self::DOWN"
+    public const DOWN = [self::UP]; // want P2016 "constant self::UP"
+}
+
+final class Chain
+{
+    public const ONE = self::TWO . '1'; // want P2016 "through App\SelfReferencing\Chain::TWO, App\SelfReferencing\Chain::THREE"
+    public const TWO = self::THREE . '2'; // want P2016 "through App\SelfReferencing\Chain::THREE, App\SelfReferencing\Chain::ONE"
+    public const THREE = self::ONE . '3'; // want P2016 "through App\SelfReferencing\Chain::ONE, App\SelfReferencing\Chain::TWO"
+}
+
+// INTO leads into the cycle of LOOP and BACK and is no part of it: php
+// throws at BACK's fetch or LOOP's, whichever of them is needed first.
+final class Into
+{
+    public const INTO = self::LOOP . 'i';
+    public const LOOP = self::BACK . 'l'; // want P2016 "constant self::BACK"
+    public const BACK = self::LOOP . 'b'; // want P2016 "constant self::LOOP"
+}
+
+// Fetches PHP may skip: no finding, and the value still reads mixed there.
+final class Skipped
+{
+    public const WIDE = PHP_INT_SIZE === 8;
+    public const PICK = self::WIDE ? 'wide' : self::PICK;
+    public const EITHER = self::WIDE || self::EITHER;
+    public const LATER = static function (): mixed {
+        return self::LATER;
+    };
+}
+
+function itself(): string
+{
+    return Itself::Z->value; // want P2202 "returns mixed"
+}
+
+function first(): string
+{
+    return First::X->value;
+}
+
+function left(): string
+{
+    return Left::X;
+}

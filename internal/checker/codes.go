@@ -86,6 +86,12 @@ var (
 	// P2015: a `type` alias whose right-hand side names the alias itself,
 	// directly or through another alias (design/generics.md §11.6).
 	P2015 = Code{"P2015", Error, "type alias mentions itself"}
+	// P2016: a class constant or a backed enum case whose value reads
+	// itself, directly or through other constants and cases, where PHP
+	// follows the reference whenever it evaluates the value: "Cannot
+	// declare self-referencing constant self::X" when the value is first
+	// needed (selfref.go).
+	P2016 = Code{"P2016", Error, "constant refers to itself"}
 
 	// P2 — calls
 	P2101 = Code{"P2101", Error, "too few arguments"}

@@ -455,6 +455,14 @@ type keptOutput struct {
 	spans     []emit.Verbatim
 }
 
+// emitted is an error's place and code, as the checker prints it and as
+// the emitter refuses the same mistake.
+type emitted struct {
+	file string
+	line int
+	code string
+}
+
 type buildResult struct {
 	files, failed, written, stale, copied, removed int
 	// findings counts the files --check --emit-on-error passed with errors.
@@ -512,6 +520,10 @@ func (j buildJob) run() buildResult {
 	// no build writes one, --emit-on-error included, and its P1000 has said
 	// why, so the emitter is not asked to fail on it and say it again.
 	broken, unparsed := map[string]bool{}, map[string]bool{}
+	// said are the errors printed, by file, line and code: the emitter's
+	// refusal of what the checker refused is the same mistake
+	// (emit.Error.Code), printed and counted once.
+	said := map[emitted]bool{}
 	for _, d := range diags {
 		if excluded(d.File) {
 			continue
@@ -526,6 +538,9 @@ func (j buildJob) run() buildResult {
 			broken[d.File] = true
 			if d.Code == checker.P1000.ID {
 				unparsed[d.File] = true
+			}
+			if !j.quiet {
+				said[emitted{d.File, d.Line, d.Code}] = true
 			}
 		}
 	}
@@ -552,8 +567,18 @@ func (j buildJob) run() buildResult {
 		opts := emit.Options{SourceName: in, MapSource: mapSource(in, dst), StrictTypes: true, Program: prog, File: prog.File(in)}
 		php, spans, err := emit.FileVerbatim(src, opts)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			res.failed++
+			var ee *emit.Error
+			if !errors.As(err, &ee) || ee.Code == "" || !said[emitted{in, ee.Line, ee.Code}] {
+				fmt.Fprintln(os.Stderr, err)
+			}
+			switch {
+			case !broken[in]:
+				res.failed++
+			case j.check:
+				// Counted above as built with its errors, it is not built.
+				res.findings--
+				res.failed++
+			}
 			continue
 		}
 		if j.kept != nil {

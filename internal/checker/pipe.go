@@ -1,6 +1,8 @@
 package checker
 
 import (
+	"fmt"
+
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/evalorder"
 	"github.com/phaenonlang/phaenon/internal/program"
@@ -111,7 +113,8 @@ func (x *fnCtx) recordPipePartial(right ast.Expr, args *ast.ArgList, sig *signat
 // class, or a method of $this or of a variable the left side does not
 // write; a variable callee the same.
 func (x *fnCtx) recordFold(e *ast.Binary, args *ast.ArgList) {
-	fold := x.pipeParam != nil && !x.pipeParam.ByRef && x.pipeSig != nil
+	untyped := x.untypedStage(e, args)
+	fold := x.pipeParam != nil && !x.pipeParam.ByRef && x.pipeSig != nil || untyped
 	if fold {
 		written := evalorder.Writes(e.Left, func(call ast.Expr, i int) bool {
 			a := evalorder.Args(call)
@@ -129,6 +132,40 @@ func (x *fnCtx) recordFold(e *ast.Binary, args *ast.ArgList) {
 		x.c.file.Folds = map[*ast.Binary]bool{}
 	}
 	x.c.file.Folds[e] = fold
+}
+
+// untypedStage records a pipe's stage whose callee is a value the checker
+// could not type, `A |> $cl(?)` with $cl a Closure without a signature,
+// `callable` or a string, as the call PHP makes: its one placeholder a
+// parameter of mixed, bound arguments where they stand, positional, and
+// the closure written for PHP 8.5, where the stage does not fold, passing
+// the piped value on by value. 8.6 throws where the parameter is by
+// reference, which a pipe cannot pass, and the call passes it then: the
+// one difference, for code 8.6 refuses. A named argument names a
+// parameter nothing knows, and is not recorded.
+func (x *fnCtx) untypedStage(e *ast.Binary, args *ast.ArgList) bool {
+	call, ok := e.Right.(*ast.Call)
+	if !ok || x.pipeSig != nil || !args.Partial() || x.c.file.Partials[args] != nil {
+		return false
+	}
+	if _, value := call.Callee.(*ast.Variable); !value {
+		return false
+	}
+	sig := &signature{name: "callable"}
+	var slot pfaSlot
+	for i, a := range args.Args {
+		if a.Name != nil || a.Unpack || a.Placeholder != nil && a.Placeholder.Variadic {
+			return false
+		}
+		p := &program.Param{Name: fmt.Sprintf("arg%d", i), Type: types.TMixed, NativeType: types.TMixed}
+		if a.Placeholder != nil {
+			p.Name = "piped"
+			slot = pfaSlot{param: p, name: p.Name, required: true, arg: a}
+		}
+		sig.params = append(sig.params, p)
+	}
+	x.recordPartial(e.Right, args, sig, []pfaSlot{slot}, false, false, true, func(*program.Param) types.Type { return nil })
+	return true
 }
 
 // foldCallee reports a stage's callee that is the same function before

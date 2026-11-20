@@ -203,9 +203,10 @@ func (l *targetLowering) context(n ast.Node) bool {
 			markConst(n.Value)
 		}
 	case *ast.StaticVar:
+		// The initialiser is code that runs (PHP 8.3), no constant
+		// expression: a partial application in it captures what it binds.
 		if n.Default != nil {
 			l.bare[n.Default] = true
-			markConst(n.Default)
 		}
 	}
 	return true
@@ -235,6 +236,9 @@ func params(rec *program.Partial, fallback bool, rest string) string {
 			continue
 		}
 		var sb strings.Builder
+		if p.Sensitive {
+			sb.WriteString(sensitiveAttr)
+		}
 		if p.Native != "" {
 			sb.WriteString(p.Native)
 			sb.WriteByte(' ')
@@ -251,8 +255,28 @@ func params(rec *program.Partial, fallback bool, rest string) string {
 		}
 		parts = append(parts, sb.String())
 	}
+	if fallback {
+		// One variadic for every parameter `...` leaves: it hides them all
+		// in a trace where one of them is sensitive.
+		at := 0
+		for at < len(rec.Params) && rec.Params[at].Arg != nil {
+			at++
+		}
+		for _, p := range rec.Params[at:] {
+			if p.Arg == nil && p.Sensitive {
+				parts[at] = sensitiveAttr + parts[at]
+				break
+			}
+		}
+	}
 	return strings.Join(parts, ", ")
 }
+
+// sensitiveAttr is #[\SensitiveParameter] before a closure's parameter:
+// PHP shows its argument in a stack trace as a SensitiveParameterValue, as
+// it shows the callee's, so that a secret a partial application binds
+// later is hidden in the closure's frame as in the callee's.
+const sensitiveAttr = "#[\\SensitiveParameter] "
 
 // fallback reports whether the parameters `...` stands for have a default
 // no file can spell, so they are passed on as `mixed ...$args`.

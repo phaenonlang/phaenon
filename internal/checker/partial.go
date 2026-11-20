@@ -730,6 +730,42 @@ func generalised(t types.Type) types.Type {
 
 // ------------------------------------------------------------------ lowering for an 8.5 target
 
+// boundEarly reports a callee PHP binds where the call is written, whose
+// defaults are the ones the declaration the checker sees gives: a named
+// function, a static method called by a class's name, by self:: or by
+// parent::, as a direct call binds them, and a method no class can
+// override, private or final, or of a final class or an enum, the same
+// for every member of the receiver's type. Any other method, one called
+// through an object or static::, and an interface's or an abstract one,
+// runs as the class of the value or of the call has it, with that class's
+// defaults: the closure does not copy them, and the callee's own take
+// effect.
+func (x *fnCtx) boundEarly(callee ast.Expr, sig *signature) bool {
+	switch c := callee.(type) {
+	case *ast.Call:
+		_, named := c.Callee.(*ast.Name)
+		return named && sig.fn != nil
+	case *ast.StaticCall:
+		n, named := c.Class.(*ast.Name)
+		return named && specialClassName(n) != "static" && sig.meth != nil
+	case *ast.MethodCall:
+		m := sig.meth
+		if m == nil || m.Class == nil {
+			return false
+		}
+		for _, member := range types.Members(x.partialRecv[c]) {
+			// `$o->m(...)` on A|B runs A's or B's m: one method for all.
+			if ct, ok := member.(types.Class); ok {
+				if cl := x.p().Class(ct.Name); cl == nil || cl.FindMethod(m.Name) != m {
+					return false
+				}
+			}
+		}
+		return m.Vis == program.Private || m.Final || m.Class.Final || m.Class.Kind == ast.KindEnum
+	}
+	return false
+}
+
 // recordPartial stores the emitter's account of a partial application and,
 // for an 8.5 target, reports a form with no exact lowering (§5.3). inPipe
 // says the application is a pipe's right side that PHP turns into a call;
@@ -738,7 +774,7 @@ func generalised(t types.Type) types.Type {
 func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature, slots []pfaSlot, rest, named, inPipe bool, typeOf func(*program.Param) types.Type) {
 	rec := &program.Partial{}
 	for _, s := range slots {
-		pp := program.PartialParam{Name: s.name, Optional: !s.required, Variadic: s.variadic, ByRef: s.param.ByRef, Arg: s.arg}
+		pp := program.PartialParam{Name: s.name, Optional: !s.required, Variadic: s.variadic, ByRef: s.param.ByRef, Sensitive: s.param.Sensitive, Arg: s.arg}
 		var declared types.Type = types.TMixed // what PHP declares
 		if s.param.NativeType != nil {
 			native := x.selfResolved(s.param.NativeType, sig)
@@ -796,6 +832,7 @@ func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature
 		x.c.file.Partials = map[*ast.ArgList]*program.Partial{}
 	}
 	x.c.file.Partials[args] = rec
+	x.hideLate(callee, sig, rec)
 	if rec.Refused != "" {
 		x.c.needsPHP(callee.Span(), phpversion.PHP86, "this partial application", rec.Refused+", or target PHP 8.6")
 	}
@@ -1564,5 +1601,32 @@ func (c *Checker) constObjectWrite(target ast.Expr) {
 	switch obj.(type) {
 	case *ast.Name, *ast.ConstFetch, *ast.ClassConstFetch:
 		c.needsPHP(target.Span(), phpversion.PHP86, "writing a property through a constant", "")
+	}
+}
+
+// hideLate marks every parameter of the closure #[\SensitiveParameter],
+// the variadic that passes them on included, where the method that runs
+// is chosen when the call runs (boundEarly), and where self:: or parent::
+// names it, which PHP 8.6's partial application binds to the overriding
+// method: that method may hide an argument its declaration shows, in a
+// class the program has not read as well, created by a string or a
+// container. A trace through the closure then shows less than 8.6's,
+// never more. A callee bound where the call is written hides what its
+// declaration does.
+func (x *fnCtx) hideLate(callee ast.Expr, sig *signature, rec *program.Partial) {
+	late := !x.boundEarly(callee, sig)
+	if c, ok := callee.(*ast.StaticCall); ok {
+		if n, named := c.Class.(*ast.Name); named {
+			switch specialClassName(n) {
+			case "self", "parent":
+				late = true
+			}
+		}
+	}
+	if !late {
+		return
+	}
+	for i := range rec.Params {
+		rec.Params[i].Sensitive = true
 	}
 }

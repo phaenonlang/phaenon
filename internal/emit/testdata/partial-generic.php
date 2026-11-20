@@ -375,7 +375,7 @@ $shown = function (\Stringable $a) use ($ada) {
 echo $shown(new Name('bob')), "\n";
 // A partial application of a partial application, and a first-class
 // callable: its type parameters are their bounds where nothing is expected.
-$again = fn($a) => $f($a);
+$again = fn(#[\SensitiveParameter] $a) => $f($a);
 echo $again(8), "\n";
 $all = pick(...);
 echo wantsScalar($all(1, 'a')), "\n";

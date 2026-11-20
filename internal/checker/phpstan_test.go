@@ -513,6 +513,8 @@ var checkerAlone = map[string][]struct {
 	},
 	"named-arguments.phn": {{P2010, []int{57}, phpRefuses, "the variadic parameter's own name given twice: " +
 		"\"Named parameter $rest overwrites previous argument\" at the call; PHPStan reports it for a declared parameter and for a collected name"}},
+	"self-referencing.phn": {{P2016, []int{22, 38, 43, 48, 53, 58, 60, 65, 75, 76, 81, 82, 83, 91, 92}, phpRefuses, "a constant's or a case's value that reads itself: " +
+		"\"Cannot declare self-referencing constant …\" at the fetch when the value is first needed; PHPStan has no rule for it, and of a cycle reports at most a value it types mixed"}},
 	"override-constants.phn": {{P2503, []int{35, 52}, rewrittenAway, "#[\\Override] on a constant or an enum case no parent declares: compiled for 8.5, which knows the attribute " +
 		"on methods and properties, the emitter leaves it out there, and php 8.5 and 8.6 load the file. Compiled for 8.6 it stays, and is PHP 8.6's compile error"}},
 
@@ -535,6 +537,27 @@ var checkerAlone = map[string][]struct {
 // statement whatever the values shows only when the statement runs.
 var thrownWhenRun = map[string]map[int]string{
 	"named-arguments.phn": {57: `\NamedArguments\variadicsOwnName();`},
+	// php names the declaration of a cycle whose value it evaluates first.
+	// Code that fetches Crossed::K or Crossed::X names Crossed::K's line,
+	// cases() and a constant expression that fetches Crossed::K name
+	// Crossed::X's.
+	"self-referencing.phn": {
+		22: `\App\SelfReferencing\ItsName::N;`,
+		38: `\App\SelfReferencing\First::X;`,
+		43: `\App\SelfReferencing\Second::Y;`,
+		48: `\App\SelfReferencing\Left::X;`,
+		53: `\App\SelfReferencing\Right::Y;`,
+		58: `\App\SelfReferencing\Crossed::K;`,
+		60: `\App\SelfReferencing\Crossed::cases();`,
+		65: `\App\SelfReferencing\Base::X;`,
+		75: `\App\SelfReferencing\Sides::UP;`,
+		76: `\App\SelfReferencing\Sides::DOWN;`,
+		81: `\App\SelfReferencing\Chain::ONE;`,
+		82: `\App\SelfReferencing\Chain::TWO;`,
+		83: `\App\SelfReferencing\Chain::THREE;`,
+		91: `\App\SelfReferencing\Into::LOOP;`,
+		92: `\App\SelfReferencing\Into::BACK;`,
+	},
 }
 
 // phpRefusals gives php a compiled golden and returns the source lines php
