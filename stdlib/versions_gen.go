@@ -5,8 +5,8 @@ package stdlib
 import "github.com/phaenonlang/phaenon/internal/phpversion"
 
 // The stubs of the supported releases, as read from php-src:
-//   - PHP 8.5: PHP-8.5 at a1a9f70cb2d
-//   - PHP 8.6: PHP-8.6 at 0761161562c
+//   - PHP 8.5: PHP-8.5 at a38ab8c8ad3
+//   - PHP 8.6: PHP-8.6 at cb5c461cfdd
 
 var releases = []phpversion.Version{phpversion.PHP85, phpversion.PHP86}
 
