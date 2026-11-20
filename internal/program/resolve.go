@@ -1037,6 +1037,11 @@ func (r *resolver) buildParams(ps []*ast.Param, doc *docblock.Doc) []*Param {
 			Attrs:      ap.Attrs,
 			Span:       ap.S,
 		}
+		for _, g := range ap.Attrs {
+			for _, a := range g.Attrs {
+				p.Sensitive = p.Sensitive || strings.EqualFold(strings.TrimPrefix(r.resolveClassName(a.Name), "\\"), "SensitiveParameter")
+			}
+		}
 		var docT types.Type
 		if doc != nil {
 			for _, pt := range doc.Params {

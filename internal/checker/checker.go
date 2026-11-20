@@ -794,6 +794,9 @@ type fnCtx struct {
 	// matching arm (catchesUnhandledMatch): there such a match is no
 	// P2304. A closure's context starts at none, as the error leaves it.
 	matchCaught int
+	// partialRecv is the receiver's type of each method call a partial
+	// application makes, whose classes say which methods may run.
+	partialRecv map[*ast.MethodCall]types.Type
 	// throwFrames collect the throw points of the try blocks and the body
 	// being checked, innermost last (design/tooling.md §9.1, throws.go);
 	// resolvedCalls are the calls whose callee gave their point, and
