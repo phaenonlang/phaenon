@@ -415,6 +415,9 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 			continue
 		}
 		hasItems = true
+		if item.ByRef {
+			x.mayBeReferenced(item.Value) // `[&$i]`: what writes through it, the checker does not follow
+		}
 		if item.Unpack {
 			t := x.expr(item.Value, env, nil)
 			k, v, ok := types.IterableKV(t, x.p())
@@ -3275,6 +3278,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 	if e.Op == token.Kind('=') {
 		expected := x.targetType(e.Target, env)
 		vt := x.expr(e.Value, env, expected)
+		plain := x.plainValue(e.Value, env) // as the value is read, before the write
 		if lit, ok := e.Target.(*ast.ArrayLit); ok {
 			x.destructure(lit, vt, env, e.S, e.Value)
 			return vt
@@ -3282,6 +3286,9 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		x.assignFrom(e.Value, e.Target, vt, env, e.S)
 		if v, ok := e.Target.(*ast.Variable); ok {
 			env.setNative(v.Name, x.guaranteedOf(e.Value, env))
+			if plain {
+				env.guarantee(v.Name)
+			}
 			x.rememberCondition(v.Name, e.Value, env)
 			x.rememberKeyOf(e, v.Name, e.Value, env)
 		}

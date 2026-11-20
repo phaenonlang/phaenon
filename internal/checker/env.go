@@ -27,6 +27,12 @@ type varInfo struct {
 	// PHPStan's conditional expressions do. Dropped when the variable or
 	// one the condition narrowed is assigned again.
 	conds []condHolder
+	// guaranteed says PHP itself guarantees what the variable holds: a
+	// parameter as PHP declares it (native), or a value assigned from
+	// literals, constants of a fixed value and other such variables. Any
+	// other write takes it away, and so does a meet with a way that lacks
+	// it. A loop's entry is decided on such variables alone (entersOnce).
+	guaranteed bool
 }
 
 // condHolder is one branch of a condition a variable was assigned from:
@@ -405,6 +411,15 @@ func (e *state) invalidateMentions(name string) {
 	}
 }
 
+// guarantee marks a variable as one whose type PHP itself guarantees
+// (varInfo.guaranteed).
+func (e *state) guarantee(name string) {
+	if v, ok := e.vars[name]; ok {
+		v.guaranteed = true
+		e.vars[name] = v
+	}
+}
+
 // setMaybe marks a variable as possibly undefined (after a merge).
 func (e *state) setMaybe(name string, t types.Type) {
 	e.vars[name] = varInfo{t: t, maybe: true}
@@ -601,7 +616,8 @@ func join(a, b *state) *state {
 	n := newEnv()
 	for k, va := range a.vars {
 		if vb, ok := b.vars[k]; ok {
-			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds)}
+			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds),
+				guaranteed: va.guaranteed && vb.guaranteed}
 		} else {
 			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native}
 		}

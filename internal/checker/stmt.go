@@ -683,7 +683,7 @@ func (x *fnCtx) fixpoint(entry *state, body func(head *state) (end, exit *state)
 	x.loopDepth++
 	defer func() { x.loopDepth-- }()
 	head := entry.clone()
-	var exit *state
+	var exit, back *state
 	var breaks []*state
 	savedDiags := x.c.mark()
 	for i := 0; i < 5; i++ {
@@ -696,7 +696,7 @@ func (x *fnCtx) fixpoint(entry *state, body func(head *state) (end, exit *state)
 		end, ex := body(head.clone())
 		exit = ex
 		breaks = x.breakEnvs
-		back := joinAll(append([]*state{end}, x.continueEnvs...)...)
+		back = joinAll(append([]*state{end}, x.continueEnvs...)...)
 		next := join(entry, back)
 		if next.equal(head) {
 			break
@@ -712,20 +712,221 @@ func (x *fnCtx) fixpoint(entry *state, body func(head *state) (end, exit *state)
 	inner := x.deepJumps
 	x.deepJumps = savedDeep
 	x.unwind(inner, &savedBreaks, &savedContinues)
+	x.loopBack, x.loopBreaks = back, breaks
 	return joinAll(append([]*state{exit}, breaks...)...)
+}
+
+// entersOnce reports whether a loop's conditions (a for's last one is its
+// test; an empty for has none) hold where the loop starts, read from the
+// types PHP declares: its body then runs at least once, as PHPStan reads
+// a for or a while whose first test is always true with
+// treatPhpDocTypesAsCertain off. The conditions are held to what both
+// read alike: variables, constants, literals and the operators over them,
+// and no variable a reference may have been taken to where the checker
+// does not follow its writes. A call, a property or an offset decides
+// nothing.
+func (x *fnCtx) entersOnce(entry *state, conds []ast.Expr) bool {
+	if len(conds) == 0 {
+		return true // `for (;;)`
+	}
+	for _, c := range conds {
+		if !x.plainCondition(c, entry) {
+			return false
+		}
+	}
+	native := nativeState(entry)
+	saved := x.c.mark()
+	for _, c := range conds[:len(conds)-1] {
+		x.expr(c, native, nil)
+	}
+	x.loopCond = true
+	_, f := x.cond(conds[len(conds)-1], native)
+	x.loopCond = false
+	x.c.rollback(saved)
+	return f.dead
+}
+
+// nativeState is e as PHP declares it: each variable holds the type PHP
+// guarantees of it (state.native), and no narrowed member path or
+// condition a docblock's type may have drawn is kept.
+func nativeState(e *state) *state {
+	n := e.clone()
+	for k, v := range n.vars {
+		if v.native != nil {
+			v.t, v.native = v.native, nil
+		}
+		v.conds = nil
+		n.vars[k] = v
+	}
+	n.paths = map[string]types.Type{}
+	return n
+}
+
+// plainCondition reports a loop condition entersOnce may decide on: one
+// over literals, constants of a fixed value and variables whose type PHP
+// guarantees, in env, the state the loop starts with.
+func (x *fnCtx) plainCondition(e ast.Expr, env *state) bool {
+	return x.overGuaranteed(e, env, false)
+}
+
+// plainValue reports a value PHP itself guarantees the type of, which
+// makes the variable assigned it guaranteed: a variable that is, or a
+// literal, a constant of a fixed value, or an operator over those and
+// over variables whose type no docblock refines (native is nil), whose
+// result the checker computes as PHP does.
+func (x *fnCtx) plainValue(e ast.Expr, env *state) bool {
+	if v, ok := unparen(e).(*ast.Variable); ok {
+		return x.guaranteedVar(v.Name, env)
+	}
+	return x.overGuaranteed(e, env, true)
+}
+
+// overGuaranteed reports an expression of literals, constants of a fixed
+// value and guaranteed variables, joined by operators; certain asks the
+// variables to be ones no docblock refines either.
+func (x *fnCtx) overGuaranteed(e ast.Expr, env *state, certain bool) bool {
+	ok := true
+	ast.Inspect(e, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.Variable:
+			info, _ := env.get(n.Name)
+			ok = ok && x.guaranteedVar(n.Name, env) && (!certain || info.native == nil)
+		case *ast.ConstFetch:
+			ok = ok && x.fixedConst(n.Name)
+			return false
+		case *ast.Name: // a constant, as the parser leaves one
+			ok = ok && x.fixedConst(n)
+			return false
+		case *ast.ClassConstFetch:
+			ok = ok && fixedClassConst(n)
+			return false
+		case *ast.Binary, *ast.Unary, *ast.Paren, *ast.IntLit, *ast.FloatLit, *ast.StringLit:
+		default:
+			ok = false
+		}
+		return ok
+	})
+	return ok
+}
+
+// guaranteedVar reports a variable defined on every way, whose type PHP
+// guarantees (varInfo.guaranteed), and to which no reference was taken
+// that the checker does not follow.
+func (x *fnCtx) guaranteedVar(name string, env *state) bool {
+	info, ok := env.get(name)
+	return ok && info.guaranteed && !info.maybe && !x.byRef[name] && !x.refTaken[name]
+}
+
+// fixedConst reports a constant whose value is fixed where the code is
+// read: true, false and null, and a constant a `const` statement of the
+// project or its packages declares. One define() declares may be another
+// on another way, and PHP's own may be this machine's (PHP_INT_MAX).
+func (x *fnCtx) fixedConst(n *ast.Name) bool {
+	if x.specialConst(n) != nil {
+		return true
+	}
+	return x.fixedConstIn(n, x.res.Scope(), map[*program.Constant]bool{})
+}
+
+// fixedConstIn resolves a constant's name in the scope it is written in
+// and holds the constant to fixedConst's rule, the value its `const`
+// statement gives it included: `const OVER = DYN;` over a constant
+// define() declares is no more fixed than DYN. seen ends a cycle, which
+// decides nothing.
+func (x *fnCtx) fixedConstIn(n *ast.Name, scope *program.Scope, seen map[*program.Constant]bool) bool {
+	if scope == nil {
+		return false
+	}
+	ns, global := scope.ResolveConst(n)
+	for _, name := range []string{ns, global} {
+		k := x.p().Constant(name)
+		if k == nil {
+			continue
+		}
+		if k.Defined || k.Polyfilled || k.File == nil || k.File.IsStub() || seen[k] {
+			return false
+		}
+		seen[k] = true
+		return x.fixedValue(k.Value, k.Scope, seen)
+	}
+	return false
+}
+
+// fixedValue reports a `const` statement's value made of literals, true,
+// false and null, constants of a fixed value and class constants named on
+// a class, joined by operators.
+func (x *fnCtx) fixedValue(e ast.Expr, scope *program.Scope, seen map[*program.Constant]bool) bool {
+	if e == nil {
+		return false
+	}
+	ok := true
+	ast.Inspect(e, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.ConstFetch:
+			ok = ok && x.fixedName(n.Name, scope, seen)
+			return false
+		case *ast.Name:
+			ok = ok && x.fixedName(n, scope, seen)
+			return false
+		case *ast.ClassConstFetch:
+			ok = ok && fixedClassConst(n)
+			return false
+		case *ast.Binary, *ast.Unary, *ast.Paren, *ast.IntLit, *ast.FloatLit, *ast.StringLit:
+		default:
+			ok = false
+		}
+		return ok
+	})
+	return ok
+}
+
+// fixedName is true, false or null, or a constant fixedConstIn takes.
+func (x *fnCtx) fixedName(n *ast.Name, scope *program.Scope, seen map[*program.Constant]bool) bool {
+	if len(n.Parts) == 1 && n.Kind != ast.NameRelative {
+		switch strings.ToLower(n.Parts[0]) {
+		case "true", "false", "null":
+			return true
+		}
+	}
+	return x.fixedConstIn(n, scope, seen)
+}
+
+// fixedClassConst reports a class constant named on a class, not on
+// static or an object, whose value a subclass may give anew.
+func fixedClassConst(e *ast.ClassConstFetch) bool {
+	n, ok := e.Class.(*ast.Name)
+	return ok && !strings.EqualFold(n.Parts[len(n.Parts)-1], "static")
+}
+
+// leftAfterOnce is the state after a loop entersOnce found the body of:
+// the condition failing after an iteration, or a break, and never on the
+// way in (fixpoint's back edge and breaks).
+func (x *fnCtx) leftAfterOnce(test func(*state) (t, f *state)) *state {
+	back, breaks := x.loopBack, x.loopBreaks
+	saved := x.c.mark()
+	_, f := test(back.clone())
+	x.c.rollback(saved)
+	return joinAll(append([]*state{f}, breaks...)...)
 }
 
 func (x *fnCtx) whileStmt(s *ast.While, env *state) {
 	if s.Alt {
 		x.removed(s.S, "the alternative while syntax", "braces")
 	}
-	after := x.fixpoint(env, func(head *state) (*state, *state) {
+	test := func(e *state) (*state, *state) {
 		x.loopCond = true
-		t, f := x.cond(s.Cond, head)
-		x.loopCond = false
+		defer func() { x.loopCond = false }()
+		return x.cond(s.Cond, e)
+	}
+	once := x.entersOnce(env, []ast.Expr{s.Cond})
+	after := x.fixpoint(env, func(head *state) (*state, *state) {
+		t, f := test(head)
 		x.stmt(s.Body, t)
 		return t, f
 	})
+	if once {
+		after = x.leftAfterOnce(test)
+	}
 	*env = *after
 }
 
@@ -747,19 +948,22 @@ func (x *fnCtx) forStmt(s *ast.For, env *state) {
 	for _, e := range s.Init {
 		x.expr(e, env, nil)
 	}
-	after := x.fixpoint(env, func(head *state) (*state, *state) {
-		var t, f *state
+	test := func(head *state) (t, f *state) {
 		if len(s.Cond) == 0 {
 			t, f = head, head.clone()
 			f.dead = true
-		} else {
-			for _, e := range s.Cond[:len(s.Cond)-1] {
-				x.expr(e, head, nil)
-			}
-			x.loopCond = true
-			t, f = x.cond(s.Cond[len(s.Cond)-1], head)
-			x.loopCond = false
+			return t, f
 		}
+		for _, e := range s.Cond[:len(s.Cond)-1] {
+			x.expr(e, head, nil)
+		}
+		x.loopCond = true
+		defer func() { x.loopCond = false }()
+		return x.cond(s.Cond[len(s.Cond)-1], head)
+	}
+	once := x.entersOnce(env, s.Cond)
+	after := x.fixpoint(env, func(head *state) (*state, *state) {
+		t, f := test(head)
 		x.stmt(s.Body, t)
 		// `continue` runs the step too: `for ($i = 1; ; ++$i) { … continue; }`
 		// does not loop on $i = 1.
@@ -770,6 +974,9 @@ func (x *fnCtx) forStmt(s *ast.For, env *state) {
 		}
 		return t, f
 	})
+	if once {
+		after = x.leftAfterOnce(test)
+	}
 	*env = *after
 }
 
@@ -1739,6 +1946,7 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 			native = variadicArray(native)
 		}
 		env.setNative(p.Name, native)
+		env.guarantee(p.Name)
 		if p.ByRef {
 			x.byRef[p.Name] = true
 		}

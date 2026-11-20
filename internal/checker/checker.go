@@ -891,6 +891,16 @@ type fnCtx struct {
 	breakEnvs    []*state
 	continueEnvs []*state
 	loopDepth    int
+	// loopBack and loopBreaks are the back edge and the breaks of the last
+	// iteration of the loop fixpoint ran last: what leaves a loop whose
+	// body runs at least once (leftAfterOnce).
+	loopBack   *state
+	loopBreaks []*state
+	// refTaken are the variables a reference may have been taken to where
+	// the checker does not follow it: an `&$v` in an array literal, an
+	// argument of a callee the checker cannot see. Neither they nor byRef
+	// decide that a loop is entered (entersOnce).
+	refTaken map[string]bool
 	// deepJumps are `break N` / `continue N` (N > 1) still leaving the
 	// constructs between them and their target: each loop or switch they
 	// leave takes a level off, and the construct around the last one takes
