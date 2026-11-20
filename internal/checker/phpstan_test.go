@@ -80,6 +80,13 @@ func TestPHPStanParity(t *testing.T) {
 		// Io\Poll\Context::wait() an array of mixed, where the overlay and
 		// the stub's docblock say T and list<Watcher>.
 		"library-php86-types.phn": {"argument.type": true, "method.nonObject": true},
+		// PHPStan types an arrow function as a generator only where its
+		// whole body is a yield; php makes it one wherever the body yields,
+		// and PHPStan reports the calls of the Generator it returns.
+		"generator-arrows-nested.phn": {"method.nonObject": true},
+		// PHPStan admits a generator's return type only where every member
+		// of it is iterable; php admits a union one member of which is.
+		"generator-return-types-unions.phn": {"generator.returnType": true},
 		// PHPStan 2.2 predates readonly property defaults (PHP 8.6) and
 		// refuses them on every PHP version.
 		"readonly-defaults.phn": {"property.readOnlyDefaultValue": true},
@@ -463,6 +470,17 @@ var checkerAlone = map[string][]struct {
 	"call-invalidation.phn": {{P2202, []int{103}, notToldApartYet, "a static call of the class forgets what was narrowed of $this->label; " +
 		"PHPStan forgets it after an instance call only"}},
 	"count-narrowing.phn": {{P2103, []int{215}, notToldApartYet, "the namespace's own count() says nothing of the list; PHPStan narrows by the function's short name"}},
+	"generator-arrows.phn": {
+		{P2202, []int{51}, notToldApartYet, "a generator arrow function returned where the docblock's Closure yields strings: PHPStan types the closure " +
+			"as the checker does, Closure(): Generator<int, 1, mixed, void>, and passes the return; it refuses a Generator returned from a function, " +
+			"not one a closure makes. The return is no place that proves the closure PHPStan reads alike"},
+		{P2202, []int{79}, phpRefuses, "the Generator an arrow function returns, returned from a function declared int: \"Return value must be of type int, " +
+			"Generator returned\" whatever the values; PHPStan passes the Generator a call of a closure gives"},
+	},
+	"generator-return-types.phn": {{P2202, []int{29}, phpRefuses, "a generator declared IteratorAggregate, a Traversable but no supertype of Generator: " +
+		"\"Generator return type must be a supertype of Generator, IteratorAggregate given\" when the file compiles; PHPStan admits any Traversable"}},
+	"generator-arrows-nested.phn": {{P2202, []int{43}, phpRefuses, "a closure whose body yields under an array, returned where an array is declared: " +
+		"\"Return value must be of type array, Generator returned\" whatever the values; PHPStan types the closure as the array and passes it"}},
 	"numeric-keys.phn": {
 		{P2202, []int{49}, notToldApartYet, "(string) of a key that is an int stays an int key; PHPStan reads it as a string key"},
 		{P2103, []int{147, 149}, notToldApartYet, "the same"},
@@ -530,7 +548,9 @@ var checkerAlone = map[string][]struct {
 // loads all the same, the code that makes php throw there: an Error at the
 // statement whatever the values shows only when the statement runs.
 var thrownWhenRun = map[string]map[int]string{
-	"named-arguments.phn": {57: `\NamedArguments\variadicsOwnName();`},
+	"named-arguments.phn":         {57: `\NamedArguments\variadicsOwnName();`},
+	"generator-arrows.phn":        {79: `\App\GeneratorArrows\notOne();`},
+	"generator-arrows-nested.phn": {43: `\App\GeneratorArrowsNested\listed();`},
 	// php names the declaration of a cycle whose value it evaluates first.
 	// Code that fetches Crossed::K or Crossed::X names Crossed::K's line,
 	// cases() and a constant expression that fetches Crossed::K name

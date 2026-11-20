@@ -1,0 +1,34 @@
+namespace App\GeneratorReturnTypesUnions;
+
+use Countable;
+use Generator;
+use Iterator;
+
+// A union is admitted as a generator's return type where one of its
+// members is (generator-return-types.phn), and php runs these. PHPStan
+// admits only a type every member of which is iterable, and reports the
+// rest (generator.returnType): the checker follows php.
+
+function maybe(): ?Generator
+{
+    yield 1;
+}
+
+function either(): Generator|int
+{
+    yield 1;
+}
+
+/** @return iterable<int, int>|false */
+function orFalse(): iterable|false
+{
+    yield 1;
+}
+
+function anObject(): object
+{
+    yield 1;
+}
+
+// A member of a union that is an intersection is not looked into.
+function mixedForms(): (Iterator&Countable)|int { yield 1; } // want P2202 "(Iterator&Countable)|int given"

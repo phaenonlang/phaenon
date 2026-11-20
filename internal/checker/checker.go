@@ -820,9 +820,12 @@ type fnCtx struct {
 	hasReturn     bool // a declared return type exists
 	name          string
 	generator     bool
-	res           *program.Resolver
-	byRef         map[string]bool
-	arrow         bool
+	// returnExpr is the declared return type as written, where the
+	// signature has one (generatorReturnType).
+	returnExpr ast.TypeExpr
+	res        *program.Resolver
+	byRef      map[string]bool
+	arrow      bool
 	// method/function being checked (for @phpstan-assert, by-ref params)
 	method   *program.Method
 	function *program.Function

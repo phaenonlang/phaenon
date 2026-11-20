@@ -786,6 +786,7 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	}
 	ctx := c.newCtx(cl.File, cl.Scope, cl, m.Static)
 	ctx.method = m
+	ctx.returnExpr = d.ReturnType
 	ctx.name = cl.Name + "::" + m.Name + "()"
 	ctx.returnType = m.Return
 	ctx.hasReturn = m.Return != nil

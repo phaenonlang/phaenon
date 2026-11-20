@@ -1,0 +1,84 @@
+namespace App\GeneratorReturnTypes;
+
+use Closure;
+use Countable;
+use Generator;
+use Iterator;
+use IteratorAggregate;
+use Traversable;
+
+// A function, a method, a closure or an arrow function that yields returns
+// a Generator, and PHP refuses the file where the declared return type
+// does not admit one ("Generator return type must be a supertype of
+// Generator, int given"): it admits a type that holds object or mixed, or
+// names Traversable, Iterator or Generator, iterable included, at its top
+// level or in an intersection that is all of it (unions of these with
+// other types: generator-return-types-unions.phn). The finding is at the
+// return type, the line php names; PHPStan names the yield, here on the
+// same line. Plain PHP, so that PHPStan reads this file as written.
+
+function counted(): int { yield 1; } // want P2202 "Generator return type must be a supertype of Generator, int given"
+
+function nullable(): ?int { yield 1; } // want P2202 "?int given"
+
+/** @return list<int> */
+function listed(): array { yield 1; } // want P2202
+
+function counts(): Countable { yield 1; } // want P2202 "Countable given"
+
+function aggregate(): IteratorAggregate { yield 1; } // want P2202
+
+/** @return Generator<int, int, mixed, void> */
+function generator(): Generator
+{
+    yield 1;
+}
+
+/** @return Iterator<int, int> */
+function iterator(): Iterator
+{
+    yield 1;
+}
+
+/** @return Traversable<int, int> */
+function traversable(): Traversable
+{
+    yield 1;
+}
+
+/** @return iterable<int, int> */
+function iterable(): iterable
+{
+    yield 1;
+}
+
+function anything(): mixed
+{
+    yield 1;
+}
+
+/** @return Iterator<int, int>&Countable */
+function intersected(): Iterator&Countable
+{
+    yield 1;
+}
+
+class Source
+{
+    public function self(): static { yield 1; } // want P2202 "static given"
+
+    public function closure(): Closure
+    {
+        return function (): array { yield 1; }; // want P2202 "array given"
+    }
+
+    public function arrow(): Closure
+    {
+        return fn (): int => yield 1; // want P2202 "int given"
+    }
+
+    public function silent(): Closure
+    {
+        return fn (): void => yield 1; // want P2202 "void given"
+    }
+}

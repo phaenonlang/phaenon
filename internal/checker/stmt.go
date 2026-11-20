@@ -1531,6 +1531,7 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 		}
 	}
 	x.generator = bodyHasYield(stmts)
+	x.generatorReturnType()
 	x.stmts(stmts, env)
 	if !env.dead && x.hasReturn && !x.generator {
 		// Reported where the body ends, like PHPStan: the last statement.
@@ -1803,6 +1804,7 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		}
 	}
 	c.generator = bodyHasYield(e.Body)
+	c.generatorReturnType()
 	exits := cenv
 	if closureHasByRefUse(e) {
 		// A by-reference use is whatever the body assigns to it as well:
@@ -1934,6 +1936,10 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 			}
 		}
 	}
+	c.generator = bodyHasYield([]ast.Stmt{&ast.ExprStmt{S: e.Body.Span(), Expr: e.Body}})
+	if c.generator {
+		return types.Callable{Closure: true, HasSig: true, Params: cps, Return: c.generatorArrow(e, cenv)}
+	}
 	bt := c.expr(e.Body, cenv, expectedRet)
 	ret := c.returnType
 	if ret != nil {
@@ -1959,6 +1965,115 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 		ret = bt
 	}
 	return types.Callable{Closure: true, HasSig: true, Params: cps, Return: ret}
+}
+
+// generatorArrow checks the body of an arrow function that yields, which
+// makes it a generator, as PHP has it (`fn () => yield 1`), and returns
+// the closure's return type: the Generator of what the body yields, its
+// return the body's value, which the closure returns to PHP, and void for
+// a body that is a yield or a yield from itself, the value of what the
+// caller sends, as PHPStan types it. A declared return type holds the
+// yields, as a generator function's does.
+func (x *fnCtx) generatorArrow(e *ast.ArrowFunc, env *state) types.Type {
+	refused := x.generatorReturnType()
+	var expected types.Type
+	if x.hasReturn {
+		expected = x.generatorReturn()
+	}
+	bt := x.expr(e.Body, env, expected)
+	if !yieldsItsValue(e.Body) {
+		if expected != nil && !types.IsAcceptable(bt, expected, x.p()) {
+			x.report(e.Body.Span(), P2202, "arrow function should return %s but returns %s", x.typeName(expected), x.typeName(bt))
+		}
+		x.returnTypes = append(x.returnTypes, bt)
+	}
+	ret := x.returnType
+	if gen := x.yieldedGenerator(); gen != nil && (ret == nil || refused || types.IsSubtype(gen, ret, x.p())) {
+		return gen
+	}
+	if ret == nil || refused {
+		return types.NewClass("Generator")
+	}
+	return ret
+}
+
+// yieldsItsValue reports a body whose value is always what a yield in it
+// gives, what the caller sends: a yield or a yield from, or a match or a
+// ternary each branch of which is one. Its Generator returns void, as
+// PHPStan types `fn () => yield 1`, whose value the caller decides.
+func yieldsItsValue(e ast.Expr) bool {
+	switch e := unparen(e).(type) {
+	case *ast.Yield, *ast.YieldFrom:
+		return true
+	case *ast.Ternary:
+		return e.Then != nil && yieldsItsValue(e.Then) && yieldsItsValue(e.Else)
+	case *ast.Match:
+		for _, arm := range e.Arms {
+			if !yieldsItsValue(arm.Body) {
+				return false
+			}
+		}
+		return len(e.Arms) > 0
+	}
+	return false
+}
+
+// generatorReturnType reports a function, a method, a closure or an arrow
+// function that yields under a return type that does not admit the
+// Generator it returns, as PHP refuses it when it compiles the file
+// ("Generator return type must be a supertype of Generator, int given"),
+// at the declared type: PHP admits a type that holds object or mixed, or
+// names Traversable, Iterator or Generator itself, iterable included, at
+// its top level or in an intersection that is all of it. It says whether
+// it reported.
+func (x *fnCtx) generatorReturnType() bool {
+	if !x.generator || x.returnExpr == nil || x.generatorTypeAdmitted(x.returnExpr, true) {
+		return false
+	}
+	span := x.returnExpr.Span()
+	x.report(span, P2202, "Generator return type must be a supertype of Generator, %s given: %s yields, and returns a Generator", x.file.Src[span.Start:span.End], x.name)
+	return true
+}
+
+// generatorTypeAdmitted is PHP's test of a generator's return type, top
+// says t is the whole type or a member of the union that is.
+func (x *fnCtx) generatorTypeAdmitted(t ast.TypeExpr, top bool) bool {
+	switch t := t.(type) {
+	case *ast.NullableType:
+		return x.generatorTypeAdmitted(t.Type, top)
+	case *ast.UnionType:
+		for _, m := range t.Types {
+			if x.generatorTypeAdmitted(m, false) {
+				return true
+			}
+		}
+		return false
+	case *ast.IntersectionType:
+		if !top {
+			return false // a DNF member: PHP looks at the union's names only
+		}
+		for _, m := range t.Types {
+			if x.generatorTypeAdmitted(m, false) {
+				return true
+			}
+		}
+		return false
+	case *ast.NamedType:
+		if t.Name == nil {
+			return false
+		}
+		if len(t.Name.Parts) == 1 && t.Name.Kind == ast.NameUnqualified {
+			switch strings.ToLower(t.Name.Parts[0]) {
+			case "object", "mixed", "iterable":
+				return true
+			}
+		}
+		switch strings.ToLower(x.res.ClassName(t.Name)) {
+		case "traversable", "iterator", "generator":
+			return true
+		}
+	}
+	return false
 }
 
 // classOfSubject returns the object expression of a `$x::class` match
