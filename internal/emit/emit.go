@@ -81,6 +81,13 @@ type Error struct {
 	File string
 	Line int
 	Msg  string
+	// Code is the checker's code where the checker reports the same
+	// mistake itself, which is then its one diagnostic: P1001 for a
+	// construct that left the language, P1002 for a partial application
+	// the checker refused for PHP 8.5. A tool that prints the checker's
+	// findings leaves such an error out, and counts its file once. It is
+	// empty for a failure of the emitter's own.
+	Code string
 }
 
 func (e *Error) Error() string {
@@ -175,7 +182,9 @@ func withdrawn(f *ast.File) (ast.Node, string) {
 func compile(src []byte, f *ast.File, opts Options) ([]byte, *lineWriter, error) {
 	e := &emitter{src: src, opts: opts, throwsWritten: map[ast.Node]bool{}}
 	if w, name := withdrawn(f); w != nil {
-		return nil, nil, e.errorf(w, "%s left the language (P1001): there is no PHP to write for it; phn fmt rewrites what has a rewrite", name)
+		err := e.errorf(w, "%s left the language (P1001): there is no PHP to write for it; phn fmt rewrites what has a rewrite", name)
+		err.Code = "P1001"
+		return nil, nil, err
 	}
 	e.planIndents(f)
 	if err := e.lowerGenerics(f); err != nil {
@@ -437,8 +446,15 @@ func (e *emitter) lineOf(offset int) int {
 	return 1 + bytes.Count(e.src[:offset], []byte("\n"))
 }
 
-func (e *emitter) errorf(n ast.Node, format string, args ...any) error {
-	return &Error{File: e.opts.SourceName, Line: e.lineOf(n.Span().Start), Msg: fmt.Sprintf(format, args...)}
+func (e *emitter) errorf(n ast.Node, format string, args ...any) *Error {
+	err := &Error{File: e.opts.SourceName, Line: e.lineOf(n.Span().Start), Msg: fmt.Sprintf(format, args...)}
+	if x, ok := n.(ast.Expr); ok && e.opts.File != nil {
+		// A partial application the checker refused: its P1002 says so.
+		if rec := e.opts.File.Partials[callArgs(x)]; rec != nil && rec.Refused != "" {
+			err.Code = "P1002"
+		}
+	}
+	return err
 }
 
 // tokens is the source's token stream, read once.

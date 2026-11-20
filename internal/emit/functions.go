@@ -71,10 +71,6 @@ func (e *emitter) lowerFunctions(f *ast.File) {
 			if n.Value != nil {
 				e.constClosures(n.Value)
 			}
-		case *ast.StaticVar:
-			if n.Default != nil {
-				e.constClosures(n.Default)
-			}
 		}
 		return true
 	})
@@ -363,7 +359,9 @@ func (e *emitter) impliedPublic(m ast.Modifier, mods ast.Span) {
 // (…) {` with `return expr;` on a line of its own (closureBody), and a
 // `function` closure gets `static`. The closures' own bodies are ordinary
 // code and are left alone; a closure keeps its brace on its line, as PER
-// has it.
+// has it. A static variable's initialiser is no constant expression but
+// code that runs (PHP 8.3): its closures stay as written, an arrow function
+// with what it captures and a closure with $this.
 func (e *emitter) constClosures(root ast.Expr) {
 	ast.Inspect(root, func(n ast.Node) bool {
 		switch n := n.(type) {

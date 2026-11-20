@@ -1,0 +1,76 @@
+// targets: 8.5, 8.6
+// A parameter declared #[\SensitiveParameter] shows its argument in a stack
+// trace as a SensitiveParameterValue. The closure a partial application is
+// written as for PHP 8.5 declares the attribute on its own parameter where
+// the callee does, in every form the lowering writes: a placeholder's, the
+// parameters `...` copies, the variadic that passes them on, a pipe's
+// closure; so that a secret bound later is hidden in the closure's frame of
+// a trace as PHP 8.6 hides it. For a method chosen when the call runs,
+// whose override may add the attribute in a class the program never
+// reads, every parameter of the closure carries it.
+
+namespace Sensitive;
+
+use SensitiveParameter as Hidden;
+
+final class Vault {
+    const ROUNDS = 3;
+}
+
+function login(string $user, #[\SensitiveParameter] string $secret, int $tries = 3): string {
+    throw new \RuntimeException("{$user} {$tries}");
+}
+
+function aliased(string $user, #[Hidden] string $secret): string {
+    throw new \RuntimeException($user);
+}
+
+function rounds(mixed $user, #[\SensitiveParameter] mixed $secret = 'x', mixed $n = Vault::ROUNDS): string {
+    throw new \RuntimeException('rounds');
+}
+
+interface Lock {
+    open(string $user, string $pin = '0000'): string;
+}
+
+final class Safe implements Lock {
+    open(string $user, #[\SensitiveParameter] string $pin = '0000'): string {
+        throw new \RuntimeException($user);
+    }
+}
+
+final class Plain {
+    open(string $user, string $pin = '0000'): string {
+        throw new \RuntimeException($user);
+    }
+}
+
+final class Door {
+    open(string $user, #[\SensitiveParameter] string $pin = '0000'): string {
+        throw new \RuntimeException($user);
+    }
+}
+
+final class Gate {
+    static open(string $user): string => ('hunter' . '2') |> login(strtoupper($user), ?, 1);
+}
+
+function seen(\Closure $f): string {
+    try {
+        $f();
+    } catch (\RuntimeException $e) {
+        return str_contains($e->getTraceAsString(), 'hunter2') ? 'shown' : 'hidden';
+    }
+    return 'none';
+}
+
+ini_set('zend.exception_ignore_args', '0');
+$placeholder = login('u', ?);
+$copied = login('u', ...);
+$imported = aliased('u', ?);
+$passed = rounds('u', ...);
+echo seen(fn() => $placeholder('hunter2')), ' ', seen(fn() => $copied('hunter2')), ' ', seen(fn() => $imported('hunter2')), "\n";
+echo seen(fn() => $passed('hunter2')), ' ', seen(fn() => Gate::open('u')), "\n";
+$lock = fn(Lock $l): \Closure => $l->open('u', ?);
+$either = fn(Plain|Door $d): \Closure => $d->open('u', ?);
+echo seen(fn() => $lock(new Safe())('hunter2')), ' ', seen(fn() => $either(new Door())('hunter2')), "\n";

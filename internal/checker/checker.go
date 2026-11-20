@@ -206,6 +206,21 @@ type Checker struct {
 	// targetedLabels says, per file, which labels a goto names
 	// (labelTargeted).
 	targetedLabels map[*program.File]map[*ast.Label]bool
+	// caseTypes are the types of backed enum cases' values, each typed
+	// once where its enum is declared (caseValue), as a constant's is
+	// (program.ConstantType); caseTyping are the cases whose value is being
+	// typed, which a value that reads itself meets again.
+	caseTypes  map[*program.EnumCase]types.Type
+	caseTyping map[*program.EnumCase]bool
+	// refs are, per class constant and enum case, the references its value
+	// follows whenever PHP evaluates it, and cycles how it reads itself, nil
+	// where it does not (selfref.go).
+	refs   map[valueDecl][]valueRef
+	cycles map[valueDecl]*cycle
+	// atOnce maps the argument list of a partial application to the call
+	// that calls it where it stands with arguments, `(f(B, ...))(X)`
+	// (Partial.Direct).
+	atOnce map[*ast.ArgList]*ast.Call
 }
 
 // New creates a checker for the program.
@@ -494,6 +509,7 @@ func (c *Checker) Check() []Diagnostic {
 		c.judged[f.Path] = true
 	}
 	c.checkReadonlyInits()
+	c.settleUnrecorded()
 	for _, pr := range c.p.Problems {
 		if pr.File == nil || !pr.File.Checked {
 			continue
@@ -803,6 +819,9 @@ type fnCtx struct {
 	// matching arm (catchesUnhandledMatch): there such a match is no
 	// P2304. A closure's context starts at none, as the error leaves it.
 	matchCaught int
+	// partialRecv is the receiver's type of each method call a partial
+	// application makes, whose classes say which methods may run.
+	partialRecv map[*ast.MethodCall]types.Type
 	// throwFrames collect the throw points of the try blocks and the body
 	// being checked, innermost last (design/tooling.md §9.1, throws.go);
 	// resolvedCalls are the calls whose callee gave their point, and
@@ -1207,8 +1226,9 @@ func (c *Checker) constType(k *program.Constant) types.Type {
 	c.file = k.File
 	defer func() { c.file = saved }()
 	// Diagnostics inside vendor constants are not reported: suppress by
-	// checking silently.
-	silent := !k.File.Checked
+	// checking silently. Nor are those of a value that reads itself, which
+	// is reported once as such (P2016), in its class's check.
+	silent := !k.File.Checked || k.Class != nil && c.cycleOf(valueDecl{k: k}) != nil
 	var savedDiags checkMark
 	if silent {
 		savedDiags = c.mark()

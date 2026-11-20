@@ -730,6 +730,42 @@ func generalised(t types.Type) types.Type {
 
 // ------------------------------------------------------------------ lowering for an 8.5 target
 
+// boundEarly reports a callee PHP binds where the call is written, whose
+// defaults are the ones the declaration the checker sees gives: a named
+// function, a static method called by a class's name, by self:: or by
+// parent::, as a direct call binds them, and a method no class can
+// override, private or final, or of a final class or an enum, the same
+// for every member of the receiver's type. Any other method, one called
+// through an object or static::, and an interface's or an abstract one,
+// runs as the class of the value or of the call has it, with that class's
+// defaults: the closure does not copy them, and the callee's own take
+// effect.
+func (x *fnCtx) boundEarly(callee ast.Expr, sig *signature) bool {
+	switch c := callee.(type) {
+	case *ast.Call:
+		_, named := c.Callee.(*ast.Name)
+		return named && sig.fn != nil
+	case *ast.StaticCall:
+		n, named := c.Class.(*ast.Name)
+		return named && specialClassName(n) != "static" && sig.meth != nil
+	case *ast.MethodCall:
+		m := sig.meth
+		if m == nil || m.Class == nil {
+			return false
+		}
+		for _, member := range types.Members(x.partialRecv[c]) {
+			// `$o->m(...)` on A|B runs A's or B's m: one method for all.
+			if ct, ok := member.(types.Class); ok {
+				if cl := x.p().Class(ct.Name); cl == nil || cl.FindMethod(m.Name) != m {
+					return false
+				}
+			}
+		}
+		return m.Vis == program.Private || m.Final || m.Class.Final || m.Class.Kind == ast.KindEnum
+	}
+	return false
+}
+
 // recordPartial stores the emitter's account of a partial application and,
 // for an 8.5 target, reports a form with no exact lowering (§5.3). inPipe
 // says the application is a pipe's right side that PHP turns into a call;
@@ -738,7 +774,7 @@ func generalised(t types.Type) types.Type {
 func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature, slots []pfaSlot, rest, named, inPipe bool, typeOf func(*program.Param) types.Type) {
 	rec := &program.Partial{}
 	for _, s := range slots {
-		pp := program.PartialParam{Name: s.name, Optional: !s.required, Variadic: s.variadic, ByRef: s.param.ByRef, Arg: s.arg}
+		pp := program.PartialParam{Name: s.name, Optional: !s.required, Variadic: s.variadic, ByRef: s.param.ByRef, Sensitive: s.param.Sensitive, Arg: s.arg}
 		var declared types.Type = types.TMixed // what PHP declares
 		if s.param.NativeType != nil {
 			native := x.selfResolved(s.param.NativeType, sig)
@@ -782,6 +818,7 @@ func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature
 		}
 		rec.Params = append(rec.Params, pp)
 	}
+	rec.Direct = !inPipe && x.direct(args, rec)
 	rec.Pipe, rec.Rest, rec.Named = inPipe, rest, named
 	_, rec.Void = sig.ret.(types.Void)
 	if inPipe {
@@ -795,9 +832,82 @@ func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature
 		x.c.file.Partials = map[*ast.ArgList]*program.Partial{}
 	}
 	x.c.file.Partials[args] = rec
+	x.hideLate(callee, sig, rec)
 	if rec.Refused != "" {
 		x.c.needsPHP(callee.Span(), phpversion.PHP86, "this partial application", rec.Refused+", or target PHP 8.6")
 	}
+}
+
+// noteAtOnce notes a call whose callee is a partial application called
+// where it stands with arguments (Checker.atOnce).
+func (x *fnCtx) noteAtOnce(e *ast.Call) {
+	if e.Args == nil || len(e.Args.Args) == 0 || e.Args.FirstClassCallable || e.Args.Partial() {
+		return
+	}
+	var args *ast.ArgList
+	switch c := unparen(e.Callee).(type) {
+	case *ast.Call:
+		args = c.Args
+	case *ast.MethodCall:
+		args = c.Args
+	case *ast.StaticCall:
+		args = c.Args
+	}
+	if !args.Partial() {
+		return
+	}
+	if x.c.atOnce == nil {
+		x.c.atOnce = map[*ast.ArgList]*ast.Call{}
+	}
+	x.c.atOnce[args] = e
+}
+
+// direct reports an application the lowering writes as the call it makes
+// (Partial.Direct): called where it stands with arguments, its one
+// placeholder the `...` after its bound arguments, none named or
+// unpacked, outside a constant expression, and its closure one that
+// passes on what it is given. PHP 8.6 evaluates the callee and the bound
+// arguments, then the call's, and calls the callee with them all, as the
+// call does: its defaults, named arguments, by-reference parameters and
+// arguments past the declared ones are the call's. It differs as that
+// closure does, func_num_args() counting the arguments given and an error
+// naming the callee; a closure that copies the defaults passes them, and
+// stays. The text that goes, the parentheses before the application and
+// `...))(` after it, holds nothing but those and spaces.
+func (x *fnCtx) direct(args *ast.ArgList, rec *program.Partial) bool {
+	at := x.c.atOnce[args]
+	if at == nil || x.inConst || len(args.Args) == 0 {
+		return false
+	}
+	last := args.Args[len(args.Args)-1]
+	if last.Placeholder == nil || !last.Placeholder.Variadic {
+		return false
+	}
+	for _, a := range args.Args[:len(args.Args)-1] {
+		if a.Placeholder != nil || a.Name != nil || a.Unpack {
+			return false
+		}
+	}
+	fallback := false
+	for _, p := range rec.Params {
+		fallback = fallback || p.Arg == nil && p.Unwritable
+	}
+	if !fallback {
+		return false
+	}
+	src := x.c.file.Src
+	callee := unparen(at.Callee)
+	for _, s := range []ast.Span{{Start: at.S.Start, End: callee.Span().Start}, {Start: last.S.Start, End: at.Args.Args[0].S.Start}} {
+		if s.Start > s.End || s.End > len(src) {
+			return false
+		}
+		for _, b := range src[s.Start:s.End] {
+			if !strings.ContainsRune(" \t().", rune(b)) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // phpstanReadsCallback are PHP's functions whose callback PHPStan types by
@@ -964,6 +1074,10 @@ func (x *fnCtx) sourceOf(e ast.Expr) string {
 // partialRefusal says why a partial application has no exact 8.5 lowering
 // (§5.3), or "" when it has one.
 func (x *fnCtx) partialRefusal(callee ast.Expr, args *ast.ArgList, sig *signature, rec *program.Partial, rest, named, inPipe bool) string {
+	if rec.Direct {
+		// The call it makes is written, and no closure.
+		return ""
+	}
 	params := map[string]bool{}
 	for _, p := range rec.Params {
 		params[p.Name] = true
@@ -1047,8 +1161,49 @@ func (x *fnCtx) partialRefusal(callee ast.Expr, args *ast.ArgList, sig *signatur
 		if named && (variadic || unwritable) {
 			return "`...` after a named argument would unpack after it, which PHP forbids"
 		}
+		if unwritable {
+			// The closure then passes on what it is given (mixed ...$args),
+			// by value: a by-reference variadic would refuse a literal for
+			// every other parameter.
+			for _, p := range rec.Params {
+				if p.Arg == nil && p.ByRef {
+					return fmt.Sprintf("`...` leaves the by-reference parameter $%s, which the closure written for PHP 8.5 would pass on by value, as a default of the parameters it leaves cannot be written there: %s", p.Name, placeholders(rec, false))
+				}
+			}
+		}
 	}
 	return ""
+}
+
+// placeholders is the advice for a `...` the closure written for PHP 8.5
+// cannot stand for: a placeholder for each parameter it leaves before a
+// variadic one, which the closure then declares as the callee does, with
+// no default to write. After a named argument they are named too.
+func placeholders(rec *program.Partial, named bool) string {
+	var each []string
+	variadic := false
+	for _, p := range rec.Params {
+		switch {
+		case p.Arg != nil:
+		case p.Variadic:
+			variadic = true
+		case named:
+			each = append(each, p.Name+": ?")
+		default:
+			each = append(each, "$"+p.Name)
+		}
+	}
+	where := "in place of the `...`"
+	if variadic {
+		where = "before the `...`"
+	}
+	switch {
+	case named:
+		return "write " + strings.Join(each, ", ") + " " + where
+	case len(each) == 1:
+		return "write a ? for " + each[0] + " " + where
+	}
+	return "write a ? for each of " + strings.Join(each, ", ") + " " + where
 }
 
 // stableArg reports a bound argument an arrow function may evaluate at each
@@ -1446,5 +1601,32 @@ func (c *Checker) constObjectWrite(target ast.Expr) {
 	switch obj.(type) {
 	case *ast.Name, *ast.ConstFetch, *ast.ClassConstFetch:
 		c.needsPHP(target.Span(), phpversion.PHP86, "writing a property through a constant", "")
+	}
+}
+
+// hideLate marks every parameter of the closure #[\SensitiveParameter],
+// the variadic that passes them on included, where the method that runs
+// is chosen when the call runs (boundEarly), and where self:: or parent::
+// names it, which PHP 8.6's partial application binds to the overriding
+// method: that method may hide an argument its declaration shows, in a
+// class the program has not read as well, created by a string or a
+// container. A trace through the closure then shows less than 8.6's,
+// never more. A callee bound where the call is written hides what its
+// declaration does.
+func (x *fnCtx) hideLate(callee ast.Expr, sig *signature, rec *program.Partial) {
+	late := !x.boundEarly(callee, sig)
+	if c, ok := callee.(*ast.StaticCall); ok {
+		if n, named := c.Class.(*ast.Name); named {
+			switch specialClassName(n) {
+			case "self", "parent":
+				late = true
+			}
+		}
+	}
+	if !late {
+		return
+	}
+	for i := range rec.Params {
+		rec.Params[i].Sensitive = true
 	}
 }

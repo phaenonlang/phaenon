@@ -95,6 +95,7 @@ func isStubFile(f *program.File) bool {
 
 func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	defer x.unresolvedCall(e.S, e.Args)
+	x.noteAtOnce(e)
 	n, isName := e.Callee.(*ast.Name)
 	if !isName {
 		return x.dynamicCall(e, env, expected)
@@ -1279,6 +1280,12 @@ func (x *fnCtx) unionCall(e *ast.MethodCall, base types.Type, name string, env *
 // methodCallOn checks the call on a receiver already typed.
 func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expected types.Type) types.Type {
 	x.noteRecv(e, obj)
+	if e.Args.Partial() {
+		if x.partialRecv == nil {
+			x.partialRecv = map[*ast.MethodCall]types.Type{}
+		}
+		x.partialRecv[e] = obj
+	}
 	name, ok := identName(e.Name)
 	if !ok {
 		x.noteName(e, x.expr(e.Name, env, nil))

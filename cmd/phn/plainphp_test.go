@@ -341,3 +341,32 @@ func TestBuildCountsAFailedFileOnce(t *testing.T) {
 		t.Errorf("phn build --check --emit-on-error (%v):\n%s\nwant the unparsed file alone to fail", status, stderr)
 	}
 }
+
+// TestBuildCountsARefusalOnce: the emitter refuses what the checker
+// refuses, a construct that left the language (P1001) and a partial
+// application with no exact lowering for PHP 8.5 (P1002); under
+// --emit-on-error such a file was counted as a file with errors and again
+// when the emitter refused it ("4 of 4 files failed to compile" for two),
+// and the refusal was printed a second time without its code.
+func TestBuildCountsARefusalOnce(t *testing.T) {
+	bin := phnBinary(t)
+	root := plainTree(t)
+	writeTree(t, root, map[string]string{
+		"src/Left.phn":    "namespace App;\n\nfinal class Left {\n    fun gone(): int => 1;\n}\n",
+		"src/Refused.phn": "namespace App;\n\nfunction pair(string $a, string $b): string => $a . $b;\n\nfunction bound(): \\Closure => pair(strtoupper('x'), ?);\n",
+	})
+	for _, args := range [][]string{{"build"}, {"build", "--emit-on-error"}, {"build", "--check", "--emit-on-error"}} {
+		_, stderr, status := run(t, root, bin, args...)
+		if status == nil {
+			t.Errorf("phn %s should fail", strings.Join(args, " "))
+		}
+		if !strings.Contains(stderr, "\n2 of 3 files failed to compile\n") {
+			t.Errorf("phn %s:\n%s\nwant 2 of 3 files failed to compile", strings.Join(args, " "), stderr)
+		}
+		for _, said := range []string{"left the language", "needs PHP 8.6 (target 8.5)"} {
+			if n := strings.Count(stderr, said); n != 1 {
+				t.Errorf("phn %s says %q %d times:\n%s", strings.Join(args, " "), said, n, stderr)
+			}
+		}
+	}
+}

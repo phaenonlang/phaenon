@@ -35,6 +35,17 @@ func localArgs(name string, env *state) bool {
 
 // expr types an expression in env, with an optional expected type for
 // contextual typing. It updates env for assignments and other side effects.
+// partialResult is a call's type, a Closure where it is a partial
+// application whose callee the checker could not type: PHP creates a
+// closure of whatever it is, and nothing is reported of a mixed it would
+// otherwise be.
+func partialResult(args *ast.ArgList, t types.Type) types.Type {
+	if args.Partial() && types.IsMixed(t) {
+		return types.NewClass("Closure")
+	}
+	return t
+}
+
 func (x *fnCtx) expr(e ast.Expr, env *state, expected types.Type) types.Type {
 	t := x.exprType(e, env, expected)
 	if c, ok := t.(types.Callable); ok && expected != nil && e != nil {
@@ -96,11 +107,11 @@ func (x *fnCtx) exprType(e ast.Expr, env *state, expected types.Type) types.Type
 	case *ast.Index:
 		return x.index(e, env)
 	case *ast.Call:
-		return x.call(e, env, expected)
+		return partialResult(e.Args, x.call(e, env, expected))
 	case *ast.MethodCall:
-		return x.methodCall(e, env, expected)
+		return partialResult(e.Args, x.methodCall(e, env, expected))
 	case *ast.StaticCall:
-		return x.staticCall(e, env, expected)
+		return partialResult(e.Args, x.staticCall(e, env, expected))
 	case *ast.New:
 		return x.newExpr(e, env, expected)
 	case *ast.Clone:
@@ -1123,12 +1134,41 @@ func (x *fnCtx) enumCaseProperty(obj types.Type, name string) (types.Type, bool)
 		if cs == nil || cs.Value == nil {
 			return nil, false
 		}
-		out = append(out, x.c.valueWhereDeclared(cl.File, cl.Scope, cl, cs.Value, x))
+		out = append(out, x.c.caseValue(cl, cs, x))
 	}
 	if len(out) == 0 {
 		return nil, false
 	}
 	return types.MakeUnion(out...), true
+}
+
+// caseValue is the type of a backed enum case's value, typed where the
+// enum is declared (valueWhereDeclared) and kept: a case read twice, or by
+// several cases, is typed once, as a constant is (program.ConstantType).
+// A value met again while it is being typed reads itself, which its case
+// reports (P2016, selfReference) and PHP throws for when it evaluates the
+// value. There it is mixed, as a constant met again is and as PHPStan
+// types it, and the typing ends.
+func (c *Checker) caseValue(cl *program.Class, cs *program.EnumCase, reader *fnCtx) types.Type {
+	if t, ok := c.caseTypes[cs]; ok {
+		return t
+	}
+	if c.caseTyping[cs] {
+		return types.TMixed
+	}
+	if c.caseTyping == nil {
+		c.caseTyping = map[*program.EnumCase]bool{}
+	}
+	c.caseTyping[cs] = true
+	t := c.valueWhereDeclared(cl.File, cl.Scope, cl, cs.Value, reader)
+	delete(c.caseTyping, cs)
+	if cl.File != nil { // without a file the reader types the value, as its own
+		if c.caseTypes == nil {
+			c.caseTypes = map[*program.EnumCase]types.Type{}
+		}
+		c.caseTypes[cs] = t
+	}
+	return t
 }
 
 // valueWhereDeclared types an expression of a declaration in another

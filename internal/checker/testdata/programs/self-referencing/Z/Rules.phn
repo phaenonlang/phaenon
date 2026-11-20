@@ -1,0 +1,12 @@
+namespace Rules;
+
+use Cards\Suit;
+
+final class Limit {
+    const HIGH = Suit::Hearts->value . 'x'; // want P2016 "constant Cards\Suit::Hearts"
+
+    const TOP = \Middle\Table::ACE; // want P2016 "constant Middle\Table::ACE"
+
+    // LOW leads into the cycle of TOP and is no part of it.
+    const LOW = self::TOP;
+}

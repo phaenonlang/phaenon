@@ -637,6 +637,12 @@ type Partial struct {
 	// Void says the callee returns void: a closure body calls it without
 	// returning its result.
 	Void bool
+	// Direct marks an application called where it stands with arguments,
+	// `(f(B, ...))(X)`, that the lowering writes as the call it makes,
+	// `f(B, X)`, where its closure would pass on what it is given (a
+	// default not written): the checker refuses nothing of a closure for
+	// it.
+	Direct bool
 }
 
 // PartialParam is one parameter of the closure a partial application
@@ -655,6 +661,10 @@ type PartialParam struct {
 	Doc string
 	// DocArray says Doc is an array type, or holds one.
 	DocArray bool
+	// Sensitive marks the callee's #[\SensitiveParameter]: the closure's
+	// parameter carries it too, or a stack trace through the closure would
+	// show the argument PHP hides in the callee's frame.
+	Sensitive bool
 	// Typed marks a parameter PHPStan types by itself, and holds an inline
 	// @var to: the application is the callback of array_map or of another
 	// function PHPStan reads the callback's parameters for, and the

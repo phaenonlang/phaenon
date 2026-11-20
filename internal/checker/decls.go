@@ -415,9 +415,17 @@ func (c *Checker) checkClass(cl *program.Class) {
 		if k.Class != cl || k.Value == nil {
 			continue
 		}
+		cyclic := c.selfReference(valueDecl{k: k}, cl)
+		mark := c.mark()
 		ctx := c.newCtx(cl.File, cl.Scope, cl, true)
 		ctx.inConst = true
 		vt := ctx.expr(k.Value, newEnv(), k.Type)
+		if cyclic {
+			// The value reads itself, the mistake reported: what its type
+			// draws is drawn from a value PHP never makes.
+			c.rollback(mark)
+			continue
+		}
 		if k.Type != nil && !types.IsAcceptable(vt, k.Type, c.p) {
 			c.reportUnfit(given{expr: k.Value}, vt, k.Type, k.Span, P2211, nil, "constant %s::%s (%s) does not accept %s", cl.Name, k.Name, types.Print(k.Type), types.Print(vt))
 		}
@@ -607,7 +615,25 @@ func (c *Checker) checkEnum(cl *program.Class) {
 			c.report(cs.Span, P2507, "case %s of backed enum %s needs a value", cs.Name, cl.Name)
 			continue
 		}
+		cyclic := c.selfReference(valueDecl{cs: cs}, cl)
+		mark := c.mark()
+		typing := !c.caseTyping[cs]
+		if typing {
+			if c.caseTyping == nil {
+				c.caseTyping = map[*program.EnumCase]bool{}
+			}
+			c.caseTyping[cs] = true
+		}
 		vt := ctx.expr(cs.Value, newEnv(), cl.BackingType)
+		if typing {
+			delete(c.caseTyping, cs)
+		}
+		if cyclic {
+			// The value reads itself, the mistake reported: what its type
+			// draws is drawn from a value PHP never makes.
+			c.rollback(mark)
+			continue
+		}
 		if !types.IsSubtype(vt, cl.BackingType, c.p) {
 			c.report(cs.Value.Span(), P2507, "case %s::%s has value %s, expected %s", cl.Name, cs.Name, types.Print(vt), types.Print(cl.BackingType))
 		}

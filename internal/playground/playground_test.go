@@ -63,6 +63,17 @@ func TestErrorWithheld(t *testing.T) {
 	}
 }
 
+// A refusal the checker reports, here a partial application with no
+// exact lowering for PHP 8.5, is the one finding of its mistake, not the
+// emitter's "not compiled" beside it.
+func TestRefusalOnce(t *testing.T) {
+	src := "function pair(string $a, string $b): string => $a . $b;\n\nfunction bound(): Closure => pair(strtoupper('x'), ?);\n"
+	res := Compile(Request{Files: map[string]string{"main.phn": src}, Main: "main.phn", Target: "8.5", EmitOnError: true})
+	if res.OK || res.PHP != "" || strings.Join(codes(res.Findings), ",") != "P1002" {
+		t.Errorf("ok %v, php %q, findings %+v", res.OK, res.PHP, res.Findings)
+	}
+}
+
 // The playground has no project file, so the extra checks are on, as they
 // are for a project that says nothing (design/roadmap.md D33): `**` on a
 // string, which PHPStan passes, is reported.

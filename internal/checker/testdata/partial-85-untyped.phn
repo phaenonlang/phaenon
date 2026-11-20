@@ -1,0 +1,46 @@
+// A partial application is lowered for PHP 8.5 to a closure written from
+// the callee's parameters (design/php-versions.md §5.3). Where the
+// checker cannot type the callee, a value whose type gives no parameter
+// list, a class or a method named only when the call runs, a string or
+// an array that names a callee, there are none to write it from: refused
+// (P1002), as the build refuses it, with advice that, followed, compiles.
+// A pipe's stage through such a value is the call PHP makes of it.
+
+final class Base {
+    static sm(string $a, string $z = 'z'): string => $a . $z;
+
+    m(string $a, string $z = 'z'): string => $a . $z;
+}
+
+/**
+ * @param callable(string, string=): string $typed
+ * @param class-string<Base> $cs
+ */
+function forms(callable $c, Closure $cl, string $name, callable $typed, string $cs, Base $obj, string $method): void {
+    $l = [];
+    $l[] = $c('c', ...); // want P1002 "the callee's type gives no parameter list, which the closure written for PHP 8.5 is written from: give it one, as `Closure(string): string` in a docblock, or target PHP 8.6"
+    $l[] = $cl('cl', ...); // want P1002 "the callee's type gives no parameter list"
+    $l[] = $c('c', ?); // want P1002 "the callee's type gives no parameter list"
+    $l[] = $name::sm('named', ...); // want P1002 "the class is known only when the call runs, and with it the parameters the closure written for PHP 8.5 is written from: name the class, or give the value a type that names it, as `class-string<Base>`"
+    $l[] = $obj->$method('dyn', ...); // want P1002 "the method is named only when the call runs, and with it the parameters the closure written for PHP 8.5 is written from: name it, as `$obj->m(...)`"
+    $l[] = Base::$method('dyn', ...); // want P1002 "name it, as `Base::m(...)`"
+    $l[] = 'strtoupper'(?); // want P1002 "a string names the function, whose parameters are not known from it, which the closure written for PHP 8.5 is written from: call the function by its name, `strtoupper(?)`"
+    $l[] = 'Base::sm'('s', ...); // want P1002 "call the method by its name, `Base::sm('s', ...)`"
+    $l[] = [$obj, 'm']('a', ...); // want P1002 "an array names the method, whose parameters are not known from it, which the closure written for PHP 8.5 is written from: call the method itself, `$obj->m('a', ...)`"
+    $l[] = ['Base', 'sm']('a', ...); // want P1002 "call the method itself, `Base::sm('a', ...)`"
+    // Typed, the callee gives its parameters.
+    $cls = Base::class;
+    $l[] = $cls::sm('var', ...);
+    $l[] = $typed('t', ...);
+    $l[] = $cs::sm('cs', ...);
+    // A pipe's stage is the call it makes, and its closure, where it does
+    // not fold, passes the piped value on.
+    $s = 'x' |> $cl(?);
+    $t = 'x' |> $cl(?, 'b');
+    echo count($l), gettype($s), gettype($t);
+}
+
+// Whatever its callee, a partial application is a Closure.
+function returned(string $name): Closure {
+    return $name::sm('r', ...); // want P1002 "the class is known only when the call runs"
+}
