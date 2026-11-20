@@ -1,0 +1,217 @@
+namespace App\RefusedBeside;
+
+// Findings of codes PHP refuses in some places and runs in others. Each
+// stands under an ignore comment: one about code php runs is silenced and
+// expects nothing here, one about code PHP refuses stays with its want,
+// so a mark that comes or goes fails the golden. Each silenced finding
+// stands beside one that stays, in the same class where there is one,
+// whose refusal must not count for it (TestRefusedByPHP).
+
+// An override held to the type argument of its parent compiles against
+// the erased type: `Box::getAll(): mixed`, `Counted::get(): \Countable`.
+// A refusal of StrBox::get() is none of StrBox::getAll()'s.
+class Box<T>
+{
+    public function getAll(): T
+    {
+        throw new \LogicException();
+    }
+
+    public function get(): int
+    {
+        return 0;
+    }
+
+    public function name(): string
+    {
+        return 'box';
+    }
+}
+
+class StrBox extends Box<int>
+{
+    public function getAll(): string // @phpstan-ignore-line
+    {
+        return 'a';
+    }
+
+    protected function get(): int // @phpstan-ignore-line // want P2502 "StrBox::get() must be at least public"
+    {
+        return 1;
+    }
+
+    protected function name(): string // @phpstan-ignore-line // want P2502 "StrBox::name() must be at least public"
+    {
+        return 'str';
+    }
+}
+
+class Counted<T of \Countable>
+{
+    public function get(): T
+    {
+        throw new \LogicException();
+    }
+
+    final public function size(): int
+    {
+        return 0;
+    }
+}
+
+final class Iterated extends Counted<\ArrayObject<int, int>>
+{
+    public function get(): \ArrayIterator<int, int> // @phpstan-ignore-line
+    {
+        return new \ArrayIterator([]);
+    }
+
+    public function size(): int // @phpstan-ignore-line // want P2505
+    {
+        return 1;
+    }
+}
+
+// A private method is none an #[\Override] below it can mean: php refuses
+// Below::gone() whether Base::gone() compiles or not.
+class Base
+{
+    private function gone(): void // @phpstan-ignore-line
+    {
+        return 1; // @phpstan-ignore-line // want P2204
+    }
+}
+
+final class Below extends Base
+{
+    #[\Override]
+    public function gone(): void // @phpstan-ignore-line // want P2503
+    {
+    }
+}
+
+// A method PHP 8.6 adds is no method of PHP 8.5's to override.
+final class Sessions extends \SessionHandler
+{
+    public static function validateId(string $id): bool // @phpstan-ignore-line
+    {
+        return $id !== '';
+    }
+
+    protected function read(string $id): string|false // @phpstan-ignore-line // want P2502 "Sessions::read() must be at least public"
+    {
+        return '';
+    }
+}
+
+// A class whose ancestor the checker does not know is linked as php
+// finds it, which may provide what the checker misses.
+final class Remote extends \Ext\Client implements \Countable // @phpstan-ignore-line
+{
+    #[\Override]
+    public function serialize(): string // @phpstan-ignore-line
+    {
+        return '';
+    }
+}
+
+interface Sized
+{
+    public function size(): int;
+}
+
+final class Sealed
+{
+}
+
+// A docblock's @final is PHPStan's alone.
+/**
+ * @final
+ */
+class Soft
+{
+}
+
+final class Kid extends Soft // @phpstan-ignore-line
+{
+}
+
+final class Hard extends Sealed // @phpstan-ignore-line // want P2509 "Hard cannot extend final class"
+{
+}
+
+// A type alias in a generator's return type, and a set hook's parameter
+// written in Phaenon's types: both compile to what PHP accepts.
+type Gen = \Generator<int, int>;
+
+function generates(): Gen // @phpstan-ignore-line
+{
+    yield 1;
+}
+
+final class Hooked
+{
+    /**
+     * @var array<string, int>
+     */
+    public array $values = [] {
+        set(list<int> $value) { // @phpstan-ignore-line
+            $this->values = $value; // @phpstan-ignore-line
+        }
+    }
+
+    public int $count = 0 {
+        set(string $value) { // @phpstan-ignore-line // want P2512 "Hooked::$count"
+            $this->count = (int) $value;
+        }
+    }
+}
+
+// A readonly anonymous class is linked when its `new` runs.
+trait Counts
+{
+    public static int $made = 0; // @phpstan-ignore-line
+}
+
+function anonymous(): object
+{
+    return new readonly class {
+        use Counts;
+    };
+}
+
+final class Narrow implements Sized
+{
+    protected function size(): int // @phpstan-ignore-line // want P2502 "Narrow::size() must be at least public"
+    {
+        return 1;
+    }
+}
+
+// A class declared under a condition, or after a statement that may end
+// the file's run, is linked when the run reaches it, if it does.
+if (\PHP_VERSION_ID >= 90000) {
+    final class Future implements Sized // @phpstan-ignore-line
+    {
+    }
+
+    final class Later extends Sealed // @phpstan-ignore-line
+    {
+    }
+}
+
+if (\PHP_VERSION_ID > 0) {
+    return;
+}
+
+final class Skipped implements Sized
+{
+    protected function size(): int // @phpstan-ignore-line
+    {
+        return 2;
+    }
+}
+
+final class Sealed // @phpstan-ignore-line
+{
+}

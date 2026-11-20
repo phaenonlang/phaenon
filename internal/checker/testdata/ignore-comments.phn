@@ -124,3 +124,257 @@ function syntax(string $s): void {
     // @phaenon-ignore-next-line
     wantsInt((integer) $s . 'w'); // want P1001
 }
+
+// Code PHP refuses, when it compiles the file or when it declares and
+// links its classes, is no finding a comment accepts either: the compiled
+// file would not load. Such a finding is reported whatever comment stands
+// on its line. A comment that names its code there is told so, where it
+// silences no other finding of that code; one that silences every finding
+// of its line silences the others, and where there are none, it silences
+// nothing. A finding of the same code about code PHP runs is silenced as
+// before: a void a docblock alone declares, a docblock's return type, a
+// default a docblock's type refuses and PHP's does not.
+function returnsUnderVoid(): void
+{
+    return 1; // @phpstan-ignore return.void // want P2204
+}
+
+function returnsUnderVoidNamed(): void
+{
+    return 2; // @phaenon-ignore P2204 // want P2204, P4015 "P2204 on line 144 is about code PHP refuses to compile or load, and no comment silences it: remove the comment"
+}
+
+function returnsUnderVoidLine(): void
+{
+    return 3; // @phaenon-ignore-line // want P2204, P4015 "no finding a comment silences is reported on line 149"
+}
+
+function returnsUnderVoidNext(): void
+{
+    // @phaenon-ignore-next-line // want P4015 "no finding a comment silences is reported on line 155"
+    return 4; // want P2204
+}
+
+function returnsUnderVoidMixed(): void
+{
+    return wantsInt('a'); // @phaenon-ignore P2204, P2103 // want P2204, P4015 "take P2204 out of the comment"
+}
+
+function returnsUnderVoidUnnamed(): void
+{
+    return wantsInt('b'); // @phaenon-ignore // want P2204, P2103, P4015 "names no code, and silences nothing: name the codes it is for, here `@phaenon-ignore P2103`"
+}
+
+/**
+ * @return void
+ */
+function returnsUnderDocblockVoid()
+{
+    return 5; // @phaenon-ignore P2204
+}
+
+class Sized
+{
+    public function size(): int
+    {
+        return 0;
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function items(): array
+    {
+        return [];
+    }
+}
+
+final class Hidden extends Sized
+{
+    protected function size(): int // @phpstan-ignore method.visibility // want P2502
+    {
+        return 1;
+    }
+}
+
+final class HiddenNamed extends Sized
+{
+    protected function size(): int // @phaenon-ignore P2502 // want P2502, P4015 "is about code PHP refuses"
+    {
+        return 2;
+    }
+}
+
+// An anonymous class is linked when its `new` runs: what PHP refuses there
+// fails that code alone, and a comment silences it.
+function hiddenLater(): Sized
+{
+    return new class extends Sized {
+        protected function size(): int // @phpstan-ignore method.visibility
+        {
+            return 3;
+        }
+    };
+}
+
+final class Documented extends Sized
+{
+    /**
+     * @return list<string>
+     */
+    public function items(): array // @phaenon-ignore P2502
+    {
+        return [];
+    }
+}
+
+final class Defaults
+{
+    public int $count = 'x'; // @phpstan-ignore property.defaultValue // want P2201
+
+    /**
+     * @var positive-int
+     */
+    public int $positive = 0; // @phaenon-ignore P2201
+}
+
+#[\NoDiscard] // @phpstan-ignore attribute.target // want P2533
+final class Kept
+{
+}
+
+// The same of the other codes PHP refuses in some places and runs in
+// others: `parent` in a method of a class without one, and in a closure,
+// which PHP binds when it creates it; `self` in a function, and in a
+// closure there; a parameter's default PHP's type refuses, and one a
+// docblock's alone does; `$this` written anew, and passed by reference; a
+// yield in top-level code or in a hook whose type admits no Generator, and
+// in a hook whose type does, a method to PHP that the yield makes a
+// generator; a set hook's parameter, and what a get hook returns.
+function fills(mixed &$out): void
+{
+}
+
+final class Orphan
+{
+    public function up(): string
+    {
+        return parent::class; // @phpstan-ignore class.noParent // want P2011
+    }
+
+    public function later(): \Closure
+    {
+        return fn (): string => parent::class; // @phpstan-ignore class.noParent
+    }
+}
+
+function selfless(): string
+{
+    return self::class; // @phpstan-ignore outOfClass.self // want P2012
+}
+
+function selflessLater(): \Closure
+{
+    return fn (): string => self::class; // @phpstan-ignore outOfClass.self
+}
+
+function defaults(int $n = 'x'): int // @phpstan-ignore parameter.defaultValue // want P2208
+{
+    return $n;
+}
+
+/**
+ * @param positive-int $n
+ */
+function positive(int $n = 0): int // @phpstan-ignore parameter.defaultValue
+{
+    return $n;
+}
+
+final class Rebinds
+{
+    public function again(): void
+    {
+        $this = new self(); // @phpstan-ignore assign.this // want P2311
+    }
+
+    public function passes(): void
+    {
+        fills($this); // @phpstan-ignore assign.this
+    }
+}
+
+final class Yields
+{
+    public \Generator $values {
+        get { // want P2203
+            yield 1; // @phpstan-ignore generator.outside
+        }
+    }
+}
+
+final class YieldsAnInt
+{
+    public int $count {
+        get { // want P2203
+            yield 1; // @phpstan-ignore generator.outside // want P2315
+        }
+    }
+}
+
+final class Hooked
+{
+    public int $count = 0 {
+        set(string $value) { // @phpstan-ignore propertySetHook.parameterType // want P2512
+            $this->count = (int) $value;
+        }
+    }
+
+    public int $total {
+        get => 'x'; // @phpstan-ignore return.type
+    }
+}
+
+readonly class Frozen
+{
+    public static int $shared; // @phpstan-ignore property.readOnlyStatic // want P2513
+}
+
+class Twice
+{
+}
+
+class Twice // @phpstan-ignore class.duplicate // want P2511
+{
+}
+
+enum Suit
+{
+    case Hearts;
+    case Hearts; // @phaenon-ignore P2511 // want P2511, P4015 "is about code PHP refuses"
+}
+
+// An erased type parameter used as a value compiles to PHP that does
+// something else than it reads, and no comment silences it either. A
+// comment that names P3003 where none is reported is told only that.
+function made<T>(): mixed
+{
+    return new T(); // @phaenon-ignore P3003 // want P3003, P4015 "P3003 on line 362 is about code that compiles to PHP doing something else than it reads, and no comment silences it: remove the comment"
+}
+
+function noneMade(): void
+{
+    wantsInt(14); // @phaenon-ignore P3003 // want P4015 "no P3003 is reported on line 367"
+}
+
+// static in a constant expression is refused when PHP compiles the file,
+// in every place the checker reports it.
+class Late
+{
+    public const ONE = 1;
+    public const SAME = static::ONE; // @phaenon-ignore P2532 // want P2532, P4015 "is about code PHP refuses"
+}
+
+// Top-level code, after every declaration: a statement before a class
+// may end the file's run before PHP declares the class.
+$yielded = yield 1; // @phpstan-ignore generator.outside // want P2315

@@ -233,7 +233,7 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 	case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native), x.p()) && !refinesOutside(declared, vt, native, x.p()):
 		x.report(s.S, P2212, "@var %s is not a subtype of the assigned %s", x.typeName(declared), x.typeName(native))
 	}
-	x.assignTo(assign.Target, declared, env, s.S)
+	x.bind(nil, assign.Target, declared, env, s.S)
 	if isVar {
 		// The variable holds what PHP guarantees of the value, which for a
 		// declaration PHP gives no type is nothing.
@@ -1158,9 +1158,9 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 	after := x.fixpoint(env, func(head *state) (*state, *state) {
 		exit := head.clone()
 		if s.Key != nil {
-			x.assignTo(s.Key, k, head, s.Key.Span())
+			x.bind(nil, s.Key, k, head, s.Key.Span())
 		}
-		x.assignTo(s.Value, v, head, s.Value.Span())
+		x.bind(nil, s.Value, v, head, s.Value.Span())
 		if s.Key != nil {
 			// `$xs[$k]` is an offset the iteration found: a write to it
 			// replaces a value, so a list stays a list (PHPStan's
@@ -1861,12 +1861,15 @@ func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
 	if !x.hasReturn {
 		return
 	}
+	// PHP refuses the return when it compiles the file where the native
+	// type says void or never; a docblock's says nothing to it, and a
+	// generator's return type is held elsewhere.
 	switch x.returnType.(type) {
 	case types.Void:
-		x.report(s.S, P2204, "%s is void and cannot return a value", x.name)
+		x.reportRefused(writtenAs(x.returnExpr, "void") && !x.generator, s.S, P2204, "%s is void and cannot return a value", x.name)
 		return
 	case types.Never:
-		x.report(s.S, P2209, "%s is declared never and cannot return", x.name)
+		x.reportRefused(writtenAs(x.returnExpr, "never") && !x.generator, s.S, P2209, "%s is declared never and cannot return", x.name)
 		return
 	}
 	if expected == nil {
@@ -2032,9 +2035,18 @@ func (x *fnCtx) generatorKV() (k, v, send types.Type) {
 	return
 }
 
+// yieldRefused says whether PHP refuses a yield that is no generator's
+// when it compiles the file: one in top-level code or in a constant
+// expression is. A property hook's body is a method's to PHP, which a
+// yield makes a generator; it is refused where the hook's return type
+// does not admit one (hookRefusesYield).
+func (x *fnCtx) yieldRefused() bool {
+	return x.class == nil || x.inConst || x.hookRefusesYield
+}
+
 func (x *fnCtx) yield(e *ast.Yield, env *state) types.Type {
 	if !x.generator {
-		x.report(e.S, P2315, "yield outside a generator")
+		x.reportRefused(x.yieldRefused(), e.S, P2315, "yield outside a generator")
 	}
 	x.structorYield(e.S)
 	k, v, send := x.generatorKV()
@@ -2066,7 +2078,7 @@ func (x *fnCtx) yield(e *ast.Yield, env *state) types.Type {
 
 func (x *fnCtx) yieldFrom(e *ast.YieldFrom, env *state) types.Type {
 	if !x.generator {
-		x.report(e.S, P2315, "yield outside a generator")
+		x.reportRefused(x.yieldRefused(), e.S, P2315, "yield outside a generator")
 	}
 	x.structorYield(e.S)
 	t := x.expr(e.Expr, env, nil)
@@ -2164,7 +2176,14 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 			// A default for a parameter typed by a template is held to the
 			// template's bound: `B $behavior = 1` with `B of 1|2`.
 			if !types.IsAcceptable(dt, paramsToBounds(p.Type), x.p()) {
-				x.c.reportUnfit(given{expr: decls[i].Default}, dt, paramsToBounds(p.Type), decls[i].Default.Span(), P2208, nil, "default value %s does not match parameter $%s of type %s", x.typeName(dt), p.Name, x.typeName(p.Type))
+				// The native type the compiled file writes: the one written,
+				// or the one the override-erasure rule widened it to.
+				nt := p.NativeType
+				if w, ok := widened[i]; ok {
+					nt = w
+				}
+				refused := literalRefused(decls[i].Default, nt, true)
+				x.c.reportUnfitRefused(refused, given{expr: decls[i].Default}, dt, paramsToBounds(p.Type), decls[i].Default.Span(), P2208, nil, "default value %s does not match parameter $%s of type %s", x.typeName(dt), p.Name, x.typeName(p.Type))
 			}
 		}
 	}
@@ -2385,7 +2404,9 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 	if x.inConst {
 		c.constClosure = true
 		if len(e.Uses) > 0 {
-			x.report(e.Uses[0].S, P2531, "a closure in a constant expression cannot use variables of the enclosing scope")
+			// PHP refuses the use list when it compiles the file; $this in
+			// such a closure (variable) fails only when the closure runs.
+			x.reportRefused(true, e.Uses[0].S, P2531, "a closure in a constant expression cannot use variables of the enclosing scope")
 		}
 	}
 	c.closureTypeParams(e.TypeParams)
@@ -2592,9 +2613,9 @@ func (x *fnCtx) arrowFunc(e *ast.ArrowFunc, env *state, expected types.Type) typ
 		_, isNever := ret.(types.Never)
 		switch {
 		case isVoid:
-			x.report(e.Body.Span(), P2204, "arrow function is void and cannot return a value: an arrow function returns its expression")
+			x.reportRefused(true, e.Body.Span(), P2204, "arrow function is void and cannot return a value: an arrow function returns its expression")
 		case isNever && c.constClosure:
-			x.report(e.Body.Span(), P2209, "arrow function is declared never and cannot return: in a constant expression it compiles to a closure that returns its expression")
+			x.reportRefused(true, e.Body.Span(), P2209, "arrow function is declared never and cannot return: in a constant expression it compiles to a closure that returns its expression")
 		case !types.IsAcceptable(bt, ret, x.p()):
 			if why, rel, ok := c.rewrittenWhy(e.Body, bt, ret, cenv, true); ok {
 				x.c.reportRelated(e.Body.Span(), P2202, rel, "arrow function should return %s but returns %s: %s", x.typeName(ret), x.typeName(bt), why)
@@ -2667,14 +2688,41 @@ func yieldsItsValue(e ast.Expr) bool {
 // at the declared type: PHP admits a type that holds object or mixed, or
 // names Traversable, Iterator or Generator itself, iterable included, at
 // its top level or in an intersection that is all of it. It says whether
-// it reported.
+// it reported. PHP refuses the type the compiled file writes: the one
+// written (typeWritten), unless the override-erasure rule narrows it.
 func (x *fnCtx) generatorReturnType() bool {
 	if !x.generator || x.returnExpr == nil || x.generatorTypeAdmitted(x.returnExpr, true) {
 		return false
 	}
 	span := x.returnExpr.Span()
-	x.report(span, P2202, "Generator return type must be a supertype of Generator, %s given: %s yields, and returns a Generator", x.file.Src[span.Start:span.End], x.name)
+	written := x.typeWritten(x.returnExpr) && (x.method == nil || x.method.ErasureOverrides()[-1] == nil)
+	x.reportRefused(written, span, P2202, "Generator return type must be a supertype of Generator, %s given: %s yields, and returns a Generator", x.file.Src[span.Start:span.End], x.name)
 	return true
+}
+
+// typeWritten reports a native type the compiled file writes as the
+// source does, as far as generatorTypeAdmitted reads it: one that names no
+// type parameter, which is erased to its bound, and no type alias, which is
+// erased to the type it stands for.
+func (x *fnCtx) typeWritten(t ast.TypeExpr) bool {
+	if mentionsParam(x.res.Native(t)) {
+		return false
+	}
+	alias := false
+	ast.Inspect(t, func(n ast.Node) bool {
+		if nt, ok := n.(*ast.NamedType); ok && nt.Name != nil && x.res.TypeAlias(nt.Name) != nil {
+			alias = true
+		}
+		return !alias
+	})
+	return !alias
+}
+
+// writtenAs reports a native type written as the keyword alone, `void` or
+// `never`.
+func writtenAs(t ast.TypeExpr, keyword string) bool {
+	n, ok := t.(*ast.NamedType)
+	return ok && n.Name != nil && len(n.Name.Parts) == 1 && n.Name.Kind == ast.NameUnqualified && strings.EqualFold(n.Name.Parts[0], keyword)
 }
 
 // generatorTypeAdmitted is PHP's test of a generator's return type, top

@@ -11,6 +11,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/phpversion"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/types"
+	"github.com/phaenonlang/phaenon/stdlib"
 )
 
 // checkClassDecl checks a top-level class declaration.
@@ -24,11 +25,141 @@ func (c *Checker) checkClassDecl(f *program.File, scope *program.Scope, d *ast.C
 	if cl == nil || cl.Decl != d {
 		// A duplicate declaration: the first one won.
 		if cl != nil {
-			c.report(d.S, P2511, "class %s is already declared%s", cl.Name, declaredAt(f, cl.File, cl.Span))
+			c.reportRefused(cl.File == f && declaredOnLoad(f, cl.Decl) && declaredOnLoad(f, d), d.S, P2511, nil, "class %s is already declared%s", cl.Name, declaredAt(f, cl.File, cl.Span))
 		}
 		return
 	}
 	c.checkClass(cl)
+}
+
+// linkedOnLoad reports a class that PHP links, against its parent, its
+// interfaces and its traits, whenever it loads the file that declares it
+// (declaredOnLoad), and whose ancestry the checker knows as the target's
+// PHP has it: what PHP refuses when it links such a class, the checker
+// knows it refuses. A class declared under a condition, in a function's
+// body or after a statement that may end the file's run is linked when
+// the run reaches it, if it does, an anonymous class when its `new` runs,
+// and what PHP refuses there fails that code alone. An ancestor the
+// checker does not know, or one the target's library lacks, may be
+// another class at run time, which provides what the checker misses.
+func (c *Checker) linkedOnLoad(cl *program.Class) bool {
+	return cl.Decl != nil && declaredOnLoad(cl.File, cl.Decl) && c.ancestryKnown(cl)
+}
+
+// ancestryKnown reports a class whose parent classes, interfaces and
+// traits, and theirs in turn, are all classes the checker knows and the
+// target's PHP declares.
+func (c *Checker) ancestryKnown(cl *program.Class) bool {
+	seen := map[*program.Class]bool{}
+	var known func(cl *program.Class) bool
+	known = func(cl *program.Class) bool {
+		if seen[cl] {
+			return true
+		}
+		seen[cl] = true
+		names := append(append([]string{}, cl.Interfaces...), cl.Traits...)
+		if cl.Parent != "" {
+			names = append(names, cl.Parent)
+		}
+		for _, name := range names {
+			a := c.p.Class(name)
+			if a == nil || !c.classOnTarget(a) || !known(a) {
+				return false
+			}
+		}
+		return true
+	}
+	return known(cl)
+}
+
+// classOnTarget reports a class the target's PHP declares: any but one of
+// PHP's library that a newer release added.
+func (c *Checker) classOnTarget(cl *program.Class) bool {
+	if cl.File == nil || !cl.File.IsStub() {
+		return true
+	}
+	v, newer := stdlib.ClassSince(cl.Name)
+	return !newer || c.target().AtLeast(v)
+}
+
+// methodOnTarget reports a method the target's PHP declares: any but one
+// of PHP's library that a newer release added (SessionHandler::validateId()
+// came in 8.6), which on the target is no method to override.
+func (c *Checker) methodOnTarget(m *program.Method) bool {
+	if m.Class == nil || !c.classOnTarget(m.Class) {
+		return false
+	}
+	if m.Class.File == nil || !m.Class.File.IsStub() {
+		return true
+	}
+	v, newer := stdlib.MethodSince(m.Class.Name, m.Name)
+	return !newer || c.target().AtLeast(v)
+}
+
+// nativeFinal reports a class declared `final`, which PHP refuses to
+// extend; a docblock's @final asks the same of PHPStan alone.
+func nativeFinal(cl *program.Class) bool {
+	return cl.Decl != nil && cl.Decl.Modifiers&ast.ModFinal != 0
+}
+
+// declaredOnLoad reports a class declaration that PHP declares whenever it
+// loads the file: a statement of the file, or of a namespace in it, with
+// nothing before it but declarations. PHP declares a class that implements
+// an interface, uses a trait or extends a class it cannot bind when it
+// compiles the file only when the run reaches it, and any other statement
+// before it may end the run first: a `return`, an `exit`, a `throw`, a
+// call that does. A second such declaration of one name in a file is
+// refused when the file is loaded (P2511); one in another file, or under a
+// condition, may never be loaded with it, as a polyfill is not.
+func declaredOnLoad(f *program.File, decl ast.Stmt) bool {
+	found, clear := false, true
+	var walk func(stmts []ast.Stmt) bool
+	walk = func(stmts []ast.Stmt) bool {
+		for _, s := range stmts {
+			if s == decl {
+				found = true
+				return true
+			}
+			switch s := s.(type) {
+			case *ast.Namespace:
+				if walk(s.Body) {
+					return true
+				}
+			case *ast.Declare:
+				clear = clear && s.Body == nil
+			case *ast.Use, *ast.ConstDecl, *ast.FunctionDecl, *ast.ClassDecl, *ast.TypeAlias,
+				*ast.OpenTag, *ast.CloseTag, *ast.InlineHTML, *ast.Nop:
+			default:
+				clear = false
+			}
+		}
+		return false
+	}
+	if f.AST != nil {
+		walk(f.AST.Stmts)
+	}
+	return found && clear
+}
+
+// topLevel reports a declaration that is a statement of the file, or of a
+// namespace in it. PHP declares such a function when it compiles the
+// file, whatever runs before it, and refuses a second one of its name
+// there (P2511); one in another file, or under a condition, may never be
+// loaded with it, as a polyfill is not.
+func topLevel(f *program.File, decl ast.Stmt) bool {
+	var in func(stmts []ast.Stmt) bool
+	in = func(stmts []ast.Stmt) bool {
+		for _, s := range stmts {
+			if s == decl {
+				return true
+			}
+			if ns, ok := s.(*ast.Namespace); ok && in(ns.Body) {
+				return true
+			}
+		}
+		return false
+	}
+	return f.AST != nil && in(f.AST.Stmts)
 }
 
 // declaredAt says, for a second declaration in the file here, where the
@@ -72,7 +203,7 @@ func (c *Checker) checkFunctionDecl(f *program.File, scope *program.Scope, d *as
 			if fn.Decl != nil {
 				at = declaredAt(f, fn.File, fn.Decl.S)
 			}
-			c.report(d.S, P2511, "function %s() is already declared%s", fn.Name, at)
+			c.reportRefused(fn.File == f && fn.Decl != nil && topLevel(f, fn.Decl), d.S, P2511, nil, "function %s() is already declared%s", fn.Name, at)
 		}
 		return
 	}
@@ -396,7 +527,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 			if m.Class == cl {
 				continue // reported as P2504
 			}
-			c.report(d.S, P2501, "class %s must implement %s::%s()", cl.Name, m.Class.Name, m.Name)
+			c.reportRefused(c.linkedOnLoad(cl), d.S, P2501, nil, "class %s must implement %s::%s()", cl.Name, m.Class.Name, m.Name)
 		}
 	}
 	for _, m := range cl.Methods {
@@ -427,7 +558,9 @@ func (c *Checker) checkClass(cl *program.Class) {
 			continue
 		}
 		if k.Type != nil && !types.IsAcceptable(vt, k.Type, c.p) {
-			c.reportUnfit(given{expr: k.Value}, vt, k.Type, k.Span, P2211, nil, "constant %s::%s (%s) does not accept %s", cl.Name, k.Name, types.Print(k.Type), types.Print(vt))
+			// A @var tag's type is no native one.
+			refused := !k.Doc && literalRefused(k.Value, k.Type, false)
+			c.reportUnfitRefused(refused, given{expr: k.Value}, vt, k.Type, k.Span, P2211, nil, "constant %s::%s (%s) does not accept %s", cl.Name, k.Name, types.Print(k.Type), types.Print(vt))
 		}
 	}
 	if cl.Kind == ast.KindEnum {
@@ -438,15 +571,16 @@ func (c *Checker) checkClass(cl *program.Class) {
 	if cl.Kind == ast.KindInterface {
 		for _, m := range cl.Methods {
 			if m.Vis != program.Public {
-				c.report(m.Span, P2514, "interface method %s::%s() must be public", cl.Name, m.Name)
+				c.reportRefused(!m.Magic, m.Span, P2514, nil, "interface method %s::%s() must be public", cl.Name, m.Name)
 			}
 			if m.Decl != nil && m.Decl.HasBody {
-				c.report(m.Span, P2514, "interface method %s::%s() cannot have a body", cl.Name, m.Name)
+				c.reportRefused(true, m.Span, P2514, nil, "interface method %s::%s() cannot have a body", cl.Name, m.Name)
 			}
 		}
 		for _, pr := range cl.Props {
 			if len(pr.Hooks) == 0 {
-				c.report(pr.Span, P2514, "interface %s cannot declare property $%s", cl.Name, pr.Name)
+				// A @property tag is none of PHP's business.
+				c.reportRefused(!pr.Magic && pr.Class == cl, pr.Span, P2514, nil, "interface %s cannot declare property $%s", cl.Name, pr.Name)
 			}
 		}
 	}
@@ -455,11 +589,14 @@ func (c *Checker) checkClass(cl *program.Class) {
 			if pr.Class != cl {
 				continue
 			}
+			// The class's own property PHP refuses when it compiles the
+			// file; a trait's, when it links the class.
+			refused := !pr.Magic && (pr.FromTrait == nil || c.linkedOnLoad(cl))
 			if pr.Static {
-				c.report(pr.Span, P2513, "readonly class %s cannot declare static property $%s", cl.Name, pr.Name)
+				c.reportRefused(refused, pr.Span, P2513, nil, "readonly class %s cannot declare static property $%s", cl.Name, pr.Name)
 			}
 			if pr.NativeType == nil {
-				c.report(pr.Span, P2513, "readonly class %s: property $%s must have a type", cl.Name, pr.Name)
+				c.reportRefused(refused, pr.Span, P2513, nil, "readonly class %s: property $%s must have a type", cl.Name, pr.Name)
 			}
 		}
 	}
@@ -507,17 +644,19 @@ func (c *Checker) checkHeader(cl *program.Class) {
 		c.libraryClass(n.Name.S, super)
 		if cl.Kind == ast.KindInterface {
 			if super.Kind != ast.KindInterface {
-				c.report(n.S, P2510, "interface %s cannot extend %s, which is not an interface", cl.Name, super.Name)
+				c.reportRefused(c.linkedOnLoad(cl), n.S, P2510, nil, "interface %s cannot extend %s, which is not an interface", cl.Name, super.Name)
 			}
 		} else {
 			if i == 0 && super.Kind != ast.KindClass {
-				c.report(n.S, P2510, "class %s cannot extend %s, which is not a class", cl.Name, super.Name)
+				c.reportRefused(c.linkedOnLoad(cl), n.S, P2510, nil, "class %s cannot extend %s, which is not a class", cl.Name, super.Name)
 			}
 			if super.Final {
-				c.report(n.S, P2509, "class %s cannot extend final class %s", cl.Name, super.Name)
+				c.reportRefused(nativeFinal(super) && c.linkedOnLoad(cl), n.S, P2509, nil, "class %s cannot extend final class %s", cl.Name, super.Name)
 			}
 			if super.IsSubclassOf(cl.Name) && !strings.EqualFold(super.Name, cl.Name) {
-				c.report(n.S, P2508, "circular inheritance between %s and %s", cl.Name, super.Name)
+				// No order of declaring the two links either: the one
+				// declared first finds the other missing.
+				c.reportRefused(c.linkedOnLoad(cl), n.S, P2508, nil, "circular inheritance between %s and %s", cl.Name, super.Name)
 			}
 		}
 	}
@@ -530,7 +669,7 @@ func (c *Checker) checkHeader(cl *program.Class) {
 		}
 		c.libraryClass(n.Name.S, iface)
 		if iface.Kind != ast.KindInterface {
-			c.report(n.S, P2510, "%s cannot implement %s, which is not an interface", cl.Name, iface.Name)
+			c.reportRefused(c.linkedOnLoad(cl), n.S, P2510, nil, "%s cannot implement %s, which is not an interface", cl.Name, iface.Name)
 		}
 	}
 	for _, m := range d.Members {
@@ -546,7 +685,7 @@ func (c *Checker) checkHeader(cl *program.Class) {
 				continue
 			}
 			if t.Kind != ast.KindTrait {
-				c.report(n.S, P2510, "%s is not a trait", t.Name)
+				c.reportRefused(c.linkedOnLoad(cl), n.S, P2510, nil, "%s is not a trait", t.Name)
 			}
 		}
 	}
@@ -565,7 +704,11 @@ func (c *Checker) checkHeader(cl *program.Class) {
 			k := strings.ToLower(m.Name)
 			if other, dup := seenMethods[k]; dup && !c.resolvedByInsteadof(cl, k) {
 				if own := cl.FindMethod(m.Name); own == nil || own.FromTrait != nil {
-					c.report(traitUseSpan(cl), P2506, "trait method %s() is defined in both %s and %s", m.Name, other.Name, t.Name)
+					// The same method brought by both, from a trait they use,
+					// is no collision to PHP.
+					theirs := other.FindMethod(m.Name)
+					same := theirs != nil && theirs.Decl == m.Decl
+					c.reportRefused(!same && c.linkedOnLoad(cl), traitUseSpan(cl), P2506, nil, "trait method %s() is defined in both %s and %s", m.Name, other.Name, t.Name)
 				}
 			}
 			seenMethods[k] = t
@@ -602,17 +745,17 @@ func (c *Checker) checkEnum(cl *program.Class) {
 	ctx := c.newCtx(cl.File, cl.Scope, cl, true)
 	for _, cs := range cl.Cases {
 		if seen[cs.Name] {
-			c.report(cs.Span, P2511, "duplicate enum case %s::%s", cl.Name, cs.Name)
+			c.reportRefused(true, cs.Span, P2511, nil, "duplicate enum case %s::%s", cl.Name, cs.Name)
 		}
 		seen[cs.Name] = true
 		if cl.BackingType == nil {
 			if cs.Value != nil {
-				c.report(cs.Span, P2507, "case %s of non-backed enum %s cannot have a value", cs.Name, cl.Name)
+				c.reportRefused(true, cs.Span, P2507, nil, "case %s of non-backed enum %s cannot have a value", cs.Name, cl.Name)
 			}
 			continue
 		}
 		if cs.Value == nil {
-			c.report(cs.Span, P2507, "case %s of backed enum %s needs a value", cs.Name, cl.Name)
+			c.reportRefused(true, cs.Span, P2507, nil, "case %s of backed enum %s needs a value", cs.Name, cl.Name)
 			continue
 		}
 		cyclic := c.selfReference(valueDecl{cs: cs}, cl)
@@ -640,7 +783,9 @@ func (c *Checker) checkEnum(cl *program.Class) {
 	}
 	for _, pr := range cl.Props {
 		if pr.Class == cl && !pr.Magic {
-			c.report(pr.Span, P2514, "enum %s cannot declare property $%s", cl.Name, pr.Name)
+			// Its own property PHP refuses when it compiles the file; a
+			// trait's, when it declares the enum.
+			c.reportRefused(pr.FromTrait == nil || c.linkedOnLoad(cl), pr.Span, P2514, nil, "enum %s cannot declare property $%s", cl.Name, pr.Name)
 		}
 	}
 	for _, m := range cl.Methods {
@@ -654,7 +799,8 @@ func (c *Checker) checkEnum(cl *program.Class) {
 		lower := strings.ToLower(m.Name)
 		switch {
 		case enumForbiddenMagic[lower]:
-			c.report(span, P2514, "enum %s cannot include magic method %s()", cl.Name, m.Name)
+			// PHP refuses it when it declares the enum.
+			c.reportRefused(c.linkedOnLoad(cl), span, P2514, nil, "enum %s cannot include magic method %s()", cl.Name, m.Name)
 		case lower == "__debuginfo":
 			// PHP 8.6 lets an enum describe itself to var_dump()
 			// (RFC debugable-enums); 8.5 refuses the method at compile time.
@@ -663,7 +809,7 @@ func (c *Checker) checkEnum(cl *program.Class) {
 	}
 	if cl.BackingType != nil {
 		if !types.IsSubtype(cl.BackingType, types.MakeUnion(types.TInt, types.TString), nil) || types.IsMixed(cl.BackingType) {
-			c.report(cl.Decl.BackingType.Span(), P2507, "enum %s must be backed by int or string", cl.Name)
+			c.reportRefused(true, cl.Decl.BackingType.Span(), P2507, nil, "enum %s must be backed by int or string", cl.Name)
 		}
 	}
 }
@@ -712,7 +858,8 @@ func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 	if pr.HasDefault && pr.Default != nil {
 		dt := ctx.expr(pr.Default, newEnv(), pr.Type)
 		if !types.IsAcceptable(dt, pr.Type, c.p) {
-			c.reportUnfit(given{expr: pr.Default}, dt, pr.Type, pr.Default.Span(), P2201, nil, "property %s::$%s (%s) does not accept default %s", cl.Name, pr.Name, types.Print(pr.Type), types.Print(dt))
+			refused := literalRefused(pr.Default, pr.NativeType, false)
+			c.reportUnfitRefused(refused, given{expr: pr.Default}, dt, pr.Type, pr.Default.Span(), P2201, nil, "property %s::$%s (%s) does not accept default %s", cl.Name, pr.Name, types.Print(pr.Type), types.Print(dt))
 		}
 	}
 	for _, h := range pr.Hooks {
@@ -721,6 +868,8 @@ func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 		env := newEnv()
 		switch strings.ToLower(h.Name.Name) {
 		case "get":
+			te := propertyTypeExpr(cl, pr.Name)
+			hctx.hookRefusesYield = te != nil && !hctx.generatorTypeAdmitted(te, true) && hctx.typeWritten(te)
 			hctx.returnType = pr.Type
 			hctx.hasReturn = true
 			if h.Expr != nil {
@@ -735,6 +884,7 @@ func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 				}
 			}
 		case "set":
+			hctx.hookRefusesYield = true // a set hook returns void
 			hctx.returnType = types.TVoid
 			hctx.hasReturn = true
 			vt := pr.Type
@@ -742,7 +892,11 @@ func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 				if pt := hctx.res.Native(h.Params[0].Type); pt != nil {
 					vt = pt
 					if !types.IsSubtype(pr.Type, pt, c.p) {
-						c.report(h.Params[0].S, P2512, "set hook parameter of %s::$%s must accept %s", cl.Name, pr.Name, types.Print(pr.Type))
+						// PHP compares the native types the compiled file
+						// writes, Phaenon's and the docblock's erased.
+						refused := pr.NativeType != nil && !mentionsParam(pr.NativeType) && !mentionsParam(pt) &&
+							!types.IsSubtype(phpType(pr.NativeType), phpType(pt), c.p)
+						c.reportRefused(refused, h.Params[0].S, P2512, nil, "set hook parameter of %s::$%s must accept %s", cl.Name, pr.Name, types.Print(pr.Type))
 					}
 				}
 				env.set(h.Params[0].Var.Name, vt)
@@ -763,10 +917,10 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	phaenon := cl.File.Mode == lexer.ModePhaenon
 	concrete := cl.Kind == ast.KindClass && !cl.Abstract
 	if m.Abstract && concrete {
-		c.report(declSpan(m), P2504, "abstract method %s::%s() in a non-abstract class", cl.Name, m.Name)
+		c.reportRefused(true, declSpan(m), P2504, nil, "abstract method %s::%s() in a non-abstract class", cl.Name, m.Name)
 	}
 	if m.Abstract && d.HasBody && cl.Kind != ast.KindInterface {
-		c.report(m.Span, P2504, "abstract method %s::%s() cannot have a body", cl.Name, m.Name)
+		c.reportRefused(true, m.Span, P2504, nil, "abstract method %s::%s() cannot have a body", cl.Name, m.Name)
 	}
 	c.checkOverride(cl, m)
 	c.debugInfoReturn(m.Name, d.ReturnType)
@@ -774,7 +928,7 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	if phaenon {
 		for _, p := range d.Params {
 			if p.Modifiers != 0 && cl.Kind == ast.KindInterface {
-				c.report(p.S, P2514, "interface %s cannot promote constructor properties", cl.Name)
+				c.reportRefused(true, p.S, P2514, nil, "interface %s cannot promote constructor properties", cl.Name)
 			}
 		}
 	}
@@ -846,7 +1000,9 @@ func (c *Checker) checkConstOverrides(cl *program.Class) {
 		}
 		parent := c.parentConstant(cl, name)
 		if parent == nil {
-			c.report(span, P2503, "%s %s::%s has #[\\Override] but no parent class or interface declares it", what, cl.Name, name)
+			// Compiled for 8.5, the attribute is left out; 8.6 refuses it
+			// when it links the class.
+			c.reportRefused(c.target().AtLeast(phpversion.PHP86) && c.linkedOnLoad(cl), span, P2503, nil, "%s %s::%s has #[\\Override] but no parent class or interface declares it", what, cl.Name, name)
 			return
 		}
 		c.libraryClassConstant(span, parent.Class, name)
@@ -892,7 +1048,7 @@ func (c *Checker) checkPropertyOverrides(cl *program.Class) {
 		parent := c.parentProperty(cl, pr.Name)
 		if parent == nil {
 			if hasOverride(pr.Attrs) {
-				c.report(span, P2503, "property %s::$%s has #[\\Override] but no parent class or interface declares it", cl.Name, pr.Name)
+				c.reportRefused(c.linkedOnLoad(cl), span, P2503, nil, "property %s::$%s has #[\\Override] but no parent class or interface declares it", cl.Name, pr.Name)
 			}
 			continue
 		}
@@ -927,13 +1083,13 @@ func (c *Checker) checkPropertyRedeclaration(cl *program.Class, pr, parent *prog
 	}
 	switch {
 	case pr.Static != parent.Static:
-		c.reportRelated(span, P2502, rel, "cannot redeclare %s %s::$%s as %s %s::$%s", staticWord(parent.Static), parent.Class.Name, parent.Name, staticWord(pr.Static), cl.Name, pr.Name)
+		c.reportRefused(c.linkedOnLoad(cl), span, P2502, rel, "cannot redeclare %s %s::$%s as %s %s::$%s", staticWord(parent.Static), parent.Class.Name, parent.Name, staticWord(pr.Static), cl.Name, pr.Name)
 	case pr.Readonly != parent.Readonly:
-		c.reportRelated(span, P2502, rel, "cannot redeclare %s property %s::$%s as %s %s::$%s", readonlyWord(parent.Readonly), parent.Class.Name, parent.Name, readonlyWord(pr.Readonly), cl.Name, pr.Name)
+		c.reportRefused(c.linkedOnLoad(cl), span, P2502, rel, "cannot redeclare %s property %s::$%s as %s %s::$%s", readonlyWord(parent.Readonly), parent.Class.Name, parent.Name, readonlyWord(pr.Readonly), cl.Name, pr.Name)
 	case pr.Vis > parent.Vis:
-		c.reportRelated(span, P2502, rel, "access level to %s::$%s must be %s (as in class %s) or weaker", cl.Name, pr.Name, parent.Vis, parent.Class.Name)
+		c.reportRefused(c.linkedOnLoad(cl), span, P2502, rel, "access level to %s::$%s must be %s (as in class %s) or weaker", cl.Name, pr.Name, parent.Vis, parent.Class.Name)
 	case parent.NativeType == nil && pr.NativeType != nil:
-		c.reportRelated(span, P2502, rel, "type of %s::$%s must be omitted to match the parent definition in class %s", cl.Name, pr.Name, parent.Class.Name)
+		c.reportRefused(c.linkedOnLoad(cl), span, P2502, rel, "type of %s::$%s must be omitted to match the parent definition in class %s", cl.Name, pr.Name, parent.Class.Name)
 	case mentionsParam(parent.Type):
 		// Redeclaring a generic property is P3007's finding.
 	case parent.NativeType != nil:
@@ -941,7 +1097,7 @@ func (c *Checker) checkPropertyRedeclaration(cl *program.Class, pr, parent *prog
 		// erased.
 		want := types.Erase(parent.NativeType)
 		if pr.NativeType == nil || !types.Equal(want, types.Erase(pr.NativeType)) {
-			c.reportRelated(span, P2502, rel, "type of %s::$%s must be %s (as in class %s)", cl.Name, pr.Name, types.Print(want), parent.Class.Name)
+			c.reportRefused(c.linkedOnLoad(cl), span, P2502, rel, "type of %s::$%s must be %s (as in class %s)", cl.Name, pr.Name, types.Print(want), parent.Class.Name)
 		}
 	}
 }
@@ -1037,7 +1193,8 @@ func (c *Checker) checkOverride(cl *program.Class, m *program.Method) {
 	parents := overriddenMethods(cl, m)
 	if len(parents) == 0 {
 		if hasOverrideAttr {
-			c.report(declSpan(m), P2503, "%s::%s() has #[\\Override] but overrides nothing", cl.Name, m.Name)
+			// A trait's method is judged in the classes that use it, if any.
+			c.reportRefused(cl.Kind != ast.KindTrait && c.linkedOnLoad(cl), declSpan(m), P2503, nil, "%s::%s() has #[\\Override] but overrides nothing", cl.Name, m.Name)
 		}
 		return
 	}
@@ -1128,9 +1285,14 @@ func constructorSignature(parent *program.Method) *program.Method {
 // declaration of the list, and afterExtra one that comes after a
 // declaration that drew an extra check: another is not reported there.
 func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, first, afterExtra bool) (broken, extra bool) {
-	mismatch := func(span ast.Span, format string, args ...any) {
+	// refused is what PHP refuses when it links the class on load: an
+	// override of a method it declares (an interface's @method tag is
+	// none), whose signatures, as the compiled file writes them, do not
+	// fit.
+	refused := !parent.Magic && c.methodOnTarget(parent) && c.linkedOnLoad(cl)
+	mismatch := func(refused bool, span ast.Span, format string, args ...any) {
 		broken = true
-		c.reportRelated(span, P2502, overridden(parent), format, args...)
+		c.reportRefused(refused, span, P2502, overridden(parent), format, args...)
 	}
 	// typeMismatch is mismatch for two types that do not fit as the method
 	// states them. For a static method it is an extra check where the
@@ -1151,9 +1313,12 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 	// that returns a generator and a compiled method that refuses it. It
 	// is a rule about the source, which the compiled output no longer
 	// shows.
-	typeMismatch := func(nativesFit bool, span ast.Span, format string, args ...any) {
+	//
+	// PHP refuses the class where the native type the compiled file writes
+	// at the slot does not fit (compiledApart).
+	typeMismatch := func(nativesFit, compiledApart bool, span ast.Span, format string, args ...any) {
 		if !m.Static || !parent.Static || !nativesFit {
-			mismatch(span, format, args...)
+			mismatch(refused && compiledApart, span, format, args...)
 			return
 		}
 		if !afterExtra {
@@ -1162,10 +1327,10 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 		extra = true
 	}
 	if parent.Final {
-		c.report(declSpan(m), P2505, "%s::%s() overrides final method %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
+		c.reportRefused(refused, declSpan(m), P2505, nil, "%s::%s() overrides final method %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
 	}
 	if parent.Static != m.Static {
-		mismatch(m.Span, "%s::%s() and %s::%s() disagree on static", cl.Name, m.Name, parent.Class.Name, parent.Name)
+		mismatch(refused, m.Span, "%s::%s() and %s::%s() disagree on static", cl.Name, m.Name, parent.Class.Name, parent.Name)
 	}
 	ctor := strings.EqualFold(m.Name, "__construct")
 	switch {
@@ -1176,10 +1341,10 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 		// declaration fixes it.
 		if by, at := c.constructorBound(cl); by != nil && m.Vis > by.Vis {
 			broken = true
-			c.reportRelated(m.Span, P2502, overridden(by), "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, by.Vis, at.Name, by.Name)
+			c.reportRefused(!by.Magic && c.methodOnTarget(by) && c.linkedOnLoad(cl), m.Span, P2502, overridden(by), "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, by.Vis, at.Name, by.Name)
 		}
 	case !ctor && m.Vis > parent.Vis:
-		mismatch(m.Span, "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, parent.Vis, parent.Class.Name, parent.Name)
+		mismatch(refused, m.Span, "%s::%s() must be at least %s like %s::%s()", cl.Name, m.Name, parent.Vis, parent.Class.Name, parent.Name)
 	}
 	if ctor {
 		if parent = constructorSignature(parent); parent == nil {
@@ -1227,49 +1392,104 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 		}
 		return t
 	}
+	// compiled is the native type the compiled file writes at a slot of a
+	// method, a parameter's index or -1 for the return, as PHP holds it:
+	// the one written, erased of what PHP does not read (phpType: a type
+	// parameter is its bound, whatever argument a subclass passes it), or
+	// the one the override-erasure rule rewrote it to; a parameter with a
+	// default of null takes null too.
+	compiled := func(of *program.Method, slot int) types.Type {
+		var t types.Type
+		if slot < 0 {
+			t = of.NativeReturn
+		} else {
+			t = of.Params[slot].NativeType
+		}
+		if w, ok := of.ErasureOverrides()[slot]; ok {
+			t = w
+		} else if t != nil {
+			t = phpType(t)
+		}
+		if slot >= 0 && t != nil {
+			if p := of.Params[slot]; p.Default != nil && isNullConst(p.Default) && !types.IsNullable(t) && !types.IsMixed(t) {
+				t = types.Nullable(t)
+			}
+		}
+		return t
+	}
+	// compiledApart says whether the type the compiled file writes at a
+	// slot of m fails a declaration m overrides, as the compiled file
+	// writes that one: m's own type, or the one the override-erasure rule
+	// rewrote it to, which fits one declaration and may then fail another.
+	// PHP refuses the class for it when it links it. A declaration of PHP's
+	// library is passed over, whose return type may be tentative, a
+	// deprecation alone, and so is a @method tag.
+	compiledApart := func(slot int) bool {
+		own := compiled(m, slot)
+		decls := overriddenMethods(cl, m)
+		if ctor {
+			decls = []*program.Method{parent}
+		}
+		for _, d := range decls {
+			switch {
+			case d.Magic || ofPHP(d.Class) || !c.methodOnTarget(d):
+			case slot < 0 && !nativesFit(own, compiled(d, -1), true):
+				return true
+			case slot >= 0 && slot < len(d.Params) && !nativesFit(compiled(d, slot), own, false):
+				return true
+			}
+		}
+		return false
+	}
 	for i, pp := range parent.Params {
 		if i >= len(m.Params) {
 			if n := len(m.Params); n > 0 && m.Params[n-1].Variadic {
 				break
 			}
-			mismatch(m.Span, "%s::%s() has fewer parameters than %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
+			mismatch(refused, m.Span, "%s::%s() has fewer parameters than %s::%s()", cl.Name, m.Name, parent.Class.Name, parent.Name)
 			break
 		}
 		cp := m.Params[i]
 		if pp.HasDefault && !cp.HasDefault && !cp.Variadic {
-			mismatch(cp.Span, "parameter $%s of %s::%s() must be optional like in %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
+			mismatch(refused, cp.Span, "parameter $%s of %s::%s() must be optional like in %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
 		}
 		pt, ct := bind(pp.Type, parent.Class), bind(cp.Type, cl)
 		if pt != nil && ct != nil && !c.overrideFits(pt, ct) {
-			typeMismatch(nativesFit(written(parent, parent.Class, i), written(m, cl, i), false),
+			typeMismatch(nativesFit(written(parent, parent.Class, i), written(m, cl, i), false), compiledApart(i),
 				cp.Span, "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
 				cp.Name, cl.Name, m.Name, types.Print(ct), parent.Class.Name, parent.Name, types.Print(pt))
 		}
 		if pp.ByRef != cp.ByRef {
-			mismatch(cp.Span, "parameter $%s of %s::%s() disagrees on by-reference with %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
+			mismatch(refused, cp.Span, "parameter $%s of %s::%s() disagrees on by-reference with %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
 		}
 	}
 	for i := len(parent.Params); i < len(m.Params); i++ {
 		if !m.Params[i].HasDefault && !m.Params[i].Variadic {
 			broken = true
-			c.report(m.Params[i].Span, P2502, "extra parameter $%s of %s::%s() must be optional", m.Params[i].Name, cl.Name, m.Name)
+			c.reportRefused(refused, m.Params[i].Span, P2502, nil, "extra parameter $%s of %s::%s() must be optional", m.Params[i].Name, cl.Name, m.Name)
 		}
 	}
 	if parent.Return != nil {
 		pr, cr := bind(parent.Return, parent.Class), bind(m.Return, cl)
 		if cr == nil {
 			if _, isVoid := pr.(types.Void); !isVoid && !types.IsMixed(pr) {
-				mismatch(m.Span, "%s::%s() must declare a return type compatible with %s::%s() (%s)", cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
+				// PHP sees the parent's native return type alone.
+				mismatch(refused && parent.NativeReturn != nil && !ofPHP(parent.Class), m.Span, "%s::%s() must declare a return type compatible with %s::%s() (%s)", cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
 			}
 		} else if !c.overrideFits(cr, pr) {
 			if _, parentVoid := pr.(types.Void); !(parentVoid && isVoidLike(cr)) {
-				typeMismatch(nativesFit(written(m, cl, -1), written(parent, parent.Class, -1), true),
+				typeMismatch(nativesFit(written(m, cl, -1), written(parent, parent.Class, -1), true), compiledApart(-1),
 					m.Span, "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
 					types.Print(cr), cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
 			}
 		}
 	}
 	return broken, extra
+}
+
+// ofPHP reports a class of PHP's library, the stubs' or an extension's.
+func ofPHP(cl *program.Class) bool {
+	return cl.File != nil && (cl.File.IsStub() || strings.HasPrefix(cl.File.Path, "<ext>/"))
 }
 
 // phpType is a native type as PHP compares it in an override: erased of

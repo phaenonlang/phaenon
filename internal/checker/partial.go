@@ -1644,7 +1644,7 @@ func (c *Checker) argListSyntax(a *ast.ArgList) {
 		case arg.Name != nil:
 			named = true
 		case named:
-			c.report(arg.S, P2110, "positional argument after a named argument")
+			c.reportRefused(true, arg.S, P2110, nil, "positional argument after a named argument")
 		}
 		if variadicAt >= 0 {
 			c.report(a.Args[variadicAt].S, P1003, "the variadic placeholder must be the last argument")

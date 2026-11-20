@@ -43,7 +43,7 @@ func TestExtraCheckBesideItsTwin(t *testing.T) {
 			c.rollback(mark)
 			c.reportExtra(at, P2103, "x")
 		}, []Kind{Extra}},
-		{"a language rule's code at an extra check's place", true, func(c *Checker, at phnast.Span) { c.reportOf(Extra, at, P1001, nil, "x") }, []Kind{LanguageRule}},
+		{"a language rule's code at an extra check's place", true, func(c *Checker, at phnast.Span) { c.reportOf(Extra, false, at, P1001, nil, "x") }, []Kind{LanguageRule}},
 		// The kind is a field of the key: no message spells it.
 		{"words that end as a key once did", false, func(c *Checker, at phnast.Span) {
 			c.reportExtra(at, P2301, "on string")
@@ -173,13 +173,13 @@ var extraCheckSites = map[string]struct{ proof, phpstan string }{
 		"value: the body's expression",
 		"return.type of the arrow function where it declares a return type; else argument.type or return.type of the place the closure is given, " +
 			"which holds the closure's return type as it holds a value"},
-	"stmt.go body reportUnfit P2208": {
+	"stmt.go body reportUnfitRefused P2208": {
 		"value: the default, which a constant expression makes a literal",
 		"parameter.defaultValue"},
-	"decls.go checkClass reportUnfit P2211": {
+	"decls.go checkClass reportUnfitRefused P2211": {
 		"value: the constant's expression, where it is a literal",
 		"classConstant.value"},
-	"decls.go checkProperty reportUnfit P2201": {
+	"decls.go checkProperty reportUnfitRefused P2201": {
 		"value: the default, where it is a literal",
 		"property.defaultValue"},
 	"expr.go assignFrom reportUnfit P2201": {
@@ -193,10 +193,10 @@ var extraCheckSites = map[string]struct{ proof, phpstan string }{
 // Every place that may report an extra check is listed with its proof, and
 // names a code whose kind its place decides: under a language rule's code
 // it would report a language rule, whatever it says. The calls are those of
-// reportExtra, reportExtraRelated and reportUnfit, and of reportOf with the
-// kind written out.
+// reportExtra, reportExtraRelated, reportUnfit and reportUnfitRefused, and
+// of reportOf with the kind written out.
 func TestExtraCheckSites(t *testing.T) {
-	codeArgument := map[string]int{"reportExtra": 1, "reportExtraRelated": 1, "reportUnfit": 4, "reportOf": 2}
+	codeArgument := map[string]int{"reportExtra": 1, "reportExtraRelated": 1, "reportUnfit": 4, "reportUnfitRefused": 5, "reportOf": 3}
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
