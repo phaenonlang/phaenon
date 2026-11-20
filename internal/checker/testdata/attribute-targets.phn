@@ -1,0 +1,121 @@
+namespace App\AttributeTargets;
+
+// PHP checks the targets of the attribute classes it declares, and that
+// one that is not repeatable stands once on a declaration, when it
+// compiles the file: `Attribute "Deprecated" cannot target parameter`,
+// `Attribute "Override" must not be repeated`. The flags are read from
+// the stubs' #[Attribute(...)]. A promoted parameter is a parameter and a
+// property, a closure a function, a property hook a method, an enum case a
+// class constant. A user's attribute class is checked only when
+// ReflectionAttribute::newInstance() runs, and #[\DelayedTargetValidation]
+// puts the check of the targets off to that call
+// (attribute-targets-runtime.phn). Plain PHP, so that PHPStan reads this
+// file as written.
+
+use Override as Overrides;
+use SensitiveParameter;
+
+#[\Deprecated]
+const OLD = 1;
+
+#[\SensitiveParameter] // want P2533 "#[\SensitiveParameter] cannot target a constant (allowed targets: parameter)"
+const SECRET = 'x';
+
+#[\AllowDynamicProperties]
+class Open
+{
+    public function read(string $name): mixed
+    {
+        return $this->{$name} ?? null;
+    }
+}
+
+#[\NoDiscard] // want P2533 "cannot target a class (allowed targets: function, method)"
+class Kept
+{
+}
+
+#[\Attribute] // want P2533 "cannot target a function"
+function marker(): void
+{
+}
+
+#[\NoDiscard]
+#[\Deprecated]
+function counted(): int
+{
+    return 1;
+}
+
+#[\Deprecated, \Deprecated] // want P2533 "#[\Deprecated] must not be repeated"
+function twice(): void
+{
+}
+
+// A repetition on a target the attribute cannot have is the target's
+// finding alone, as PHP reports it.
+#[\ReturnTypeWillChange, \ReturnTypeWillChange] // want P2533 "cannot target a function"
+function both(): void
+{
+}
+
+class Base
+{
+    public const LIMIT = 1;
+
+    public int $size = 0;
+
+    public function name(): string
+    {
+        return 'base';
+    }
+}
+
+final class Child extends Base
+{
+    // PHP 8.6's flags, which the stubs hold: on an 8.5 target the emitter
+    // drops #[\Override] from a constant (override-constants.phn).
+    #[\Override]
+    public const LIMIT = 2;
+
+    #[\Override]
+    public int $size = 1;
+
+    #[\Deprecated] // want P2533 "cannot target a property (allowed targets: class, function, method, class constant, constant)"
+    public int $count = 0;
+
+    public int $hooked {
+        #[\ReturnTypeWillChange]
+        get => 1;
+    }
+
+    public function __construct(
+        #[\SensitiveParameter] public string $token = '',
+        #[\Deprecated] public string $old = '', // want P2533 "cannot target a parameter"
+        #[\NoDiscard] public string $other = '', // want P2533 "#[\NoDiscard] cannot target a parameter"
+    ) {
+    }
+
+    #[Overrides, Overrides] // want P2533 "#[\Override] must not be repeated"
+    #[\ReturnTypeWillChange]
+    public function name(): string
+    {
+        return 'child';
+    }
+
+    public function login(#[SensitiveParameter] string $password, #[\Override] string $user): bool // want P2533 "cannot target a parameter (allowed targets: method, property, class constant)"
+    {
+        $check = #[\SensitiveParameter] static fn (string $p): bool => $p === $password; // want P2533 "cannot target a function"
+
+        return $check($user);
+    }
+}
+
+enum Suit
+{
+    #[\Deprecated]
+    case Hearts;
+
+    #[\AllowDynamicProperties] // want P2533 "cannot target a class constant"
+    case Spades;
+}

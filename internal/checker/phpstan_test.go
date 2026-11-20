@@ -94,6 +94,12 @@ func TestPHPStanParity(t *testing.T) {
 		// and properties; PHP 8.6 allows it on constants, and compiled for
 		// 8.5 the emitter drops it there.
 		"override-constants.phn": {"attribute.target": true},
+		// The targets PHP checks only in ReflectionAttribute::newInstance():
+		// a user's attribute's, and PHP's own beside
+		// #[\DelayedTargetValidation] (PHP 8.5), which PHPStan 2.2 does not
+		// read. PHPStan reports them where they are written, and does not
+		// know the attribute classes of php-src's test extension.
+		"attribute-targets-runtime.phn": {"attribute.target": true, "attribute.notFound": true},
 		// PHPStan 2.2 predates __debugInfo() on enums (PHP 8.6) and refuses
 		// it on every version.
 		"enum-magic.phn": {"enum.magicMethod": true},

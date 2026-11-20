@@ -204,6 +204,9 @@ type Checker struct {
 	// targetedLabels says, per file, which labels a goto names
 	// (labelTargeted).
 	targetedLabels map[*program.File]map[*ast.Label]bool
+	// attrFlags caches the flags of PHP's attribute classes, -1 for a
+	// class that is none (attributeFlags).
+	attrFlags map[*program.Class]int
 	// caseTypes are the types of backed enum cases' values, each typed
 	// once where its enum is declared (caseValue), as a constant's is
 	// (program.ConstantType); caseTyping are the cases whose value is being
@@ -720,6 +723,7 @@ func (c *Checker) checkFile(f *program.File) {
 		}
 	}
 	visit(f.AST.Stmts)
+	c.ownAttributes(f)
 	c.withdrawnSpellings(f)
 	c.genericClosures(f)
 	c.partialSyntax(f)
