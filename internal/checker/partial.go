@@ -810,7 +810,7 @@ func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature
 			}
 		}
 		if pp.Optional && !pp.Variadic {
-			if d, ok := x.writableDefault(s.param.Default); ok {
+			if d, ok := x.writableDefault(s.param.Default, defaultScope(sig)); ok && x.boundEarly(callee, sig) {
 				pp.Default = d
 			} else {
 				pp.Unwritable = true
@@ -998,17 +998,42 @@ func (x *fnCtx) selfResolved(t types.Type, sig *signature) types.Type {
 	})
 }
 
+// defaultScope is the namespace and the imports a callee's parameter
+// defaults are read in: its own file's where it is declared, a trait's for
+// a method copied from one, the global namespace for PHP's own functions
+// and for a callee not known by its declaration.
+func defaultScope(sig *signature) *program.Scope {
+	var scope *program.Scope
+	switch {
+	case sig.fn != nil:
+		scope = sig.fn.Scope
+	case sig.meth != nil && sig.meth.FromTrait != nil:
+		scope = sig.meth.FromTrait.Scope
+	case sig.meth != nil && sig.meth.Class != nil:
+		scope = sig.meth.Class.Scope
+	}
+	if scope == nil {
+		return &program.Scope{}
+	}
+	return scope
+}
+
 // writableDefault prints a parameter's default as PHP code that means the
-// same in any file: a literal, or a global constant written fully
-// qualified. Anything else — a class constant, `new`, php-src's UNKNOWN —
-// is not copied.
-func (x *fnCtx) writableDefault(e ast.Expr) (string, bool) {
+// same in any file: a literal, PHP's own constant, or a constant a `const`
+// statement declares, written fully qualified as the callee's own
+// namespace and imports resolve it (scope), where PHP reads the default.
+// Anything else — a class constant, `new`, a magic constant, an operator,
+// php-src's UNKNOWN, a constant not found, a global one of the program's
+// that an unqualified name in a namespace falls back to — is not copied,
+// and the closure passes on what it is given, the callee's own default
+// taking effect for what it is not.
+func (x *fnCtx) writableDefault(e ast.Expr, scope *program.Scope) (string, bool) {
 	switch e := e.(type) {
 	case *ast.IntLit, *ast.FloatLit, *ast.StringLit:
 		src := x.sourceOf(e)
 		return src, src != ""
 	case *ast.Unary:
-		if inner, ok := x.writableDefault(e.Expr); ok && (e.Op == token.Kind('-') || e.Op == token.Kind('+')) {
+		if inner, ok := x.writableDefault(e.Expr, scope); ok && (e.Op == token.Kind('-') || e.Op == token.Kind('+')) {
 			if _, num := e.Expr.(*ast.IntLit); num {
 				return string(rune(e.Op)) + inner, true
 			}
@@ -1016,18 +1041,31 @@ func (x *fnCtx) writableDefault(e ast.Expr) (string, bool) {
 				return string(rune(e.Op)) + inner, true
 			}
 		}
+	case *ast.ConstFetch:
+		return x.writableDefault(e.Name, scope)
 	case *ast.Name:
-		name, ok := constName(e)
-		switch {
-		case !ok:
-			return "", false
-		case name == "null" || name == "true" || name == "false":
+		switch name, _ := constName(e); name {
+		case "null", "true", "false":
 			return name, true
-		case name == "unknown":
+		case "unknown":
 			return "", false
 		}
-		if c := x.p().Constant(strings.Join(e.Parts, "\\")); c != nil {
-			return "\\" + c.Name, true
+		// A constant define() makes is PHP's to find when the call runs,
+		// perhaps once the closure is made: only one a `const` statement
+		// declares is known to be there. An unqualified name in a
+		// namespace is the namespace's constant where one is when the call
+		// runs, else the global one; a define() the program does not see
+		// (of a computed name, in a function's body) may make the
+		// namespace's, so a global one of the program's is not written
+		// for it. PHP's own constants are: a namespace's define() of
+		// PHP_EOL is the one case that misreads, and the fallback would
+		// cost every default of PHP_EOL, JSON_*, SORT_* its exactness.
+		ns, global := scope.ResolveConst(e)
+		if c := x.p().Constant(ns); c != nil {
+			return "\\" + c.Name, !c.Defined
+		}
+		if c := x.p().Constant(global); c != nil && (ns == global || phpOwn(c)) {
+			return "\\" + c.Name, !c.Defined
 		}
 	case *ast.ArrayLit:
 		if len(e.Items) == 0 {
@@ -1038,12 +1076,12 @@ func (x *fnCtx) writableDefault(e ast.Expr) (string, bool) {
 			if it == nil || it.Unpack || it.ByRef {
 				return "", false
 			}
-			v, ok := x.writableDefault(it.Value)
+			v, ok := x.writableDefault(it.Value, scope)
 			if !ok {
 				return "", false
 			}
 			if it.Key != nil {
-				k, ok := x.writableDefault(it.Key)
+				k, ok := x.writableDefault(it.Key, scope)
 				if !ok {
 					return "", false
 				}
@@ -1054,6 +1092,12 @@ func (x *fnCtx) writableDefault(e ast.Expr) (string, bool) {
 		return "[" + strings.Join(parts, ", ") + "]", true
 	}
 	return "", false
+}
+
+// phpOwn reports a constant PHP declares itself, in its stubs or in an
+// extension read from the local php.
+func phpOwn(c *program.Constant) bool {
+	return c.File != nil && (c.File.IsStub() || strings.HasPrefix(c.File.Path, "<ext>/"))
 }
 
 // sourceOf returns the text of a literal node. Literals of stubs and vendor
@@ -1156,6 +1200,15 @@ func (x *fnCtx) partialRefusal(callee ast.Expr, args *ast.ArgList, sig *signatur
 			if p.Arg == nil {
 				variadic = variadic || p.Variadic
 				unwritable = unwritable || p.Unwritable
+			}
+		}
+		if unwritable && !x.boundEarly(callee, sig) {
+			// The closure then passes on what it is given (mixed ...$args),
+			// by value, and the method that runs decides the defaults.
+			for _, p := range rec.Params {
+				if p.Arg == nil && p.ByRef && !(named && p.Variadic) {
+					return fmt.Sprintf("the method is bound when the call runs, so the defaults of the parameters `...` leaves are not known where the closure is written, and a closure that passes its arguments on cannot pass $%s by reference: %s", p.Name, placeholders(rec, named))
+				}
 			}
 		}
 		if named && (variadic || unwritable) {

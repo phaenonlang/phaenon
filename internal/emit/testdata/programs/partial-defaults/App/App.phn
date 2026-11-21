@@ -1,0 +1,61 @@
+namespace App;
+
+use Shop\Corner;
+use Shop\Left;
+use Shop\Right;
+use Shop\Shelf;
+use Shop\Shelved;
+
+const ON = 'app-on';
+
+// Each `...` leaves the callee's default to the closure: written fully
+// qualified as the callee's namespace resolves it, or, where no file can
+// write it to mean the same, left to the callee (`mixed ...$args`).
+final class Defaults {
+    /** @return array<string, mixed> */
+    static all(): array {
+        $shelf = new Shelf();
+        return [
+            'ns' => (\Shop\ns('t', ...))(),
+            'onlyGlobal' => (\Shop\onlyGlobal('t', ...))(),
+            'relative' => (\Shop\relative('t', ...))(),
+            'imported' => (\Shop\imported('t', ...))(),
+            'listed' => (\Shop\listed('t', ...))(),
+            'named' => (\Shop\named('t', ...))(),
+            'joined' => (\Shop\joined('t', ...))(),
+            'space' => (\Shop\space('t', ...))(),
+            'useConst' => (\Imp\imported('t', ...))(),
+            'trait' => (\Imp\Reader::fromTrait('t', ...))(),
+            'static' => (Shelf::ns('t', ...))(),
+            'method' => ($shelf->inst('t', ...))(),
+            'self' => (Shelf::selfX('t', ...))(),
+            'parent' => (Shelf::parentX('t', ...))(),
+            'case' => (Shelf::suit('t', ...))(),
+            'class' => (Shelf::klass('t', ...))(),
+            'pad' => (str_pad('ab', 5, ...))(),
+            'flag' => (\Shop\flagged('t', ...))(),
+            'eol' => (\Shop\eol('t', ...))(),
+            'parsed' => self::parsed(),
+        ];
+    }
+
+    static parsed(): string {
+        $errors = null;
+        $p = \Shop\parse('p:', ...);
+        return $p($errors) . json_encode($errors);
+    }
+
+    // An override's default is the one PHP 8.6 passes, where the method is
+    // bound when the call runs: through an object of a class that is not
+    // final, an interface, static::.
+    /** @return array<string, mixed> */
+    static late(Shelf $shelf, Shelved $shelved, Corner $corner, Left|Right $side): array {
+        return [
+            'object' => ($shelf->inst('t', ...))(),
+            'interface' => ($shelved->lit('t', ...))(),
+            'final' => ($corner->inst('t', ...))(),
+            'static' => Corner::viaStatic(),
+            'union' => ($side->side('t', ...))(),
+        ];
+    }
+}

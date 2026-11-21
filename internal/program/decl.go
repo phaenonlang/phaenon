@@ -259,6 +259,10 @@ type Constant struct {
 	Deprecated     bool
 	DeprecatedNote string
 	Polyfilled     bool
+	// Defined marks a global constant define() makes, perhaps in a branch
+	// or after code that names it runs; a `const` statement declares the
+	// others where it stands.
+	Defined bool
 	// Attrs are the attribute groups of a class constant's declaration.
 	Attrs    []*ast.AttrGroup
 	evalType types.Type
@@ -358,7 +362,9 @@ func (p *Program) collect(f *File) {
 						switch strings.ToLower(n.Parts[0]) {
 						case "define":
 							if lit, ok := call.Args.Args[0].Value.(*ast.StringLit); ok {
-								p.declareConstant(f, scope, strings.TrimPrefix(StringValue(lit), "\\"), call.Args.Args[1].Value, s.S)
+								if k := p.declareConstant(f, scope, strings.TrimPrefix(StringValue(lit), "\\"), call.Args.Args[1].Value, s.S); k != nil {
+									k.Defined = true
+								}
 							}
 						case "class_alias":
 							r := p.newResolver(f, scope, nil, s.S)
