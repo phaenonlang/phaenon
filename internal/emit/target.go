@@ -504,7 +504,8 @@ func closureParts(rec *program.Partial, fb, typeRest, constExpr bool, rest strin
 
 // restShape is the type of what a closure that passes on `mixed ...$args`
 // is given (fallback): by position and by name, each the parameter's type,
-// none required, a variadic parameter taking the rest; "" where every one
+// none required, a variadic parameter taking the rest; by position alone
+// where a callable value's type names the parameter not; "" where every one
 // takes mixed, which says nothing more. The closure takes mixed; the @var
 // holds the call to the callee's parameters for PHPStan, which mixed would
 // fail at every typed one.
@@ -530,7 +531,9 @@ func restShape(rec *program.Partial) string {
 			continue
 		}
 		positional = append(positional, fmt.Sprintf("%d?: %s", len(positional), t))
-		named = append(named, p.Name+"?: "+t)
+		if !p.Positional {
+			named = append(named, p.Name+"?: "+t)
+		}
 	}
 	if !typed {
 		return ""

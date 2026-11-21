@@ -14,6 +14,14 @@ declare(strict_types=1);
 // call to them. The variadic is named so as to hide no variable the bound
 // arguments read and to repeat no parameter. Called where it stands with
 // arguments, such an application is the call it makes.
+//
+// A callable value's type gives its parameters no default to write, nor a
+// type PHP checks of the value: the closure over it passes on what `...`
+// leaves, and says the types of the type's parameters in an inline @var,
+// its own and those `...` passes on, by name where the type names them.
+// A parameter the type does not name is the closure's $arg1, $arg2, …,
+// or $arg1_2 where that is the type's name of another parameter or a
+// variable the call reads.
 
 namespace Fallback;
 
@@ -27,6 +35,11 @@ final class Card
     public const RANK = 'ace';
 
     public function __construct(public string $face = 'up') {}
+
+    public function faced(string $t, string $how = self::RANK): string
+    {
+        return $t . $this->face . $how;
+    }
 }
 
 function ranked(string $t, string $rank = Card::RANK, int $n = 1 + 2): string
@@ -149,5 +162,170 @@ function run(): void
     echo (fn(array &$out = []) => filled('f:', $out))($out), '|', json_encode($out), '|', (fn(string $b = 'b', string $c = 'c') => counts('a', $b, $c))('B'), "\n";
 }
 
+final class Hand
+{
+    /**
+     * @param \Closure(string, string=): string $held
+     */
+    public function __construct(public \Closure $held) {}
+
+    public function played(): string
+    {
+        $h = $this->held;
+        $p = function (#[\SensitiveParameter] mixed ...$args) use ($h) {
+            /** @var array{0?: string} $args */
+            return $h('h:', ...$args);
+        };
+        return $p() . '|' . $p('two');
+    }
+}
+
+/** @param callable(string, string=): string $cb */
+function called(callable $cb): string
+{
+    $c = function (#[\SensitiveParameter] mixed ...$args) use ($cb) {
+        /** @var array{0?: string} $args */
+        return $cb('cb:', ...$args);
+    };
+    return $c() . '|' . $c('jack');
+}
+
+/**
+ * @param \Closure(string, string=): string $f
+ */
+function given(\Closure $f): string
+{
+    $g = function (#[\SensitiveParameter] mixed ...$args) use ($f) {
+        /** @var array{0?: string} $args */
+        return $f('g:', ...$args);
+    };
+    $q = function (#[\SensitiveParameter] $arg1) use ($f) {
+        /** @var string $arg1 */
+        return $f($arg1, 'queen');
+    };
+    $k = function (#[\SensitiveParameter] $arg2) use ($f) {
+        /** @var string $arg2 */
+        return $f('k:', $arg2);
+    };
+    return $g() . '|' . $g('nine') . '|' . $q('q:') . '|' . $k('king') . '|' . $f('i:', 'ten');
+}
+
+/** @param \Closure(string $t, string $rank=): string $f */
+function named_value(\Closure $f): string
+{
+    $g = function (#[\SensitiveParameter] mixed ...$args) use ($f) {
+        /** @var array{0?: string, rank?: string} $args */
+        return $f('nv:', ...$args);
+    };
+    return $g() . '|' . $g(rank: 'two');
+}
+
+/**
+ * @param \Closure(string, int=, string...): string $f
+ */
+function spread(\Closure $f): string
+{
+    $s = function (#[\SensitiveParameter] mixed ...$args) use ($f) {
+        /** @var array{0?: int, ...<int|string, string>} $args */
+        return $f('sp:', ...$args);
+    };
+    $v = function (#[\SensitiveParameter] ...$arg3) use ($f) {
+        /** @var array<int|string, string> $arg3 */
+        return $f('sv:', 5, ...$arg3);
+    };
+    return $s() . '|' . $s(3, 'a', 'b') . '|' . $v('c');
+}
+
+/** @param \Closure(string $t, string &$o=): string $f */
+function written(\Closure $f): string
+{
+    $w = function (#[\SensitiveParameter] &$o) use ($f) {
+        /** @var string $o */
+        return $f('w:', $o);
+    };
+    $out = 'o';
+    return $w($out) . '|' . $out;
+}
+
+/** @param \Closure(string $arg2, string): string $f */
+function both(\Closure $f): string
+{
+    $b = function (#[\SensitiveParameter] $arg2, #[\SensitiveParameter] $arg2_2) use ($f) {
+        /** @var string $arg2 */
+        /** @var string $arg2_2 */
+        return $f($arg2, $arg2_2);
+    };
+    return $b('t:', 'u');
+}
+
+/**
+ * @param \Closure(string, string): string $arg1
+ */
+function named_arg1(\Closure $arg1): string
+{
+    $n = function (#[\SensitiveParameter] $arg1_2) use ($arg1) {
+        /** @var string $arg1_2 */
+        return $arg1($arg1_2, 'v');
+    };
+    return $n('n:');
+}
+
+/**
+ * @param \Closure(string, string): string $f
+ */
+function reads_arg1(\Closure $f, string $arg1): string
+{
+    $r = function (#[\SensitiveParameter] $arg1_2) use ($f, $arg1) {
+        /** @var string $arg1_2 */
+        return $f($arg1_2, $arg1);
+    };
+    return $r('r:');
+}
+
+function values(): void
+{
+    // A first-class callable of a function and of a method in a variable.
+    $f = ranked(...);
+    $r = function (#[\SensitiveParameter] mixed ...$args) use ($f) {
+        /** @var array{0?: string, 1?: int, rank?: string, n?: int} $args */
+        return $f('fv:', ...$args);
+    };
+    echo $r(), '|', $r('king'), '|', $r(n: 4), "\n";
+    $m = new Card('down')->faced(...);
+    $h = function (#[\SensitiveParameter] mixed ...$args) use ($m) {
+        /** @var array{0?: string, how?: string} $args */
+        return $m('m:', ...$args);
+    };
+    echo $h(), '|', $h(how: 'two'), "\n";
+    $l = listed(...);
+    $ls = function (#[\SensitiveParameter] mixed ...$args) use ($l) {
+        /** @var array{0?: int, n?: int, ...<int|string, string>} $args */
+        return $l('lv:', ...$args);
+    };
+    echo $ls(), '|', $ls(4, 'x', 'y'), "\n";
+    // An arrow function in a variable.
+    $a = fn(string $x, string $y = 'y'): string => $x . $y;
+    $b = function (#[\SensitiveParameter] mixed ...$args) use ($a) {
+        /** @var array{0?: string, y?: string} $args */
+        return $a('a:', ...$args);
+    };
+    echo $b(), '|', $b('b'), '|', $b(y: 'c'), "\n";
+    // A parameter and a property of a closure type, a callable docblock
+    // type, a type that names its parameters, a variadic one.
+    echo given(ranked(...)), "\n";
+    echo new Hand(ranked(...))->played(), "\n";
+    echo called(ranked(...)), "\n";
+    echo named_value(ranked(...)), "\n";
+    echo spread(listed(...)), "\n";
+    // By reference, a placeholder's parameter stays so.
+    echo written(function (string $t, string &$o = 'x'): string {
+        $o = $t . 'out';
+        return $t;
+    }), "\n";
+    // A position's name taken by a parameter, the callee or a bound argument.
+    echo both(ranked(...)), '|', named_arg1(ranked(...)), '|', reads_arg1(ranked(...), 'w'), "\n";
+}
+
 run();
-// phaenon-map v1 partial-fallback.phn 1-6=1 7:1 21-21=14 22:15 26-26=18 27:19 33-35=24 36:25 38-40=26 41:27 43-45=28 46:29 48-50=30 51:31 53-55=32 56:33 58-58=34 59:35 61-63=36 64:37 67-69=39 70:40 71-73=41 74:41 75-75=41 76:42 81-83=46 84:47 85-87=48 88:48 89-89=48 90:49 95-95=53 96:54 97-99=54 100:55 102-104=56 105:57 107-109=58 110:59 112-114=60 115:61 117-119=62 120:63 122-124=64 125:65 127-129=66 130:67 133-135=69 136:70 137-139=70 140:71
+values();
+// phaenon-map v1 partial-fallback.phn 1-6=1 7:1 29-29=22 30:23 34-34=26 35:27 40-42=31 43:32 46-48=34 49:35 51-53=36 54:37 56-58=38 59:39 61-63=40 64:41 66-68=42 69:43 71-71=44 72:45 74-76=46 77:47 80-82=49 83:50 84-86=51 87:51 88-88=51 89:52 94-96=56 97:57 98-100=58 101:58 102-102=58 103:59 108-108=63 109:64 110-112=64 113:65 115-117=66 118:67 120-122=68 123:69 125-127=70 128:71 130-132=72 133:73 135-137=74 138:75 140-142=76 143:77 146-148=79 149:80 150-152=80 153:81 166-166=93 167-169=94 170:94 173-173=96 174:97 176-178=98 179:99 185-185=104 186:105 187-189=105 190:106 193-195=109 196:109 197-197=109 198:110 199-201=110 202:111 203-205=111 206:112 207-209=112 210:113 215-215=117 216:118 217-219=118 220:119 223-225=122 226:122 227-227=122 228:123 229-231=123 232:124 233-235=124 236:125 241-241=129 242:130 243-245=130 246:131 252-252=136 253:137 254-257=137 258:138 261-263=141 264:141 265-265=141 266:142 267-269=142 270:143 273-275=146 276:146 277-277=146 278:147 279-281=147 282:148 286-286=151 287:152 290-292=154 293:155 296-298=157 299:158 302-304=160 305:161 309-311=164 312:165
