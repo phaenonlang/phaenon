@@ -613,8 +613,8 @@ func (c *Checker) reportRelated(span ast.Span, code Code, rel *Related, format s
 // relateAlso adds rel to the related positions of the finding reported
 // since mark, where one was: a finding that was already reported, in the
 // same words at the same place, keeps what it has.
-func (c *Checker) relateAlso(mark int, rel *Related) {
-	if rel != nil && len(c.diags) > mark {
+func (c *Checker) relateAlso(mark checkMark, rel *Related) {
+	if rel != nil && len(c.diags) > mark.diags {
 		d := &c.diags[len(c.diags)-1]
 		d.Related = append(d.Related, *rel)
 	}
