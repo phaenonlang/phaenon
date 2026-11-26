@@ -208,7 +208,10 @@ type Param struct {
 	Modifiers  ast.Modifier
 	Attrs      []*ast.AttrGroup
 	Out        types.Type // @param-out
-	Span       ast.Span
+	// OutFrom is where Out is documented when the method inherits it from
+	// one it overrides (inheritParamOuts), nil when its own docblock has it.
+	OutFrom *TagSource
+	Span    ast.Span
 	// Inherited: Type is the documented type of the parameter the method
 	// overrides (implicit @inheritDoc), which may equal NativeType, as an
 	// inherited `mixed[]` equals `array`.
@@ -216,6 +219,13 @@ type Param struct {
 	// Sensitive marks a parameter declared #[\SensitiveParameter], whose
 	// argument a stack trace shows as a SensitiveParameterValue.
 	Sensitive bool
+}
+
+// TagSource is the parameter of a method whose docblock documents a tag
+// that the parameter of an override inherits.
+type TagSource struct {
+	Method *Method
+	Param  *Param
 }
 
 // Property is a property (declared, promoted, or from a trait).
