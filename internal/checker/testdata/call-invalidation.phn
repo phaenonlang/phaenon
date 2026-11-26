@@ -116,3 +116,118 @@ final class Registry extends Base
         return 1;
     }
 }
+
+// An object given to a function or a method that returns void, is tagged
+// @phpstan-impure, or that PHPStan lists with side effects
+// (get_object_vars()), may come back changed: what was narrowed or written
+// of its properties, and of the paths under them, is forgotten, as PHPStan
+// forgets it. The object's own type stays, and a readonly property keeps
+// what was known of it. A callee that returns a value, a constructor, a
+// closure held in a variable and an object inside an array forget nothing.
+// `$this` given forgets its members and the class's static ones.
+final class Ticket
+{
+    public ?string $ref = null;
+    public string $state = '';
+    public ?Ticket $parent = null;
+
+    public function __construct(public readonly ?string $code = null)
+    {
+    }
+}
+
+final class TicketBox
+{
+    public function __construct(public Ticket $t)
+    {
+    }
+}
+
+function logTicket(object $t): void
+{
+}
+
+function describeTicket(Ticket $t): string
+{
+    return '';
+}
+
+/** @phpstan-impure */
+function closeTicket(Ticket $t): bool
+{
+    $t->state = 'closed';
+    return true;
+}
+
+/** @param list<object> $ts */
+function logTickets(array $ts): void
+{
+}
+
+function takesRef(string $ref): void
+{
+}
+
+function forgotten(Ticket $t): void
+{
+    if ($t->ref !== null) {
+        logTicket($t);
+        takesRef($t->ref); // want P2103 "string|null given"
+    }
+    if ($t->ref !== null) {
+        closeTicket($t);
+        takesRef($t->ref); // want P2103 "string|null given"
+    }
+}
+
+function written(Ticket $t): int
+{
+    $t->state = 'open';
+    logTicket($t);
+    if ($t->state === 'closed') {
+        return 1;
+    }
+    return 0;
+}
+
+function kept(Ticket $t, \Closure $f): void
+{
+    if ($t->ref !== null) {
+        $v = describeTicket($t);
+        $box = new TicketBox($t);
+        $f($t);
+        logTickets([$t]);
+        takesRef($t->ref);
+        echo $v, \count([$box]);
+    }
+}
+
+function nested(Ticket $t): void
+{
+    if ($t->parent !== null && $t->parent->ref !== null && $t->ref !== null) {
+        logTicket($t->parent);
+        takesRef($t->ref);
+        takesRef($t->parent->ref); // want P2103 "string|null given"
+    }
+}
+
+function readonlyKept(Ticket $t): void
+{
+    if ($t->code !== null) {
+        logTicket($t);
+        takesRef($t->code);
+    }
+}
+
+final class Desk
+{
+    public ?string $last = null;
+
+    public function serve(): void
+    {
+        if ($this->last !== null) {
+            logTicket($this);
+            takesRef($this->last); // want P2103 "string|null given"
+        }
+    }
+}

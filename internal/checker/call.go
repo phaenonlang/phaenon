@@ -1655,6 +1655,93 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 	return t
 }
 
+// sideEffects reports a callee that may change an object it is given, as
+// PHPStan's hasSideEffects() answers yes and its ArgumentsHandler then
+// forgets what the scope held under each argument that may be an object:
+//
+//   - a function or a method declared, or documented, to return void (a
+//     constructor never is one: `new Wrap($o)` forgets nothing, nor does
+//     `parent::__construct($o)`), `@phpstan-pure` or not;
+//   - one tagged `@phpstan-impure`;
+//   - a function or method of PHP's PHPStan lists with side effects
+//     though it returns a value (stdlib.HasSideEffects): get_object_vars(),
+//     array_push();
+//
+// and not a method that returns $this or static, which PHPStan takes for
+// a fluent setter that leaves its arguments as they were, unless it is
+// tagged impure. A closure or a callable held in a variable, a first-class
+// callable included, has no reflection to PHPStan and forgets nothing.
+func (x *fnCtx) sideEffects(sig *signature) bool {
+	var ret types.Type
+	var doc *docblock.Doc
+	var name string
+	switch {
+	case sig.fn != nil:
+		ret, doc, name = sig.fn.Return, sig.fn.Doc, strings.ToLower(sig.fn.Name)
+	case sig.meth != nil:
+		m := sig.meth
+		if strings.EqualFold(m.Name, "__construct") {
+			return m.Doc != nil && m.Doc.Impure
+		}
+		ret, doc = m.Return, m.Doc
+		if m.Class != nil {
+			name = strings.ToLower(m.Class.Name) + "::" + strings.ToLower(m.Name)
+		}
+		switch ret.(type) {
+		case types.This, types.Static:
+			return doc != nil && doc.Impure // a fluent setter
+		}
+	default:
+		return false
+	}
+	if doc != nil && doc.Impure {
+		return true
+	}
+	if _, void := ret.(types.Void); void {
+		return true
+	}
+	return sig.stub && stdlib.HasSideEffects(name)
+}
+
+// forgetArgument drops what the flow knew under the argument key, of type
+// t, after a call that may have changed it (sideEffects), as PHPStan's
+// invalidateExpression() of the argument forgets every expression that
+// holds it: its properties, the paths under them, its offsets and method
+// calls, and where it is a variable, the paths that pass it or index by
+// it. The argument itself keeps its type, and a readonly property of it
+// what was known of it. `$this` given takes the static members of the
+// class's own hierarchy with it, as PHPStan reads `$this` as self and
+// static there.
+func (x *fnCtx) forgetArgument(env *state, key string, t types.Type) {
+	readonly := func(k string) bool {
+		name := k[len(key)+len("->"):]
+		if !strings.HasPrefix(k[len(key):], "->") || strings.ContainsAny(name, "-[(:") {
+			return false
+		}
+		for _, cn := range types.ClassNames(t) {
+			if cl := x.p().Class(cn); cl != nil {
+				if pr := cl.FindProperty(name); pr != nil && pr.Readonly {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	env.invalidate(func(k string) bool {
+		if key == "$this" {
+			for _, own := range []string{"self::", "static::", "parent::"} {
+				if strings.HasPrefix(strings.ToLower(k), own) {
+					return true
+				}
+			}
+		}
+		return pathUnder(k, key) && !readonly(k)
+	})
+	if strings.HasPrefix(key, "$") && !strings.ContainsAny(key[1:], "-[(:$") {
+		env.invalidateMentions(key[1:])
+	}
+}
+
 // forgetOwnScope drops what was narrowed about $this and the static members
 // of the current class's hierarchy after a side-effecting call to a method
 // declared in decl, when the current class is decl or inherits from it, and
@@ -3092,10 +3179,18 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				"argument %d ($%s) of %s expects %s, %s given", b.idx+1, b.param.Name, sig.name, x.typeName(pt), x.typeName(at))
 		}
 	}
-	for _, b := range bindings {
+	forgets := x.sideEffects(sig)
+	for i, b := range bindings {
 		// `render($event)` may change what $event->getResponse() answers.
-		if key, ok := x.pathKey(b.arg.Value); ok {
-			env.invalidateCalls(key)
+		key, ok := x.pathKey(b.arg.Value)
+		if !ok {
+			continue
+		}
+		env.invalidateCalls(key)
+		// An argument that may be an object or a resource, PHPStan's
+		// `!isObject()->no()`: an array holding objects is none.
+		if forgets && !b.param.ByRef && !b.arg.Unpack && argTypes[i] != nil && mayBeObject(argTypes[i]) {
+			x.forgetArgument(env, key, argTypes[i])
 		}
 	}
 	argByName := map[string]types.Type{}

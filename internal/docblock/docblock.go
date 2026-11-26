@@ -27,6 +27,7 @@ type Doc struct {
 	Deprecated  bool
 	Internal    bool
 	Pure        bool
+	Impure      bool // @phpstan-impure: a call has side effects
 	Immutable   bool
 	Final       bool
 	ParamOut    []ParamTag // @param-out
@@ -362,6 +363,8 @@ func (d *Doc) handle(t tagText) {
 		d.Internal = true
 	case "@pure":
 		d.Pure = true
+	case "@impure":
+		d.Impure = true
 	case "@immutable", "@readonly":
 		d.Immutable = true
 	case "@final":
