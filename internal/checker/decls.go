@@ -1317,10 +1317,31 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 	// shows.
 	//
 	// PHP refuses the class where the native type the compiled file writes
-	// at the slot does not fit (compiledApart).
-	typeMismatch := func(nativesFit, compiledApart bool, span ast.Span, format string, args ...any) {
+	// at the slot, a parameter's index or -1 for the return, does not fit
+	// (compiledApart). Where it fits because the rule rewrote it, the
+	// compiled method is another than the source writes: `(): iterable`
+	// compiled to `(): array` refuses the generator its body returns, and
+	// `(string $x)` compiled to `(int|string $x)` hands the body an int it
+	// was checked without. No comment silences either (compiledOtherwise):
+	// a comment accepts a finding about what the code does, and here the
+	// compiled code does something else than the code that was checked.
+	// A type that compiles as written is a comment's to accept: one a
+	// docblock or Phaenon's syntax alone narrows, and a native type the
+	// erased declaration admits though its type argument does not
+	// (`get(): string` under `Held<int>`, whose compiled `get(): mixed` it
+	// fits).
+	typeMismatch := func(nativesFit, compiledApart bool, slot int, span ast.Span, format string, args ...any) {
 		if !m.Static || !parent.Static || !nativesFit {
-			mismatch(refused && compiledApart, span, format, args...)
+			_, rewritten := m.ErasureOverrides()[slot]
+			why := mayBeSilenced
+			switch {
+			case refused && compiledApart:
+				why = refusedByPHP
+			case rewritten && !nativesFit:
+				why = compiledOtherwise
+			}
+			broken = true
+			c.reportOf(Parity, why, span, P2502, overridden(parent), format, args...)
 			return
 		}
 		if !afterExtra {
@@ -1457,7 +1478,7 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 		}
 		pt, ct := bind(pp.Type, parent.Class), bind(cp.Type, cl)
 		if pt != nil && ct != nil && !c.overrideFits(pt, ct) {
-			typeMismatch(nativesFit(written(parent, parent.Class, i), written(m, cl, i), false), compiledApart(i),
+			typeMismatch(nativesFit(written(parent, parent.Class, i), written(m, cl, i), false), compiledApart(i), i,
 				cp.Span, "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
 				cp.Name, cl.Name, m.Name, types.Print(ct), parent.Class.Name, parent.Name, types.Print(pt))
 		}
@@ -1480,7 +1501,7 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 			}
 		} else if !c.overrideFits(cr, pr) {
 			if _, parentVoid := pr.(types.Void); !(parentVoid && isVoidLike(cr)) {
-				typeMismatch(nativesFit(written(m, cl, -1), written(parent, parent.Class, -1), true), compiledApart(-1),
+				typeMismatch(nativesFit(written(m, cl, -1), written(parent, parent.Class, -1), true), compiledApart(-1), -1,
 					m.Span, "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
 					types.Print(cr), cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
 			}
