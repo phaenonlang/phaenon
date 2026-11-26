@@ -129,13 +129,13 @@ PHPStan parity.
 | Variable | Read by | Effect |
 |---|---|---|
 | `PHAENON_PHP_SRC` | `internal/conformance`; `TestFresh` (`stdlib/gen`) | Absolute path of a php-src tree (`/path/to/php-src`): the `.phpt` corpus, a clone or a release branch extracted as above; for `TestFresh`, the clone whose release branches the committed stubs and version table must match |
-| `PHAENON_PHP` | `internal/conformance`; `TestPHPStanParity` | The php taken as the oracle, `php` on `PATH` by default; the emit execution suite compiles for its release line, and an 8.6 here also serves the parity run's 8.6 goldens |
-| `PHAENON_PHP86` | `TestGenerics` (emit), `TestLift` (migrate), `TestPHPStanParity` | A PHP 8.6 (`/path/to/php8.6`): `php -l`, the loading and the behaviour of the outputs compiled for 8.6, and PHPStan on it for the goldens whose header says `// target: 8.6` |
+| `PHAENON_PHP` | `internal/conformance`; `TestPHPStanParity`, `TestRefusedByPHP` | The php taken as the oracle, `php` on `PATH` by default; the emit execution suite compiles for its release line, and an 8.6 here also serves the parity run's 8.6 goldens |
+| `PHAENON_PHP86` | `TestGenerics` (emit), `TestLift` (migrate), `TestPHPStanParity`, `TestRefusedByPHP` | A PHP 8.6 (`/path/to/php8.6`): `php -l`, the loading and the behaviour of the outputs compiled for 8.6, and PHPStan on it for the goldens whose header says `// target: 8.6` |
 | `PHAENON_EXEC` | `TestPrinterExecution`, `TestEmitExecution` | Any non-empty value runs the execution comparisons (≈2.5 min each; pass `-timeout 30m`) |
 | `PHAENON_PHPT_FILTER` | `internal/conformance` | Only the `.phpt` paths containing this substring, e.g. `Zend/tests` |
 | `PHAENON_SHOW_DIFFS` | printer round trip, execution suites | How many differences to print (default 25) |
 | `PHAENON_SHOW_FALSE_ACCEPT` | `TestParserAgainstPHP` | Lists (up to 30) files PHP rejects but Phaenon parses |
-| `PHAENON_PHPSTAN` | `TestPHPStanParity` (checker), `TestGenerics` (emit) | Path to a PHPStan binary (`/path/to/phpstan`), run at level max with `treatPhpDocTypesAsCertain: false` (`../design/checker.md` §9); the checker's run holds the corpus to it in both directions, the extra checks' marks included |
+| `PHAENON_PHPSTAN` | `TestPHPStanParity`, `TestRefusedByPHP` (checker), `TestGenerics` (emit) | Path to a PHPStan binary (`/path/to/phpstan`), run at level max with `treatPhpDocTypesAsCertain: false` (`../design/checker.md` §9); the checker's run holds the corpus to it in both directions, the extra checks' marks included, and with it the findings marked as code PHP refuses, which no ignore comment silences, to php |
 | `PHAENON_UPDATE` | the emit, format, migrate and trace goldens; `TestComposerAgrees` (semver) | Rewrites the expected files from the current output; for the constraint vectors, their answers from Composer's |
 | `PHAENON_GOLDEN` | `TestGolden` (checker) | Only the golden files whose name contains this substring |
 | `PHAENON_COMPOSER` | `internal/distribution`; `TestComposerAgrees` (semver) | A composer binary: the `phaenon/phn` plugin runs under it in temporary projects that install it alone; one of them builds `phn` and runs what it compiles. The constraint vectors are asked of its composer/semver, in a script of a project that installs nothing |

@@ -265,8 +265,10 @@ var (
 	// ignore.unmatchedIdentifier, ignore.unmatchedLine, ignore.parseError).
 	// A comment is held to the codes the run reports and no other
 	// (Checker.leftOut). No comment silences this code, nor a code of the
-	// run (ofTheRun) or of the syntax (ofTheSyntax), and one that names any
-	// of them is reported for that.
+	// run (ofTheRun), of the syntax (ofTheSyntax) or of code that does
+	// something else than it reads (otherThanItReads), nor a finding about
+	// code PHP refuses (Checker.reportRefused), and one that names any of
+	// them is reported for that.
 	P4015 = Code{"P4015", Warning, "ignore comment that silences nothing"}
 	// P4013 reported a `concurrently` block or a `spawn` in a project without
 	// phaenon/concurrent installed; retired with the syntax on 2026-11-08
@@ -310,8 +312,23 @@ var ofTheSyntax = map[string]bool{
 	P1004.ID: true, P1005.ID: true, P1006.ID: true, P1007.ID: true,
 }
 
+// otherThanItReads are the codes whose every finding is about code that
+// compiles to PHP doing something else than the source says: an erased
+// type parameter used as a value (P3003). The parameter is gone from the
+// output, where `T` is left as written and PHP reads it as a class of the
+// file's namespace: `new T()`, `T::make()`, `T::X` and a bare `T` throw
+// when they run, `T::class` is the name of a class nobody declared, and
+// `$x instanceof T` is false whatever $x holds. No ignore comment
+// silences them, and one that names the code on a line where it is
+// reported is told so (P4015).
+var otherThanItReads = map[string]bool{P3003.ID: true}
+
 // silenceable reports whether an ignore comment may silence a finding of
-// the code: neither P4015, nor a code of the run or of the syntax.
+// the code: neither P4015, nor a code of the run or of the syntax, nor
+// one of code that does something else than it reads. A finding about
+// code PHP refuses is silenced by none either, whatever its code
+// (Diagnostic.refused); which finding is one is decided where it is
+// reported (reportRefused).
 func silenceable(code string) bool {
-	return code != P4015.ID && !ofTheRun[code] && !ofTheSyntax[code]
+	return code != P4015.ID && !ofTheRun[code] && !ofTheSyntax[code] && !otherThanItReads[code]
 }

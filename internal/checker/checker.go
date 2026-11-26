@@ -113,6 +113,10 @@ type Diagnostic struct {
 	// kept, and rolled back as any finding is, until Check knows which
 	// comments silenced something, and then left out.
 	silencedBy *ignoreRule
+	// refused marks a finding about code PHP itself refuses: a compile
+	// error, or a fatal error when the file is loaded and its classes are
+	// declared or linked. No ignore comment silences it (reportRefused).
+	refused bool
 }
 
 // SyntaxError is the P1000 of a file that does not parse (err, from
@@ -238,7 +242,8 @@ func New(p *program.Program, opts Options) *Checker {
 
 // ignoreRule is one ignore comment and the line it silences. A
 // `@phpstan-ignore …` silences every finding of its line a comment may
-// silence (silenceable), as it always has: how PHPStan's identifiers would match Phaenon's codes is not
+// silence (silenceable, and none about code PHP refuses), as it always
+// has: how PHPStan's identifiers would match Phaenon's codes is not
 // settled. A `@phaenon-ignore P2103, P2202` silences the codes it names
 // and no other, and like `@phaenon-ignore-line` and
 // `@phaenon-ignore-next-line`, which silence every finding, it is itself
@@ -371,11 +376,12 @@ func (c *Checker) without(r *ignoreRule, code string) string {
 // reported on its line that a comment silences, which it is for; where there are none, to remove
 // it, unless the run leaves some code's findings out (leavesOut) and one
 // of those may be there. Advice that a comment followed would make P4015
-// again is not given: a code the line does not report, or none.
+// again is not given: a code the line does not report, or none, or one
+// whose finding there is about code PHP refuses.
 func (c *Checker) codesFor(path string, line int, word string) string {
 	var codes []string
 	for _, d := range c.diags {
-		if d.File == path && d.Line == line && silenceable(d.Code) && !slices.Contains(codes, d.Code) {
+		if d.File == path && d.Line == line && silenceable(d.Code) && !d.refused && !slices.Contains(codes, d.Code) {
 			codes = append(codes, d.Code)
 		}
 	}
@@ -442,10 +448,25 @@ func (c *Checker) leavesOut() bool {
 // files checked to their end. A comment is held to the codes this run
 // reports and no other (leftOut). P4015 itself is silenced by no comment,
 // or a stale suppression could be hidden by naming it, and a comment that
-// names it is told so.
+// names it is told so. So is one that names the code of a finding about
+// code PHP refuses on its line, or about code that does something else
+// than it reads (otherThanItReads), where it silences no other finding of
+// that code.
 func (c *Checker) settleIgnores() {
+	type lineCode struct {
+		file string
+		line int
+		code string
+	}
+	// standing are the findings no comment silences that a comment may
+	// name on their line: about code PHP refuses, or code that does
+	// something else than it reads.
+	standing := map[lineCode]bool{}
 	kept := c.diags[:0]
 	for _, d := range c.diags {
+		if d.refused || otherThanItReads[d.Code] {
+			standing[lineCode{d.File, d.Line, d.Code}] = true
+		}
 		if d.silencedBy != nil {
 			// Every comment that covers the line and names the code silenced
 			// it, not the first alone: one above the line and one after it,
@@ -494,6 +515,10 @@ func (c *Checker) settleIgnores() {
 							c.report(r.at, P4015, "%s: %s is no finding of a line, and no comment silences it: %s", r.word, code, c.without(r, code))
 						case ofTheSyntax[code]:
 							c.report(r.at, P4015, "%s: %s says the code is not Phaenon as written, and no comment silences it: %s", r.word, code, c.without(r, code))
+						case !r.used[code] && standing[lineCode{f.Path, line, code}] && otherThanItReads[code]:
+							c.report(r.at, P4015, "%s: %s on line %d is about code that compiles to PHP doing something else than it reads, and no comment silences it: %s", r.word, code, line, c.without(r, code))
+						case !r.used[code] && standing[lineCode{f.Path, line, code}]:
+							c.report(r.at, P4015, "%s: %s on line %d is about code PHP refuses to compile or load, and no comment silences it: %s", r.word, code, line, c.without(r, code))
 						case !r.used[code] && !c.leftOut(code):
 							c.report(r.at, P4015, "%s: no %s is reported on line %d", r.word, code, line)
 						}
@@ -607,7 +632,26 @@ func related(f *program.File, span ast.Span, format string, args ...any) *Relate
 
 // reportRelated is report with the declaration the finding is about.
 func (c *Checker) reportRelated(span ast.Span, code Code, rel *Related, format string, args ...any) {
-	c.reportOf(Parity, span, code, rel, format, args...)
+	c.reportOf(Parity, false, span, code, rel, format, args...)
+}
+
+// reportRefused is reportRelated for a finding that may be about code PHP
+// itself refuses, which refused says: a compile error that `php -l`
+// reports, or a fatal error when the file is loaded and its classes are
+// declared or linked. Such a finding is silenced by no ignore comment, as
+// the compiled file would not run at all: a comment accepts a finding
+// about what code does, and code PHP refuses does nothing. The place that
+// reports it decides, finding by finding, since a code may mean such code
+// in one finding and not in another: an incompatible native signature is
+// fatal when the class is declared, a docblock that PHP never reads is
+// not.
+func (c *Checker) reportRefused(refused bool, span ast.Span, code Code, rel *Related, format string, args ...any) {
+	c.reportOf(Parity, refused, span, code, rel, format, args...)
+}
+
+// reportRefused is the checker's, for a finding without a declaration.
+func (x *fnCtx) reportRefused(refused bool, span ast.Span, code Code, format string, args ...any) {
+	x.c.reportRefused(refused, span, code, nil, format, args...)
 }
 
 // relateAlso adds rel to the related positions of the finding reported
@@ -635,7 +679,9 @@ type findingKey struct {
 
 // reportOf records a finding of the kind its place gives it; a code that
 // is a language rule as a whole makes it one whatever the place says.
-func (c *Checker) reportOf(kind Kind, span ast.Span, code Code, rel *Related, format string, args ...any) {
+// refused marks a finding about code PHP refuses (reportRefused), which no
+// comment silences; a finding reported again with the mark takes it.
+func (c *Checker) reportOf(kind Kind, refused bool, span ast.Span, code Code, rel *Related, format string, args ...any) {
 	if languageRules[code.ID] {
 		kind = LanguageRule
 	}
@@ -648,12 +694,19 @@ func (c *Checker) reportOf(kind Kind, span ast.Span, code Code, rel *Related, fo
 	endLine, endCol := c.file.Position(end)
 	key := findingKey{file: c.file.Path, line: line, col: col, code: code.ID, msg: msg, extra: kind == Extra}
 	if c.reported[key] {
+		if refused {
+			for i := range c.diags {
+				if c.diags[i].key == key {
+					c.diags[i].refused, c.diags[i].silencedBy = true, nil
+				}
+			}
+		}
 		return
 	}
 	c.reported[key] = true
 	d := Diagnostic{File: c.file.Path, Line: line, Col: col, EndLine: endLine, EndCol: endCol + 1,
-		Severity: code.Severity, Code: code.ID, Kind: kind, Message: msg, key: key}
-	if silenceable(code.ID) {
+		Severity: code.Severity, Code: code.ID, Kind: kind, Message: msg, key: key, refused: refused}
+	if silenceable(code.ID) && !refused {
 		d.silencedBy = c.silencing(c.file, line, code.ID)
 	}
 	if rel != nil {
@@ -833,7 +886,12 @@ type fnCtx struct {
 	inConst      bool // checking a constant expression: an attribute argument, a constant, a default
 	constClosure bool // a closure inside a constant expression: static, capturing nothing (P2531)
 	nameOnly     bool // resolving a class name PHP does not load: X::class, instanceof X, catch (X)
-	inFinally    int  // depth of finally blocks around the statement being checked
+	inDocblock   bool // resolving a name the compiled file writes in a docblock alone: a throws clause's
+	// hookRefusesYield marks a property hook's body whose return type does
+	// not admit a Generator, void for set and the property's native type
+	// for get: PHP refuses a yield there when it compiles the file (P2315).
+	hookRefusesYield bool
+	inFinally        int // depth of finally blocks around the statement being checked
 	// matchCaught counts the try blocks around the statement being checked
 	// whose catches take the UnhandledMatchError of a match without a
 	// matching arm (catchesUnhandledMatch): there such a match is no
@@ -1026,6 +1084,26 @@ func (x *fnCtx) report(span ast.Span, code Code, format string, args ...any) {
 
 func (x *fnCtx) p() *program.Program { return x.c.p }
 
+// scopeKnown says whether PHP knows, when it compiles the code being
+// checked, the class that self, static and parent name there, and so
+// refuses the file where there is none (P2012) or it has no parent
+// (P2011): in the
+// body of a named function and of a method outside a trait, where the
+// class says `extends` nothing. A closure is bound to its scope when it is
+// created, top-level code runs in the scope that includes the file, a
+// trait's method in each class that uses it, and a constant expression is
+// evaluated when its value is first needed. A throws clause compiles to
+// a docblock, which PHP never reads.
+func (x *fnCtx) scopeKnown() bool {
+	if x.inConst || x.inDocblock {
+		return false
+	}
+	if x.class == nil {
+		return x.function != nil
+	}
+	return x.method != nil && x.class.Kind != ast.KindTrait && x.class.Parent == ""
+}
+
 // resolveClassName resolves a class name written in code, reporting unknown
 // classes; "static"/"self"/"parent" map to the current class.
 func (x *fnCtx) resolveClassName(n *ast.Name, span ast.Span) (string, bool) {
@@ -1036,16 +1114,16 @@ func (x *fnCtx) resolveClassName(n *ast.Name, span ast.Span) (string, bool) {
 	switch name {
 	case "self", "static":
 		if x.class == nil {
-			x.report(span, P2012, "%s used outside a class", name)
+			x.reportRefused(x.scopeKnown(), span, P2012, "%s used outside a class", name)
 			return "", false
 		}
 		return x.class.Name, true
 	case "parent":
 		if x.class == nil {
-			x.report(span, P2012, "parent used outside a class")
+			x.reportRefused(x.scopeKnown(), span, P2012, "parent used outside a class")
 			return "", false
 		}
-		x.report(span, P2011, "class %s has no parent", x.class.Name)
+		x.reportRefused(x.scopeKnown(), span, P2011, "class %s has no parent", x.class.Name)
 		return "", false
 	}
 	cl := x.p().Class(name)

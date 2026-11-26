@@ -1520,13 +1520,13 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 		switch raw {
 		case "parent":
 			if x.class == nil {
-				x.report(n.S, P2012, "parent used outside a class")
+				x.reportRefused(x.scopeKnown(), n.S, P2012, "parent used outside a class")
 				x.argsOnly(e.Args, env)
 				return types.TMixed
 			}
 			pc := x.class.ParentClass()
 			if pc == nil {
-				x.report(n.S, P2011, "class %s has no parent", x.class.Name)
+				x.reportRefused(x.scopeKnown(), n.S, P2011, "class %s has no parent", x.class.Name)
 				x.argsOnly(e.Args, env)
 				return types.TMixed
 			}
@@ -1539,7 +1539,7 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 			}
 		case "self", "static":
 			if x.class == nil {
-				x.report(n.S, P2012, "%s used outside a class", raw)
+				x.reportRefused(x.scopeKnown(), n.S, P2012, "%s used outside a class", raw)
 				x.argsOnly(e.Args, env)
 				return types.TMixed
 			}
@@ -1799,7 +1799,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 		if specialClassName(c) == "parent" && x.class != nil {
 			cl = x.class.ParentClass()
 			if cl == nil {
-				x.report(c.S, P2011, "class %s has no parent", x.class.Name)
+				x.reportRefused(x.scopeKnown(), c.S, P2011, "class %s has no parent", x.class.Name)
 				x.argsOnly(e.Args, env)
 				return types.TObject
 			}
@@ -2644,7 +2644,8 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				continue
 			}
 			if seenNamed {
-				x.report(a.S, P2110, "positional argument after a named argument")
+				// PHP refuses it when it compiles the call.
+				x.reportRefused(true, a.S, P2110, "positional argument after a named argument")
 			}
 			var p *program.Param
 			if i < len(sig.params) {

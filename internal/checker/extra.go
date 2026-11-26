@@ -1,6 +1,8 @@
 package checker
 
 import (
+	"strconv"
+
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
@@ -50,13 +52,13 @@ import (
 // (`// want P2301 extra`), and the parity run holds the mark to PHPStan.
 // With Options.NoExtraChecks the finding is not returned.
 func (c *Checker) reportExtra(span ast.Span, code Code, format string, args ...any) {
-	c.reportOf(Extra, span, code, nil, format, args...)
+	c.reportOf(Extra, false, span, code, nil, format, args...)
 }
 
 // reportExtraRelated is reportExtra with the declaration the finding is
 // about.
 func (c *Checker) reportExtraRelated(span ast.Span, code Code, rel *Related, format string, args ...any) {
-	c.reportOf(Extra, span, code, rel, format, args...)
+	c.reportOf(Extra, false, span, code, rel, format, args...)
 }
 
 // reportExtra is the checker's: an extra check, with its proof at the call.
@@ -107,6 +109,103 @@ func (c *Checker) reportUnfit(v given, got, want types.Type, span ast.Span, code
 		return
 	}
 	c.reportRelated(span, code, rel, format, args...)
+}
+
+// reportUnfitRefused is reportUnfit for a default or a constant's value
+// that PHP refuses when it compiles the file where refused says so
+// (literalRefused): a finding about code PHP refuses, which no comment
+// silences, and no extra check.
+func (c *Checker) reportUnfitRefused(refused bool, v given, got, want types.Type, span ast.Span, code Code, rel *Related, format string, args ...any) {
+	if refused {
+		c.reportRefused(true, span, code, rel, format, args...)
+		return
+	}
+	c.reportUnfit(v, got, want, span, code, rel, format, args...)
+}
+
+// literalRefused reports a default or a constant's value written as a
+// literal of a kind its native type does not take, which PHP refuses when
+// it compiles the file: "Cannot use string as default value for parameter
+// $x of type int", the same of a property, "Cannot use string as value
+// for class constant …". native is the type the compiled file writes.
+// Only a literal is judged: PHP evaluates a constant expression when the
+// value is first needed, most of them, and the checker's type of a value
+// says more than PHP's kinds do. null is a parameter's default whatever
+// its type (param), which PHP 8.5 makes nullable, deprecated. A member
+// the checker does not spell as PHP's own, a type parameter, which is
+// erased, among them, takes anything.
+func literalRefused(e ast.Expr, native types.Type, param bool) bool {
+	kind := literalKind(e)
+	if kind == "" || native == nil || param && kind == "null" {
+		return false
+	}
+	for _, m := range types.Members(native) {
+		switch m := m.(type) {
+		case types.Int:
+			if kind == "int" {
+				return false
+			}
+		case types.Float:
+			if kind == "int" || kind == "float" {
+				return false
+			}
+		case types.String, types.StringLit, types.ClassString, types.Bytes:
+			if kind == "string" {
+				return false
+			}
+		case types.Bool:
+			if kind == "true" || kind == "false" {
+				return false
+			}
+		case types.BoolLit:
+			if kind == strconv.FormatBool(m.V) {
+				return false
+			}
+		case types.Null:
+			if kind == "null" {
+				return false
+			}
+		case types.Array, types.Shape, types.Iterable:
+			if kind == "array" {
+				return false
+			}
+		case types.Class, types.Object, types.Static, types.This, types.EnumCase, types.ObjectShape, types.Intersection:
+			// An object takes no literal.
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// literalKind is the kind PHP gives a literal in its message: "int",
+// "float", "string", "array", "true", "false" or "null"; "" for any other
+// expression.
+func literalKind(e ast.Expr) string {
+	switch e := unparen(e).(type) {
+	case *ast.IntLit:
+		return "int"
+	case *ast.FloatLit:
+		return "float"
+	case *ast.StringLit:
+		return "string"
+	case *ast.ArrayLit:
+		return "array"
+	case *ast.Unary:
+		if e.Op == token.Kind('-') || e.Op == token.Kind('+') {
+			switch e.Expr.(type) {
+			case *ast.IntLit:
+				return "int"
+			case *ast.FloatLit:
+				return "float"
+			}
+		}
+		return ""
+	}
+	if name, ok := constName(e); ok && (name == "true" || name == "false" || name == "null") {
+		return name
+	}
+	return ""
 }
 
 // knownAlike reports whether PHPStan knows no more of a value than the

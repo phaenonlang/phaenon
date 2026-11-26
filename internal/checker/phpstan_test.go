@@ -619,17 +619,23 @@ var thrownWhenRun = map[string]map[int]string{
 }
 
 // phpRefusals gives php a compiled golden and returns the source lines php
-// refuses it for, each with php's message. php stops at its first error,
+// refuses it for, each with php's messages, one per line of the text. php
+// stops at its first error,
 // so the file is loaded again and again, each time without the top-level
-// declaration the last error was in, until it loads. Only an error php
+// declaration the last error was in, or the class's member
+// (withoutDeclarationAt), until it loads. Only an error php
 // places in the golden's own compiled file counts, and one that only says
-// a declaration taken out is missing does not. A line of thrown is one php
+// a declaration taken out is missing does not, nor one that taking out a
+// member may have caused (takenPart.caused): taking out reveals what php
+// refuses, and never makes it up. A line of thrown is one php
 // is to throw at, in that file, when the code beside it runs after the
 // file has been loaded as it is.
 func phpRefusals(t *testing.T, php, dir, phpName string, compiled []byte, sourceLine func(int) int, thrown map[int]string) map[int]string {
 	t.Helper()
 	refused := map[int]string{}
-	fatal := regexp.MustCompile(`(?m)^(?:PHP )?(?:Fatal|Parse) error:\s+(.*?) in (\S+?)(?: on line |:)(\d+)`)
+	// The place is the last on the line: a message may name another, as
+	// "Cannot redeclare class X (previously declared in f.php:3)" does.
+	fatal := regexp.MustCompile(`(?m)^(?:PHP )?(?:Fatal|Parse) error:\s+(.*) in (\S+?)(?: on line |:)(\d+)\s*$`)
 	// run loads a file and runs code after it; it returns php's first
 	// error where that error is in the file itself, and "" for an error
 	// php places anywhere else (the vendor fixture, the code run).
@@ -651,7 +657,9 @@ func phpRefusals(t *testing.T, php, dir, phpName string, compiled []byte, source
 	missing := regexp.MustCompile(`^(?:Uncaught Error: )?(?:Class|Interface|Trait|Enum) "([^"]+)" not found|^(?:Uncaught Error: )?Call to undefined function ([^(]+)\(`)
 	variant := slices.Clone(compiled)
 	gone := map[string]bool{} // the declarations taken out, by short name
-	for range 64 {
+	var taken []takenPart     // the members taken out
+	supers, methods := classSupers(compiled)
+	for range 256 {
 		if err := os.WriteFile(filepath.Join(dir, "load.php"), variant, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -669,15 +677,21 @@ func phpRefusals(t *testing.T, php, dir, phpName string, compiled []byte, source
 			}
 			artifact = gone[strings.ToLower(name)]
 		}
-		if !artifact {
-			refused[sourceLine(line)] = message
+		for _, part := range taken {
+			artifact = artifact || part.caused(message, line, supers, methods)
 		}
-		next, name, ok := withoutDeclarationAt(variant, line)
+		if at := sourceLine(line); !artifact && !slices.Contains(strings.Split(refused[at], "\n"), message) {
+			refused[at] = strings.TrimPrefix(refused[at]+"\n"+message, "\n")
+		}
+		next, name, part, ok := withoutDeclarationAt(variant, line, message)
 		if !ok {
 			break
 		}
 		if name != "" {
 			gone[strings.ToLower(name)] = true
+		}
+		if part != nil {
+			taken = append(taken, *part)
 		}
 		variant = next
 	}
@@ -689,19 +703,146 @@ func phpRefusals(t *testing.T, php, dir, phpName string, compiled []byte, source
 	return refused
 }
 
-// withoutDeclarationAt blanks, in a PHP file, the top-level statement that
-// holds a line, keeping every line where it was, and says what that
-// statement declared: a class or a function by its name, "" otherwise.
-func withoutDeclarationAt(php []byte, line int) ([]byte, string, bool) {
+// takenPart is a class's member or attribute group withoutDeclarationAt
+// took out: its class's short name and compiled lines, the members it
+// declared, and the traits it used, by short name in lower case.
+type takenPart struct {
+	class       string
+	first, last int
+	names       []takenName
+	traits      []string
+}
+
+// takenName is a member a part declared: `name` of a method, a constant or
+// a case, `$name` of a property, with its kind as php's messages name it
+// ("method", "property", "constant") and whether it is private, which no
+// #[\Override] below it can mean.
+type takenName struct {
+	name, kind string
+	private    bool
+}
+
+// classSupers maps each class, interface and trait a PHP file declares
+// to the classes and interfaces it extends or implements, and to the
+// methods it declares, all by short name in lower case.
+func classSupers(php []byte) (supers map[string][]string, methods map[string]map[string]bool) {
+	supers, methods = map[string][]string{}, map[string]map[string]bool{}
 	f, err := parser.Parse(php, lexer.ModePHP)
 	if err != nil {
-		return nil, "", false
+		return supers, methods
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		if cd, ok := n.(*ast.ClassDecl); ok && cd.Name != nil {
+			key := strings.ToLower(cd.Name.Name)
+			for _, t := range append(slices.Clone(cd.Extends), cd.Implements...) {
+				if t.Name != nil {
+					supers[key] = append(supers[key], strings.ToLower(t.Name.Parts[len(t.Name.Parts)-1]))
+				}
+			}
+			methods[key] = map[string]bool{}
+			for _, m := range cd.Members {
+				if md, ok := m.(*ast.MethodDecl); ok {
+					methods[key][strings.ToLower(md.Name.Name)] = true
+				}
+			}
+		}
+		return true
+	})
+	return supers, methods
+}
+
+// below reports a class that extends or implements another, by short
+// names in lower case.
+func below(class, super string, supers map[string][]string) bool {
+	seen := map[string]bool{}
+	var up func(c string) bool
+	up = func(c string) bool {
+		if seen[c] {
+			return false
+		}
+		seen[c] = true
+		for _, s := range supers[c] {
+			if s == super || up(s) {
+				return true
+			}
+		}
+		return false
+	}
+	return up(class)
+}
+
+// reAbstractListed is a method php lists as abstract in "Class X contains
+// 1 abstract method … (I::size)".
+var reAbstractListed = regexp.MustCompile(`::(\w+)\b`)
+
+// reOverrideLost is php's refusal of an #[\Override] that overrides
+// nothing, with the class, the member and the kind of member it names.
+var reOverrideLost = regexp.MustCompile(`([\w\\]+)::(\$?\w+)(?:\(\))? has #\[\\Override\] attribute, but no matching parent (\w+)`)
+
+// reNamedMember is a member as php names it in a message: `X::$name`,
+// `X::name`, "magic method __toString".
+var reNamedMember = regexp.MustCompile(`::(\$?\w+)|magic method (\w+)`)
+
+// caused reports an error that taking the part out may have caused, where
+// it does not show one php had to refuse: in its class, one that names a
+// member it declared ("Class X contains 1 abstract method … (I::__construct)"
+// once X's constructor is out) or, a trait's use taken out, an abstract
+// method the class lacks that one of those traits declares (or may: a
+// trait the file does not declare); in a class below it, an #[\Override] that has
+// lost the member it overrode, where that member could mean it (one of its
+// kind, and not private); anywhere, an error thrown when code reaches for
+// a member that is no longer there.
+func (p takenPart) caused(message string, line int, supers map[string][]string, methods map[string]map[string]bool) bool {
+	inClass := p.first <= line && line <= p.last
+	if len(p.traits) > 0 && inClass && strings.Contains(message, "abstract method") {
+		for _, m := range reAbstractListed.FindAllStringSubmatch(message, -1) {
+			for _, t := range p.traits {
+				if declared, known := methods[t]; !known || declared[strings.ToLower(m[1])] {
+					return true
+				}
+			}
+		}
+	}
+	lost := reOverrideLost.FindStringSubmatch(message)
+	for _, n := range p.names {
+		if !regexp.MustCompile(`(?i)::` + regexp.QuoteMeta(n.name) + `\b`).MatchString(message) {
+			continue
+		}
+		switch {
+		case inClass:
+			return true
+		case lost != nil && strings.EqualFold(lost[2], n.name) && lost[3] == n.kind && !n.private:
+			class := lost[1][strings.LastIndexByte(lost[1], '\\')+1:]
+			if below(strings.ToLower(class), p.class, supers) {
+				return true
+			}
+		case strings.HasPrefix(message, "Uncaught ") && (strings.Contains(message, "ndefined") || strings.Contains(message, "undeclared")):
+			return true
+		}
+	}
+	return false
+}
+
+// withoutDeclarationAt blanks, in a PHP file, the top-level statement that
+// holds a line, keeping every line where it was, and says what that
+// statement declared: a class or a function by its name, "" otherwise. In
+// a class, it blanks the attribute group or the member the line is in
+// alone, so that php is asked again about the class's others, and says
+// what it took out. On the class's own lines php reports what is wrong
+// with the class as a whole, and what is wrong with a member it links,
+// which it names in message (`X::$p`, "magic method __toString", a trait's
+// `T::m`): such a member, or the use of such a trait, is taken out where
+// the class declares it, and otherwise the class.
+func withoutDeclarationAt(php []byte, line int, message string) ([]byte, string, *takenPart, bool) {
+	f, err := parser.Parse(php, lexer.ModePHP)
+	if err != nil {
+		return nil, "", nil, false
 	}
 	start := 0
 	for n := 1; n < line; n++ {
 		i := bytes.IndexByte(php[start:], '\n')
 		if i < 0 {
-			return nil, "", false
+			return nil, "", nil, false
 		}
 		start += i + 1
 	}
@@ -709,11 +850,22 @@ func withoutDeclarationAt(php []byte, line int) ([]byte, string, bool) {
 	if i := bytes.IndexByte(php[start:], '\n'); i >= 0 {
 		end = start + i
 	}
-	var blank func(stmts []ast.Stmt) ([]byte, string, bool)
-	blank = func(stmts []ast.Stmt) ([]byte, string, bool) {
+	reaches := func(span ast.Span) bool { return span.Start < end && span.End > start }
+	blanked := func(span ast.Span) []byte {
+		out := slices.Clone(php)
+		for i := span.Start; i < span.End; i++ {
+			if out[i] != '\n' {
+				out[i] = ' '
+			}
+		}
+		return out
+	}
+	lineAt := func(offset int) int { return 1 + bytes.Count(php[:offset], []byte{'\n'}) }
+	var blank func(stmts []ast.Stmt) ([]byte, string, *takenPart, bool)
+	blank = func(stmts []ast.Stmt) ([]byte, string, *takenPart, bool) {
 		for _, s := range stmts {
 			span := s.Span()
-			if span.Start >= end || span.End <= start {
+			if !reaches(span) {
 				continue // the statement does not reach the line
 			}
 			name := ""
@@ -721,21 +873,85 @@ func withoutDeclarationAt(php []byte, line int) ([]byte, string, bool) {
 			case *ast.Namespace:
 				return blank(s.Body)
 			case *ast.ClassDecl:
+				part := &takenPart{first: lineAt(span.Start), last: lineAt(span.End - 1)}
+				if s.Name != nil {
+					part.class = strings.ToLower(s.Name.Name)
+				}
+				for _, g := range s.Attrs {
+					if reaches(g.S) {
+						return blanked(g.S), "", part, true
+					}
+				}
+				named := map[string]bool{}
+				for _, m := range reNamedMember.FindAllStringSubmatch(message, -1) {
+					named[strings.ToLower(m[1]+m[2])] = true
+				}
+				declares := func(m ast.ClassMember) bool {
+					switch m := m.(type) {
+					case *ast.MethodDecl:
+						if named[strings.ToLower(m.Name.Name)] {
+							return true
+						}
+						for _, p := range m.Params {
+							if p.Modifiers != 0 && p.Var != nil && named["$"+strings.ToLower(p.Var.Name)] {
+								return true
+							}
+						}
+					case *ast.PropertyDecl:
+						for _, it := range m.Props {
+							if named["$"+strings.ToLower(it.Var.Name)] {
+								return true
+							}
+						}
+					case *ast.TraitUse:
+						// A trait's method php names, as a collision names both.
+						for _, n := range m.Names {
+							if regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(n.Parts[len(n.Parts)-1]) + `::`).MatchString(message) {
+								return true
+							}
+						}
+					}
+					return false
+				}
+				inMember := slices.ContainsFunc(s.Members, func(m ast.ClassMember) bool { return reaches(m.Span()) })
+				for _, m := range s.Members {
+					if inMember && !reaches(m.Span()) || !inMember && !declares(m) {
+						continue
+					}
+					switch m := m.(type) {
+					case *ast.MethodDecl:
+						part.names = append(part.names, takenName{m.Name.Name, "method", m.Modifiers&ast.ModPrivate != 0})
+						for _, p := range m.Params {
+							if p.Modifiers != 0 && p.Var != nil {
+								part.names = append(part.names, takenName{"$" + p.Var.Name, "property", p.Modifiers&ast.ModPrivate != 0})
+							}
+						}
+					case *ast.PropertyDecl:
+						for _, it := range m.Props {
+							part.names = append(part.names, takenName{"$" + it.Var.Name, "property", m.Modifiers&ast.ModPrivate != 0})
+						}
+					case *ast.ClassConstDecl:
+						for _, k := range m.Consts {
+							part.names = append(part.names, takenName{k.Name.Name, "constant", m.Modifiers&ast.ModPrivate != 0})
+						}
+					case *ast.EnumCase:
+						part.names = append(part.names, takenName{m.Name.Name, "constant", false})
+					case *ast.TraitUse:
+						for _, n := range m.Names {
+							part.traits = append(part.traits, strings.ToLower(n.Parts[len(n.Parts)-1]))
+						}
+					}
+					return blanked(m.Span()), "", part, true
+				}
 				if s.Name != nil {
 					name = s.Name.Name
 				}
 			case *ast.FunctionDecl:
 				name = s.Name.Name
 			}
-			out := slices.Clone(php)
-			for i := span.Start; i < span.End; i++ {
-				if out[i] != '\n' {
-					out[i] = ' '
-				}
-			}
-			return out, name, true
+			return blanked(span), name, nil, true
 		}
-		return nil, "", false
+		return nil, "", nil, false
 	}
 	return blank(f.Stmts)
 }

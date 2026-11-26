@@ -50,9 +50,9 @@ func (x *fnCtx) throwsClause(t *ast.Throws, doc *docblock.Doc, name ast.Span) {
 			continue
 		}
 		saved := x.nameOnly
-		x.nameOnly = true
+		x.nameOnly, x.inDocblock = true, true
 		name, ok := x.resolveClassName(nt.Name, nt.S)
-		x.nameOnly = saved
+		x.nameOnly, x.inDocblock = saved, false
 		if !ok {
 			continue
 		}

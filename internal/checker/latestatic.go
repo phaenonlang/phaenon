@@ -115,9 +115,9 @@ func (c *Checker) lateStaticIn(f *program.File, e ast.Expr, class *ast.ClassDecl
 		case class == nil:
 			c.report(span, P2012, "static used outside a class")
 		case instead == "":
-			c.report(span, P2532, "%s in a constant expression: PHP evaluates the expression for the class that declares it and refuses static there at compile time", written)
+			c.reportRefused(true, span, P2532, nil, "%s in a constant expression: PHP evaluates the expression for the class that declares it and refuses static there at compile time", written)
 		default:
-			c.report(span, P2532, "%s in a constant expression: PHP evaluates the expression for the class that declares it and refuses static there at compile time; write %s", written, instead)
+			c.reportRefused(true, span, P2532, nil, "%s in a constant expression: PHP evaluates the expression for the class that declares it and refuses static there at compile time; write %s", written, instead)
 		}
 	}
 	fold := func(e ast.Expr) foldResult { return foldStatic(e, at, 0) }

@@ -120,10 +120,10 @@ func (c *Checker) attributeTargets(f *program.File, groups []*ast.AttrGroup, tar
 					allowed = append(allowed, name)
 				}
 			}
-			c.report(u.a.S, P2533, "#[\\%s] cannot target a %s (allowed targets: %s): PHP refuses it when it compiles the file", u.class.Name, what, strings.Join(allowed, ", "))
+			c.reportRefused(true, u.a.S, P2533, nil, "#[\\%s] cannot target a %s (allowed targets: %s): PHP refuses it when it compiles the file", u.class.Name, what, strings.Join(allowed, ", "))
 		case seen[u.class] && u.flags&attrRepeatable == 0:
 			reported[u.class] = true
-			c.report(u.a.S, P2533, "#[\\%s] must not be repeated: PHP refuses a second one on a declaration when it compiles the file", u.class.Name)
+			c.reportRefused(true, u.a.S, P2533, nil, "#[\\%s] must not be repeated: PHP refuses a second one on a declaration when it compiles the file", u.class.Name)
 		}
 		seen[u.class] = true
 	}

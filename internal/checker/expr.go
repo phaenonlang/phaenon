@@ -847,7 +847,7 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 			if pc := x.class.ParentClass(); pc != nil {
 				recv, classes = types.Class{Name: pc.Name, Args: x.class.ParentArgs}, []*program.Class{pc}
 			} else {
-				x.report(n.S, P2011, "class %s has no parent", x.class.Name)
+				x.reportRefused(x.scopeKnown(), n.S, P2011, "class %s has no parent", x.class.Name)
 				return types.TMixed
 			}
 		} else {
@@ -3274,7 +3274,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		if isVar {
 			x.byRef[target.Name] = true
 		}
-		x.assignTo(e.Target, vt, env, e.S)
+		x.bind(nil, e.Target, vt, env, e.S)
 		// `$alias = &$r`: one value from here on, which a write to either
 		// writes (env.set). A reference to an offset or a property is
 		// not followed, as PHPStan does not follow it.
@@ -3291,7 +3291,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 			x.destructure(lit, vt, env, e.S, e.Value)
 			return vt
 		}
-		x.assignFrom(e.Value, e.Target, vt, env, e.S)
+		x.bind(e.Value, e.Target, vt, env, e.S)
 		if v, ok := e.Target.(*ast.Variable); ok {
 			env.setNative(v.Name, x.guaranteedOf(e.Value, env))
 			if plain {
@@ -3308,7 +3308,7 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		vt := x.expr(e.Value, rightEnv, x.targetType(e.Target, env))
 		*env = *join(env, rightEnv)
 		res := types.MakeUnion(types.StripNull(cur), vt)
-		x.assignTo(e.Target, res, env, e.S)
+		x.bind(nil, e.Target, res, env, e.S)
 		return res
 	}
 	cur := x.expr(e.Target, env, nil)
@@ -3424,6 +3424,25 @@ func (x *fnCtx) assignTo(target ast.Expr, vt types.Type, env *state, span ast.Sp
 	x.assignFrom(nil, target, vt, env, span)
 }
 
+// bind is assignFrom for a write that binds its target anew: `=`, `=&`,
+// `??=`, a foreach's key and value, an element of a destructuring. Of
+// $this, PHP refuses such a write when it compiles the file, where a
+// compound assignment, an increment and a by-reference argument compile
+// and fail or pass when they run (P2311).
+func (x *fnCtx) bind(value, target ast.Expr, vt types.Type, env *state, span ast.Span) {
+	if v, ok := unparen(target).(*ast.Variable); ok && v.Name == "this" {
+		x.reassignsThis(v, true)
+		return
+	}
+	x.assignFrom(value, target, vt, env, span)
+}
+
+// reassignsThis reports a write of $this, refused where PHP refuses it
+// (bind).
+func (x *fnCtx) reassignsThis(v *ast.Variable, refused bool) {
+	x.reportRefused(refused, v.S, P2311, "cannot re-assign $this")
+}
+
 // assignFrom is assignTo for a plain assignment, whose value is the
 // expression given: where a property refuses the value, that expression is
 // what may prove the finding an extra check (extra.go). Every other
@@ -3434,7 +3453,7 @@ func (x *fnCtx) assignFrom(value ast.Expr, target ast.Expr, vt types.Type, env *
 		x.assignFrom(value, t.Expr, vt, env, span)
 	case *ast.Variable:
 		if t.Name == "this" {
-			x.report(t.S, P2311, "cannot re-assign $this")
+			x.reassignsThis(t, false)
 			return
 		}
 		if _, isVoid := vt.(types.Void); isVoid {
@@ -4549,7 +4568,7 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 				x.byRef[v.Name] = true
 			}
 		}
-		x.assignTo(item.Value, elem, env, span)
+		x.bind(nil, item.Value, elem, env, span)
 	}
 }
 
