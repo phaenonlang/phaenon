@@ -203,6 +203,12 @@ var (
 	// (design/roadmap.md), the code is not reused.
 	P2530 = Code{"P2530", Error, "bytes used as text"}
 	P2531 = Code{"P2531", Error, "closure in a constant expression captures its scope"}
+	// P2532: `static::X`, `static::class`, `new static` or `static::m(...)`
+	// in a constant expression, which PHP evaluates for the declaring
+	// class and refuses at compile time ("static::" is not allowed in
+	// compile-time constants); a static variable's initialiser and a
+	// closure's body are code and may name it (lateStatic).
+	P2532 = Code{"P2532", Error, "static in a constant expression"}
 	// P2533: an attribute class of PHP's own on a declaration its flags
 	// leave out, or repeated where it is not repeatable, which PHP refuses
 	// when it compiles the file (ownAttributes); a user's attribute is

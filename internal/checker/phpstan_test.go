@@ -555,6 +555,9 @@ var checkerAlone = map[string][]struct {
 		"\"Cannot declare self-referencing constant …\" at the fetch when the value is first needed; PHPStan has no rule for it, and of a cycle reports at most a value it types mixed"}},
 	"override-constants.phn": {{P2503, []int{35, 52}, rewrittenAway, "#[\\Override] on a constant or an enum case no parent declares: compiled for 8.5, which knows the attribute " +
 		"on methods and properties, the emitter leaves it out there, and php 8.5 and 8.6 load the file. Compiled for 8.6 it stays, and is PHP 8.6's compile error"}},
+	"static-in-constants.phn": {{P2532, []int{25, 33, 39, 44, 65, 75, 85, 105, 115, 128, 137, 144, 149, 163}, phpRefuses,
+		"static in a constant expression is a compile error, `\"static::\" is not allowed in compile-time constants` and its kin; " +
+			"PHPStan has no rule for it, and reports at most a typed property's default as mixed"}},
 
 	"library-php86-types.phn": {{P2103, []int{42, 43}, artifact, "PHPStan's maps predate PHP 8.6 (allowIn says so for this file): " +
 		"it has Io\\Poll's parameters as bare arrays, where the stubs say non-empty-array<Io\\Poll\\Event>"}},
