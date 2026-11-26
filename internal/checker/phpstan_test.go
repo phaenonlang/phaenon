@@ -137,6 +137,18 @@ func TestPHPStanParity(t *testing.T) {
 		// body the rewritten return type refuses, on the line of its
 		// return: the same mistake, two lines below the checker's.
 		"override-interfaces.phn": {"return.type": {27, 61, 71, 111, 128, 168, 186, 231}},
+		// Where a by-reference parameter's @param-out is held at the end of
+		// a body, PHPStan reports a value no way out leaves: at a switch
+		// whose every way writes the parameter and returns (872) and at an
+		// endless loop (891), which it holds to the state they were entered
+		// with; at a return of a never function's call (885), as its rule
+		// passes over only an expression statement of explicit never type,
+		// which a return is not. The checker holds each way out to the
+		// type, and has nothing to report. And PHPStan reports the end of a
+		// body at a comment that follows its last statement (907), which
+		// php-parser holds as a statement of its own; the checker reports
+		// it at the statement (checkerAlone).
+		"param-out-body.phn": {"paramOut.type": {872, 885, 891, 907}},
 	}
 	// besideExtra are the lines whose findings are all extra checks and on
 	// which PHPStan speaks all the same, under an identifier the lists
@@ -562,6 +574,9 @@ var checkerAlone = map[string][]struct {
 	"library-php86-types.phn": {{P2103, []int{42, 43}, artifact, "PHPStan's maps predate PHP 8.6 (allowIn says so for this file): " +
 		"it has Io\\Poll's parameters as bare arrays, where the stubs say non-empty-array<Io\\Poll\\Event>"}},
 	"readonly-defaults.phn": {{P2206, []int{21}, artifact, "PHPStan predates readonly property defaults (allowIn) and reports the default itself, not the assignment PHP 8.6 refuses"}},
+
+	"param-out-body.phn": {{P2213, []int{905}, artifact, "the end of a body whose last statement a comment follows: php-parser holds the comment " +
+		"as a statement of its own, the body's last, and PHPStan reports the end at the comment's line (allowAt)"}},
 
 	"kept-conditions.phn": {
 		{P2103, []int{333, 349}, notToldApartYet, "a condition kept in a variable, ended by a write PHPStan does not follow: array_walk_recursive() with a callback " +

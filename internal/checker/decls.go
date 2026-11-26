@@ -98,6 +98,7 @@ func (c *Checker) checkFunction(f *program.File, fn *program.Function) {
 	c.declaredName(fn.Decl.Name.S, "function", fn.Decl.Name.Name)
 	c.checkUntyped(f, fn.Decl.Params, fn.Params, fn.Decl.ReturnType, fn.Return, fn.Decl.Name.Name, fn.Decl.S, fn.Doc, false)
 	ctx.pushThrows()
+	ctx.declHead = ast.Span{Start: fn.Decl.S.Start, End: fn.Decl.Name.S.End}
 	ctx.body(fn.Params, fn.Decl.Params, ctx.exprBody(fn.Decl.Name.Name, fn.Decl.Arrow, fn.Decl.Body), fn.Decl.Name.S)
 	points := ctx.popThrows()
 	if c.opts.Thrown != nil {
@@ -804,6 +805,7 @@ func (c *Checker) checkMethod(cl *program.Class, m *program.Method) {
 	scopeParams(ctx, m.Return)
 	ctx.pushThrows()
 	ctx.trackInits, ctx.trackReturns = true, true
+	ctx.declHead = ast.Span{Start: d.S.Start, End: d.Name.S.End}
 	end := ctx.body(m.Params, d.Params, ctx.exprBody(m.Name, d.Arrow, d.Body), d.Name.S)
 	c.recordInits(d, append(ctx.returnEnvs, end))
 	// A method an override may replace keeps the members its body does not

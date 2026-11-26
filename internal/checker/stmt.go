@@ -43,6 +43,9 @@ func (x *fnCtx) stmts(ss []ast.Stmt, env *state) {
 
 // stmt checks one statement.
 func (x *fnCtx) stmt(s ast.Stmt, env *state) {
+	if at, ok := x.outEnds[s]; ok && !env.dead {
+		defer x.outsAtEnd(s, at, env, len(x.returnEnvs))
+	}
 	if d := statementDoc(s); d != "" {
 		// `/** @var array<string, mixed> $data */` before an if, a loop or a
 		// try retypes the variable from there on, as PHPStan reads it.
@@ -92,6 +95,7 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 			if vv, ok := v.(*ast.Variable); ok {
 				env.set(vv.Name, types.TMixed)
 				x.byRef[vv.Name] = true
+				x.handedOver(vv, env)
 			}
 		}
 	case *ast.StaticVars:
@@ -119,6 +123,7 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 			}
 			env.set(v.Var.Name, t)
 			x.byRef[v.Var.Name] = true
+			x.handedOver(v.Var, env)
 		}
 	case *ast.Unset:
 		for _, v := range s.Vars {
@@ -126,6 +131,7 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 			case *ast.Variable:
 				x.variable(t, env, true)
 				env.unset(t.Name)
+				x.handedOver(t, env)
 			case *ast.Index:
 				base := x.exprLenient(t.Array, env)
 				x.forgetOffset(t, env)
@@ -423,6 +429,7 @@ func (x *fnCtx) unsetIndex(t *ast.Index, base types.Type, env *state, span ast.S
 			now := unsetOffset(boundedShapes(bounded), keyT)
 			env.set(a.Name, now)
 			x.keepRewritten(a, info.rewritten, p, t.S, now, env)
+			x.wroteOut(a.Name, now, env, span)
 		}
 	case *ast.PropertyFetch, *ast.StaticPropertyFetch, *ast.Index:
 		// Removing an element writes the property that holds the array,
@@ -517,6 +524,7 @@ func (x *fnCtx) writeExisting(target ast.Expr, vt types.Type, env *state, span a
 	case *ast.Variable:
 		if _, defined := env.get(t.Name); defined && t.Name != "this" {
 			env.set(t.Name, vt)
+			x.wroteOut(t.Name, vt, env, span)
 		}
 	case *ast.PropertyFetch, *ast.StaticPropertyFetch:
 		x.assignTo(t, vt, env, span)
@@ -663,6 +671,7 @@ func (x *fnCtx) ifStmt(s *ast.If, env *state) {
 	if s.Alt {
 		x.removed(s.S, "the alternative if syntax", "braces")
 	}
+	x.outsPastIf(s, env)
 	thenEnv, elseEnv := x.cond(s.Cond, env)
 	positive, negative := x.guardOf(s.Cond)
 	pop := x.c.pushGuard(positive)
@@ -1308,6 +1317,7 @@ func sameKind(a, b types.Type) bool {
 }
 
 func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
+	returns := len(x.returnEnvs) // the returns the finally block runs after
 	bodyEnv := env.clone()
 	// The catch blocks start from where the body can first throw (calls
 	// throw, as PHPStan's throw points are): after the leading statements
@@ -1455,10 +1465,21 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 	if s.HasFinally {
 		fEnv := joinAll(append(append([]*state{}, ends...), thrown)...)
 		fEnv.dead = false
+		// What the block writes of a parameter documented @param-out, it
+		// writes on every way out of the try, at a return inside it too.
+		entered := fEnv.outs
+		fEnv.outs = nil
 		x.inFinally++
 		x.stmts(s.Finally, fEnv)
 		x.inFinally--
+		wrote := fEnv.outs
+		fEnv.outs = entered
+		mergeOuts(fEnv, wrote)
+		if x.trackReturns && returns <= len(x.returnEnvs) {
+			finallyWrote(x.returnEnvs[returns:], wrote, fEnv)
+		}
 		after := joinAll(ends...)
+		mergeOuts(after, wrote)
 		// Assignments in finally apply on every path.
 		for k, v := range fEnv.vars {
 			if _, ok := after.vars[k]; !ok || !types.Equal(after.vars[k].t, v.t) {
@@ -2170,6 +2191,14 @@ func (x *fnCtx) body(params []*program.Param, decls []*ast.Param, stmts []ast.St
 	}
 	x.generator = bodyHasYield(stmts)
 	x.generatorReturnType()
+	x.paramOuts(params, stmts, env)
+	if len(withoutTrailingNops(stmts)) == 0 {
+		at := x.declHead
+		if at.End == 0 {
+			at = span
+		}
+		x.outsHeld(env, at, endsHere) // an empty body ends where it is declared
+	}
 	x.stmts(stmts, env)
 	if !env.dead && x.hasReturn && !x.generator {
 		// Reported where the body ends, like PHPStan: the last statement.

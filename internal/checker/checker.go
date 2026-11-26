@@ -889,6 +889,18 @@ type fnCtx struct {
 	// any of its exits does.
 	returnEnvs   []*state
 	trackReturns bool
+	// outs are the by-reference parameters of the function or method
+	// being checked that a @param-out documents, by name and in order
+	// (outOrder); outEnds the statements its body ends with, each with
+	// the span its finding goes to (paramout.go). Nil in a closure.
+	// outUnchecked marks the write being recorded as one held to nothing;
+	// declHead is where the declaration starts, its attributes and
+	// modifiers included, which an empty body's end is reported at.
+	outs         map[string]*outParam
+	outOrder     []*outParam
+	outEnds      map[ast.Stmt]ast.Span
+	outUnchecked bool
+	declHead     ast.Span
 	// trackInits records the properties of $this a method body assigns
 	// (state.inits), for the readonly properties a constructor must
 	// initialise (readonly.go).
