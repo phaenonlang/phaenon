@@ -55,18 +55,20 @@ func Truthy(t Type) Type {
 
 // NonEmptyShape is s where it holds an entry at least: never for a sealed
 // shape with none, and a sealed shape whose one entry is optional has it,
-// as PHPStan's non-empty `array{a?: int}` is `array{a: int}`.
+// as PHPStan's non-empty `array{a?: int}` is `array{a: int}`. A list holds
+// its first entry where it holds any: PHPStan's non-empty `list{0?: int,
+// 1?: int}` is `list{0: int, 1?: int}`.
 func NonEmptyShape(s Shape) Type {
 	if shapeNonEmpty(s) || s.Unsealed {
 		return s
 	}
-	switch len(s.Entries) {
-	case 0:
+	switch {
+	case len(s.Entries) == 0:
 		return TNever
-	case 1:
-		e := s.Entries[0]
-		e.Optional = false
-		s.Entries = []ShapeEntry{e}
+	case len(s.Entries) == 1 || s.List && s.Entries[0].IsInt && s.Entries[0].IntKey == 0:
+		entries := append([]ShapeEntry(nil), s.Entries...)
+		entries[0].Optional = false
+		s.Entries = entries
 	}
 	return s
 }

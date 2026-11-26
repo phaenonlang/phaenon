@@ -1,8 +1,6 @@
 package checker
 
 import (
-	"math"
-
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/types"
@@ -53,14 +51,12 @@ import (
 // of what the alias writes, nor of the end after it, and the same holds of
 // `static $x` and `global $x`. A closure that uses the parameter by
 // reference does not, and what it may write is part of what the end
-// holds. Of php-src's functions with no @param-out in the overlay, moving
-// an array's pointer (reset(), end(), next(), prev()), array_walk() with a
-// callback that takes the value by value and array_multisort() write
-// nothing PHPStan holds to the tag, and the end of the body is held to
-// what the parameter then holds; a sort that keeps the types of the keys
-// and values writes the array, a list no longer one (keepsTheKeys); any other
-// function's write, settype(), parse_str(), fsockopen()'s error code,
-// array_walk() with a callback that takes the value by reference, is one
+// holds. A function of php-src's writes what the overlay's @param-out
+// says, held to the tag at the call, and a parameter PHPStan's map says it
+// reads is no write, the end of the body held to what the parameter then
+// holds, but where PHPStan writes it back all the same (phpwrites.go).
+// What is left, settype() and a function with side effects that reads an
+// argument that may be an object or a resource, is a write
 // the checker does not type, and hands the parameter over unchecked.
 
 // outParam is a by-reference parameter a @param-out documents, with what
@@ -297,43 +293,6 @@ func (x *fnCtx) wroteOut(name string, vt types.Type, env *state, span ast.Span) 
 	x.c.reportRelated(span, P2213, related(x.file, op.p.Span, "parameter $%s declared here", op.p.Name),
 		"$%s is documented @param-out %s, and %s writes %s to it here: %s",
 		op.p.Name, x.typeName(out), x.name, x.typeName(vt), remedy)
-}
-
-// sortWrite holds the parameter e is, or holds an offset of, to its
-// @param-out type where a sort of php-src's with no @param-out in the
-// overlay writes the array back with its keys and values (keepsTheKeys):
-// PHPStan holds the value written to the tag at the call. In another
-// order, a list's keys are no list's any more (sortKeepingKeys).
-func (x *fnCtx) sortWrite(e ast.Expr, env *state, span ast.Span) {
-	if v := x.outRoot(e); v != nil {
-		if info, ok := env.get(v.Name); ok {
-			t := info.t
-			if _, sorted := unparen(e).(*ast.Variable); sorted {
-				t = sortKeepingKeys(t)
-			}
-			x.wroteOut(v.Name, t, env, span)
-		}
-	}
-}
-
-// sortKeepingKeys is t, an array a sort reorders keeping its keys: a list
-// is then an array of int<0, max> keys, as PHPStan has it
-// (makeListMaybe), and any other array keeps its type.
-func sortKeepingKeys(t types.Type) types.Type {
-	return types.Map(t, func(m types.Type) types.Type {
-		switch m := m.(type) {
-		case types.Array:
-			if m.List {
-				m.List = false
-				m.Key = types.Int{Lo: 0, Hi: math.MaxInt64}
-			}
-			return m
-		case types.Shape:
-			m.List = false
-			return m
-		}
-		return m
-	})
 }
 
 // handedOver records a write to the parameter e is, or holds an offset of,

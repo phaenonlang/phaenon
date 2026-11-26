@@ -86,17 +86,25 @@ function array_reverse(array $array, bool $preserve_keys = false): array {}
 function array_unique(array $array, int $flags = SORT_STRING): array {}
 
 /**
+ * The array keeps its keys; the checker keeps a shape's entries
+ * (poppedArray).
+ *
+ * @template K of array-key
  * @template V
- * @param array<V> $array
- * @param-out ($array is list ? list<V> : array<V>) $array
+ * @param array<K, V> $array
+ * @param-out ($array is list ? list<V> : array<K, V>) $array
  * @return ($array is non-empty-array ? V : V|null)
  */
 function array_pop(array &$array): mixed {}
 
 /**
+ * The array keeps its keys; the checker keeps a shape's entries
+ * (poppedArray).
+ *
+ * @template K of array-key
  * @template V
- * @param array<V> $array
- * @param-out ($array is list ? list<V> : array<V>) $array
+ * @param array<K, V> $array
+ * @param-out ($array is list ? list<V> : array<K, V>) $array
  * @return ($array is non-empty-array ? V : V|null)
  */
 function array_shift(array &$array): mixed {}
@@ -492,14 +500,14 @@ function array_all(array $array, callable $callback): bool {}
 /**
  * @template V
  * @param array<V> $array
- * @param-out list<V> $array
+ * @param-out ($array is non-empty-array ? non-empty-list<V> : list<V>) $array
  */
 function sort(array &$array, int $flags = SORT_REGULAR): true {}
 
 /**
  * @template V
  * @param array<V> $array
- * @param-out list<V> $array
+ * @param-out ($array is non-empty-array ? non-empty-list<V> : list<V>) $array
  */
 function rsort(array &$array, int $flags = SORT_REGULAR): true {}
 
@@ -507,25 +515,29 @@ function rsort(array &$array, int $flags = SORT_REGULAR): true {}
  * @template V
  * @param array<V> $array
  * @param callable(V, V): int $callback
- * @param-out list<V> $array
+ * @param-out ($array is non-empty-array ? non-empty-list<V> : list<V>) $array
  */
 function usort(array &$array, callable $callback): true {}
 
 /**
+ * The array keeps its keys, in another order (the checker's
+ * sortKeepingKeys, as PHPStan writes it back).
+ *
  * @template K of array-key
  * @template V
  * @param array<K, V> $array
  * @param callable(V, V): int $callback
- * @param-out array<K, V> $array
  */
 function uasort(array &$array, callable $callback): true {}
 
 /**
+ * The array keeps its keys, in another order (the checker's
+ * sortKeepingKeys, as PHPStan writes it back).
+ *
  * @template K of array-key
  * @template V
  * @param array<K, V> $array
  * @param callable(K, K): int $callback
- * @param-out array<K, V> $array
  */
 function uksort(array &$array, callable $callback): true {}
 

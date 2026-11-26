@@ -947,6 +947,19 @@ type fnCtx struct {
 	// any of its exits does.
 	returnEnvs   []*state
 	trackReturns bool
+	// refExits holds, for each closure checked in this body whose first
+	// parameter is taken by reference, what that parameter holds where
+	// the closure returns or ends: what array_walk() writes back with it
+	// (phpwrites.go).
+	refExits map[*ast.Closure]types.Type
+	// neverEnvs collects, while trackNever is set, the state at every
+	// statement of type never in a closure whose first parameter is taken
+	// by reference: an exit PHPStan gathers for array_walk() as a return.
+	neverEnvs  []*state
+	trackNever bool
+	// inTry counts the try statements whose body or catch blocks are
+	// being checked.
+	inTry int
 	// outs are the by-reference parameters of the function or method
 	// being checked that a @param-out documents, by name and in order
 	// (outOrder); outEnds the statements its body ends with, each with
