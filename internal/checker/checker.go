@@ -117,6 +117,42 @@ type Diagnostic struct {
 	// error, or a fatal error when the file is loaded and its classes are
 	// declared or linked. No ignore comment silences it (reportRefused).
 	refused bool
+	// rewritten marks a finding about a declaration the compiled file
+	// writes with another type than the source does, since the type the
+	// source writes does not fit: the body was checked against a type the
+	// compiled method does not have. No ignore comment silences it
+	// (compiledOtherwise).
+	rewritten bool
+}
+
+// standing is why no ignore comment silences a finding, whatever its code:
+// decided where the finding is reported, since a code may mean such code
+// in one finding and not in another.
+type standing uint8
+
+const (
+	// mayBeSilenced: the finding is about what the code does, which a
+	// comment may accept, where its code is one a comment silences
+	// (silenceable).
+	mayBeSilenced standing = iota
+	// compiledOtherwise: the compiled file says something else than the
+	// source at the place (Diagnostic.rewritten).
+	compiledOtherwise
+	// refusedByPHP: PHP refuses the compiled file (Diagnostic.refused).
+	refusedByPHP
+)
+
+// standing is why no comment silences d, mayBeSilenced where one may: PHP
+// refusing the code comes before the code saying something else, as
+// nothing runs of code PHP refuses.
+func (d *Diagnostic) standing() standing {
+	switch {
+	case d.refused:
+		return refusedByPHP
+	case d.rewritten || otherThanItReads[d.Code]:
+		return compiledOtherwise
+	}
+	return mayBeSilenced
 }
 
 // SyntaxError is the P1000 of a file that does not parse (err, from
@@ -381,7 +417,7 @@ func (c *Checker) without(r *ignoreRule, code string) string {
 func (c *Checker) codesFor(path string, line int, word string) string {
 	var codes []string
 	for _, d := range c.diags {
-		if d.File == path && d.Line == line && silenceable(d.Code) && !d.refused && !slices.Contains(codes, d.Code) {
+		if d.File == path && d.Line == line && silenceable(d.Code) && d.standing() == mayBeSilenced && !slices.Contains(codes, d.Code) {
 			codes = append(codes, d.Code)
 		}
 	}
@@ -450,23 +486,23 @@ func (c *Checker) leavesOut() bool {
 // or a stale suppression could be hidden by naming it, and a comment that
 // names it is told so. So is one that names the code of a finding about
 // code PHP refuses on its line, or about code that does something else
-// than it reads (otherThanItReads), where it silences no other finding of
-// that code.
+// than it reads (otherThanItReads, compiledOtherwise), where it silences
+// no other finding of that code.
 func (c *Checker) settleIgnores() {
 	type lineCode struct {
 		file string
 		line int
 		code string
 	}
-	// standing are the findings no comment silences that a comment may
+	// stands are the findings no comment silences that a comment may
 	// name on their line: about code PHP refuses, or code that does
-	// something else than it reads.
-	standing := map[lineCode]bool{}
+	// something else than it reads. Where a line has one of each under a
+	// code, the comment is told of the one PHP refuses.
+	stands := map[lineCode]standing{}
 	kept := c.diags[:0]
 	for _, d := range c.diags {
-		if d.refused || otherThanItReads[d.Code] {
-			standing[lineCode{d.File, d.Line, d.Code}] = true
-		}
+		at := lineCode{d.File, d.Line, d.Code}
+		stands[at] = max(stands[at], d.standing())
 		if d.silencedBy != nil {
 			// Every comment that covers the line and names the code silenced
 			// it, not the first alone: one above the line and one after it,
@@ -515,9 +551,9 @@ func (c *Checker) settleIgnores() {
 							c.report(r.at, P4015, "%s: %s is no finding of a line, and no comment silences it: %s", r.word, code, c.without(r, code))
 						case ofTheSyntax[code]:
 							c.report(r.at, P4015, "%s: %s says the code is not Phaenon as written, and no comment silences it: %s", r.word, code, c.without(r, code))
-						case !r.used[code] && standing[lineCode{f.Path, line, code}] && otherThanItReads[code]:
+						case !r.used[code] && stands[lineCode{f.Path, line, code}] == compiledOtherwise:
 							c.report(r.at, P4015, "%s: %s on line %d is about code that compiles to PHP doing something else than it reads, and no comment silences it: %s", r.word, code, line, c.without(r, code))
-						case !r.used[code] && standing[lineCode{f.Path, line, code}]:
+						case !r.used[code] && stands[lineCode{f.Path, line, code}] == refusedByPHP:
 							c.report(r.at, P4015, "%s: %s on line %d is about code PHP refuses to compile or load, and no comment silences it: %s", r.word, code, line, c.without(r, code))
 						case !r.used[code] && !c.leftOut(code):
 							c.report(r.at, P4015, "%s: no %s is reported on line %d", r.word, code, line)
@@ -632,7 +668,7 @@ func related(f *program.File, span ast.Span, format string, args ...any) *Relate
 
 // reportRelated is report with the declaration the finding is about.
 func (c *Checker) reportRelated(span ast.Span, code Code, rel *Related, format string, args ...any) {
-	c.reportOf(Parity, false, span, code, rel, format, args...)
+	c.reportOf(Parity, mayBeSilenced, span, code, rel, format, args...)
 }
 
 // reportRefused is reportRelated for a finding that may be about code PHP
@@ -646,7 +682,11 @@ func (c *Checker) reportRelated(span ast.Span, code Code, rel *Related, format s
 // fatal when the class is declared, a docblock that PHP never reads is
 // not.
 func (c *Checker) reportRefused(refused bool, span ast.Span, code Code, rel *Related, format string, args ...any) {
-	c.reportOf(Parity, refused, span, code, rel, format, args...)
+	why := mayBeSilenced
+	if refused {
+		why = refusedByPHP
+	}
+	c.reportOf(Parity, why, span, code, rel, format, args...)
 }
 
 // reportRefused is the checker's, for a finding without a declaration.
@@ -679,9 +719,10 @@ type findingKey struct {
 
 // reportOf records a finding of the kind its place gives it; a code that
 // is a language rule as a whole makes it one whatever the place says.
-// refused marks a finding about code PHP refuses (reportRefused), which no
-// comment silences; a finding reported again with the mark takes it.
-func (c *Checker) reportOf(kind Kind, refused bool, span ast.Span, code Code, rel *Related, format string, args ...any) {
+// why says whether a comment may silence the finding and, where none
+// does, for which reason (standing); a finding reported again with a
+// reason takes it.
+func (c *Checker) reportOf(kind Kind, why standing, span ast.Span, code Code, rel *Related, format string, args ...any) {
 	if languageRules[code.ID] {
 		kind = LanguageRule
 	}
@@ -694,10 +735,12 @@ func (c *Checker) reportOf(kind Kind, refused bool, span ast.Span, code Code, re
 	endLine, endCol := c.file.Position(end)
 	key := findingKey{file: c.file.Path, line: line, col: col, code: code.ID, msg: msg, extra: kind == Extra}
 	if c.reported[key] {
-		if refused {
+		if why != mayBeSilenced {
 			for i := range c.diags {
-				if c.diags[i].key == key {
-					c.diags[i].refused, c.diags[i].silencedBy = true, nil
+				if d := &c.diags[i]; d.key == key {
+					d.refused = d.refused || why == refusedByPHP
+					d.rewritten = d.rewritten || why == compiledOtherwise
+					d.silencedBy = nil
 				}
 			}
 		}
@@ -705,8 +748,9 @@ func (c *Checker) reportOf(kind Kind, refused bool, span ast.Span, code Code, re
 	}
 	c.reported[key] = true
 	d := Diagnostic{File: c.file.Path, Line: line, Col: col, EndLine: endLine, EndCol: endCol + 1,
-		Severity: code.Severity, Code: code.ID, Kind: kind, Message: msg, key: key, refused: refused}
-	if silenceable(code.ID) && !refused {
+		Severity: code.Severity, Code: code.ID, Kind: kind, Message: msg, key: key,
+		refused: why == refusedByPHP, rewritten: why == compiledOtherwise}
+	if silenceable(code.ID) && why == mayBeSilenced {
 		d.silencedBy = c.silencing(c.file, line, code.ID)
 	}
 	if rel != nil {
