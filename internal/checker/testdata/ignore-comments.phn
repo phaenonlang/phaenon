@@ -108,3 +108,19 @@ function advice(): void {
     wantsInt(13); // @phaenon-ignore // want P4015 "names no code, and silences nothing: no finding a comment silences is reported on line 108, so remove it"
     wantsInt('y'); /* @phaenon-ignore P2202 */ // @phaenon-ignore // want P2103, P4015 "no P2202 is reported", P4015 "name the codes it is for, here `@phaenon-ignore P2103`"
 }
+
+// Phaenon's syntax (P1000–P1007) is no finding a comment accepts: what
+// Phaenon removed or forbids, and what the target cannot run, is reported
+// whatever comment stands on its line. A comment that names such a code
+// is told so; one that silences every finding of its line silences the
+// others there, and where there are none, it silences nothing. PHP's
+// deprecations (P1101) are silenced as any finding is.
+function syntax(string $s): void {
+    $a = (integer) $s; // @phpstan-ignore cast.int // want P1001
+    $b = (integer) $s; // @phaenon-ignore-line // want P1001, P4015 "no finding a comment silences is reported on line 120"
+    $c = (integer) $s; // @phaenon-ignore P1001 // want P1001, P4015 "P1001 says the code is not Phaenon as written, and no comment silences it: remove the comment"
+    wantsInt((integer) $s . 'z'); // @phaenon-ignore P1001, P2103 // want P1001, P4015 "P1001 says the code is not Phaenon as written, and no comment silences it: take P1001 out of the comment"
+    wantsInt((integer) $s . 'z'); // @phaenon-ignore // want P1001, P2103, P4015 "names no code, and silences nothing: name the codes it is for, here `@phaenon-ignore P2103`"
+    // @phaenon-ignore-next-line
+    wantsInt((integer) $s . 'w'); // want P1001
+}

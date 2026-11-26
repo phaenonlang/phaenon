@@ -53,10 +53,15 @@ func setVisibilityOf(m ast.Modifier, get Visibility) Visibility {
 // TypeParam is a declared type parameter (docblock @template in M2,
 // syntax in M3).
 type TypeParam struct {
-	Name     string
-	Bound    types.Type // nil = mixed
-	Default  types.Type
-	Variance types.Variance
+	Name  string
+	Bound types.Type // nil = mixed
+	// BoundText is the bound in the words of its declaration, `AnB` where
+	// it names an alias and `map<string, int>` where it is so written, as
+	// the printer writes a type (one line, no comments), for a finding
+	// that tells the reader what to declare; "" without a bound.
+	BoundText string
+	Default   types.Type
+	Variance  types.Variance
 	// Native marks a parameter declared in Phaenon syntax (`class Foo<T>`)
 	// rather than in a docblock: the emitter erases it and the checker
 	// applies the Phaenon rules (variance positions, static members, …).
@@ -254,8 +259,10 @@ type Constant struct {
 	Deprecated     bool
 	DeprecatedNote string
 	Polyfilled     bool
-	// Defined marks a global constant define() declares, whose value may
-	// differ from one way to another.
+	// Defined marks a global constant define() makes, perhaps in a branch
+	// or after code that names it runs, so that its value may differ from
+	// one way to another; a `const` statement declares the others where
+	// it stands.
 	Defined bool
 	// Attrs are the attribute groups of a class constant's declaration.
 	Attrs    []*ast.AttrGroup

@@ -2,7 +2,7 @@
 
 /*
  * The values of the constants php-src declares UNKNOWN in its stubs, read
- * from PHP 8.6.0-dev (get_defined_constants(), the embedded extensions only).
+ * from PHP 8.6.0 (get_defined_constants(), the embedded extensions only).
  * A stub keeps its @var type; the value is what a conditional type decides
  * on. Machine-dependent constants (PHP_OS, PHP_EOL, …) are typed, not
  * valued, by the checker. The installation paths (PHP_PREFIX, PHP_BINARY,
@@ -1745,8 +1745,8 @@ const PGSQL_ERRORS_SQLSTATE = 3;
 const PGSQL_ERRORS_TERSE = 0;
 const PGSQL_ERRORS_VERBOSE = 2;
 const PGSQL_FATAL_ERROR = 7;
-const PGSQL_LIBPQ_VERSION = '18.6';
-const PGSQL_LIBPQ_VERSION_STR = '18.6';
+const PGSQL_LIBPQ_VERSION = '19.0';
+const PGSQL_LIBPQ_VERSION_STR = '19.0';
 const PGSQL_NONFATAL_ERROR = 6;
 const PGSQL_NOTICE_ALL = 2;
 const PGSQL_NOTICE_CLEAR = 3;
@@ -1777,8 +1777,7 @@ const PGSQL_TUPLES_OK = 2;
 const PHP_BINARY = '/usr/bin/php';
 const PHP_BINARY_READ = 2;
 const PHP_BINDIR = '/usr/bin';
-const PHP_BUILD_DATE = 'Oct 31 2026 23:25:36';
-const PHP_BUILD_PROVIDER = 'Shivam Mathur';
+const PHP_BUILD_DATE = 'Nov 20 2026 18:53:09';
 const PHP_CLI_PROCESS_TITLE = true;
 const PHP_CONFIG_FILE_PATH = '/usr/lib';
 const PHP_CONFIG_FILE_SCAN_DIR = '';
@@ -1787,7 +1786,7 @@ const PHP_DEBUG = false;
 const PHP_EOL = '
 ';
 const PHP_EXTENSION_DIR = '/usr/lib/php/extensions';
-const PHP_EXTRA_VERSION = '-dev';
+const PHP_EXTRA_VERSION = '';
 const PHP_FD_SETSIZE = 1024;
 const PHP_FLOAT_DIG = 15;
 const PHP_FLOAT_EPSILON = 2.220446049250313E-16;
@@ -1842,7 +1841,7 @@ const PHP_URL_PORT = 2;
 const PHP_URL_QUERY = 6;
 const PHP_URL_SCHEME = 0;
 const PHP_URL_USER = 3;
-const PHP_VERSION = '8.6.0-dev';
+const PHP_VERSION = '8.6.0';
 const PHP_VERSION_ID = 80600;
 const PHP_ZTS = false;
 const PKCS7_BINARY = 128;

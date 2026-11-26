@@ -203,6 +203,12 @@ var (
 	// (design/roadmap.md), the code is not reused.
 	P2530 = Code{"P2530", Error, "bytes used as text"}
 	P2531 = Code{"P2531", Error, "closure in a constant expression captures its scope"}
+	// P2532: `static::X`, `static::class`, `new static` or `static::m(...)`
+	// in a constant expression, which PHP evaluates for the declaring
+	// class and refuses at compile time ("static::" is not allowed in
+	// compile-time constants); a static variable's initialiser and a
+	// closure's body are code and may name it (lateStatic).
+	P2532 = Code{"P2532", Error, "static in a constant expression"}
 	// P2533: an attribute class of PHP's own on a declaration its flags
 	// leave out, or repeated where it is not repeatable, which PHP refuses
 	// when it compiles the file (ownAttributes); a user's attribute is
@@ -255,7 +261,8 @@ var (
 	// ignore.unmatchedIdentifier, ignore.unmatchedLine, ignore.parseError).
 	// A comment is held to the codes the run reports and no other
 	// (Checker.leftOut). No comment silences this code, nor a code of the
-	// run (ofTheRun), and one that names either is reported for that.
+	// run (ofTheRun) or of the syntax (ofTheSyntax), and one that names any
+	// of them is reported for that.
 	P4015 = Code{"P4015", Warning, "ignore comment that silences nothing"}
 	// P4013 reported a `concurrently` block or a `spawn` in a project without
 	// phaenon/concurrent installed; retired with the syntax on 2026-11-08
@@ -280,4 +287,27 @@ var (
 var ofTheRun = map[string]bool{
 	P4005.ID: true, P4007.ID: true, P4008.ID: true, P4009.ID: true,
 	P4010.ID: true, P4012.ID: true, P4016.ID: true,
+}
+
+// ofTheSyntax are the codes that say the source is not Phaenon as written:
+// a file that does not parse (P1000), a construct Phaenon removed
+// (P1001), one the target lacks and phn does not lower (P1002), syntax
+// PHP's compiler or Phaenon forbids (P1003–P1006) and syntax not designed
+// yet (P1007). An ignore comment accepts a finding about what code does;
+// it does not make other text Phaenon. Silenced, such a finding let the
+// build fail on the file all the same with a less clear message, or write
+// the text as it stands: `(integer)`, which PHP 8.5 deprecates, a tab, a
+// construct the target cannot run. So no ignore comment silences these
+// codes, and a comment that names one is told so (P4015). PHP's
+// deprecations (P1101) are no part of it: the code runs, and a comment
+// may accept them.
+var ofTheSyntax = map[string]bool{
+	P1000.ID: true, P1001.ID: true, P1002.ID: true, P1003.ID: true,
+	P1004.ID: true, P1005.ID: true, P1006.ID: true, P1007.ID: true,
+}
+
+// silenceable reports whether an ignore comment may silence a finding of
+// the code: neither P4015, nor a code of the run or of the syntax.
+func silenceable(code string) bool {
+	return code != P4015.ID && !ofTheRun[code] && !ofTheSyntax[code]
 }

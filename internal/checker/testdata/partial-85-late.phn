@@ -1,0 +1,65 @@
+// A method bound when the call runs takes its own defaults. For a PHP 8.5
+// target the closure that stands for `...` then passes on what it is given,
+// and nothing by reference: one that leaves a by-reference parameter is
+// refused, as one is whose defaults cannot be written otherwise
+// (design/php-versions.md §5.3). A ? for each parameter `...` leaves
+// before a variadic one is exact.
+
+define('FILL_K', 'k');
+
+class Filler {
+    fill(string $t, ?array<mixed> &$out = null): string {
+        $out = [$t];
+        return $t;
+    }
+
+    two(string $t, string $k = 'k', ?array<mixed> &$out = null): string {
+        $out = [$k];
+        return $t;
+    }
+
+    refs(string $t, string $k = 'k', int &...$refs): string {
+        foreach ($refs as &$r) {
+            $r++;
+        }
+        return $t . $k;
+    }
+
+    plain(string $t, string $k = 'k'): string => $t . $k;
+}
+
+final class Sealed {
+    fill(string $t, ?array<mixed> &$out = null): string {
+        $out = [$t];
+        return $t;
+    }
+
+    defined(string $t, string $k = FILL_K, ?array<mixed> &$out = null): string {
+        $out = [$k];
+        return $t;
+    }
+}
+
+function late(Filler $f): void {
+    $out = null;
+    $n = 1;
+    $a = $f->fill('a', ...); // want P1002 "the method is bound when the call runs, so the defaults of the parameters `...` leaves are not known where the closure is written, and a closure that passes its arguments on cannot pass $out by reference: write a ? for $out in place of the `...`, or target PHP 8.6"
+    $b = $f->two('b', ...); // want P1002 "write a ? for each of $k, $out in place of the `...`"
+    $c = $f->two(t: 'c', ...); // want P1002 "write k: ?, out: ? in place of the `...`"
+    $d = $f->refs('d', ...); // want P1002 "cannot pass $refs by reference: write a ? for $k before the `...`"
+    echo $a($out), $b(), $c(), $d('k', $n);
+    $e = $f->fill('e', ?);
+    $g = $f->two('g', ?, ?);
+    $h = $f->two(t: 'h', k: ?, out: ?);
+    $i = $f->refs('i', ?, ...);
+    $j = $f->plain('j', ...);
+    echo $e($out), $g('k', $out), $h('k', $out), $i('k', $n), $j();
+}
+
+function early(Sealed $s): void {
+    $out = null;
+    $a = $s->fill('a', ...);
+    $b = $s->defined('b', ...); // want P1002 "`...` leaves the by-reference parameter $out, which the closure written for PHP 8.5 would pass on by value, as a default of the parameters it leaves cannot be written there: write a ? for each of $k, $out in place of the `...`"
+    $c = $s->defined('c', ?, ?);
+    echo $a($out), $b(), $c('k', $out);
+}

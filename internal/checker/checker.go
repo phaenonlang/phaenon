@@ -224,6 +224,9 @@ type Checker struct {
 	// that calls it where it stands with arguments, `(f(B, ...))(X)`
 	// (Partial.Direct).
 	atOnce map[*ast.ArgList]*ast.Call
+	// refusedStatic holds the static references in constant expressions
+	// reported before the file is typed (lateStatic).
+	refusedStatic map[ast.Expr]bool
 }
 
 // New creates a checker for the program.
@@ -234,8 +237,8 @@ func New(p *program.Program, opts Options) *Checker {
 }
 
 // ignoreRule is one ignore comment and the line it silences. A
-// `@phpstan-ignore …` silences every finding of its line, as it always
-// has: how PHPStan's identifiers would match Phaenon's codes is not
+// `@phpstan-ignore …` silences every finding of its line a comment may
+// silence (silenceable), as it always has: how PHPStan's identifiers would match Phaenon's codes is not
 // settled. A `@phaenon-ignore P2103, P2202` silences the codes it names
 // and no other, and like `@phaenon-ignore-line` and
 // `@phaenon-ignore-next-line`, which silence every finding, it is itself
@@ -351,13 +354,13 @@ func parseIgnore(text string) *ignoreRule {
 }
 
 // without is the advice to a comment that names a code no comment
-// silences (P4015, a code of the run): to take the code out where another
+// silences (P4015, a code of the run or of the syntax): to take the code out where another
 // code it names silences something, or may in a run that reports the code
 // (leftOut), and otherwise to remove the comment, which silences nothing:
 // left with no code, or with codes that silence nothing, it is P4015 again.
 func (c *Checker) without(r *ignoreRule, code string) string {
 	for _, other := range r.codes {
-		if other != P4015.ID && !ofTheRun[other] && (r.used[other] || c.leftOut(other)) {
+		if silenceable(other) && (r.used[other] || c.leftOut(other)) {
 			return "take " + code + " out of the comment"
 		}
 	}
@@ -365,14 +368,14 @@ func (c *Checker) without(r *ignoreRule, code string) string {
 }
 
 // codesFor is the advice to a comment that names no code: the codes still
-// reported on its line, which it is for; where there are none, to remove
+// reported on its line that a comment silences, which it is for; where there are none, to remove
 // it, unless the run leaves some code's findings out (leavesOut) and one
 // of those may be there. Advice that a comment followed would make P4015
 // again is not given: a code the line does not report, or none.
 func (c *Checker) codesFor(path string, line int, word string) string {
 	var codes []string
 	for _, d := range c.diags {
-		if d.File == path && d.Line == line && d.Code != P4015.ID && !slices.Contains(codes, d.Code) {
+		if d.File == path && d.Line == line && silenceable(d.Code) && !slices.Contains(codes, d.Code) {
 			codes = append(codes, d.Code)
 		}
 	}
@@ -489,6 +492,8 @@ func (c *Checker) settleIgnores() {
 							c.report(r.at, P4015, "%s: no comment silences P4015, or one that silences nothing could hide itself: %s", r.word, c.without(r, code))
 						case ofTheRun[code]:
 							c.report(r.at, P4015, "%s: %s is no finding of a line, and no comment silences it: %s", r.word, code, c.without(r, code))
+						case ofTheSyntax[code]:
+							c.report(r.at, P4015, "%s: %s says the code is not Phaenon as written, and no comment silences it: %s", r.word, code, c.without(r, code))
 						case !r.used[code] && !c.leftOut(code):
 							c.report(r.at, P4015, "%s: no %s is reported on line %d", r.word, code, line)
 						}
@@ -605,6 +610,16 @@ func (c *Checker) reportRelated(span ast.Span, code Code, rel *Related, format s
 	c.reportOf(Parity, span, code, rel, format, args...)
 }
 
+// relateAlso adds rel to the related positions of the finding reported
+// since mark, where one was: a finding that was already reported, in the
+// same words at the same place, keeps what it has.
+func (c *Checker) relateAlso(mark checkMark, rel *Related) {
+	if rel != nil && len(c.diags) > mark.diags {
+		d := &c.diags[len(c.diags)-1]
+		d.Related = append(d.Related, *rel)
+	}
+}
+
 // findingKey is what makes two findings one: the place, the code and the
 // words. An extra check is kept apart from a finding of another kind at the
 // same place in the same words, which is reported, rolled back and
@@ -638,7 +653,7 @@ func (c *Checker) reportOf(kind Kind, span ast.Span, code Code, rel *Related, fo
 	c.reported[key] = true
 	d := Diagnostic{File: c.file.Path, Line: line, Col: col, EndLine: endLine, EndCol: endCol + 1,
 		Severity: code.Severity, Code: code.ID, Kind: kind, Message: msg, key: key}
-	if code != P4015 {
+	if silenceable(code.ID) {
 		d.silencedBy = c.silencing(c.file, line, code.ID)
 	}
 	if rel != nil {
@@ -698,6 +713,7 @@ func (c *Checker) checkFile(f *program.File) {
 		c.checkTabs(f)
 		c.checkWords(f)
 	}
+	c.lateStatic(f)
 	// Top-level code runs in a context without a class.
 	scope := f.ScopeAt(0)
 	ctx := c.newCtx(f, scope, nil, true)
@@ -846,6 +862,10 @@ type fnCtx struct {
 	// method/function being checked (for @phpstan-assert, by-ref params)
 	method   *program.Method
 	function *program.Function
+	// enclosing is the context a closure is written in, nil for a
+	// function's or a method's own: the type parameters it names are
+	// declared there (boundText).
+	enclosing *fnCtx
 	// thisType caches the $this type for the class.
 	thisType types.Type
 	// loopCond is set while a loop condition is evaluated: `while (true)`

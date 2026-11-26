@@ -61,6 +61,11 @@ type signature struct {
 	// to come from is part of the finding, not a second one (P2112). Its
 	// other parameters and its return type are checked as any call's.
 	removed bool
+	// value marks the signature of a callable value's type (sigOfCallable):
+	// its parameters' types are what the checker knows of the value, which
+	// PHP does not check of it, and a parameter the type gives no name is
+	// named by its position (unnamedParam).
+	value bool
 }
 
 // magicSig is the callee of a partial application of a method that
@@ -1029,7 +1034,7 @@ func (x *fnCtx) unknownCallee(e *ast.Call) {
 // them from its arguments, `$h = pick(...); $h(1, 'a')`, as a call of the
 // function does.
 func (x *fnCtx) sigOfCallable(c types.Callable) *signature {
-	sig := &signature{name: "callable", ret: c.Return}
+	sig := &signature{name: "callable", ret: c.Return, value: true}
 	seen := map[string]bool{}
 	types.Walk(c, func(m types.Type) {
 		if p, ok := m.(types.Param); ok && strings.Contains(p.Name, "\x00") && !seen[p.Name] {
@@ -1046,6 +1051,21 @@ func (x *fnCtx) sigOfCallable(c types.Callable) *signature {
 		sig.params = append(sig.params, &program.Param{Name: name, Type: p.Type, HasDefault: p.Optional, Variadic: p.Variadic, ByRef: p.ByRef})
 	}
 	return sig
+}
+
+// unnamedParam reports the name sigOfCallable gives a parameter its
+// callable type does not name, its position (a variadic placeholder's
+// offset after it): no PHP name is all digits.
+func unnamedParam(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // callableOf builds the Closure type of a callable named by a string
@@ -1476,6 +1496,9 @@ func (x *fnCtx) methodCallOn(e *ast.MethodCall, obj types.Type, env *state, expe
 }
 
 func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) types.Type {
+	if x.lateStaticRefused(e) {
+		return types.TError
+	}
 	defer x.unresolvedCall(e.S, e.Args)
 	name, ok := identName(e.Name)
 	if !ok {
@@ -1730,6 +1753,10 @@ func (x *fnCtx) traitUserProperties(trait *program.Class, name string) (found []
 // ------------------------------------------------------------------ new
 
 func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type {
+	if x.lateStaticRefused(e) {
+		x.argsOnly(e.Args, env)
+		return types.TError
+	}
 	defer x.unresolvedCall(e.S, nil)
 	if e.Anon != nil {
 		cl := x.p().DeclareAnonymous(x.file, x.res.Scope(), e.Anon)
@@ -3032,7 +3059,14 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			if b.arg.Unpack {
 				arg = given{}
 			}
-			x.c.reportUnfit(arg, at, pt, b.arg.S, P2103, related(sig.file, b.param.Span, "parameter $%s of %s declared here", b.param.Name, sig.name),
+			declaredAt := related(sig.file, b.param.Span, "parameter $%s of %s declared here", b.param.Name, sig.name)
+			if why, written, ok := x.rewrittenWhy(b.arg.Value, at, pt, env, false); ok && !b.arg.Unpack {
+				mark := x.c.mark()
+				x.c.reportRelated(b.arg.S, P2103, declaredAt, "argument %d ($%s) of %s expects %s, %s given: %s", b.idx+1, b.param.Name, sig.name, x.typeName(pt), x.typeName(at), why)
+				x.c.relateAlso(mark, written)
+				continue
+			}
+			x.c.reportUnfit(arg, at, pt, b.arg.S, P2103, declaredAt,
 				"argument %d ($%s) of %s expects %s, %s given", b.idx+1, b.param.Name, sig.name, x.typeName(pt), x.typeName(at))
 		}
 	}

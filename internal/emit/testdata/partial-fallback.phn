@@ -8,6 +8,14 @@
 // call to them. The variadic is named so as to hide no variable the bound
 // arguments read and to repeat no parameter. Called where it stands with
 // arguments, such an application is the call it makes.
+//
+// A callable value's type gives its parameters no default to write, nor a
+// type PHP checks of the value: the closure over it passes on what `...`
+// leaves, and says the types of the type's parameters in an inline @var,
+// its own and those `...` passes on, by name where the type names them.
+// A parameter the type does not name is the closure's $arg1, $arg2, …,
+// or $arg1_2 where that is the type's name of another parameter or a
+// variable the call reads.
 
 namespace Fallback;
 
@@ -19,6 +27,8 @@ final class Card {
     const RANK = 'ace';
 
     __construct(public string $face = 'up') {}
+
+    faced(string $t, string $how = self::RANK): string => $t . $this->face . $how;
 }
 
 function ranked(string $t, string $rank = Card::RANK, int $n = 1 + 2): string => $t . $rank . $n;
@@ -80,4 +90,94 @@ function run(): void {
     echo (filled('f:', ...))($out), '|', json_encode($out), '|', (counts('a', ...))('B'), "\n";
 }
 
+final class Hand {
+    __construct(public Closure(string, string=): string $held) {}
+
+    played(): string {
+        $h = $this->held;
+        $p = $h('h:', ...);
+        return $p() . '|' . $p('two');
+    }
+}
+
+/** @param callable(string, string=): string $cb */
+function called(callable $cb): string {
+    $c = $cb('cb:', ...);
+    return $c() . '|' . $c('jack');
+}
+
+function given(Closure(string, string=): string $f): string {
+    $g = $f('g:', ...);
+    $q = $f(?, 'queen');
+    $k = $f('k:', ?);
+    return $g() . '|' . $g('nine') . '|' . $q('q:') . '|' . $k('king') . '|' . ($f('i:', ...))('ten');
+}
+
+/** @param \Closure(string $t, string $rank=): string $f */
+function named_value(\Closure $f): string {
+    $g = $f('nv:', ...);
+    return $g() . '|' . $g(rank: 'two');
+}
+
+function spread(Closure(string, int=, string...): string $f): string {
+    $s = $f('sp:', ...);
+    $v = $f('sv:', 5, ...);
+    return $s() . '|' . $s(3, 'a', 'b') . '|' . $v('c');
+}
+
+/** @param \Closure(string $t, string &$o=): string $f */
+function written(\Closure $f): string {
+    $w = $f('w:', ?);
+    $out = 'o';
+    return $w($out) . '|' . $out;
+}
+
+/** @param \Closure(string $arg2, string): string $f */
+function both(\Closure $f): string {
+    $b = $f(?, ?);
+    return $b('t:', 'u');
+}
+
+function named_arg1(Closure(string, string): string $arg1): string {
+    $n = $arg1(?, 'v');
+    return $n('n:');
+}
+
+function reads_arg1(Closure(string, string): string $f, string $arg1): string {
+    $r = $f(?, $arg1);
+    return $r('r:');
+}
+
+function values(): void {
+    // A first-class callable of a function and of a method in a variable.
+    $f = ranked(...);
+    $r = $f('fv:', ...);
+    echo $r(), '|', $r('king'), '|', $r(n: 4), "\n";
+    $m = new Card('down')->faced(...);
+    $h = $m('m:', ...);
+    echo $h(), '|', $h(how: 'two'), "\n";
+    $l = listed(...);
+    $ls = $l('lv:', ...);
+    echo $ls(), '|', $ls(4, 'x', 'y'), "\n";
+    // An arrow function in a variable.
+    $a = fn(string $x, string $y = 'y'): string => $x . $y;
+    $b = $a('a:', ...);
+    echo $b(), '|', $b('b'), '|', $b(y: 'c'), "\n";
+    // A parameter and a property of a closure type, a callable docblock
+    // type, a type that names its parameters, a variadic one.
+    echo given(ranked(...)), "\n";
+    echo new Hand(ranked(...))->played(), "\n";
+    echo called(ranked(...)), "\n";
+    echo named_value(ranked(...)), "\n";
+    echo spread(listed(...)), "\n";
+    // By reference, a placeholder's parameter stays so.
+    echo written(function (string $t, string &$o = 'x'): string {
+        $o = $t . 'out';
+        return $t;
+    }), "\n";
+    // A position's name taken by a parameter, the callee or a bound argument.
+    echo both(ranked(...)), '|', named_arg1(ranked(...)), '|', reads_arg1(ranked(...), 'w'), "\n";
+}
+
 run();
+values();

@@ -1,0 +1,32 @@
+{
+    "ns": "shop-on",
+    "onlyGlobal": "global-only",
+    "relative": "shop-on",
+    "imported": "other-on",
+    "listed": {
+        "0": "shop-on",
+        "k": "global-only"
+    },
+    "named": "shop-on-max",
+    "joined": "shop-on!",
+    "space": "Shop",
+    "useConst": "other-on",
+    "trait": "other-on",
+    "static": "shop-on",
+    "method": "shop-on",
+    "self": "shelf-x",
+    "parent": "base-x",
+    "case": "h",
+    "class": "Shop\\Shelf",
+    "pad": "ab   ",
+    "flag": "global-flag",
+    "eol": "t1/2",
+    "parsed": "p:128[\"e\"]"
+}
+{
+    "object": "corner",
+    "interface": "corner-lit",
+    "final": "corner",
+    "static": "corner-late",
+    "union": "right"
+}
