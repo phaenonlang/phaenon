@@ -1106,7 +1106,30 @@ func (x *fnCtx) argsOnly(args *ast.ArgList, env *state) {
 	for _, a := range args.Args {
 		if a.Value != nil {
 			x.expr(a.Value, env, nil)
+			x.mayBeReferenced(a.Value) // a callee the checker cannot see may take it by reference
 		}
+	}
+}
+
+// mayBeReferenced records the variable e is, or holds an offset of, as one
+// a reference may have been taken to where the checker does not follow
+// the writes through it (refTaken).
+func (x *fnCtx) mayBeReferenced(e ast.Expr) {
+	for {
+		switch n := e.(type) {
+		case *ast.Paren:
+			e = n.Expr
+			continue
+		case *ast.Index:
+			e = n.Array
+			continue
+		case *ast.Variable:
+			if x.refTaken == nil {
+				x.refTaken = map[string]bool{}
+			}
+			x.refTaken[n.Name] = true
+		}
+		return
 	}
 }
 

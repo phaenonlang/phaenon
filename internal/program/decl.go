@@ -260,8 +260,9 @@ type Constant struct {
 	DeprecatedNote string
 	Polyfilled     bool
 	// Defined marks a global constant define() makes, perhaps in a branch
-	// or after code that names it runs; a `const` statement declares the
-	// others where it stands.
+	// or after code that names it runs, so that its value may differ from
+	// one way to another; a `const` statement declares the others where
+	// it stands.
 	Defined bool
 	// Attrs are the attribute groups of a class constant's declaration.
 	Attrs    []*ast.AttrGroup

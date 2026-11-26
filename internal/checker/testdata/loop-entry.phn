@@ -1,0 +1,343 @@
+namespace LoopEntry;
+
+// A for or a while whose condition holds where the loop starts runs its
+// body at least once, as PHPStan reads it with treatPhpDocTypesAsCertain
+// off: what leaves the loop is the condition failing after an iteration,
+// or a break, never the way in. The condition is read from the types PHP
+// declares, and only where both tools read it alike: variables, constants,
+// literals and the operators over them.
+
+final class Limits
+{
+    public const COUNT = 3;
+
+    public function viaSelf(): int
+    {
+        for ($i = 0; $i < self::COUNT; $i++) {
+            $y = $i;
+        }
+        return $y;
+    }
+}
+
+function counted(): int
+{
+    for ($i = 0; $i < 3; $i++) {
+        $y = $i;
+    }
+    return $y;
+}
+
+function whileCounted(): int
+{
+    $i = 0;
+    while ($i < 1) {
+        $y = $i;
+        $i++;
+    }
+    return $y;
+}
+
+function nested(): int
+{
+    for ($i = 0; $i < 3; $i++) {
+        for ($j = 0; $j < 2; $j++) {
+            $y = $j;
+        }
+        $z = $y;
+    }
+    return $z;
+}
+
+function boundNarrowed(int $n): int
+{
+    if ($n > 0) {
+        for ($i = 0; $i < $n; $i++) {
+            $y = $i;
+        }
+        return $y;
+    }
+    return 0;
+}
+
+function writtenEveryTime(): string
+{
+    $s = null;
+    for ($i = 0; $i < 2; $i++) {
+        $s = 'x' . $i;
+    }
+    return \strtoupper($s);
+}
+
+function copied(): int
+{
+    $limit = 3;
+    $n = $limit;
+    for ($i = 0; $i < $n; $i++) {
+        $y = $i;
+    }
+    return $y;
+}
+
+const ROUNDS = 2;
+
+function viaAConstStatement(): int
+{
+    for ($i = 0; $i < ROUNDS; $i++) {
+        $y = $i;
+    }
+    return $y;
+}
+
+// ---- entered or not, as PHP declares it
+
+/** @param positive-int $n */
+function docblockBound(int $n): int
+{
+    for ($i = 0; $i < $n; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+/** @param non-empty-list<int> $queue */
+function drain(array $queue): int
+{
+    while ($queue) {
+        $item = \array_shift($queue);
+    }
+    return $item; // want P2009
+}
+
+final class Node
+{
+    public ?Node $next = null;
+}
+
+/** @param Node $node */
+function lastNode(?Node $node): Node
+{
+    while ($node) {
+        $last = $node;
+        $node = $node->next;
+    }
+    return $last; // want P2009
+}
+
+/** @param true $go */
+function documentedTrue(bool $go): int
+{
+    while ($go) {
+        $y = 1;
+        $go = false;
+    }
+    return $y; // want P2009
+}
+
+function countedByACall(): int
+{
+    $a = [1, 2];
+    while (\count($a) > 0) {
+        $y = \array_pop($a);
+    }
+    return $y; // want P2009
+}
+
+// ---- a variable written through a reference the checker does not follow
+
+function writtenByAClosure(): int
+{
+    $i = 0;
+    $f = function () use (&$i): void {
+        $i = 5;
+    };
+    $f();
+    while ($i < 3) {
+        $y = $i;
+        $i++;
+    }
+    return $y; // want P2009
+}
+
+function bump(int &$i): void
+{
+    $i += 5;
+}
+
+function writtenByAnUnseenCallee(): int
+{
+    $i = 0;
+    $cb = 'LoopEntry\bump';
+    $cb($i);
+    while ($i < 3) {
+        $y = 1;
+        $i = \random_int(0, 5);
+    }
+    return $y; // want P2009
+}
+
+// ---- a value PHP does not guarantee: a docblock's type that reached the
+// variable another way than as a parameter, or a constant whose value is
+// another on another way or another machine
+
+/** @param array{n: positive-int} $opts */
+function keyedDestructure(array $opts): int
+{
+    ['n' => $n] = $opts;
+    for ($i = 0; $i < $n; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+/** @param list{list{positive-int}} $nested */
+function nestedDestructure(array $nested): int
+{
+    [[$n]] = $nested;
+    for ($i = 0; $i < $n; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+/** @param list<list{positive-int}> $rows */
+function foreachDestructure(array $rows): int
+{
+    foreach ($rows as [$n]) {
+        for ($i = 0; $i < $n; $i++) {
+            $y = $i;
+        }
+        return $y; // want P2009
+    }
+    return 0;
+}
+
+/** @param list{true} $flags */
+function destructuredTrue(array $flags): int
+{
+    [$go] = $flags;
+    while ($go) {
+        $y = 1;
+        $go = false;
+    }
+    return $y; // want P2009
+}
+
+/** @param array{n: positive-int} $opts */
+function offsetRead(array $opts): int
+{
+    $n = $opts['n'];
+    for ($i = 0; $i < $n; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+/** @param positive-int $n */
+function ternary(int $n, bool $b): int
+{
+    $m = $b ? $n : 1;
+    for ($i = 0; $i < $m; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+/** @param positive-int $n */
+function matched(int $n, int $k): int
+{
+    $m = match ($k) {
+        1 => $n,
+        default => 2,
+    };
+    for ($i = 0; $i < $m; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+/** @param positive-int $n */
+function clamped(int $n): int
+{
+    $m = \max(1, $n);
+    for ($i = 0; $i < $m; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+/** @param positive-int $n */
+function summed(int $n): int
+{
+    $m = $n + 0;
+    for ($i = 0; $i < $m; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+/** @param positive-int $n */
+function stepped(int $n): int
+{
+    $m = $n;
+    $m++;
+    for ($i = 0; $i < $m; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+if (\random_int(0, 1) === 1) {
+    \define('LoopEntry\DYNAMIC', 3);
+} else {
+    \define('LoopEntry\DYNAMIC', 0);
+}
+
+function viaDefine(): int
+{
+    for ($i = 0; $i < DYNAMIC; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+// A constant a `const` statement declares over one define() declares is
+// no more fixed than that one.
+const OVER_DYNAMIC = DYNAMIC;
+
+function viaConstOverDefine(): int
+{
+    for ($i = 0; $i < OVER_DYNAMIC; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+function copiedConstOverDefine(): int
+{
+    $n = OVER_DYNAMIC;
+    for ($i = 0; $i < $n; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
+
+// One over a fixed constant is fixed.
+const THREE = 3;
+const FOUR = THREE + 1;
+
+function viaConstOverConst(): int
+{
+    for ($i = 0; $i < FOUR; $i++) {
+        $y = $i;
+    }
+    return $y;
+}
+
+function nearTheLargestInt(): int
+{
+    for ($i = \PHP_INT_MAX - 1; $i < \PHP_INT_MAX; $i++) {
+        $y = $i;
+    }
+    return $y; // want P2009
+}
