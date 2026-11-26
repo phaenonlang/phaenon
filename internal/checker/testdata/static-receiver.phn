@@ -110,3 +110,115 @@ function onNode(Node $node): void
     $node->later()()[0]->leafOnly(); // want P2006
     Node::make()[0]->leafOnly(); // want P2006
 }
+
+// self:: in a static method forwards the class it was called on, as
+// static:: and parent:: do: the `static` of what it calls is the caller's
+// own, not the class the method is written in. A function outside the
+// hierarchy names a class, and gets that class.
+
+class Made
+{
+    public static function create(): static
+    {
+        return new static(); // @phpstan-ignore new.static
+    }
+
+    public static function viaSelf(): static
+    {
+        $made = self::create();
+        return $made;
+    }
+
+    public static function viaStatic(): static
+    {
+        $made = static::create();
+        return $made;
+    }
+
+    public function fromAnInstance(): static
+    {
+        $made = self::create();
+        return $made;
+    }
+}
+
+final class MadeChild extends Made
+{
+    public static function viaParent(): static
+    {
+        $made = parent::create();
+        return $made;
+    }
+}
+
+function madeOutside(): MadeChild
+{
+    return Made::create(); // want P2202 "returns StaticReceiver\Made"
+}
+
+// `static` in a @param-out is the receiver's class at a call as well, as
+// it is in a @return: read through a child, it is the child.
+
+function takesMadeChild(MadeChild $c): void
+{
+}
+
+function takesFilledChild(FilledChild $c): void
+{
+}
+
+class Filled
+{
+    /** @param-out static $n */
+    public function own(mixed &$n): void
+    {
+        $n = $this;
+    }
+
+    /** @param-out list<static> $all */
+    public function all(mixed &$all): void
+    {
+        $all = [$this];
+    }
+
+    /** @param-out static|null $made */
+    public static function make(mixed &$made): void
+    {
+        $made = null;
+    }
+
+    public static function viaSelf(): ?static
+    {
+        $made = null;
+        self::make($made);
+        return $made;
+    }
+}
+
+final class FilledChild extends Filled
+{
+}
+
+function fillsThroughTheChild(FilledChild $c): void
+{
+    $a = null;
+    $c->own($a);
+    takesFilledChild($a);
+    $all = null;
+    $c->all($all);
+    foreach ($all as $child) {
+        takesFilledChild($child);
+    }
+    $made = null;
+    FilledChild::make($made);
+    if ($made !== null) {
+        takesFilledChild($made);
+    }
+}
+
+function fillsThroughTheParent(Filled $c): void
+{
+    $a = null;
+    $c->own($a);
+    takesFilledChild($a); // want P2103 "StaticReceiver\Filled given"
+}

@@ -43,7 +43,7 @@ func TestExtraCheckBesideItsTwin(t *testing.T) {
 			c.rollback(mark)
 			c.reportExtra(at, P2103, "x")
 		}, []Kind{Extra}},
-		{"a language rule's code at an extra check's place", true, func(c *Checker, at phnast.Span) { c.reportOf(Extra, false, at, P1001, nil, "x") }, []Kind{LanguageRule}},
+		{"a language rule's code at an extra check's place", true, func(c *Checker, at phnast.Span) { c.reportOf(Extra, mayBeSilenced, at, P1001, nil, "x") }, []Kind{LanguageRule}},
 		// The kind is a field of the key: no message spells it.
 		{"words that end as a key once did", false, func(c *Checker, at phnast.Span) {
 			c.reportExtra(at, P2301, "on string")

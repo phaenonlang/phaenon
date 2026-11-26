@@ -1,6 +1,7 @@
 package program
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -302,6 +303,7 @@ func (c *Class) ensureMembers() {
 		c.useTrait(tu)
 	}
 	c.inheritDocTypes()
+	c.inheritParamOuts()
 }
 
 // inheritDocTypes gives a method without docblock types the docblock types
@@ -365,6 +367,145 @@ func (c *Class) inheritDocTypes() {
 			}
 		}
 	}
+}
+
+// inheritParamOuts gives each by-reference parameter of c's methods that
+// the method's own docblock documents no @param-out the tag of the method
+// it overrides, as PHPStan merges one docblock into another
+// (ResolvedPhpDocBlock::mergeParamOutTags), and unlike inheritDocTypes's
+// @param in two ways. The tag comes from one declaration, the one PHPStan
+// takes the whole docblock from (docParent): a parent's method with a
+// docblock that has no @param-out passes on none, though an interface
+// beside the parent documents one. And the parameters are matched by
+// position, so that a renamed parameter takes the tag of the one it
+// replaces, the subject of a conditional type renamed with it; a
+// constructor's are matched by name, as PHPStan matches them. The tag is
+// merged tag by tag: a docblock of the method's own that gives the
+// parameter a @param, or documents another parameter's @param-out, keeps
+// the parent's @param-out of it. The parent's type parameters are mapped
+// through @extends and @implements; a method's own stay as they are.
+//
+// A method a trait brings in takes the tag through the class that uses the
+// trait, as PHPStan resolves it there, for the calls through that class:
+// on parameters of its own, since the trait's are every user's and its
+// body's. The trait's own methods take nothing: the body is checked once,
+// in the trait, against the trait's own docblock (paramout.go).
+func (c *Class) inheritParamOuts() {
+	if c.Kind == ast.KindTrait {
+		return
+	}
+	var self []types.Type
+	if t, ok := c.TypeOf().(types.Class); ok {
+		self = t.Args
+	}
+	untagged := func(p *Param) bool { return p.ByRef && p.Out == nil }
+	for _, m := range c.Methods {
+		if m.Decl == nil || !slices.ContainsFunc(m.Params, untagged) {
+			continue
+		}
+		d := m.docParent(0)
+		if d == nil {
+			continue
+		}
+		byName := strings.EqualFold(m.Name, "__construct")
+		at := func(i int, dp *Param) *Param {
+			if byName {
+				return paramNamed(m.Params, dp.Name)
+			}
+			if i < len(m.Params) {
+				return m.Params[i]
+			}
+			return nil
+		}
+		var subst map[string]types.Type
+		if args, ok := c.SuperArgs(d.Class.Name, self); ok {
+			subst = d.Class.Subst(args)
+		}
+		renamed := map[string]string{}
+		for i, dp := range d.Params {
+			if cp := at(i, dp); cp != nil && cp.Name != dp.Name {
+				renamed[dp.Name] = cp.Name
+			}
+		}
+		own := m.FromTrait == nil
+		for i, dp := range d.Params {
+			cp := at(i, dp)
+			if dp.Out == nil || cp == nil || !cp.ByRef || cp.Out != nil {
+				continue
+			}
+			if !own {
+				m.Params = slices.Clone(m.Params)
+				for j, p := range m.Params {
+					cl := *p
+					m.Params[j] = &cl
+				}
+				own = true
+				cp = at(i, dp)
+			}
+			cp.Out = renameSubjects(types.Substitute(dp.Out, subst), renamed)
+			cp.OutFrom = dp.OutFrom
+			if cp.OutFrom == nil {
+				cp.OutFrom = &TagSource{Method: d, Param: dp}
+			}
+		}
+	}
+}
+
+// docParent is the declaration PHPStan takes m's docblock from, to merge
+// m's own into (PhpDocInheritanceResolver::resolvePhpDocForMethod): the
+// first that has a docblock, its own or one it inherits (hasDoc), of the
+// method in the parent's table, a concrete constructor included, unless it
+// is private or a constructor of PHP's own, and the methods of the class's
+// immediate interfaces in the order declared; failing those, the first
+// abstract method of the class's traits that has a docblock of its own.
+// nil for none.
+func (m *Method) docParent(depth int) *Method {
+	cl := m.Class
+	if cl == nil || m.Magic || depth > maxOverrideDepth {
+		return nil
+	}
+	key := strings.ToLower(m.Name)
+	if entry, _ := tableEntry(cl.ParentClass(), key, map[*Class]bool{cl: true}); entry != nil && entry.Vis != Private &&
+		(key != "__construct" || !entry.Class.File.IsStub()) && entry.hasDoc(depth+1) {
+		return entry
+	}
+	for _, i := range immediateInterfaces(cl) {
+		if entry, _ := tableEntry(i, key, map[*Class]bool{cl: true}); entry != nil && entry.hasDoc(depth+1) {
+			return entry
+		}
+	}
+	p := cl.File.program
+	for _, name := range cl.Traits {
+		if t := p.Class(name); t != nil && t.Kind == ast.KindTrait {
+			if tm := t.FindMethod(key); tm != nil && tm.Abstract && tm.Doc != nil && tm.Decl != m.Decl {
+				return tm
+			}
+		}
+	}
+	return nil
+}
+
+// hasDoc reports whether PHPStan resolves a docblock for m: its own, or one
+// it inherits (docParent).
+func (m *Method) hasDoc(depth int) bool {
+	return m.Doc != nil || m.docParent(depth) != nil
+}
+
+// renameSubjects is t with the parameters a conditional type tests renamed
+// as names maps them.
+func renameSubjects(t types.Type, names map[string]string) types.Type {
+	if len(names) == 0 {
+		return t
+	}
+	return types.MapDeep(t, func(m types.Type) types.Type {
+		if c, ok := m.(types.Conditional); ok {
+			if to, ok := names[c.ParamName]; ok {
+				c.ParamName = to
+				return c
+			}
+		}
+		return m
+	})
 }
 
 // inheritedFrom lists the declarations m inherits a docblock from, in the

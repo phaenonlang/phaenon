@@ -1,0 +1,522 @@
+namespace ParamOutInherited;
+
+// An override inherits the @param-out of the method it overrides, as
+// PHPStan merges a parent's docblock into the child's tag by tag: its body
+// is held to the tag (P2213), and a call through it reads the tag's type
+// afterwards (program.inheritParamOuts).
+
+function takesString(string $s): void
+{
+}
+
+interface Reader
+{
+    /** @param-out int $n */
+    public function read(mixed &$n): void;
+}
+
+// ---- the body of an override is held to the inherited tag
+
+final class WritesAString implements Reader
+{
+    public function read(mixed &$n): void
+    {
+        $n = 'x'; // want P2213 "$n inherits @param-out int from ParamOutInherited\Reader::read(), and ParamOutInherited\WritesAString::read() writes 'x' to it here: write a value of type int, or declare the @param-out type the body writes"
+    }
+}
+
+final class WritesTheType implements Reader
+{
+    public function read(mixed &$n): void
+    {
+        $n = 1;
+    }
+}
+
+final class WritesNothing implements Reader
+{
+    public function read(mixed &$n): void
+    {
+        echo 1; // want P2213 "$n inherits @param-out int from ParamOutInherited\Reader::read(), and ParamOutInherited\WritesNothing::read() ends here with $n holding mixed"
+    }
+}
+
+// ---- a call through the override reads the inherited tag
+
+function callsThrough(WritesTheType $r): void
+{
+    $v = null;
+    $r->read($v);
+    takesString($v); // want P2103 "int given"
+}
+
+// ---- merged tag by tag: a docblock of the override's own keeps the tag
+
+final class OtherTags implements Reader
+{
+    /** @return void */
+    public function read(mixed &$n): void
+    {
+        $n = 'x'; // want P2213 "inherits @param-out int"
+    }
+}
+
+final class OwnParamTag implements Reader
+{
+    /** @param mixed $n */
+    public function read(mixed &$n): void
+    {
+        $n = 'x'; // want P2213 "inherits @param-out int"
+    }
+}
+
+final class OwnTag implements Reader
+{
+    /** @param-out string $n */
+    public function read(mixed &$n): void
+    {
+        $n = 'x';
+    }
+}
+
+function callsOwnTag(OwnTag $r): void
+{
+    $v = null;
+    $r->read($v);
+    takesString($v);
+}
+
+interface Two
+{
+    /**
+     * @param-out int $a
+     * @param-out int $b
+     */
+    public function read(mixed &$a, mixed &$b): void;
+}
+
+final class OneOfTwo implements Two
+{
+    /** @param-out string $a */
+    public function read(mixed &$a, mixed &$b): void
+    {
+        $a = 's';
+        $b = 's'; // want P2213 "$b inherits @param-out int from ParamOutInherited\Two::read()"
+    }
+}
+
+// ---- matched by position: a renamed parameter takes the tag
+
+interface Positional
+{
+    /** @param-out int $n */
+    public function read(mixed &$n, int $k): void;
+}
+
+final class Renamed implements Positional
+{
+    public function read(mixed &$m, int $k): void
+    {
+        $m = 'x'; // want P2213 "$m inherits @param-out int"
+    }
+}
+
+final class Swapped implements Positional
+{
+    public function read(mixed &$k, int $n): void
+    {
+        $k = 'x'; // want P2213 "$k inherits @param-out int"
+    }
+}
+
+function callsRenamed(Renamed $r): void
+{
+    $v = null;
+    $r->read($v, 1);
+    takesString($v); // want P2103 "int given"
+}
+
+interface Conditional
+{
+    /** @param-out ($asInt is true ? int : string) $n */
+    public function read(mixed &$n, bool $asInt): void;
+}
+
+final class ConditionalRenamed implements Conditional
+{
+    public function read(mixed &$m, bool $flag): void
+    {
+        $m = 1.5; // want P2213 "inherits @param-out int|string"
+        $m = $flag ? 1 : 's';
+    }
+}
+
+function callsConditional(ConditionalRenamed $r): void
+{
+    $v = null;
+    $r->read($v, true);
+    takesString($v); // want P2103 "int given"
+    $w = null;
+    $r->read($w, false);
+    takesString($w);
+}
+
+// ---- a parameter that is no reference takes nothing; another type does
+
+final class NotByReference implements Positional
+{
+    public function read(mixed $n, int $k): void // want P2502
+    {
+        $n = 'x';
+    }
+}
+
+interface Narrow
+{
+    /** @param-out int $n */
+    public function read(int|string &$n): void;
+}
+
+final class Widens implements Narrow
+{
+    public function read(mixed &$n): void
+    {
+        $n = 'x'; // want P2213 "inherits @param-out int"
+    }
+}
+
+// ---- the parent's type parameters, through @implements
+
+/**
+ * @template T
+ */
+interface Generic
+{
+    /** @param-out T $n */
+    public function read(mixed &$n): void;
+}
+
+/**
+ * @implements Generic<int>
+ */
+final class OfInt implements Generic
+{
+    public function read(mixed &$n): void
+    {
+        $n = 'x'; // want P2213 "inherits @param-out int from ParamOutInherited\Generic::read()"
+    }
+}
+
+function callsOfInt(OfInt $r): void
+{
+    $v = null;
+    $r->read($v);
+    takesString($v); // want P2103 "int given"
+}
+
+/**
+ * @template U
+ * @implements Generic<U>
+ */
+final class OfU implements Generic
+{
+    public function read(mixed &$n): void
+    {
+        $n = 1; // want P2213 "inherits @param-out U from ParamOutInherited\Generic::read()"
+    }
+}
+
+// ---- several levels; the parent's class before an interface beside it
+
+abstract class Middle implements Reader
+{
+    public function read(mixed &$n): void
+    {
+        $n = 1;
+    }
+}
+
+final class Bottom extends Middle
+{
+    public function read(mixed &$n): void
+    {
+        $n = 'x'; // want P2213 "inherits @param-out int from ParamOutInherited\Reader::read()"
+    }
+}
+
+class DeclaresNothing extends Middle
+{
+}
+
+final class BelowAnInheritedMethod extends DeclaresNothing
+{
+    public function read(mixed &$n): void
+    {
+        $n = 'x'; // want P2213 "inherits @param-out int from ParamOutInherited\Reader::read()"
+    }
+}
+
+abstract class ImplementsNothing implements Reader
+{
+}
+
+final class BelowAnAbstractClass extends ImplementsNothing
+{
+    public function read(mixed &$n): void
+    {
+        $n = 'x'; // want P2213 "inherits @param-out int from ParamOutInherited\Reader::read()"
+    }
+}
+
+interface StringReader
+{
+    /** @param-out string $n */
+    public function read(mixed &$n): void;
+}
+
+class ParentTagged
+{
+    /** @param-out int $n */
+    public function read(mixed &$n): void
+    {
+        $n = 1;
+    }
+}
+
+final class ParentBeforeInterface extends ParentTagged implements StringReader
+{
+    public function read(mixed &$n): void
+    {
+        $n = 1.5; // want P2213 "inherits @param-out int from ParamOutInherited\ParentTagged::read()"
+    }
+}
+
+class ParentUndocumented
+{
+    public function read(mixed &$n): void
+    {
+        $n = 1;
+    }
+}
+
+final class InterfaceBesideUndocumented extends ParentUndocumented implements StringReader
+{
+    public function read(mixed &$n): void
+    {
+        $n = 1.5; // want P2213 "inherits @param-out string from ParamOutInherited\StringReader::read()"
+    }
+}
+
+class ParentOtherwiseDocumented
+{
+    /** @return void */
+    public function read(mixed &$n): void
+    {
+        $n = 1;
+    }
+}
+
+// The docblock is the parent's, which has no @param-out: the interface's
+// is not merged in.
+final class InterfaceBesideDocumented extends ParentOtherwiseDocumented implements StringReader
+{
+    public function read(mixed &$n): void
+    {
+        $n = 1.5;
+    }
+}
+
+class PrivateTagged
+{
+    /** @param-out int $n */
+    private function read(mixed &$n): void // want P2406
+    {
+        $n = 1;
+    }
+}
+
+final class BesidePrivate extends PrivateTagged
+{
+    public function read(mixed &$n): void
+    {
+        $n = 'x';
+    }
+}
+
+// ---- traits, constructors, static methods, @method
+
+// A trait's body is held to the trait's own tags alone: PHPStan reports
+// the write below in the context of UsesForStrings, whose method inherits
+// @param-out string, and the checker, which checks the body once in the
+// trait, does not (paramout.go).
+trait WritesInt
+{
+    public function read(mixed &$n): void
+    {
+        $n = 1;
+    }
+}
+
+final class UsesForInts implements Reader
+{
+    use WritesInt;
+}
+
+final class UsesForStrings implements StringReader
+{
+    use WritesInt;
+}
+
+final class UsesAlone
+{
+    use WritesInt;
+}
+
+function callsTheTraitMethod(UsesForInts $r): void
+{
+    $v = null;
+    $r->read($v);
+    takesString($v); // want P2103 "int given"
+}
+
+interface Copyable
+{
+    /** @param-out Copyable $out */
+    public function copy(mixed &$out): void;
+}
+
+trait ClonesItself
+{
+    public function copy(mixed &$out): void
+    {
+        $out = clone $this;
+    }
+}
+
+final class Copied implements Copyable
+{
+    use ClonesItself;
+}
+
+trait WritesAStringToFill
+{
+    public function fill(mixed &$n): void
+    {
+        $n = 'x';
+    }
+}
+
+// PHPStan resolves an aliased method's docblock by the trait method's own
+// name, fill(), which nothing above documents: the body writes what it
+// likes, and a call through the alias reads Reader's tag all the same.
+final class Aliased implements Reader
+{
+    use WritesAStringToFill {
+        fill as read;
+    }
+}
+
+function callsTheAlias(Aliased $r): void
+{
+    $v = null;
+    $r->read($v);
+    takesString($v); // want P2103 "int given"
+}
+
+trait AbstractTagged
+{
+    /** @param-out int $n */
+    abstract public function fill(mixed &$n): void;
+}
+
+final class ImplementsTheTrait
+{
+    use AbstractTagged;
+
+    public function fill(mixed &$n): void
+    {
+        $n = 'x'; // want P2213 "inherits @param-out int from ParamOutInherited\AbstractTagged::fill()"
+    }
+}
+
+trait ConcreteTagged
+{
+    /** @param-out int $n */
+    public function fill(mixed &$n): void
+    {
+        $n = 1;
+    }
+}
+
+final class OverridesTheTrait
+{
+    use ConcreteTagged;
+
+    public function fill(mixed &$n): void
+    {
+        $n = 'x';
+    }
+}
+
+class Constructed
+{
+    /** @param-out int $n */
+    public function __construct(mixed &$n)
+    {
+        $n = 1;
+    }
+}
+
+final class ConstructedToo extends Constructed
+{
+    public function __construct(mixed &$n)
+    {
+        $n = 'x'; // want P2213 "inherits @param-out int from ParamOutInherited\Constructed::__construct()"
+    }
+}
+
+final class ConstructedRenamed extends Constructed
+{
+    public function __construct(mixed &$m)
+    {
+        $m = 'x';
+    }
+}
+
+function constructs(): void
+{
+    $v = null;
+    new ConstructedToo($v);
+    takesString($v); // want P2103 "int given"
+}
+
+class StaticTagged
+{
+    /** @param-out int $n */
+    public static function fill(mixed &$n): void
+    {
+        $n = 1;
+    }
+}
+
+final class StaticChild extends StaticTagged
+{
+    public static function fill(mixed &$n): void
+    {
+        $n = 'x'; // want P2213 "inherits @param-out int from ParamOutInherited\StaticTagged::fill()"
+    }
+}
+
+/**
+ * @method void read(mixed &$n)
+ */
+final class MagicOverride extends ParentTagged
+{
+}
+
+function callsTheMagicMethod(MagicOverride $r): void
+{
+    $v = null;
+    $r->read($v);
+    takesString($v); // want P2103 "mixed given"
+}
