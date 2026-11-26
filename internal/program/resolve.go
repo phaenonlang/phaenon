@@ -803,9 +803,32 @@ func (r *resolver) alias(name string) (types.Type, bool) {
 
 // ------------------------------------------------------------------ merging
 
-// effective combines a native type and a docblock type: the docblock wins
-// when it refines the native type, otherwise the native type wins and a
-// problem is recorded.
+// effective combines a native type and a docblock type as PHPStan does
+// (TypehintHelper::decideType), so that a value is held to what PHPStan
+// holds it to:
+//
+//   - where the native type admits no null, the docblock's null is left
+//     out: `@param int|null` on `int $n` is an int (and still a problem);
+//   - the docblock is the type where it refines the native one, a type
+//     parameter by its bound; otherwise the native type stands, and a
+//     problem is recorded. A callable docblock on a native callable is the
+//     type even so, and the problem is recorded all the same;
+//   - a member of a native union that shares no value with that type is
+//     added back: null for `?array $xs` under `@param list<string> $xs`,
+//     string for `int|string $n` under `@param positive-int $n`. The
+//     docblock refines what it speaks of, and the native type still says
+//     what else the value may be: count($xs) is refused until null is
+//     tested, and `$xs = null` is written as the declaration allows.
+//
+// PHPStan reads an array the docblock writes without a key on a native
+// iterable, `int[]` on `iterable $xs`, as the iterable of its values; the
+// checker keeps the array, which is stricter, until its narrowing of an
+// iterable by `instanceof \Traversable` gives the array PHPStan's does.
+//
+// PHP's own functions and classes are not read so: their docblocks in the
+// stubs and the overlay are PHPStan's function map, whose types are the
+// whole types, `callable(V): R|null` where it says so. There the docblock
+// is the type where it refines the native one, and nothing is added back.
 func (r *resolver) effective(native, doc types.Type, what string) types.Type {
 	if doc == nil {
 		return native
@@ -816,16 +839,144 @@ func (r *resolver) effective(native, doc types.Type, what string) types.Type {
 	if types.IsMixed(doc) {
 		return native
 	}
-	if types.IsSubtype(doc, native, r.p) {
-		return doc
+	written := doc
+	if !types.IsNullable(native) && !r.f.IsStub() {
+		if _, never := doc.(types.Never); !never {
+			doc = types.StripNull(doc)
+		}
 	}
-	// Tolerate the common harmless disagreements: docblock `static`/`$this`
-	// against native `self`/`static`, callable docblocks on Closure/callable.
-	if types.IsSubtype(types.Erase(doc), types.Erase(native), r.p) {
-		return doc
+	refines := func(doc types.Type) bool {
+		if _, never := doc.(types.Never); never && !types.Equal(doc, written) {
+			return false // `@param null` on a type without null: nothing is left
+		}
+		// Tolerate the common harmless disagreements: docblock `static`/`$this`
+		// against native `self`/`static`, callable docblocks on Closure/callable.
+		return types.IsSubtype(doc, native, r.p) || types.IsSubtype(types.Erase(doc), types.Erase(native), r.p)
 	}
-	r.problem("%s: docblock type %s is not a subtype of the declared type %s", what, types.Print(doc), types.Print(native))
-	return native
+	result := native
+	if refines(doc) || callables(native, doc) && !r.f.IsStub() {
+		result = doc
+	}
+	if !refines(written) {
+		r.problem("%s: docblock type %s is not a subtype of the declared type %s", what, types.Print(written), types.Print(native))
+	}
+	if u, ok := native.(types.Union); ok && !r.f.IsStub() {
+		back := []types.Type{result}
+		for _, m := range u.Types {
+			if r.apart(m, result) {
+				back = append(back, m)
+			}
+		}
+		result = types.MakeUnion(back...)
+	}
+	return result
+}
+
+// callables reports a native type and a docblock type that are both
+// callables, of which PHPStan takes the docblock's whatever it says:
+// `callable(int): int` on a native Closure.
+func callables(native, doc types.Type) bool {
+	_, ok := native.(types.Callable)
+	if !ok {
+		return false
+	}
+	for _, m := range types.Members(doc) {
+		if _, ok := m.(types.Callable); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// apart reports a member m of a native union that shares no value with t,
+// as PHPStan's isSuperTypeOf() answers no there, member by member of t:
+// where types.Overlaps finds none, as of null, an array or a scalar beside
+// a class, and besides
+//
+//   - two classes neither of which extends the other and neither of which
+//     is an interface, as a class has one parent: `Foo` under `@param Bar`
+//     on `Foo|Bar`, Closure, a final class, beside any other, and a class
+//     beside the one `static` or a type parameter's bound stands for;
+//   - a class that is no Traversable beside an iterable, which PHPStan
+//     asks of the class itself;
+//   - beside an intersection, what is apart from one of its members and
+//     of none of them a supertype.
+//
+// types.Overlaps, which decides the narrowings, leaves those possible.
+func (r *resolver) apart(m, t types.Type) bool {
+	for _, x := range types.Members(t) {
+		if !r.apartFrom(m, x) {
+			return false
+		}
+	}
+	return true
+}
+
+// apartFrom is apart for one member x of the docblock's type.
+func (r *resolver) apartFrom(m, x types.Type) bool {
+	if !types.Overlaps(m, x, r.p) {
+		return true
+	}
+	if in, ok := x.(types.Intersection); ok {
+		some := false
+		for _, y := range in.Types {
+			if types.IsSubtype(y, m, r.p) {
+				return false
+			}
+			some = some || r.apartFrom(m, y)
+		}
+		return some
+	}
+	_, mIter := m.(types.Iterable)
+	_, xIter := x.(types.Iterable)
+	if mIter || xIter {
+		other := x
+		if xIter {
+			other = m
+		}
+		c, ok := r.className(other)
+		return ok && !mIter != !xIter && !r.p.IsSubclassOf(c, "Traversable")
+	}
+	mc, ok := r.className(m)
+	if !ok {
+		return false
+	}
+	xc, ok := r.className(x)
+	return ok && !r.p.IsSubclassOf(mc, xc) && !r.p.IsSubclassOf(xc, mc)
+}
+
+// className is the class t is an instance of: a class's, Closure for a
+// closure, the class `static` and `$this` stand for, a type parameter's
+// bound's, where that is a class the program knows and no interface.
+func (r *resolver) className(t types.Type) (string, bool) {
+	name := ""
+	switch t := t.(type) {
+	case types.Class:
+		name = t.Name
+	case types.Callable:
+		if !t.Closure {
+			return "", false
+		}
+		name = "Closure"
+	case types.Static:
+		if t.Of == nil {
+			return "", false
+		}
+		name = t.Of.Name
+	case types.This:
+		if t.Of == nil {
+			return "", false
+		}
+		name = t.Of.Name
+	case types.Param:
+		if t.Bound == nil {
+			return "", false
+		}
+		return r.className(t.Bound)
+	default:
+		return "", false
+	}
+	return name, r.p.Exists(name) && !r.p.IsInterface(name)
 }
 
 // ------------------------------------------------------------------ building signatures
@@ -1072,6 +1223,11 @@ func (r *resolver) buildParams(ps []*ast.Param, doc *docblock.Doc) []*Param {
 		native := p.NativeType
 		if p.Variadic && native != nil {
 			// The native variadic type describes one element too.
+		}
+		if native != nil && ap.Default != nil && !types.IsNullable(native) && isNullLiteral(ap.Default) {
+			// `array $xs = null` is implicitly nullable, as PHP reads it (and
+			// PHPStan reflects it): a docblock's null fits it.
+			native = types.Nullable(native)
 		}
 		p.Type = r.effective(native, docT, "parameter $"+p.Name)
 		if p.Type == nil {
