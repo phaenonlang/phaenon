@@ -32,6 +32,18 @@ function clamp(mixed $value, mixed $min, mixed $max): mixed {}
 function intval(mixed $value, int $base = 10): int {}
 
 /**
+ * Numbers, as PHPStan's function map has them. PHP converts a numeric
+ * string, a bool and null as `**` does, and takes a GMP, whose power is
+ * written `$g ** $e`; PHPStan reports each, and so does the checker. The
+ * result is the type of `$num ** $exponent` (the checker's specialReturn).
+ *
+ * @param int|float $num
+ * @param int|float $exponent
+ * @return int|float
+ */
+function pow(mixed $num, mixed $exponent): int|float|object {}
+
+/**
  * An object is no number, as for intval().
  *
  * @param int|float|string|bool|array<mixed>|resource|\GMP|\SimpleXMLElement|null $value

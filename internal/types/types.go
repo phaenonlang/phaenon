@@ -170,7 +170,23 @@ type (
 	// (`AbstractLogger&object{records: list<string>}`). Erases to object.
 	ObjectShape struct{ Entries []ShapeEntry }
 	// Union and Intersection are normalised: flat, no duplicates, at least two members.
-	Union        struct{ Types []Type }
+	//
+	// A Benevolent union is PHPStan's BenevolentUnionType, the int|float it
+	// gives `$a / $b` and `$a ** $b` over ints: a value of it is accepted
+	// where one of its members is (IsAcceptable), as an argument, a return,
+	// a property, and held to a type as an ordinary union where every
+	// member has to fit (IsSubtype), as PHPStan holds a @param-out. MakeUnion
+	// keeps it where every member it ends with is one of the benevolent
+	// unions' it was given, as PHPStan's TypeCombinator::union does: with
+	// `0` or `1.5` beside it, not with null. Substitute and MapDeep keep it
+	// where the members stay its own (a template it is inferred for). What
+	// rebuilds a union from its members otherwise, Map, Filter, a
+	// narrowing, makes an ordinary one, which is stricter, as most of
+	// PHPStan's narrowings make one.
+	Union struct {
+		Types      []Type
+		Benevolent bool
+	}
 	Intersection struct{ Types []Type }
 	// Param is a type parameter (template) with its bound. Owner is the
 	// declaring class or function, for printing and identity.
@@ -252,11 +268,11 @@ var (
 	// TArray is array<array-key, mixed>.
 	TArray Type = Array{Key: TArrayKey, Value: TMixed}
 	// TArrayKey is int|string.
-	TArrayKey Type = Union{[]Type{TInt, TString}}
+	TArrayKey Type = Union{Types: []Type{TInt, TString}}
 	// TScalar is bool|int|float|string.
-	TScalar Type = Union{[]Type{TBool, TInt, TFloat, TString}}
+	TScalar Type = Union{Types: []Type{TBool, TInt, TFloat, TString}}
 	// TNumeric is int|float|numeric-string.
-	TNumeric Type = Union{[]Type{TInt, TFloat, String{Numeric: true}}}
+	TNumeric Type = Union{Types: []Type{TInt, TFloat, String{Numeric: true}}}
 	// TDecimalIntString is decimal-int-string, the type of (string) $int.
 	TDecimalIntString Type = String{NonEmpty: true, Numeric: true, DecimalInt: true}
 	// TIterable is iterable<mixed, mixed>.
@@ -373,7 +389,7 @@ func Equal(a, b Type) bool {
 		return ok && Equal(a.Key, b.Key) && Equal(a.Value, b.Value)
 	case Union:
 		b, ok := b.(Union)
-		return ok && equalSet(a.Types, b.Types)
+		return ok && a.Benevolent == b.Benevolent && equalSet(a.Types, b.Types)
 	case Intersection:
 		b, ok := b.(Intersection)
 		return ok && equalSet(a.Types, b.Types)
@@ -438,14 +454,19 @@ func equalSet(a, b []Type) bool {
 
 // ------------------------------------------------------------------ union
 
-// MakeUnion builds the normalised union of the given types.
+// MakeUnion builds the normalised union of the given types. It is
+// benevolent where every member it ends with is a member of a benevolent
+// union among ts.
 func MakeUnion(ts ...Type) Type {
-	var members []Type
+	var members, benevolent []Type
 	var add func(t Type)
 	add = func(t Type) {
 		switch t := t.(type) {
 		case nil:
 		case Union:
+			if t.Benevolent {
+				benevolent = append(benevolent, t.Types...)
+			}
 			for _, m := range t.Types {
 				add(m)
 			}
@@ -465,7 +486,51 @@ func MakeUnion(ts ...Type) Type {
 		return members[0]
 	}
 	sort.SliceStable(members, func(i, j int) bool { return unionOrder(members[i]) < unionOrder(members[j]) })
-	return Union{members}
+	return Union{Types: members, Benevolent: len(benevolent) > 0 && amongAll(members, benevolent)}
+}
+
+// amongAll reports whether each of ms is one of of.
+func amongAll(ms, of []Type) bool {
+	for _, m := range ms {
+		found := false
+		for _, o := range of {
+			if Equal(m, o) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// Benevolent is t, a union, made benevolent (Union); any other type is
+// itself.
+func Benevolent(t Type) Type {
+	if u, ok := t.(Union); ok {
+		u.Benevolent = true
+		return u
+	}
+	return t
+}
+
+// keptBenevolent is r, what a substitution made of the union u, benevolent
+// as u was where its members are u's: a benevolent int|float a type
+// argument or a template stood for stays one, as PHPStan maps it.
+func keptBenevolent(u Union, r Type) Type {
+	if ru, ok := r.(Union); ok && u.Benevolent && amongAll(ru.Types, u.Types) {
+		ru.Benevolent = true
+		return ru
+	}
+	return r
+}
+
+// IsBenevolent reports a benevolent union.
+func IsBenevolent(t Type) bool {
+	u, ok := t.(Union)
+	return ok && u.Benevolent
 }
 
 // unionOrder gives a stable, readable member order: null last, scalars by
@@ -1305,7 +1370,7 @@ func MapDeep(t Type, f func(Type) Type) Type {
 		for i, m := range v.Types {
 			out[i] = MapDeep(m, f)
 		}
-		return f(MakeUnion(out...))
+		return f(keptBenevolent(v, MakeUnion(out...)))
 	case Intersection:
 		out := make([]Type, len(v.Types))
 		for i, m := range v.Types {
@@ -1387,7 +1452,7 @@ func Substitute(t Type, subst map[string]Type) Type {
 		}
 		return t
 	case Union:
-		return Map(t, func(m Type) Type { return Substitute(m, subst) })
+		return keptBenevolent(t, Map(t, func(m Type) Type { return Substitute(m, subst) }))
 	case Intersection:
 		ms := make([]Type, len(t.Types))
 		for i, m := range t.Types {

@@ -294,7 +294,9 @@ func (x *fnCtx) stepMembers(t types.Type, e *ast.IncDec) (result types.Type, ref
 				refuse("")
 				continue
 			}
-			out = append(out, types.TInt, types.TFloat)
+			// The number it reads as, a benevolent int|float as PHPStan has
+			// it (types.Union).
+			out = append(out, types.Benevolent(types.MakeUnion(types.TInt, types.TFloat)))
 		case types.ClassString:
 			refuse("") // a class name is never a number
 		default:
