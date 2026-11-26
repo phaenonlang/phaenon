@@ -58,6 +58,22 @@ import (
 // What is left, settype() and a function with side effects that reads an
 // argument that may be an object or a resource, is a write
 // the checker does not type, and hands the parameter over unchecked.
+//
+// A method that overrides another is held to the tag it inherits where
+// its own docblock has none (program.inheritParamOuts), as PHPStan merges
+// the tag in, and a finding names the declaration whose docblock has it.
+// A trait's body is held to the trait's own tags alone. PHPStan checks it
+// in the context of each class that uses the trait, against the tag that
+// class's method inherits; the checker checks it once, in the trait, where
+// $this, static and the users' properties are the trait's, and holding
+// that one reading to a user's tag reports what PHPStan passes (`$out =
+// clone $this` for a user's `@param-out Copyable`). So a trait's body that
+// breaks a tag its user inherits is not reported here, where PHPStan
+// reports it in the user's context:
+//
+//	interface Reader { /** @param-out int $n */ function read(mixed &$n): void; }
+//	trait WritesString { function read(mixed &$n): void { $n = 'x'; } }
+//	final class R implements Reader { use WritesString; }
 
 // outParam is a by-reference parameter a @param-out documents, with what
 // it holds where the body starts.
@@ -266,9 +282,25 @@ func (x *fnCtx) outEnd(op *outParam, t types.Type, at ast.Span, how int) {
 	if _, never := out.(types.Never); never {
 		remedy = "a @param-out never says the function does not return; end it with a throw, or declare the @param-out type it holds"
 	}
-	x.c.reportRelated(at, P2213, related(x.file, op.p.Span, "parameter $%s declared here", op.p.Name),
-		"$%s is documented @param-out %s, and %s %s with $%s holding %s: %s",
-		op.p.Name, x.typeName(out), x.name, where, op.p.Name, x.typeName(t), remedy)
+	documented, rel := x.outDocumented(op.p, out)
+	x.c.reportRelated(at, P2213, rel, "$%s %s, and %s %s with $%s holding %s: %s",
+		op.p.Name, documented, x.name, where, op.p.Name, x.typeName(t), remedy)
+}
+
+// outDocumented is how a finding about p's @param-out type out names the
+// tag, and the declaration it points at: p's own, or, where the method
+// inherits the tag, the parameter of the method whose docblock has it.
+func (x *fnCtx) outDocumented(p *program.Param, out types.Type) (string, *Related) {
+	from := p.OutFrom
+	if from == nil {
+		return "is documented @param-out " + x.typeName(out), related(x.file, p.Span, "parameter $%s declared here", p.Name)
+	}
+	name := from.Method.Name + "()"
+	if from.Method.Class != nil {
+		name = from.Method.Class.Name + "::" + name
+	}
+	return "inherits @param-out " + x.typeName(out) + " from " + name,
+		related(methodFile(from.Method), from.Param.Span, "parameter $%s of %s declared here, documented @param-out", from.Param.Name, name)
 }
 
 // wroteOut holds a write of a value of type vt to the variable name, at
@@ -290,9 +322,9 @@ func (x *fnCtx) wroteOut(name string, vt types.Type, env *state, span ast.Span) 
 	if _, never := out.(types.Never); never {
 		remedy = "a @param-out never says the function does not return; declare the @param-out type the body writes"
 	}
-	x.c.reportRelated(span, P2213, related(x.file, op.p.Span, "parameter $%s declared here", op.p.Name),
-		"$%s is documented @param-out %s, and %s writes %s to it here: %s",
-		op.p.Name, x.typeName(out), x.name, x.typeName(vt), remedy)
+	documented, rel := x.outDocumented(op.p, out)
+	x.c.reportRelated(span, P2213, rel, "$%s %s, and %s writes %s to it here: %s",
+		op.p.Name, documented, x.name, x.typeName(vt), remedy)
 }
 
 // handedOver records a write to the parameter e is, or holds an offset of,

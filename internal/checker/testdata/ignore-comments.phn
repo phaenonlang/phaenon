@@ -367,6 +367,113 @@ function noneMade(): void
     wantsInt(14); // @phaenon-ignore P3003 // want P4015 "no P3003 is reported on line 367"
 }
 
+// So does an override whose native type does not fit the one it
+// overrides: the compiled method takes the type that fits (the
+// override-erasure rule), another than the body was checked with.
+// `(): iterable` compiles to `(): array`, which refuses the generator the
+// body is; `(string $x)` to `(int|string $x)`, which hands the body an
+// int; `(): float` under `Ranged<int>` to `(): int|string`, which no float
+// leaves. No comment silences such a finding, static or not, in a class
+// declared when its code runs as in one linked on load. One about a type
+// that compiles as written is a comment's to accept: a docblock's, or a
+// native type the erased declaration admits though its type argument does
+// not.
+interface Ranged<T of int|string>
+{
+    get(): T;
+}
+
+interface Held<T>
+{
+    get(): T;
+
+    set(T $v): void;
+}
+
+class Listed
+{
+    /**
+     * @return list<int>
+     */
+    all(): array
+    {
+        return [];
+    }
+
+    one(int $x): int
+    {
+        return $x;
+    }
+
+    static make(int $x): int
+    {
+        return $x;
+    }
+}
+
+final class Floats implements Ranged<int>
+{
+    get(): float // @phaenon-ignore P2502 // want P2502, P4015 "P2502 on line 416 is about code that compiles to PHP doing something else than it reads, and no comment silences it: remove the comment"
+    {
+        return 1.5;
+    }
+}
+
+class Generated extends Listed
+{
+    /**
+     * @return iterable<int>
+     */
+    all(): iterable // @phaenon-ignore P2502 // want P2502, P4015 "something else than it reads"
+    {
+        yield 1;
+    }
+
+    // @phaenon-ignore-next-line // want P4015 "no finding a comment silences is reported on line 433"
+    one(string $x): string // want P2502, P2502
+    {
+        return $x;
+    }
+
+    static make(string $x): int // @phpstan-ignore method.childParameterType // want P2502
+    {
+        return 1;
+    }
+}
+
+final class HeldApart implements Held<int>
+{
+    get(): string // @phaenon-ignore P2502
+    {
+        return 'a';
+    }
+
+    set(string $v): void // @phaenon-ignore P2502 // want P2502, P4015 "something else than it reads"
+    {
+    }
+}
+
+final class ListedStrings extends Listed
+{
+    /**
+     * @return list<string>
+     */
+    all(): array // @phaenon-ignore P2502
+    {
+        return [];
+    }
+}
+
+if (PHP_VERSION_ID > 80000) {
+    class GeneratedLate extends Listed
+    {
+        one(string $x): int // @phaenon-ignore P2502 // want P2502, P4015 "something else than it reads"
+        {
+            return 1;
+        }
+    }
+}
+
 // static in a constant expression is refused when PHP compiles the file,
 // in every place the checker reports it.
 class Late

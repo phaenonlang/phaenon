@@ -52,13 +52,13 @@ import (
 // (`// want P2301 extra`), and the parity run holds the mark to PHPStan.
 // With Options.NoExtraChecks the finding is not returned.
 func (c *Checker) reportExtra(span ast.Span, code Code, format string, args ...any) {
-	c.reportOf(Extra, false, span, code, nil, format, args...)
+	c.reportOf(Extra, mayBeSilenced, span, code, nil, format, args...)
 }
 
 // reportExtraRelated is reportExtra with the declaration the finding is
 // about.
 func (c *Checker) reportExtraRelated(span ast.Span, code Code, rel *Related, format string, args ...any) {
-	c.reportOf(Extra, false, span, code, rel, format, args...)
+	c.reportOf(Extra, mayBeSilenced, span, code, rel, format, args...)
 }
 
 // reportExtra is the checker's: an extra check, with its proof at the call.

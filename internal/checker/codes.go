@@ -267,8 +267,9 @@ var (
 	// (Checker.leftOut). No comment silences this code, nor a code of the
 	// run (ofTheRun), of the syntax (ofTheSyntax) or of code that does
 	// something else than it reads (otherThanItReads), nor a finding about
-	// code PHP refuses (Checker.reportRefused), and one that names any of
-	// them is reported for that.
+	// code PHP refuses (Checker.reportRefused) or about a declaration the
+	// compiled file writes otherwise than the source (compiledOtherwise),
+	// and one that names any of them is reported for that.
 	P4015 = Code{"P4015", Warning, "ignore comment that silences nothing"}
 	// P4013 reported a `concurrently` block or a `spawn` in a project without
 	// phaenon/concurrent installed; retired with the syntax on 2026-11-08
@@ -320,15 +321,19 @@ var ofTheSyntax = map[string]bool{
 // when they run, `T::class` is the name of a class nobody declared, and
 // `$x instanceof T` is false whatever $x holds. No ignore comment
 // silences them, and one that names the code on a line where it is
-// reported is told so (P4015).
+// reported is told so (P4015). A finding of another code may be about
+// such code too, which the place that reports it says
+// (compiledOtherwise): an override whose native type the compiled file
+// replaces by one that fits (P2502).
 var otherThanItReads = map[string]bool{P3003.ID: true}
 
 // silenceable reports whether an ignore comment may silence a finding of
 // the code: neither P4015, nor a code of the run or of the syntax, nor
 // one of code that does something else than it reads. A finding about
 // code PHP refuses is silenced by none either, whatever its code
-// (Diagnostic.refused); which finding is one is decided where it is
-// reported (reportRefused).
+// (Diagnostic.refused), nor is one about a declaration the compiled file
+// writes otherwise than the source (Diagnostic.rewritten); which finding
+// is one is decided where it is reported (standing).
 func silenceable(code string) bool {
 	return code != P4015.ID && !ofTheRun[code] && !ofTheSyntax[code] && !otherThanItReads[code]
 }

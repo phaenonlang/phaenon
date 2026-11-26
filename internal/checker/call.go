@@ -1642,14 +1642,13 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 			}
 			classes = []*program.Class{x.class}
 			viaSelf = true
-			if raw == "static" || !x.static {
-				if x.static {
-					recv = types.Static{Of: &types.Class{Name: x.class.Name, Args: selfArgs(x.class)}}
-				} else {
-					recv = x.thisType
-				}
+			// self:: forwards the called class as static:: and parent:: do
+			// (PHP's late static binding), in a static method too: the
+			// `static` of what it calls is the caller's own.
+			if x.static {
+				recv = types.Static{Of: &types.Class{Name: x.class.Name, Args: selfArgs(x.class)}}
 			} else {
-				recv = types.Class{Name: x.class.Name, Args: selfArgs(x.class)}
+				recv = x.thisType
 			}
 		default:
 			t, cl := x.classRefType(n, n.S)
@@ -3244,6 +3243,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		out := b.param.Out
 		if out != nil {
 			out = x.evalConditional(types.Substitute(types.Substitute(out, rename), subst), argByName)
+			if sig.recv != nil {
+				out = replaceStatic(out, sig.recv) // `@param-out static` is the receiver's class, as a `@return static` is
+			}
 		}
 		if pm := pregMatchesType(sig.name, b.param.Name, args, argByName); pm != nil {
 			out = pm
