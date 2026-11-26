@@ -149,6 +149,14 @@ func TestPHPStanParity(t *testing.T) {
 		// php-parser holds as a statement of its own; the checker reports
 		// it at the statement (checkerAlone).
 		"param-out-body.phn": {"paramOut.type": {872, 885, 891, 907}},
+		// A trait's body, which PHPStan checks in the context of each class
+		// that uses the trait, against the @param-out that class's method
+		// inherits (356: UsesForStrings's string); the checker checks the
+		// body once, in the trait, where $this and the users' members are
+		// the trait's, and holds it to the trait's own tags alone, since
+		// holding that one reading to a user's tag reports code PHPStan
+		// passes (paramout.go).
+		"param-out-inherited.phn": {"paramOut.type": {356}},
 	}
 	// besideExtra are the lines whose findings are all extra checks and on
 	// which PHPStan speaks all the same, under an identifier the lists
