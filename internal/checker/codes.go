@@ -128,6 +128,9 @@ var (
 	// value of another type, or the body ends with it holding one, unwritten
 	// on some way there (paramout.go).
 	P2213 = Code{"P2213", Error, "by-reference parameter does not hold its @param-out type"}
+	// P2214: a by-reference parameter no @param-out documents is written a
+	// value of another type than its declared one (paramout.go).
+	P2214 = Code{"P2214", Error, "by-reference parameter is written a value of another type"}
 
 	// P2 — expressions
 	P2301 = Code{"P2301", Error, "invalid operand types"}

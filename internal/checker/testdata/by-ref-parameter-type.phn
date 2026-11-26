@@ -1,0 +1,537 @@
+namespace ByRefParameterType;
+
+// A by-reference parameter no @param-out documents is held to its declared
+// type, as PHPStan holds it (parameterByRef.type): every write to it in
+// the body leaves a value of that type (P2214), and nothing is held where
+// the body ends (paramout.go).
+
+function writer(mixed &$s): void
+{
+    $s = 's';
+}
+
+/** @param-out string $s */
+function stringWriter(mixed &$s): void
+{
+    $s = 's';
+}
+
+function mayThrow(): void
+{
+    if (\random_int(0, 1) === 1) {
+        throw new \RuntimeException('thrown');
+    }
+}
+
+// ---- the type held: the declaration, refined by the docblock
+
+function native(int &$n): void
+{
+    $n = 'x'; // want P2214 "$n is declared int by reference, and function ByRefParameterType\native() writes 'x' to it here: write a value of type int, or document with @param-out what $n holds afterwards"
+}
+
+function nativeHeld(int &$n): void
+{
+    $n = 2;
+}
+
+/** @param positive-int $n */
+function refined(int &$n): void
+{
+    $n = 0; // want P2214 "$n is declared int<1, max> by reference, and function ByRefParameterType\refined() writes 0"
+}
+
+/** @param positive-int $n */
+function refinedHeld(int &$n): void
+{
+    $n = 5;
+}
+
+/** @param int $n */
+function documentedOnly(&$n): void
+{
+    $n = 'x'; // want P2214 "declared int by reference"
+}
+
+function untyped(&$n): void // want P2516
+{
+    $n = 'x';
+}
+
+function declaredMixed(mixed &$n): void
+{
+    $n = 'x';
+}
+
+function withDefault(int &$n = 0): void
+{
+    $n = 'x'; // want P2214 "declared int by reference"
+}
+
+function nullable(?int &$n = null): void
+{
+    $n = null;
+}
+
+/**
+ * @template T
+ * @param T $x
+ */
+function template(mixed &$x): void
+{
+    $x = 1; // want P2214 "$x is declared T by reference, and function ByRefParameterType\template() writes 1"
+}
+
+// ---- a variadic parameter: the values of the array it holds
+
+function variadicRebound(int &...$xs): void
+{
+    $xs = 'a';
+}
+
+function variadicOffset(int &...$xs): void
+{
+    $xs[0] = 'a'; // want P2214 "$xs is declared int by reference, and function ByRefParameterType\variadicOffset() writes int|'a' to it here"
+}
+
+function variadicArray(int &...$xs): void
+{
+    $xs = [1, 2];
+}
+
+function variadicArrayOfStrings(int &...$xs): void
+{
+    $xs = ['a']; // want P2214 "writes 'a' to it here"
+}
+
+// ---- methods, a constructor's promoted parameter
+
+final class Methods
+{
+    public function __construct(public int &$n)
+    {
+        $n = 'x'; // want P2214 "ByRefParameterType\Methods::__construct() writes 'x'"
+    }
+
+    public function instance(int &$n): void
+    {
+        $n = 'x'; // want P2214 "ByRefParameterType\Methods::instance() writes 'x'"
+    }
+
+    public static function fill(int &$n): void
+    {
+        $n = 'x'; // want P2214 "ByRefParameterType\Methods::fill() writes 'x'"
+    }
+}
+
+// ---- every write
+
+function compound(int &$n): void
+{
+    $n .= 'x'; // want P2214 "writes non-empty-string"
+}
+
+function compoundHeld(int &$n): void
+{
+    $n += 1;
+}
+
+function stepped(int &$n): void
+{
+    $n++;
+}
+
+function byReference(int &$n, string $s): void
+{
+    $n = &$s; // want P2214 "writes string"
+}
+
+function afterAReference(int &$n): void
+{
+    $alias = &$n;
+    $alias = 'x';
+    $n = 'y'; // want P2214 "writes 'y'"
+}
+
+function afterStatic(int &$n): void
+{
+    static $n;
+    $n = 'x'; // want P2214 "writes 'x'"
+}
+
+/** @param array<int, int> $a */
+function offset(array &$a): void
+{
+    $a[0] = 'x'; // want P2214 "$a is declared array<int, int> by reference, and function ByRefParameterType\offset() writes non-empty-array<int, int|'x'>"
+}
+
+/** @param array{a: int, b: string} $a */
+function unsetOffset(array &$a): void
+{
+    unset($a['a']); // want P2214 "writes array{b: string}"
+}
+
+function destructured(int &$n): void
+{
+    [$n] = ['x']; // want P2214 "writes 'x'"
+    ['k' => $n] = ['k' => 'y']; // want P2214 "writes 'y'"
+}
+
+/** @param list<string> $xs */
+function foreachValue(int &$n, array $xs): void
+{
+    foreach ($xs as $n) { // want P2214 "writes string"
+    }
+}
+
+/** @param array<string, int> $xs */
+function foreachKey(int &$n, array $xs): void
+{
+    foreach ($xs as $n => $v) { // want P2214 "writes string"
+    }
+}
+
+function caught(int &$n): void
+{
+    try {
+        mayThrow();
+    } catch (\RuntimeException $n) { // want P2214 "writes RuntimeException"
+    }
+}
+
+function passedOn(int &$n): void
+{
+    writer($n); // want P2214 "writes mixed"
+}
+
+function passedOnToATag(int &$n): void
+{
+    stringWriter($n); // want P2214 "writes string"
+}
+
+/** @param list<int> $out */
+function sortedKeepingKeys(array &$out): void
+{
+    \asort($out); // want P2214 "$out is declared list<int> by reference, and function ByRefParameterType\sortedKeepingKeys() writes array<int<0, max>, int>"
+}
+
+/** @param list<int> $out */
+function sorted(array &$out): void
+{
+    \sort($out);
+}
+
+/** @param list<string> $out */
+function keyed(array &$out): void
+{
+    $out['k'] = 'x'; // want P2214 "writes non-empty-array<int|'k', string>"
+}
+
+// ---- closures and arrow functions are not held, nor the end of a body
+
+function closures(int &$n): void
+{
+    $f = function (int &$m): void {
+        $m = 'x';
+    };
+    $g = fn (int &$m): string => $m = 'x';
+    $h = function () use (&$n): void {
+        $n = 'x';
+    };
+}
+
+function endsUnwritten(int|string &$n): void
+{
+    if (\is_string($n)) {
+        return;
+    }
+}
+
+// ---- what PHPStan passes: the written value is of the type
+
+/** @param list<string> $out */
+function builtInALoop(array &$out, int $k): void
+{
+    for ($i = 0; $i < $k; $i++) {
+        $out[] = (string) $i;
+    }
+}
+
+/** @param array<string, list<int>> $groups */
+function grouped(array &$groups, string $k, int $v): void
+{
+    $groups[$k][] = $v;
+}
+
+/** @param array<string, true> $seen */
+function set(array &$seen, string $key): void
+{
+    if (isset($seen[$key])) {
+        return;
+    }
+    $seen[$key] = true;
+}
+
+/** @param non-empty-string $s */
+function concatenated(string &$s): void
+{
+    $s .= 'x';
+}
+
+function fixedUp(?string &$s): void
+{
+    if ($s === null) {
+        $s = '';
+    }
+    $s .= 'a';
+}
+
+function narrowed(int|string &$x): void
+{
+    if (\is_string($x)) {
+        $x = \strlen($x);
+    }
+    $x = $x + 1;
+}
+
+// A read of the parameter is not widened while it holds a value of its
+// type: the literals of a shape and of an array written whole stay.
+
+/** @param array{level: 'info'|'warn', debug?: bool} $opts */
+function defaults(array &$opts): void
+{
+    $opts['debug'] ??= false;
+    $opts['level'] = 'info';
+}
+
+/** @param array{name: string, role: 'admin'|'user'} $u */
+function promoted(array &$u): void
+{
+    $u['role'] = 'admin';
+    $u['name'] .= '!';
+    $u['name'] .= '?';
+}
+
+/** @param array{kind: 'file', path: string}|array{kind: 'dir', path: string, children: list<string>} $node */
+function normalized(array &$node): void
+{
+    $node['path'] = \rtrim($node['path'], '/');
+    if ($node['kind'] === 'dir') {
+        foreach ($node['children'] as $c) {
+            echo $c;
+        }
+    }
+}
+
+/** @param array<string, true> $seen */
+function seeded(array &$seen): void
+{
+    $seen = ['root' => true];
+    $seen['child'] = true;
+}
+
+/** @param list<positive-int> $ids */
+function seededIds(array &$ids): void
+{
+    $ids = [1, 2];
+    $ids[] = 3;
+}
+
+// Nor in a closure that uses it by reference, whose writes PHPStan holds
+// to nothing: what the closure may leave joins what the parameter holds
+// after it, and a write there is held to the type with it.
+
+/**
+ * @param array<string, true> $seen
+ * @param list<string> $keys
+ */
+function visitedAll(array &$seen, array $keys): void
+{
+    $mark = function (string $k) use (&$seen): void {
+        $seen[$k] = true;
+    };
+    foreach ($keys as $k) {
+        $mark($k);
+    }
+    $seen['root'] = true;
+}
+
+/** @param array<string, true> $seen */
+function visitedNested(array &$seen, string $k): void
+{
+    $outer = function () use (&$seen, $k): void {
+        $inner = function () use (&$seen, $k): void {
+            $seen[$k] = true;
+        };
+        $inner();
+        $seen[$k . '!'] = true;
+    };
+    $outer();
+    $seen['root'] = true;
+}
+
+/** @param array<string, true> $seen */
+function wrongInAClosure(array &$seen, string $k): void
+{
+    $mark = function () use (&$seen, $k): void {
+        $seen[$k] = 1;
+    };
+    $mark();
+    $seen['root'] = true; // want P2214 "writes non-empty-array<string, bool|int>"
+}
+
+// ---- the same writes, held to a @param-out
+
+/** @param-out int $n */
+function caughtTagged(mixed &$n): void
+{
+    $n = 1;
+    try {
+        mayThrow();
+    } catch (\RuntimeException $n) { // want P2213 "$n is documented @param-out int, and function ByRefParameterType\caughtTagged() writes RuntimeException"
+    }
+}
+
+/** @param-out int $xs */
+function variadicTagged(mixed &...$xs): void
+{
+    $xs[0] = 'a'; // want P2213 "$xs is documented @param-out int, and function ByRefParameterType\variadicTagged() writes mixed"
+}
+
+/** @param-out int $xs */
+function variadicTaggedEnd(mixed &...$xs): void // want P2213 "ends here with $xs holding mixed"
+{
+}
+
+/** @param-out int $xs */
+function variadicTaggedHeld(int &...$xs): void
+{
+    $xs = 'rebound';
+}
+
+// A parameter a @param-out documents is read within its declared type too:
+// the level's literals stay until the body has written what the tag says.
+// The first write leaves the level optional, which the tag is not, and
+// PHPStan reports it as the checker does.
+
+/**
+ * @param array{level?: 'info'|'warn', debug?: bool} $opts
+ * @param-out array{level: 'info'|'warn', debug: bool} $opts
+ */
+function filled(array &$opts): void
+{
+    $opts['debug'] ??= false; // want P2213 "writes array{level?: 'info'|'warn', debug: bool}"
+    $opts['level'] ??= 'info';
+}
+
+// ---- arithmetic on a range the declaration states: PHPStan computes the
+// range the arithmetic leaves, `int<1, max>` after `$count++` on an
+// `int<0, max>`, and passes these; the checker's arithmetic on a range is
+// int, a step, a compound assignment and any other sum alike, on the
+// parameter or an entry of it, and an int is no int<0, max>. False
+// findings, held in the parity run's table until the lattice computes
+// with ranges. A step that leaves the range is reported by both.
+
+/** @param int<0, max> $count */
+function counts(int &$count): void
+{
+    $count++; // want P2214 "writes int to it here"
+}
+
+/** @param int<0, max> $count */
+function countsBy(int &$count): void
+{
+    $count += 2; // want P2214 "writes int to it here"
+}
+
+/** @param int<0, max> $count */
+function countsBySum(int &$count): void
+{
+    $count = $count + 1; // want P2214 "writes int to it here"
+}
+
+/** @param positive-int $n */
+function leavesTheRange(int &$n): void
+{
+    $n--; // want P2214 "writes int to it here"
+}
+
+// ---- a write under a variable key on a list: PHPStan keeps the list,
+// the inner array's id optional, which the first write is reported for;
+// the checker makes it an array of int keys, no list, and reports the
+// second write too, which PHPStan passes, its id written. The second is a
+// false finding, held in the parity run's table until such a write keeps
+// a list.
+
+/** @param list<array{id: int, state: 'new'|'done'}> $tasks */
+function finished(array &$tasks, int $i): void
+{
+    $tasks[$i]['state'] = 'done'; // want P2214 "writes non-empty-array<int, array{id: int, state: 'new'|'done'}>"
+    $tasks[$i]['id'] = 5; // want P2214 "writes non-empty-array<int, array{id: int, state: string}>"
+}
+
+// ---- writes whose value is typed as PHPStan types it: a float divided is
+// a float, a division and a power of two ints is PHPStan's (int|float),
+// which a parameter is held to strictly; a nullable declaration keeps its
+// null under a docblock that refines it; and what PHP's own functions
+// leave in an argument is what PHPStan leaves there.
+
+function halves(float &$f): void
+{
+    $f /= 2;
+    $f = \abs($f - 1.5);
+    $f = \pow($f, 2);
+    $f = $f / 3;
+}
+
+function ratio(int $a, int $b, float &$f, int &$n): void
+{
+    $f = (float) $a / $b;
+    $n = $a / $b; // want P2214 "$n is declared int by reference, and function ByRefParameterType\ratio() writes (int|float)"
+    $n = $a ** $b; // want P2214 "writes (int|float)"
+}
+
+/** @param positive-int $code */
+function resets(?int &$code): void
+{
+    $code = null;
+    $code = 0; // want P2214 "$code is declared int<1, max>|null by reference, and function ByRefParameterType\resets() writes 0"
+}
+
+/** @param list<string> $stack */
+function pops(array &$stack): void
+{
+    \array_pop($stack);
+    \array_shift($stack);
+}
+
+/** @param array<string, int> $map */
+function popsMap(array &$map): void
+{
+    \array_pop($map);
+}
+
+/** @param array<int|string, string> $m */
+function matches(string $s, array &$m): void
+{
+    \preg_match('/(a)(b)?/', $s, $m);
+}
+
+/** @param list<string> $m */
+function matchesList(string $s, array &$m): void
+{
+    \preg_match('/(a)(b)/', $s, $m);
+}
+
+/** @param array<string, string> $out */
+function parsed(string $s, array &$out): void
+{
+    \parse_str($s, $out); // want P2214 "$out is declared array<string, string> by reference, and function ByRefParameterType\parsed() writes array<string|array>"
+}
+
+/** @param list<int> $xs */
+function sortedList(array &$xs): void
+{
+    \sort($xs);
+    \usort($xs, static fn (int $a, int $b): int => $a <=> $b);
+}

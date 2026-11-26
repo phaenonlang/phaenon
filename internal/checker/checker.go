@@ -1005,15 +1005,18 @@ type fnCtx struct {
 	// being checked.
 	inTry int
 	// outs are the by-reference parameters of the function or method
-	// being checked that a @param-out documents, by name and in order
-	// (outOrder); outEnds the statements its body ends with, each with
-	// the span its finding goes to (paramout.go). Nil in a closure.
+	// being checked that the body is held to a type of, by name and in
+	// order (outOrder); outEnds the statements its body ends with, where a
+	// @param-out documents one of them, each with the span its finding
+	// goes to (paramout.go). Nil in a closure, which heldUses gives the
+	// types of such parameters it uses by reference, for its reads alone.
 	// outUnchecked marks the write being recorded as one held to nothing;
 	// declHead is where the declaration starts, its attributes and
 	// modifiers included, which an empty body's end is reported at.
 	outs         map[string]*outParam
 	outOrder     []*outParam
 	outEnds      map[ast.Stmt]ast.Span
+	heldUses     map[string][]types.Type
 	outUnchecked bool
 	declHead     ast.Span
 	// trackInits records the properties of $this a method body assigns

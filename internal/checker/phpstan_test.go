@@ -588,6 +588,13 @@ var checkerAlone = map[string][]struct {
 	"param-out-body.phn": {{P2213, []int{905}, artifact, "the end of a body whose last statement a comment follows: php-parser holds the comment " +
 		"as a statement of its own, the body's last, and PHPStan reports the end at the comment's line (allowAt)"}},
 
+	"by-ref-parameter-type.phn": {
+		{P2214, []int{438, 444, 450}, falseFinding, "arithmetic on a by-reference parameter declared int<0, max>, a step, a compound assignment " +
+			"and a sum assigned back alike: PHPStan computes the range it leaves, int<1, max> and int<2, max>, and the checker's arithmetic on a range is int"},
+		{P2214, []int{470}, falseFinding, "the second write under a variable key on a list of shapes: the first leaves an array of int keys, no list, " +
+			"where PHPStan keeps the list (its id optional, which both report there), and the second, which PHPStan passes with the id written, is no list again"},
+	},
+
 	"kept-conditions.phn": {
 		{P2103, []int{333, 349}, notToldApartYet, "a condition kept in a variable, ended by a write PHPStan does not follow: array_walk_recursive() with a callback " +
 			"that takes the value by reference, array_multisort() on an int key it renumbers. php gives takesStd() an int and a null, PHPStan keeps the stdClass; " +
