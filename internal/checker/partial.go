@@ -1234,9 +1234,11 @@ func (x *fnCtx) partialRefusal(callee ast.Expr, args *ast.ArgList, sig *signatur
 				unwritable = unwritable || p.Unwritable
 			}
 		}
-		if unwritable && !x.boundEarly(callee, sig) {
+		if unwritable && !sig.value && !x.boundEarly(callee, sig) {
 			// The closure then passes on what it is given (mixed ...$args),
-			// by value, and the method that runs decides the defaults.
+			// by value, and the method that runs decides the defaults. A
+			// callable value is no method: its type writes no default, and
+			// it is refused below in the words that say so.
 			for _, p := range rec.Params {
 				if p.Arg == nil && p.ByRef && !(named && p.Variadic) {
 					return fmt.Sprintf("the method is bound when the call runs, so the defaults of the parameters `...` leaves are not known where the closure is written, and a closure that passes its arguments on cannot pass $%s by reference: %s", p.Name, placeholders(rec, named))
