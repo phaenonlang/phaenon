@@ -35,3 +35,13 @@ function leftByRef(): void {
     $v = '';
     echo (noted('y', ...))($v), (counted('z', ...))('k', $n);
 }
+
+// A callable value's type writes no default: its by-reference parameter
+// `...` leaves is refused as a function's is, and a ? for it is not.
+/** @param \Closure(string $t, string &$o=): string $f */
+function valueByRef(\Closure $f): void {
+    $a = $f('x', ...); // want P1002 "`...` leaves the by-reference parameter $o, which the closure written for PHP 8.5 would pass on by value, as a default of the parameters it leaves cannot be written there: write a ? for $o in place of the `...`"
+    $b = $f('x', ?);
+    $out = '';
+    echo $b($out);
+}

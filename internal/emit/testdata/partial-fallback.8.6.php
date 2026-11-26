@@ -14,6 +14,14 @@ declare(strict_types=1);
 // call to them. The variadic is named so as to hide no variable the bound
 // arguments read and to repeat no parameter. Called where it stands with
 // arguments, such an application is the call it makes.
+//
+// A callable value's type gives its parameters no default to write, nor a
+// type PHP checks of the value: the closure over it passes on what `...`
+// leaves, and says the types of the type's parameters in an inline @var,
+// its own and those `...` passes on, by name where the type names them.
+// A parameter the type does not name is the closure's $arg1, $arg2, …,
+// or $arg1_2 where that is the type's name of another parameter or a
+// variable the call reads.
 
 namespace Fallback;
 
@@ -27,6 +35,11 @@ final class Card
     public const RANK = 'ace';
 
     public function __construct(public string $face = 'up') {}
+
+    public function faced(string $t, string $how = self::RANK): string
+    {
+        return $t . $this->face . $how;
+    }
 }
 
 function ranked(string $t, string $rank = Card::RANK, int $n = 1 + 2): string
@@ -122,5 +135,121 @@ function run(): void
     echo (filled('f:', ...))($out), '|', json_encode($out), '|', (counts('a', ...))('B'), "\n";
 }
 
+final class Hand
+{
+    /**
+     * @param \Closure(string, string=): string $held
+     */
+    public function __construct(public \Closure $held) {}
+
+    public function played(): string
+    {
+        $h = $this->held;
+        $p = $h('h:', ...);
+        return $p() . '|' . $p('two');
+    }
+}
+
+/** @param callable(string, string=): string $cb */
+function called(callable $cb): string
+{
+    $c = $cb('cb:', ...);
+    return $c() . '|' . $c('jack');
+}
+
+/**
+ * @param \Closure(string, string=): string $f
+ */
+function given(\Closure $f): string
+{
+    $g = $f('g:', ...);
+    $q = $f(?, 'queen');
+    $k = $f('k:', ?);
+    return $g() . '|' . $g('nine') . '|' . $q('q:') . '|' . $k('king') . '|' . ($f('i:', ...))('ten');
+}
+
+/** @param \Closure(string $t, string $rank=): string $f */
+function named_value(\Closure $f): string
+{
+    $g = $f('nv:', ...);
+    return $g() . '|' . $g(rank: 'two');
+}
+
+/**
+ * @param \Closure(string, int=, string...): string $f
+ */
+function spread(\Closure $f): string
+{
+    $s = $f('sp:', ...);
+    $v = $f('sv:', 5, ...);
+    return $s() . '|' . $s(3, 'a', 'b') . '|' . $v('c');
+}
+
+/** @param \Closure(string $t, string &$o=): string $f */
+function written(\Closure $f): string
+{
+    $w = $f('w:', ?);
+    $out = 'o';
+    return $w($out) . '|' . $out;
+}
+
+/** @param \Closure(string $arg2, string): string $f */
+function both(\Closure $f): string
+{
+    $b = $f(?, ?);
+    return $b('t:', 'u');
+}
+
+/**
+ * @param \Closure(string, string): string $arg1
+ */
+function named_arg1(\Closure $arg1): string
+{
+    $n = $arg1(?, 'v');
+    return $n('n:');
+}
+
+/**
+ * @param \Closure(string, string): string $f
+ */
+function reads_arg1(\Closure $f, string $arg1): string
+{
+    $r = $f(?, $arg1);
+    return $r('r:');
+}
+
+function values(): void
+{
+    // A first-class callable of a function and of a method in a variable.
+    $f = ranked(...);
+    $r = $f('fv:', ...);
+    echo $r(), '|', $r('king'), '|', $r(n: 4), "\n";
+    $m = new Card('down')->faced(...);
+    $h = $m('m:', ...);
+    echo $h(), '|', $h(how: 'two'), "\n";
+    $l = listed(...);
+    $ls = $l('lv:', ...);
+    echo $ls(), '|', $ls(4, 'x', 'y'), "\n";
+    // An arrow function in a variable.
+    $a = fn(string $x, string $y = 'y'): string => $x . $y;
+    $b = $a('a:', ...);
+    echo $b(), '|', $b('b'), '|', $b(y: 'c'), "\n";
+    // A parameter and a property of a closure type, a callable docblock
+    // type, a type that names its parameters, a variadic one.
+    echo given(ranked(...)), "\n";
+    echo new Hand(ranked(...))->played(), "\n";
+    echo called(ranked(...)), "\n";
+    echo named_value(ranked(...)), "\n";
+    echo spread(listed(...)), "\n";
+    // By reference, a placeholder's parameter stays so.
+    echo written(function (string $t, string &$o = 'x'): string {
+        $o = $t . 'out';
+        return $t;
+    }), "\n";
+    // A position's name taken by a parameter, the callee or a bound argument.
+    echo both(ranked(...)), '|', named_arg1(ranked(...)), '|', reads_arg1(ranked(...), 'w'), "\n";
+}
+
 run();
-// phaenon-map v1 partial-fallback.phn 1-6=1 7:1 21-21=14 22:15 26-26=18 27:19 33-35=24 36:25 38-40=26 41:27 43-45=28 46:29 48-50=30 51:31 53-55=32 56:33 58-58=34 59:35 61-63=36 64:37 67-69=39 70:40 71-73=41 74:41 75-75=41 76:42 81-83=46 84:47 85-87=48 88:48 89-89=48 90:49 95-95=53 96:54
+values();
+// phaenon-map v1 partial-fallback.phn 1-6=1 7:1 29-29=22 30:23 34-34=26 35:27 40-42=31 43:32 46-48=34 49:35 51-53=36 54:37 56-58=38 59:39 61-63=40 64:41 66-68=42 69:43 71-71=44 72:45 74-76=46 77:47 80-82=49 83:50 84-86=51 87:51 88-88=51 89:52 94-96=56 97:57 98-100=58 101:58 102-102=58 103:59 108-108=63 109:64 139-139=93 140-142=94 143:94 146-146=96 147:97 155-155=104 156:105 160-162=109 163:109 164-164=109 165:110 173-173=117 174:118 178-180=122 181:122 182-182=122 183:123 190-190=129 191:130 198-198=136 199:137 203-205=141 206:141 207-207=141 208:142 212-214=146 215:146 216-216=146 217:147 222-222=151 223:152

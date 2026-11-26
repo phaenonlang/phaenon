@@ -773,8 +773,37 @@ func (x *fnCtx) boundEarly(callee ast.Expr, sig *signature) bool {
 // resolved it.
 func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature, slots []pfaSlot, rest, named, inPipe bool, typeOf func(*program.Param) types.Type) {
 	rec := &program.Partial{}
+	// A parameter the callable type does not name is reached by position
+	// alone, and the closure needs a variable for it: $arg and its
+	// position, or another name where that one is the type's name for
+	// another parameter or a variable the call reads, which the closure
+	// captures. The name is the compiler's, so it is never a reason to
+	// refuse the application.
+	var taken map[string]bool
+	if sig.value {
+		taken = map[string]bool{}
+		for _, s := range slots {
+			if !unnamedParam(s.name) {
+				taken[s.name] = true
+			}
+		}
+		ast.Inspect(callee, func(n ast.Node) bool {
+			if v, ok := n.(*ast.Variable); ok {
+				taken[v.Name] = true
+			}
+			return true
+		})
+	}
 	for _, s := range slots {
 		pp := program.PartialParam{Name: s.name, Optional: !s.required, Variadic: s.variadic, ByRef: s.param.ByRef, Sensitive: s.param.Sensitive, Arg: s.arg}
+		if sig.value && unnamedParam(s.name) {
+			name := "arg" + s.name
+			for i := 2; taken[name]; i++ {
+				name = fmt.Sprintf("arg%s_%d", s.name, i)
+			}
+			taken[name] = true
+			pp.Name, pp.Positional = name, true
+		}
 		var declared types.Type = types.TMixed // what PHP declares
 		if s.param.NativeType != nil {
 			native := x.selfResolved(s.param.NativeType, sig)
@@ -799,7 +828,10 @@ func (x *fnCtx) recordPartial(callee ast.Expr, args *ast.ArgList, sig *signature
 			// what `T $a` does, mixed, and its $a is an int. Without it
 			// PHPStan would type the closure's result from mixed, and
 			// refuse the compiled file where the source was accepted.
-			if !types.Equal(t, types.Erase(t)) || mentionsParam(s.param.Type) && !types.Equal(x.selfResolved(t, sig), declared) {
+			// A callable value's type declares nothing PHP checks: the
+			// closure says each of its parameters' types there, as PHP's
+			// own closure over the value takes them from the value.
+			if !types.Equal(t, types.Erase(t)) || mentionsParam(s.param.Type) && !types.Equal(x.selfResolved(t, sig), declared) || sig.value && !types.IsMixed(t) {
 				pp.Doc = types.PrintQualifiedValues(x.selfResolved(t, sig))
 				types.Walk(t, func(m types.Type) {
 					switch m.(type) {
