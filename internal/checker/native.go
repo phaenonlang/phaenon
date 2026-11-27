@@ -122,6 +122,14 @@ func (x *fnCtx) phpType(e ast.Expr, env *state, guaranteed bool) types.Type {
 		if pr := cl.FindProperty(v.Name); pr != nil {
 			return refinedNative(pr.NativeType, pr.Type, guaranteed)
 		}
+	case *ast.ClassConstFetch:
+		// `$x::class` of a refined $x (`@param Dog` over a native Animal) is
+		// the class PHP holds $x to.
+		if obj := classOfSubject(e); obj != nil {
+			if n := x.phpType(obj, env, guaranteed); n != nil {
+				return types.ClassString{Of: types.StripNull(n)}
+			}
+		}
 	case *ast.Index:
 		// An element of a refined array (`@param array{body: string}` over
 		// a native `array`) is as uncertain as the array: PHP knows mixed.

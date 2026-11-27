@@ -2343,6 +2343,9 @@ func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Typ
 // not reported, as PHPStan does not with treatPhpDocTypesAsCertain off,
 // and still decide the result for the flow.
 func (x *fnCtx) disjointComparison(e *ast.Binary, l, r types.Type, env *state) (known bool) {
+	if x.unknownClassName(e.Left) || x.unknownClassName(e.Right) {
+		return false
+	}
 	if !x.nativeOverlap(e.Left, l, e.Right, r, env) {
 		word := "false"
 		if e.Op == token.T_IS_NOT_IDENTICAL {

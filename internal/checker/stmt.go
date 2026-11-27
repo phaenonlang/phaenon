@@ -2924,6 +2924,14 @@ func (x *fnCtx) classNameConst(e ast.Expr) (string, bool) {
 func (x *fnCtx) testedArm(env *state, subject, value ast.Expr) *state {
 	cmp := &ast.Binary{S: value.Span(), Op: token.T_IS_IDENTICAL, Left: subject, Right: value}
 	_, isBool := boolConst(value)
+	if _, _, ok := x.classIdentity(subject, value); ok {
+		// `switch ($x::class) { case Dog::class: … }`, read as the
+		// comparison reads it.
+		saved := x.c.mark()
+		then, _ := x.cond(cmp, env)
+		x.c.rollback(saved)
+		return then
+	}
 	switch s := unparen(subject).(type) {
 	case *ast.Isset, *ast.Empty:
 		if !isBool {
@@ -3070,10 +3078,12 @@ func (x *fnCtx) match(e *ast.Match, env *state, expected types.Type) types.Type 
 						classes = append(classes, types.NewClass(name))
 					}
 				}
+				// An arm takes nothing away from the arms after it: an object
+				// that is not exactly a Cat may be a subclass of Cat, and
+				// PHPStan takes nothing away for a final class either.
 				if len(classes) == len(arm.Conds) && !impossible {
 					target := types.MakeUnion(classes...)
 					x.narrowPath(armEnv, classOf, types.Intersect(classRemaining, target, x.p()), false)
-					classRemaining = x.subtract(classRemaining, target, x.p())
 				}
 			}
 		}
