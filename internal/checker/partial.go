@@ -565,7 +565,9 @@ func (x *fnCtx) closeOpen(c types.Callable, expected types.Type, e ast.Expr) typ
 		case !ok:
 			subst[tp.Name] = types.TMixed
 		case tp.Bound != nil && !types.IsMixed(v):
-			if bound := types.Substitute(tp.Bound, subst); !types.IsSubtype(v, bound, x.p()) {
+			if fit := boundFitting(v, types.Substitute(tp.Bound, subst), x.p()); fit != nil {
+				subst[tp.Name] = fit
+			} else if bound := types.Substitute(tp.Bound, subst); !types.IsSubtype(v, bound, x.p()) {
 				of := "the closure"
 				if call, ok := unparen(e).(*ast.Call); ok && call.Args != nil && call.Args.FirstClassCallable {
 					if n, named := call.Callee.(*ast.Name); named {

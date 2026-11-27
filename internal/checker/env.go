@@ -675,7 +675,7 @@ func join(a, b *state) *state {
 	n := newEnv()
 	for k, va := range a.vars {
 		if vb, ok := b.vars[k]; ok {
-			n.vars[k] = varInfo{t: types.MakeUnion(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds),
+			n.vars[k] = varInfo{t: joinTypes(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds),
 				guaranteed: va.guaranteed && vb.guaranteed, rewritten: earlierWrite(va.rewritten, vb.rewritten)}
 		} else {
 			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native, rewritten: va.rewritten}
@@ -688,7 +688,7 @@ func join(a, b *state) *state {
 	}
 	for k, ta := range a.paths {
 		if tb, ok := b.paths[k]; ok {
-			n.paths[k] = types.MakeUnion(ta, tb)
+			n.paths[k] = joinTypes(ta, tb)
 		}
 	}
 	for k := range a.inits {
@@ -705,6 +705,26 @@ func join(a, b *state) *state {
 		}
 	}
 	return n
+}
+
+// joinTypes is what a variable or a path holds where two ways meet: the
+// union of both. A benevolent int|float stays one only where no way holds
+// an ordinary union: PHPStan's merge of two scopes takes a benevolent
+// union for equal to the ordinary one of the same members, and may keep
+// that one (`$y = $n; if ($c) { $y = $a / $b; }`, a loop that divides a
+// benevolent value by a plain int), where its ternary keeps the mark.
+func joinTypes(a, b types.Type) types.Type {
+	u := types.MakeUnion(a, b)
+	if types.IsBenevolent(u) && (ordinaryUnion(a) || ordinaryUnion(b)) {
+		return types.MakeUnion(types.Members(u)...)
+	}
+	return u
+}
+
+// ordinaryUnion reports a union that is not benevolent.
+func ordinaryUnion(t types.Type) bool {
+	u, ok := t.(types.Union)
+	return ok && !u.Benevolent
 }
 
 // joinAll merges several environments.
@@ -1057,7 +1077,7 @@ func shapesKV(ms []types.Shape) (keys, values types.Type, nonEmpty bool) {
 }
 
 func widenType(t types.Type) types.Type {
-	return types.Map(t, func(m types.Type) types.Type {
+	w := types.Map(t, func(m types.Type) types.Type {
 		switch m := m.(type) {
 		case types.Int:
 			return types.TInt
@@ -1082,6 +1102,10 @@ func widenType(t types.Type) types.Type {
 		}
 		return m
 	})
+	if types.IsBenevolent(t) && types.Equal(types.MakeUnion(types.Members(w)...), types.MakeUnion(types.Members(t)...)) {
+		return types.Benevolent(w) // `$a / $b` read through a reference stays benevolent
+	}
+	return w
 }
 
 func shapeKeys(s types.Shape) types.Type {

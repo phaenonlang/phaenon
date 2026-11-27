@@ -176,7 +176,7 @@ function asPHPStanReadsThem(bool $c, int $i, int $below): int
     takesInt($w ** $below); // want P2103
     takesInt($w ** -1); // want P2103
     takesText($i ** -2); // want P2103 "expects string, float given"
-    takesText($i ** $w); // want P2103 "expects string, int given"
+    takesText($i ** $w); // want P2103 "expects string, (int|float) given"
     if ($c) {
         return $i ** $below; // want P2202
     }
@@ -346,4 +346,291 @@ function knownToPHPStan(mixed $m, string $s, int $k, array $l): int
     takesInt($r ** -1); // want P2103
 
     return \strlen('abc') ** -1; // want P2202
+}
+
+// A division and a power have the types PHPStan gives them: a float where
+// an operand is one, and over integers a benevolent int|float, passed for
+// an int and for a float (an argument, a return, a property, the values
+// of an array) and held to an int where a type is held, as a @param-out
+// is. PHP gives a float for 7 / 2, a negative exponent and a power past
+// the integers.
+final class Ratio
+{
+    public int $count = 0;
+    public float $mean = 0.0;
+
+    public function record(int $total, int $n): void
+    {
+        $this->count = $total / $n;
+        $this->mean = $total / $n;
+        $this->count /= $n;
+    }
+}
+
+function halves(float $f, int $a, int $b, int|float $n): void
+{
+    takesFloat($f / 2);
+    takesInt($f / 2); // want P2103 "expects int, float given"
+    takesInt((float) $a / $b); // want P2103 "expects int, float given"
+    takesInt($a / $b);
+    takesFloat($a / $b);
+    takesInt($n / 2); // want P2103 "expects int, int|float given"
+    takesText($a / $b); // want P2103 "expects string, (int|float) given"
+    takesInt(7 / 2); // want P2103 "expects int, float given"
+    $q = $a / $b;
+    takesInt($q * 100);
+    takesInt(-$q);
+    takesInt($q / 2);
+    $q++;
+    takesInt($q);
+}
+
+// Of an int and a literal, PHPStan has a benevolent (float|int) where the
+// int is a plain one and an ordinary int<…>|float where it is a range, as
+// time()'s is; the lattice, which computes with no range, has a plain int
+// for both, and the ordinary union.
+function byLiterals(int $a): void
+{
+    takesFloat($a / 2);
+    takesInt($a / 2); // want P2103 "expects int, int|float given"
+    takesInt(\time() / 60); // want P2103 "expects int, int|float given"
+}
+
+function powersOfInts(int $a, int $b, float $f, int|float $n): void
+{
+    takesInt($a ** $b);
+    takesFloat($a ** $b);
+    takesInt($n ** 2);
+    takesInt($f ** 2); // want P2103 "expects int, float given"
+    if (\is_int($a ** $b)) {
+        echo 1;
+    }
+    $p = $a ** $b;
+    if ($p === 1.5) {
+        echo 2;
+    }
+}
+
+/** @param-out int $n */
+function outDivided(int &$n, int $a, int $b): void
+{
+    $n = $a / $b; // want P2213 "writes (int|float) to it"
+}
+
+/** @param-out int $n */
+function outPower(int &$n, int $a): void
+{
+    $n = $a ** 2; // want P2213 "writes (int|float) to it"
+}
+
+/** @param-out float $f */
+function outHalved(?float &$f, float $g): void
+{
+    $f = $g / 2;
+}
+
+/**
+ * @param list<int> $ints
+ * @return list<int>
+ */
+function inLists(array $ints, int $a, int $b): array
+{
+    $ints[] = $a / $b;
+    return $ints;
+}
+
+function numericFunctions(int $i, float $f, int $a, int $b): void
+{
+    takesInt(\abs($i));
+    takesFloat(\abs($f));
+    takesInt(\abs($f)); // want P2103 "expects int, float given"
+    takesInt(\pow($a, $b));
+    takesInt(\pow($f, 2)); // want P2103 "expects int, float given"
+    echo \pow('2', 2); // want P2103 "of pow() expects int|float, '2' given"
+}
+
+/** @param-out positive-int $n */
+function absolute(int &$n): void
+{
+    $n = \abs($n); // want P2213 "writes int<0, max> to it"
+}
+
+/**
+ * @param list<float> $xs
+ * @param-out float $sum
+ */
+function sumOf(array $xs, ?float &$sum): void
+{
+    $sum = \array_sum($xs); // want P2213 "writes 0|float to it"
+}
+
+/** @param-out float $sum */
+function sumOfValues(int $i, float $f, ?float &$sum): void
+{
+    $sum = \array_sum([$i, $f]);
+}
+
+// min() and max() of two keep it benevolent where PHPStan, which reads
+// them as a comparison and a ternary, keeps it: not on the side the
+// comparison narrows by a literal.
+function clampedBelow(int $a, int $b): int
+{
+    return \max($a / $b, 0);
+}
+
+function clampedAbove(int $a, int $b): int
+{
+    return \min($a / $b, 1); // want P2202 "returns int|float"
+}
+
+// Beside a plain int a division is an ordinary int|float, though the other
+// operand is benevolent, as PHPStan types it; and where two ways meet, one
+// of them an ordinary int|float, the mark goes, as PHPStan's merge of the
+// two keeps the ordinary union.
+function perUserPerDay(int $total, int $users, int $days): int
+{
+    return $total / $users / $days; // want P2202 "returns int|float"
+}
+
+function perDay(int $total, int $users): int
+{
+    return $total / $users / 7;
+}
+
+function joined(int $a, int $b, int|float $n, bool $c): void
+{
+    $y = $n;
+    if ($c) {
+        $y = $a / $b;
+    }
+    takesInt($y); // want P2103 "expects int, int|float given"
+}
+
+// The mark is kept by what PHPStan maps member by member: the values of a
+// shape, each decided on its own, a template, a closure's return a
+// callback's template takes, a read through a reference.
+/** @return array{ratio: float, count: int} */
+function summary(int $a, int $b): array
+{
+    return ['ratio' => $a / $b, 'count' => $a / $b];
+}
+
+/**
+ * @template T
+ * @param T $x
+ * @return T
+ */
+function same(mixed $x): mixed
+{
+    return $x;
+}
+
+/**
+ * @param list<int> $xs
+ * @return list<float>
+ */
+function scaledAll(array $xs, int $n): array
+{
+    takesInt(same($n / $n));
+    return \array_map(fn (int $x) => $x / $n, $xs);
+}
+
+function viaReference(int|float &$q, int $a, int $b): void
+{
+    $q = $a / $b;
+    takesInt($q);
+}
+
+// Written to a property PHP declares int or float, the value is that
+// member to what reads the property, as PHPStan remembers it, while a
+// function that tests the type judges the value written, which may be
+// either: is_float() is no impossible check there. A property PHP gives
+// no type keeps the union, whatever its docblock says.
+final class Pages
+{
+    public int $pages = 0;
+    public ?float $mean = null;
+    public float $avg = 0.0;
+    /** @var int */
+    public $documented = 0;
+
+    public function split(int $total, int $per): string
+    {
+        $this->pages = $total / $per;
+        if (\is_float($this->pages)) {
+            return 'fraction';
+        }
+        $this->mean = $total / $per;
+        if (\is_int($this->mean)) {
+            return 'whole';
+        }
+        $this->avg = $total / $per;
+        if ($this->avg === 0) { // want P2305 "always false"
+            return 'zero';
+        }
+        $this->documented = $total / $per;
+        if (\is_float($this->documented)) {
+            return 'fraction';
+        }
+        return 'some';
+    }
+}
+
+// Each entry of a shape is decided where the comparison reaches it, and
+// a type parameter bounded by int is inferred as the int of the union,
+// as PHPStan infers it.
+/** @return array{int, float, int, float, int, float, int, float} */
+function eight(int $a, int $b): array
+{
+    return [$a / $b, $a / $b, $a / $b, $a / $b, $a / $b, $a / $b, $a / $b, $a / $b];
+}
+
+/**
+ * @template T of int
+ * @param T $x
+ * @return T
+ */
+function sameInt(int $x): int
+{
+    return $x;
+}
+
+function bounded(int $a, int $b): void
+{
+    takesInt(sameInt($a / $b));
+}
+
+// A type test of a property the function wrote or narrowed reports
+// nothing, as PHPStan reports nothing of an expression whose type its
+// scope holds, however it was narrowed since; once a call may have
+// changed the property, it is its declared int again, and is_float() of
+// it is always false.
+final class Counted
+{
+    public int $pages = 0;
+
+    public function atLeastOne(int $total, int $per): void
+    {
+        $this->pages = $total / $per;
+        if ($this->pages === 0) {
+            $this->pages = 1;
+        }
+        if (\is_float($this->pages)) {
+            echo 'fraction';
+        }
+        if ($this->pages > 1) {
+            echo 'many';
+        }
+        if (\is_int($this->pages)) {
+            echo 'whole';
+        }
+        $this->touch();
+        if (\is_float($this->pages)) { // want P2402 "is_float() on int is always false"
+            echo 'never';
+        }
+    }
+
+    public function touch(): void
+    {
+    }
 }

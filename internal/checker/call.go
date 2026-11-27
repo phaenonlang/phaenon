@@ -11,6 +11,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/docblock"
 	"github.com/phaenonlang/phaenon/internal/program"
+	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
 	"github.com/phaenonlang/phaenon/stdlib"
 )
@@ -591,10 +592,26 @@ func (x *fnCtx) specialReturn(name string, e *ast.Call, ret types.Type, env *sta
 		}
 		return types.MakeUnion(t, fail)
 	case "array_sum":
-		// Ints add up to an int, non-negative ones to a non-negative int,
-		// floats to a float (PHPStan's ArraySumFunctionDynamicReturnTypeExtension).
-		if _, v, ok := types.IterableKV(argType(0), x.p()); ok {
-			return arraySumType(v, ret)
+		if len(args.Args) == 1 && !args.Args[0].Unpack {
+			return x.arraySumType(argType(0), ret, e)
+		}
+	case "abs":
+		if len(args.Args) == 1 && !args.Args[0].Unpack {
+			if t := absType(argType(0)); t != nil {
+				return t
+			}
+		}
+	case "pow":
+		// pow() is `**` (PHPStan's PowFunctionReturnTypeExtension), of
+		// the arguments the overlay holds to int|float: what the operator
+		// would report of them is reported of the arguments already.
+		if len(args.Args) == 2 && !args.Args[0].Unpack && !args.Args[1].Unpack && args.Args[0].Name == nil && args.Args[1].Name == nil {
+			saved, arith := x.c.mark(), x.arith
+			x.arith = arithOperands{}
+			t := x.binaryTypes(token.T_POW, argType(0), argType(1), e)
+			x.c.rollback(saved)
+			x.arith = arith
+			return t
 		}
 	case "preg_split":
 		if t := pregSplitType(args); t != nil {
@@ -638,11 +655,28 @@ func shapeIsList(s types.Shape) bool {
 	return true
 }
 
-// arraySumType is array_sum() over values of type v: int for ints
-// (int<0, max> when none is negative), float for floats, int|float when
-// both or anything else numeric may be among them; ret when v says
-// nothing.
-func arraySumType(v, ret types.Type) types.Type {
+// arraySumType is array_sum() of an array of type at, as PHPStan's
+// ArraySumFunctionDynamicReturnTypeExtension has it:
+//
+//   - an array written out, a shape, is its values added up from 0 with
+//     `+`, an optional one as itself or 0: [1, 2.5] is a float, [] is 0;
+//   - of any other array, ints add up to an int (int<0, max> where none is
+//     negative, true, false and null counted as 1 and 0), floats to a
+//     float, and an int|float stays one, benevolent where it is; an array
+//     that may be empty adds up to 0, so that floats are float|0 there.
+//
+// ret where the values say nothing.
+func (x *fnCtx) arraySumType(at, ret types.Type, e ast.Node) types.Type {
+	if t := x.shapeSum(at, e); t != nil {
+		return t
+	}
+	_, v, ok := types.IterableKV(at, x.p())
+	if !ok {
+		return ret
+	}
+	if types.IsBenevolent(v) && types.Equal(types.MakeUnion(types.Members(v)...), types.MakeUnion(types.TInt, types.TFloat)) {
+		return v // added up and to 0, still a benevolent int|float
+	}
 	ints, floats := 0, 0
 	nonNegative := true
 	for _, m := range types.Members(v) {
@@ -650,6 +684,8 @@ func arraySumType(v, ret types.Type) types.Type {
 		case types.Int:
 			ints++
 			nonNegative = nonNegative && m.Lo >= 0
+		case types.Bool, types.BoolLit, types.Null:
+			ints++
 		case types.Float, types.FloatLit:
 			floats++
 		default:
@@ -663,9 +699,92 @@ func arraySumType(v, ret types.Type) types.Type {
 		}
 		return types.TInt
 	case floats > 0 && ints == 0:
+		if !certainlyHolds(at) {
+			return types.MakeUnion(types.TFloat, types.IntLit(0))
+		}
 		return types.TFloat
 	}
 	return ret
+}
+
+// shapeSum is array_sum() of at where every member is a shape that holds
+// nothing beyond its entries: its values added up from 0, an optional one
+// as itself or 0, the way `+` types them; nil for any other array.
+func (x *fnCtx) shapeSum(at types.Type, e ast.Node) types.Type {
+	var shapes []types.Shape
+	for _, m := range types.Members(at) {
+		sh, ok := m.(types.Shape)
+		if !ok || sh.Unsealed {
+			return nil
+		}
+		shapes = append(shapes, sh)
+	}
+	saved, arith := x.c.mark(), x.arith
+	defer func() {
+		x.c.rollback(saved)
+		x.arith = arith
+	}()
+	x.arith = arithOperands{}
+	var out []types.Type
+	for _, sh := range shapes {
+		sum := types.IntLit(0)
+		for _, en := range sh.Entries {
+			v := en.Type
+			if en.Optional {
+				v = types.MakeUnion(v, types.IntLit(0))
+			}
+			sum = x.binaryTypes(token.Kind('+'), sum, v, e)
+		}
+		out = append(out, sum)
+	}
+	return types.MakeUnion(out...)
+}
+
+// absType is abs() of an argument of type t, member by member, as PHPStan
+// has it (toAbsoluteNumber): an int its absolute values, int<0, max> of a
+// plain int, a range or a literal its own; a float a float. A benevolent
+// int|float stays benevolent. nil where a member is no number: the
+// argument is reported, and the result is the stub's.
+func absType(t types.Type) types.Type {
+	var out []types.Type
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.Int:
+			out = append(out, absInt(m))
+		case types.Float:
+			out = append(out, m)
+		case types.FloatLit:
+			out = append(out, types.FloatLit{V: math.Abs(m.V)})
+		default:
+			return nil
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	u := types.MakeUnion(out...)
+	if types.IsBenevolent(t) {
+		return types.Benevolent(u)
+	}
+	return u
+}
+
+// absInt is the absolute values of i. PHP_INT_MIN has none among the ints
+// (abs() gives a float), and stands for int<…, max> as in PHPStan.
+func absInt(i types.Int) types.Int {
+	neg := func(n int64) int64 {
+		if n == math.MinInt64 {
+			return math.MaxInt64
+		}
+		return -n
+	}
+	switch {
+	case i.Lo >= 0:
+		return i
+	case i.Hi <= 0:
+		return types.Int{Lo: neg(i.Hi), Hi: neg(i.Lo)}
+	}
+	return types.Int{Lo: 0, Hi: max(neg(i.Lo), i.Hi)}
 }
 
 // pregSplitType is what preg_split() returns under the flags written at
@@ -882,6 +1001,26 @@ func (x *fnCtx) filteredValue(callback ast.Expr, value types.Type, env *state) t
 	return nil
 }
 
+// boundFitting is what PHPStan infers for a type parameter bounded by
+// bound from a benevolent union v its bound does not take whole: the
+// members it takes, int of `(int|float)` for `T of int`. nil where v is
+// no benevolent union, fits whole, or has no such member.
+func boundFitting(v, bound types.Type, h types.Hierarchy) types.Type {
+	if !types.IsBenevolent(v) || types.IsSubtype(v, bound, h) {
+		return nil
+	}
+	var fit []types.Type
+	for _, m := range types.Members(v) {
+		if types.IsSubtype(m, bound, h) {
+			fit = append(fit, m)
+		}
+	}
+	if len(fit) == 0 {
+		return nil
+	}
+	return types.MakeUnion(fit...)
+}
+
 // minMaxType types min()/max() of the given arguments: the range the
 // result can lie in when every argument is an int (`max(1, $n)` is
 // int<1, max>), else the union of the arguments.
@@ -891,7 +1030,7 @@ func minMaxType(isMax bool, ts []types.Type) types.Type {
 		for _, m := range types.Members(t) {
 			i, ok := m.(types.Int)
 			if !ok {
-				return types.MakeUnion(ts...)
+				return minMaxUnion(isMax, ts)
 			}
 			ints = append(ints, i)
 		}
@@ -908,6 +1047,27 @@ func minMaxType(isMax bool, ts []types.Type) types.Type {
 		}
 	}
 	return types.Int{Lo: lo, Hi: hi}
+}
+
+// minMaxUnion is min() or max() of values that are not all ints: one of
+// them. A benevolent int|float stays one, except where PHPStan, which
+// reads min($x, $y) of two as `$x < $y ? $x : $y` and max() as `$x < $y ?
+// $y : $x`, has the comparison narrow it to an ordinary union: on the side
+// it takes where the comparison holds, $x of min() and $y of max(), beside
+// an integer that is a literal or a range. min($a / $b, 1) is int|float,
+// max($a / $b, 0) a benevolent one.
+func minMaxUnion(isMax bool, ts []types.Type) types.Type {
+	u := types.MakeUnion(ts...)
+	if len(ts) != 2 || !types.IsBenevolent(u) {
+		return u
+	}
+	for i, t := range ts {
+		taken := isMax && i == 1 || !isMax && i == 0
+		if n, ok := asInteger(ts[1-i]); types.IsBenevolent(t) && taken && ok && !types.Equal(n, types.TInt) {
+			return types.MakeUnion(types.Members(u)...)
+		}
+	}
+	return u
 }
 
 // omittedOnly are the parameters of PHP's functions and methods whose
@@ -3095,6 +3255,10 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			continue // mixed may still fit; the argument itself is reported where it is passed
 		}
 		bound := openToBounds(types.Substitute(tp.Bound, subst), sig.typeParams, subst)
+		if fit := boundFitting(v, bound, x.p()); fit != nil {
+			subst[tps[i].Name] = fit
+			continue
+		}
 		if !types.IsSubtype(v, bound, x.p()) {
 			if nativeMismatch(tp.Name) {
 				continue // the argument PHP refuses is the finding
