@@ -408,6 +408,35 @@ function offsetCapture(string $contents): void
     }
 }
 
+// A closure preg_replace_callback() calls under PREG_OFFSET_CAPTURE, with
+// the pattern written at the call, receives each match paired with its
+// offset, as preg_match() fills $matches, and under PREG_UNMATCHED_AS_NULL
+// as well a value that may be null. A first-class callable is held to the
+// type the function declares, as PHPStan holds it.
+
+/** @param array<int|string, array{string, int}> $m */
+function offsetPairs(array $m): string
+{
+    return $m[0][0];
+}
+
+function callbackOffsets(string $contents): void
+{
+    $flags = \PREG_OFFSET_CAPTURE;
+    $a = preg_replace_callback('/(\d+)/', function (array $m): string {
+        takesInt($m[0][1]);
+        return $m[1][0];
+    }, $contents, -1, $count, \PREG_OFFSET_CAPTURE);
+    $b = preg_replace_callback('/(\d+)/', fn ($m) => $m[0][0], $contents, flags: $flags);
+    $c = preg_replace_callback('/(\d+)/', function (array $m): string {
+        return $m[0][0] ?? '';
+    }, $contents, -1, $count, \PREG_OFFSET_CAPTURE | \PREG_UNMATCHED_AS_NULL);
+    $d = preg_replace_callback('/(\d+)/', offsetPairs(...), $contents, -1, $count, \PREG_OFFSET_CAPTURE); // want P2103 "expects callable(array<string>): string"
+    $e = preg_replace_callback('/(\d+)/', function (array $m): string {
+        return $m[0];
+    }, $contents);
+}
+
 /**
  * @param array<string, int> $failModes
  * @param list<string> $declared
