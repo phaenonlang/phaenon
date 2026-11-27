@@ -207,6 +207,7 @@ function fputs($stream, string $data, ?int $length = null): int|false {}
 
 /**
  * @param bool $strong_result
+ * @param-out mixed $strong_result
  * @return bytes
  */
 function openssl_random_pseudo_bytes(int $length, &$strong_result = null): string {}
@@ -272,5 +273,8 @@ function sodium_bin2hex(#[\SensitiveParameter] string $string): string {}
 /** @return bytes */
 function sodium_hex2bin(#[\SensitiveParameter] string $string, string $ignore = ""): string {}
 
-/** @param string|bytes $string */
+/**
+ * @param string|bytes $string
+ * @param-out null $string
+ */
 function sodium_memzero(#[\SensitiveParameter] string &$string): void {}
