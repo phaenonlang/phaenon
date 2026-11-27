@@ -1,6 +1,9 @@
 package docblock
 
-import "testing"
+import (
+	"encoding/hex"
+	"testing"
+)
 
 func TestParseType(t *testing.T) {
 	// input → canonical printing ("" = same as input)
@@ -201,6 +204,38 @@ func TestThrowsVoid(t *testing.T) {
 	} {
 		if got := Parse(doc).ThrowsVoid(); got != want {
 			t.Errorf("%q: ThrowsVoid() = %v, want %v", doc, got, want)
+		}
+	}
+}
+
+// TestStringLiterals holds a quoted string of a type, a literal or a
+// shape's key, to the value phpdoc-parser's StringUnescaper gives it (as
+// hex), the reader PHPStan reads docblocks with.
+func TestStringLiterals(t *testing.T) {
+	for _, c := range []struct{ src, hex string }{
+		{`'it\'s \\ \n \" \x41'`, "69742773205c205c6e205c22205c783431"},
+		{`"\x41\X4\xZ\x"`, "41045c785a5c78"},
+		{`"\101\0\08\1234\400\777"`, "41000038533400ff"},
+		{`"\n\r\t\v\e\f\$\'\q"`, "0a0d090b1b0c5c245c275c71"},
+		{`"a\\\"b"`, "615c2262"},
+		{`"\u{41}\u{1F600}\u{D800}\u{}\u{zz}\u"`, "41f09f9880eda0805c757b7d5c757b7a7a7d5c75"},
+		{`"plain"`, "706c61696e"},
+	} {
+		n, err := ParseType(c.src)
+		if err != nil || n.Kind != KindStringLit {
+			t.Errorf("%s: %v, %v", c.src, n, err)
+			continue
+		}
+		if h := hex.EncodeToString([]byte(n.Str)); h != c.hex {
+			t.Errorf("%s: value %s, phpdoc-parser's %s", c.src, h, c.hex)
+		}
+		shape, err := ParseType("array{" + c.src + ": int}")
+		if err != nil || len(shape.Entries) != 1 {
+			t.Errorf("array{%s: int}: %v, %v", c.src, shape, err)
+			continue
+		}
+		if h := hex.EncodeToString([]byte(shape.Entries[0].Key)); h != c.hex {
+			t.Errorf("array{%s: int}: key %s, phpdoc-parser's %s", c.src, h, c.hex)
 		}
 	}
 }

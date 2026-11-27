@@ -1548,6 +1548,33 @@ function matchesGroups(string $subject, string $pattern, int $flags): void
     takesStd($sets); // want P2103 "list<list<string>> given"
 }
 
+const PAIRED = '/(\d)\1/';
+const NAMED_BY_ESCAPE = "/(\x3F<year>\\d{4})/";
+
+/**
+ * A pattern is read as its value, wherever it is written: a constant's,
+ * whose backreference \1 is PCRE's, an octal escape of a double-quoted
+ * string, \1 there, which PHP decodes, and a heredoc's escape, which PHP
+ * decodes too, where a nowdoc leaves \x3F to PCRE.
+ */
+function matchesGroupsOfValues(string $subject): void
+{
+    \preg_match(PAIRED, $subject, $paired);
+    takesList($paired);
+    \preg_match(NAMED_BY_ESCAPE, $subject, $named);
+    takesList($named); // want P2103 "array<string> given"
+    \preg_match("/(\d)\1/", $subject, $octal);
+    takesList($octal);
+    \preg_match(<<<EOT
+        /(\x3F<year>\\d{4})/
+        EOT, $subject, $heredoc);
+    takesList($heredoc); // want P2103 "array<string> given"
+    \preg_match(<<<'EOT'
+        /(\x3F<year>\d{4})/
+        EOT, $subject, $nowdoc);
+    takesList($nowdoc);
+}
+
 function checked(int $n): int
 {
     return $n;

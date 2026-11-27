@@ -599,36 +599,3 @@ func isUnknownValue(e ast.Expr) bool {
 	}
 	return len(n.Parts) == 1 && n.Parts[0] == "UNKNOWN"
 }
-
-// StringValue returns the value of a constant string literal (quotes
-// removed, escapes of single-quoted strings processed; double-quoted
-// strings get the common escapes).
-func StringValue(lit *ast.StringLit) string {
-	raw := lit.Raw
-	if len(raw) >= 2 && (raw[0] == '\'' || raw[0] == '"') {
-		q := raw[0]
-		body := raw[1 : len(raw)-1]
-		if q == '\'' {
-			return strings.NewReplacer(`\\`, `\`, `\'`, `'`).Replace(body)
-		}
-		return strings.NewReplacer(`\\`, `\`, `\"`, `"`, `\n`, "\n", `\t`, "\t", `\r`, "\r", `\$`, "$").Replace(body)
-	}
-	if len(raw) >= 3 && (raw[0] == 'b' || raw[0] == 'B') {
-		return StringValue(&ast.StringLit{Raw: raw[1:]})
-	}
-	// heredoc / nowdoc: strip the first line and the closing label line.
-	if strings.HasPrefix(raw, "<<<") {
-		nl := strings.IndexByte(raw, '\n')
-		if nl < 0 {
-			return ""
-		}
-		body := raw[nl+1:]
-		if last := strings.LastIndexByte(body, '\n'); last >= 0 {
-			body = body[:last]
-		} else {
-			body = ""
-		}
-		return body
-	}
-	return raw
-}

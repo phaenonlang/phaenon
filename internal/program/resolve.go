@@ -3,6 +3,7 @@ package program
 import (
 	"math"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -711,6 +712,15 @@ func (r *resolver) docType(n *docblock.TypeNode) types.Type {
 				} else {
 					se.Key = e.Key
 				}
+			}
+			// A key written twice, `'A'` and `"\x41"`, is one entry with
+			// the last type, as an array literal keeps it and PHPStan reads
+			// it.
+			if i := slices.IndexFunc(s.Entries, func(o types.ShapeEntry) bool {
+				return o.IsInt == se.IsInt && o.IntKey == se.IntKey && o.Key == se.Key
+			}); i >= 0 {
+				s.Entries[i] = se
+				continue
 			}
 			s.Entries = append(s.Entries, se)
 		}

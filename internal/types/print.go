@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // String prints t in PHPStan vocabulary: array<string, Foo>, list<int>,
@@ -16,6 +17,61 @@ func Print(t Type) string {
 	var b strings.Builder
 	(&printer{b: &b}).print(t, false)
 	return b.String()
+}
+
+// Describe prints t for a message: like Print, but a string literal
+// longer than describeLimit characters is cut, as PHPStan's
+// ConstantStringType::describe cuts it, so that a heredoc of a hundred
+// kilobytes compared with 'x' is not written out whole. A type that is
+// compared, keyed or written into code is printed whole (Print).
+func Describe(t Type) string {
+	var b strings.Builder
+	(&printer{b: &b, message: true}).print(t, false)
+	return b.String()
+}
+
+// describeLimit is where a literal is cut in a message, PHPStan's
+// DESCRIBE_LIMIT. PHPStan keeps a class-string literal whole; the
+// checker's literals do not say they name a class, and one shaped as a
+// class's name stays whole (className).
+const describeLimit = 20
+
+// cutLiteral cuts s to limit characters, the last of them an ellipsis, at
+// the end of a word where one ends within the limit, as Nette's
+// Strings::truncate does for PHPStan.
+func cutLiteral(s string, limit int) string {
+	r := []rune(s)
+	if len(r) <= limit || className(s) {
+		return s
+	}
+	n := limit - 1
+	for i := n; i >= 1; i-- {
+		if wordEnds(r[i]) {
+			return string(r[:i]) + "…"
+		}
+	}
+	return string(r[:n]) + "…"
+}
+
+// className reports s shaped as a namespaced class's name: names
+// separated by backslashes, a leading one allowed. A single long word, a
+// hex digest, is cut as any other string.
+func className(s string) bool {
+	if !strings.Contains(strings.TrimPrefix(s, `\`), `\`) {
+		return false
+	}
+	for _, part := range strings.Split(strings.TrimPrefix(s, `\`), `\`) {
+		if !isIdent(part) {
+			return false
+		}
+	}
+	return true
+}
+
+// wordEnds reports a character Strings::truncate cuts before: white space
+// or ASCII punctuation, \s\x00-/:-@\[-`{-~.
+func wordEnds(c rune) bool {
+	return unicode.IsSpace(c) || c <= '/' || c >= ':' && c <= '@' || c >= '[' && c <= '`' || c >= '{' && c <= '~'
 }
 
 // PrintQualified prints t for a docblock in emitted code: like Print, but
@@ -131,6 +187,7 @@ type printer struct {
 	qualified bool
 	phaenon   bool // PrintPhaenon's spelling
 	values    bool // PrintQualifiedValues: no iterable type without its value type
+	message   bool // Describe: a long literal cut
 }
 
 func (pr *printer) class(name string) {
@@ -210,9 +267,11 @@ func (pr *printer) print(t Type, nested bool) {
 			b.WriteString("string")
 		}
 	case StringLit:
-		b.WriteString("'")
-		b.WriteString(strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(t.V))
-		b.WriteString("'")
+		v := t.V
+		if pr.message {
+			v = cutLiteral(v, describeLimit)
+		}
+		b.WriteString(quoteString(v))
 	case ClassString:
 		if pr.phaenon {
 			b.WriteString("class")
@@ -500,6 +559,54 @@ func ParamName(name string) string {
 		return name[:i]
 	}
 	return name
+}
+
+// quoteString writes a string literal's value as PHPStan describes it
+// (ConstantStringType::export): in single quotes with \ and ' escaped, or,
+// for a value that holds a control character, in double quotes as
+// addcslashes() escapes them, \n, \t, … and the octal of the others, with
+// \ and " escaped. A docblock reads either back to the value, as PHPStan
+// and the checker read a docblock's string, but for \a and \b, which
+// neither decodes.
+func quoteString(s string) string {
+	control := false
+	for i := 0; i < len(s) && !control; i++ {
+		control = s[i] < 0x20
+	}
+	if !control {
+		return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+	}
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '\a':
+			b.WriteString(`\a`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\v':
+			b.WriteString(`\v`)
+		case '\f':
+			b.WriteString(`\f`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\\', '"':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		default:
+			if c < 0x20 {
+				fmt.Fprintf(&b, `\%03o`, c)
+			} else {
+				b.WriteByte(c)
+			}
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 func isIdent(s string) bool {

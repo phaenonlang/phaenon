@@ -328,6 +328,11 @@ func intLitType(raw string) types.Type {
 }
 
 func (x *fnCtx) interpolated(e *ast.InterpolatedString, env *state) types.Type {
+	// A heredoc or nowdoc of text alone is a constant string to PHP's
+	// parser, and a literal type to PHPStan.
+	if v, ok := program.HeredocValue(e); ok {
+		return types.StringLit{V: v}
+	}
 	nonEmpty := false
 	for _, p := range e.Parts {
 		switch p := p.(type) {
