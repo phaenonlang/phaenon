@@ -143,6 +143,9 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	if lower == "array_map" && e.Args != nil && len(e.Args.Args) > 2 {
 		x.arrayMapOverSeveral(sig, e.Args, env)
 	}
+	if lower == "array_walk" && sig.stub && e.Args != nil {
+		x.arrayWalkCallback(sig, e.Args, env)
+	}
 	ret := x.checkCall(sig, e.Args, env, e.S, expected)
 	if _, isNever := ret.(types.Never); isNever {
 		env.dead = true
@@ -340,6 +343,64 @@ func (x *fnCtx) arrayMapOverSeveral(sig *signature, args *ast.ArgList, env *stat
 	sig.params = params
 	sig.ret = types.Array{Key: types.TInt, Value: cb.Return, List: true}
 	sig.known = known
+}
+
+// arrayWalkCallback adapts array_walk()'s signature to the call: the
+// callback receives a value and a key of the array, and the third
+// argument where the call gives it, after them, so it is callable(V, K):
+// mixed or callable(V, K, A): mixed, as PHPStan's
+// ArrayWalkParameterClosureTypeExtension types it. V and K are what
+// iterating the array gives, read from it rather than inferred, so that a
+// callback's parameters cannot choose them: an object that is no
+// Traversable gives mixed for both, as it does to PHPStan. A third
+// parameter is held to the argument's type where it is given, and a
+// callback that needs one is refused where it is not, as PHP throws an
+// ArgumentCountError then. An unpacked argument may be any of them: the
+// call is checked as the overlay declares it. array_walk_recursive()
+// passes the argument on as well, and its stub's callable says nothing
+// of what it receives, as in PHPStan.
+func (x *fnCtx) arrayWalkCallback(sig *signature, args *ast.ArgList, env *state) {
+	cb := slices.IndexFunc(sig.params, func(p *program.Param) bool { return p.Name == "callback" })
+	if cb < 0 {
+		return
+	}
+	declared, ok := sig.params[cb].Type.(types.Callable)
+	if !ok || !declared.HasSig {
+		return
+	}
+	var array, arg *ast.Arg
+	for i, a := range args.Args {
+		switch {
+		case a.Unpack:
+			return
+		case a.Name != nil && a.Name.Name == "array" || a.Name == nil && i == 0:
+			array = a
+		case a.Name != nil && a.Name.Name == "arg" || a.Name == nil && i == 2:
+			arg = a
+		}
+	}
+	if array == nil || array.Value == nil || array.Placeholder != nil {
+		return
+	}
+	// The array is passed by reference: a variable, a property or an
+	// offset, which reading here does not type twice.
+	key, value, iterable := types.IterableKV(x.pathType(array.Value, env), x.p())
+	if _, never := value.(types.Never); never && !iterable {
+		key, value = types.TMixed, types.TMixed
+	}
+	declared.Params = []types.CallableParam{{Type: value}, {Type: key}}
+	if arg != nil && arg.Value != nil && arg.Placeholder == nil {
+		t := x.expr(arg.Value, env, nil)
+		if sig.known == nil {
+			sig.known = map[ast.Expr]types.Type{}
+		}
+		sig.known[arg.Value] = t
+		declared.Params = append(declared.Params, types.CallableParam{Type: t})
+	}
+	callback := *sig.params[cb]
+	callback.Type = declared
+	sig.params = slices.Clone(sig.params)
+	sig.params[cb] = &callback
 }
 
 // arrayPush retypes the by-reference array of array_push / array_unshift
