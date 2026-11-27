@@ -35,13 +35,13 @@ class Base
     {
     }
 
-    /** @return int */
+    /** @return positive-int|non-empty-string */
     public static function documentedScalar(): int|string
     {
         return 1;
     }
 
-    /** @param int|string $x */
+    /** @param negative-int|'' $x */
     public static function documentedScalarParam(int|string $x): void
     {
     }
@@ -105,13 +105,13 @@ final class Child extends Base
     {
     }
 
-    /** @return string */
+    /** @return negative-int|'' */
     public static function documentedScalar(): int|string // want P2502 extra
     {
         return '';
     }
 
-    /** @param int $x */
+    /** @param positive-int|non-empty-string $x */
     public static function documentedScalarParam(int|string $x): void // want P2502 extra
     {
     }

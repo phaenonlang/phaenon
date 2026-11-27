@@ -1,0 +1,218 @@
+namespace DocblockOnNative;
+
+// A docblock refines the native type it is written on, and a member of a
+// native union that shares no value with what it says stays, as PHPStan
+// has it (TypehintHelper::decideType): null under `?array`, a string under
+// `int|string`. The docblock speaks of the array; the declaration still
+// says the value may be null, so it is tested before it is counted, and
+// null is written and returned as the declaration allows.
+
+/** @param list<string> $xs */
+function takesList(array $xs): void
+{
+}
+
+function takesInt(int $n): void
+{
+}
+
+/** @param positive-int $n */
+function takesPositive(int $n): void
+{
+}
+
+/** @param list<string> $xs */
+function counted(?array $xs): int
+{
+    return \count($xs); // want P2103 "list<string>|null given"
+}
+
+/** @param list<string> $xs */
+function tested(?array $xs): int
+{
+    if ($xs === null) {
+        return 0;
+    }
+    takesList($xs);
+    return \count($xs);
+}
+
+/** @param positive-int $n */
+function passed(?int $n): void
+{
+    takesInt($n); // want P2103 "int<1, max>|null given"
+}
+
+/** @param positive-int $n */
+function either(int|string $n): void
+{
+    takesInt($n); // want P2103 "int<1, max>|string given"
+}
+
+/** @param 'a'|'b' $mode */
+function mode(string|int|null $mode): string
+{
+    return $mode; // want P2202 "returns int|'a'|'b'|null"
+}
+
+/** @param \Closure(int): int $f */
+function call(?callable $f): void
+{
+    $f(1); // want P2109 "null is not callable"
+}
+
+/**
+ * @template T of object
+ * @param T $o
+ * @return T
+ */
+function same(?object $o): object
+{
+    return $o; // want P2202 "returns T|null"
+}
+
+/** @return list<string> */
+function nothingYet(): ?array
+{
+    return null;
+}
+
+function caller(): int
+{
+    return \count(nothingYet()); // want P2103 "list<string>|null given"
+}
+
+/** @return positive-int */
+function code(): int|string
+{
+    return 'none';
+}
+
+// Where the native type admits no null, the docblock's is left out: the
+// docblock is reported, and the rest of it is the type.
+/** @param positive-int|null $n */
+function narrowed(int $n): void // want P4002 "docblock type int<1, max>|null is not a subtype of the declared type int"
+{
+    takesPositive($n);
+}
+
+final class Holder
+{
+    /** @var list<string> */
+    public ?array $names = null;
+
+    /** @var positive-int */
+    public ?int $count = null;
+
+    /** @param list<string> $tags */
+    public function __construct(public ?array $tags)
+    {
+    }
+
+    public function reset(): void
+    {
+        $this->names = null;
+        $this->count = null;
+        $this->tags = null;
+    }
+
+    public function size(): int
+    {
+        return \count($this->names); // want P2103 "list<string>|null given"
+    }
+
+    public function tagged(): int
+    {
+        return \count($this->tags); // want P2103 "list<string>|null given"
+    }
+}
+
+// A class the native union names beside the one the docblock says stays
+// where no object is both, as PHPStan's isSuperTypeOf() has it: a class
+// has one parent, so two classes neither of which extends the other share
+// none, and Closure, a final class, none with another. An interface may
+// be implemented by a subclass, and is not added back.
+class Foo
+{
+}
+
+class Bar
+{
+}
+
+interface Tagged
+{
+}
+
+/** @param Foo $x */
+function classes(Foo|Bar $x): void
+{
+}
+
+/** @param Foo $x */
+function classOrClosure(Foo|\Closure $x): void
+{
+}
+
+/** @param Foo $x */
+function classAndInterface(Foo|Tagged $x): void
+{
+}
+
+/** @param \DateTimeImmutable $d */
+function dates(\DateTimeImmutable|\DateTime $d): void
+{
+}
+
+function callers(Tagged $t): void
+{
+    classes(new Bar());
+    classOrClosure(fn (): int => 1);
+    dates(new \DateTime());
+    classAndInterface($t); // want P2103 "expects DocblockOnNative\Foo, DocblockOnNative\Tagged given"
+}
+
+// Each member of the docblock's type is held apart from the native member
+// on its own: null or an array beside the class the docblock names does
+// not keep the other class out, `static` stands for its class, and a class
+// that is no Traversable shares nothing with an iterable.
+final class Response
+{
+}
+
+/** @param Foo|null $x */
+function handle(Foo|Response|null $x): void
+{
+}
+
+/** @param list<int>|Foo $x */
+function listOrObject(array|Foo|Bar $x): void
+{
+}
+
+/** @param iterable<int> $x */
+function iterableOrBar(iterable|Bar $x): void
+{
+}
+
+class Chain
+{
+    /** @param static $x */
+    public function with(Foo|self $x): void
+    {
+    }
+
+    /** @return static */
+    public function next(): static|Foo
+    {
+        return new Foo();
+    }
+}
+
+function moreCallers(Chain $c): void
+{
+    handle(new Response());
+    listOrObject(new Bar());
+    iterableOrBar(new Bar());
+    $c->with(new Foo());
+}
