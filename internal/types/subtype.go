@@ -252,7 +252,24 @@ func overlap2(x, y Type, h Hierarchy) bool {
 		return true
 	}
 	if kx == kindCallable || ky == kindCallable {
-		return ky == kindObject || kx == kindObject || kx == kindString || ky == kindString || kx == kindArray || ky == kindArray
+		// An object of a class final by its keyword is a callable only
+		// where it has __invoke(); a subclass of one a docblock marks
+		// @final may add it, as PHPStan has it
+		// (ObjectType::findCallableParametersAcceptors()).
+		for _, t := range []Type{x, y} {
+			if c, ok := classOfCase(t).(Class); ok && h != nil && h.IsFinalByKeyword(c.Name) && !h.IsInvokable(c.Name) {
+				return false
+			}
+		}
+		other, c := ky, x
+		if ky == kindCallable {
+			other, c = kx, y
+		}
+		// A Closure is an object of a final class that is no Traversable.
+		if cl, ok := c.(Callable); ok && cl.Closure {
+			return other == kindObject
+		}
+		return other == kindObject || other == kindString || other == kindArray || other == kindIterable
 	}
 	if kx == kindIterable || ky == kindIterable {
 		other := ky
@@ -440,6 +457,10 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 		switch b := b.(type) {
 		case String:
 			return stringRefines(a, b)
+		case Callable:
+			// A callable-string names a function or a static method, and is
+			// taken for any signature, as a bare callable is.
+			return a.Callable && !b.Closure
 		}
 		return false
 	case ClassString:
@@ -557,7 +578,7 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 			}
 			return true
 		case Callable:
-			if a.Callable {
+			if a.Callable && !b.Closure {
 				return true // is_array($callable): the array form of a callable is still callable
 			}
 			// [$object, 'method'] / ['Class', 'method'] is a callable array;
@@ -673,6 +694,10 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 			return true
 		case Class:
 			return classSub(Class{Name: a.Class}, b, h, depth)
+		case Callable:
+			// A case of an enum with __invoke() is a callable, as an
+			// object of its class is.
+			return !b.Closure && h != nil && h.IsInvokable(a.Class)
 		}
 		return false
 	case Callable:

@@ -1817,8 +1817,9 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 	if nold := x.nativeVar(arg, env); nold != nil {
 		nthen, nels = types.Intersect(nold, target, x.p()), x.subtract(nold, target, x.p())
 	}
+	atElse := x.subtract(at, target, x.p())
 	x.narrowPathNative(then, arg, types.Intersect(at, target, x.p()), nthen, true)
-	x.narrowPathNative(els, arg, x.subtract(at, target, x.p()), nels, false)
+	x.narrowPathNative(els, arg, atElse, nels, false)
 	if isNullType(target) {
 		// Where is_null() fails the value is not null. Other predicates are
 		// not exact both ways: is_resource() fails on a closed resource.
@@ -1827,14 +1828,29 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 	nt := x.nativeOr(arg, at, env)
 	if !types.IsMixed(at) {
 		held := x.heldExpression(arg, env)
+		// A test is always true where it leaves nothing for its false
+		// branch: a callable's array form that may name no method is taken
+		// where a callable is expected and still leaves itself there. The
+		// array written in the call, `is_callable([$o, 'm'])`, is a test of
+		// the method in PHPStan (method_exists()), which never calls it
+		// always true.
+		inline := arg
+		for {
+			p, ok := inline.(*ast.Paren)
+			if !ok {
+				break
+			}
+			inline = p.Expr
+		}
+		_, literal := inline.(*ast.ArrayLit)
 		if _, isNever := types.Intersect(at, target, x.p()).(types.Never); isNever {
 			x.condValueType = types.TFalse
 			if _, never := types.Intersect(nt, target, x.p()).(types.Never); never && !types.IsMixed(nt) && !held {
 				x.report(e.S, P2402, "%s() on %s is always false", name, x.typeName(at))
 			}
-		} else if types.IsSubtype(at, target, x.p()) && !isParamType(at) {
+		} else if types.IsSubtype(at, target, x.p()) && isNeverType(atElse) && !isParamType(at) {
 			x.condValueType = types.TTrue
-			if !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p()) && !held {
+			if !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p()) && isNeverType(x.subtract(nt, target, x.p())) && !held && !(literal && name == "is_callable") {
 				x.report(e.S, P2402, "%s() on %s is always true", name, x.typeName(at))
 			}
 		}

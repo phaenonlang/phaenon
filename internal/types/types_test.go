@@ -28,11 +28,15 @@ func (h mapHierarchy) IsSubclassOf(sub, super string) bool {
 	}
 	return false
 }
-func (h mapHierarchy) IsFinal(name string) bool         { return h.final[strings.ToLower(name)] }
-func (h mapHierarchy) IsInvokable(string) bool          { return false }
-func (h mapHierarchy) IsInterface(name string) bool     { return h.iface[strings.ToLower(name)] }
-func (h mapHierarchy) Variances(name string) []Variance { return h.vars[strings.ToLower(name)] }
-func (h mapHierarchy) IsCallableName(name string) bool  { return false }
+func (h mapHierarchy) IsFinal(name string) bool          { return h.final[strings.ToLower(name)] }
+func (h mapHierarchy) IsFinalByKeyword(name string) bool { return h.final[strings.ToLower(name)] }
+func (h mapHierarchy) IsInvokable(string) bool           { return false }
+func (h mapHierarchy) IsInterface(name string) bool      { return h.iface[strings.ToLower(name)] }
+func (h mapHierarchy) Variances(name string) []Variance  { return h.vars[strings.ToLower(name)] }
+func (h mapHierarchy) IsCallableName(name string) bool   { return false }
+func (h mapHierarchy) HasMethod(string, string) (bool, bool) {
+	return false, false
+}
 func (h mapHierarchy) PropertyType(class, name string) (Type, bool) {
 	return nil, false
 }
@@ -330,6 +334,64 @@ func TestCallableShape(t *testing.T) {
 	}
 	if got, ok := Substitute(plain, map[string]Type{"T": TObject}).(Shape); !ok || got.Callable {
 		t.Errorf("Substitute: %#v, want a shape that is not callable", got)
+	}
+}
+
+// TestCallableMeet: a string, an array and an iterable met with callable
+// are its string and array forms, as PHPStan meets them; what may be no
+// callable stays in the false branch of the test.
+func TestCallableMeet(t *testing.T) {
+	pair := func(a, b Type) Shape {
+		return Shape{List: true, Entries: []ShapeEntry{{IsInt: true, IntKey: 0, Type: a}, {IsInt: true, IntKey: 1, Type: b}}}
+	}
+	cases := []struct {
+		got  Type
+		want string
+	}{
+		{Intersect(TString, TCallable, testH), "callable-string"},
+		{Intersect(String{Lowercase: true}, TCallable, testH), "callable-string"},
+		{Intersect(String{Numeric: true}, TCallable, testH), "never"},
+		{Intersect(TString, TClosure, testH), "never"},
+		{Intersect(ClassString{}, TCallable, testH), "class-string"},
+		{Intersect(MakeUnion(TInt, TString), TCallable, testH), "callable-string"},
+		{Intersect(TArray, TCallable, testH), "list{string|object, string}"},
+		{Intersect(Array{Key: TInt, Value: TString, List: true}, TCallable, testH), "list{string, string}"},
+		{Intersect(Array{Key: TInt, Value: TInt, List: true}, TCallable, testH), "never"},
+		{Intersect(Array{Key: TArrayKey, Value: TObject}, TCallable, testH), "never"},
+		{Intersect(pair(TInt, TInt), TCallable, testH), "list{int, int}"},
+		{Intersect(Shape{Entries: []ShapeEntry{{Key: "a", Type: TString}, {Key: "b", Type: TString}}}, TCallable, testH), "never"},
+		{Intersect(TIterable, TCallable, testH), "list{string|object, string}|(Traversable&callable)"},
+		{Subtract(TString, TCallable, testH), "string"},
+		{Subtract(String{Callable: true, NonEmpty: true}, TCallable, testH), "never"},
+		{Subtract(pair(TObject, StringLit{"m"}), TCallable, testH), "list{object, 'm'}"},
+		{Subtract(CallableArray, TCallable, testH), "never"},
+	}
+	for _, c := range cases {
+		if got := Print(c.got); got != c.want {
+			t.Errorf("got %q, want %q", got, c.want)
+		}
+	}
+	if s, ok := Intersect(pair(TInt, TInt), TCallable, testH).(Shape); !ok || !s.Callable {
+		t.Error("a two-entry list met with callable is not known to be callable")
+	}
+	if !IsSubtype(String{Callable: true}, Callable{HasSig: true, Return: TString}, testH) {
+		t.Error("a callable-string is not taken for a callable of any signature")
+	}
+	if IsSubtype(String{Callable: true}, TClosure, testH) || IsSubtype(CallableArray, TClosure, testH) {
+		t.Error("a callable's string or array form is taken for a Closure")
+	}
+	declared, proved := String{Callable: true}, String{Callable: true, NonEmpty: true}
+	if IsSubtype(declared, String{NonEmpty: true}, testH) || !IsSubtype(proved, String{NonEmpty: true}, testH) {
+		t.Error("a declared callable-string is taken for a non-empty-string, or a proved one is not")
+	}
+	if !Overlaps(declared, StringLit{""}, testH) || Overlaps(proved, StringLit{""}, testH) || Overlaps(proved, StringLit{"123"}, testH) {
+		t.Error("a declared callable-string proves, or a proved one does not")
+	}
+	if got := Print(Intersect(proved, String{Numeric: true}, testH)); got != "never" {
+		t.Errorf("a proved callable-string met with a numeric-string is %s", got)
+	}
+	if Overlaps(TClosure, TIterable, testH) || Overlaps(TClosure, TString, testH) {
+		t.Error("a Closure overlaps an iterable or a string")
 	}
 }
 

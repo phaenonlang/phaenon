@@ -474,6 +474,12 @@ func (p *Program) IsFinal(name string) bool {
 	return c != nil && (c.Final || c.Kind == ast.KindEnum || c.Anonymous)
 }
 
+// IsFinalByKeyword implements types.Hierarchy.
+func (p *Program) IsFinalByKeyword(name string) bool {
+	c := p.Class(name)
+	return c != nil && (c.Kind == ast.KindEnum || c.Anonymous || c.Decl != nil && c.Decl.Modifiers&ast.ModFinal != 0)
+}
+
 // Variances implements types.Hierarchy.
 func (p *Program) Variances(name string) []types.Variance {
 	c := p.Class(name)
@@ -517,6 +523,20 @@ func (p *Program) IsInvokable(name string) bool {
 	}
 	c.Signature()
 	return c.FindMethod("__invoke") != nil
+}
+
+// HasMethod implements types.Hierarchy.
+func (p *Program) HasMethod(class, name string) (has, static bool) {
+	c := p.Class(class)
+	if c == nil {
+		return false, false
+	}
+	c.Signature()
+	m := c.FindMethod(name)
+	if m == nil {
+		return false, false
+	}
+	return true, m.Static
 }
 
 // IsInterface implements types.Hierarchy.

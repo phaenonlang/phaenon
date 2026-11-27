@@ -1,0 +1,714 @@
+namespace App\IsCallable;
+
+// is_callable() meets a value with callable, as PHPStan meets them: a
+// string becomes a callable-string, an array the array form of a callable,
+// [class-or-object, method], and an object of a final class is a callable
+// only where it has __invoke(). The false branch keeps what may not be a
+// callable. Each branch holds a finding that would be missing were it dead.
+
+final class Row
+{
+    public function m(): int
+    {
+        return 1;
+    }
+
+    public static function make(): self
+    {
+        return new self();
+    }
+}
+
+final class Invokable
+{
+    public function __invoke(): int
+    {
+        return 1;
+    }
+}
+
+final class Magic
+{
+    /** @param array<mixed> $args */
+    public function __call(string $name, array $args): mixed
+    {
+        return null;
+    }
+}
+
+class Open
+{
+    public function m(): int
+    {
+        return 1;
+    }
+}
+
+interface Runs
+{
+    public function run(): int;
+}
+
+enum Invoked
+{
+    case One;
+
+    public function __invoke(): int
+    {
+        return 1;
+    }
+}
+
+enum Plain
+{
+    case One;
+}
+
+function takesCallable(callable $c): mixed
+{
+    return $c();
+}
+
+/** @param callable(int): string $c */
+function takesSignature(callable $c): string
+{
+    return $c(1);
+}
+
+function takesClosure(\Closure $c): mixed
+{
+    return $c();
+}
+
+function takesString(string $s): int
+{
+    return strlen($s);
+}
+
+/** @param class-string $s */
+function takesClassString(string $s): string
+{
+    return $s;
+}
+
+function takesInt(int $i): int
+{
+    return $i;
+}
+
+/** @param list<string> $l */
+function takesList(array $l): int
+{
+    return count($l);
+}
+
+function aString(string $s): mixed
+{
+    if (is_callable($s)) {
+        takesString($s);
+        takesInt($s); // want P2103 "expects int, callable-string given"
+        return takesCallable($s);
+    }
+    takesInt($s); // want P2103 "expects int, string given"
+    return takesCallable($s); // want P2103 "expects callable, string given"
+}
+
+function notCallable(string $s): mixed
+{
+    if (!is_callable($s)) {
+        return takesCallable($s); // want P2103 "expects callable, string given"
+    }
+    return takesCallable($s);
+}
+
+function neverEmpty(string $s): int
+{
+    if (is_callable($s) && $s === '') { // want P2305 "is always false"
+        return 1;
+    }
+    return 0;
+}
+
+/** @param non-empty-string $s */
+function nonEmpty(string $s): mixed
+{
+    if (is_callable($s)) {
+        takesInt($s); // want P2103 "expects int, callable-string given"
+        return takesCallable($s);
+    }
+    return null;
+}
+
+/** @param lowercase-string $s */
+function lowercase(string $s): mixed
+{
+    if (is_callable($s, true)) {
+        takesInt($s); // want P2103 "expects int, callable-string given"
+        return takesCallable($s);
+    }
+    return null;
+}
+
+/** @param numeric-string $s */
+function numeric(string $s): int
+{
+    if (is_callable($s)) {
+        return takesInt($s);
+    }
+    return takesInt($s); // want P2103 "expects int, numeric-string given"
+}
+
+/** @param class-string $s */
+function classString(string $s): mixed
+{
+    if (is_callable($s)) {
+        takesClassString($s);
+        takesInt($s); // want P2103 "expects int, class-string given"
+        return takesCallable($s); // want P2103 "expects callable, class-string given"
+    }
+    return null;
+}
+
+/** @param callable-string $s */
+function callableString(string $s): string
+{
+    takesClosure($s); // want P2103 "expects Closure, callable-string given"
+    takesString($s);
+    return takesSignature($s);
+}
+
+function literals(): int
+{
+    $name = 'strlen';
+    $none = 'no_such_function';
+    if (is_callable($name)) { // want P2402 "is always true"
+        return 1;
+    }
+    if (is_callable($none)) { // want P2402 "is always false"
+        return 2;
+    }
+    return 0;
+}
+
+function stringOrInt(int|string $v): mixed
+{
+    if (is_callable($v)) {
+        takesString($v);
+        return takesCallable($v);
+    }
+    return takesString($v); // want P2103 "expects string, int|string given"
+}
+
+function nullable(?string $v): mixed
+{
+    if (is_callable($v)) {
+        return takesCallable($v);
+    }
+    return takesString($v); // want P2103 "expects string, string|null given"
+}
+
+function stringOrClosure(string|\Closure $v): mixed
+{
+    if (is_callable($v)) {
+        return takesCallable($v);
+    }
+    return takesClosure($v); // want P2103 "expects Closure, string given"
+}
+
+function callableOrString(callable|string $v): mixed
+{
+    if (is_callable($v)) {
+        return takesCallable($v);
+    }
+    takesInt($v); // want P2103 "expects int, string given"
+    return takesString($v);
+}
+
+function aCallable(callable $c): mixed
+{
+    if ($c instanceof \Closure) {
+        return takesClosure($c);
+    }
+    if (is_string($c)) {
+        takesInt($c); // want P2103 "expects int, callable-string given"
+        return takesSignature($c);
+    }
+    return takesCallable($c);
+}
+
+function closureOfName(string $s): ?\Closure
+{
+    if (is_callable($s)) {
+        return $s(...);
+    }
+    return null;
+}
+
+/**
+ * @param callable(int): string $c
+ * @return \Closure(int): string
+ */
+function closureOfCallable(callable $c): \Closure
+{
+    return $c(...);
+}
+
+function closureOfString(string $s): \Closure
+{
+    return $s(...); // want P2202 "returns string"
+}
+
+/** @param array<mixed> $a */
+function anArray(array $a): mixed
+{
+    if (is_callable($a)) {
+        takesInt($a); // want P2103 "expects int, list{string|object, string} given"
+        takesInt($a[1]); // want P2103 "expects int, string given"
+        $a[2]; // want P2313 "does not exist"
+        return takesCallable($a);
+    }
+    return takesCallable($a); // want P2103 "expects callable, array given"
+}
+
+/** @param array<mixed> $a */
+function callsArray(array $a): mixed
+{
+    if (is_callable($a)) {
+        return $a();
+    }
+    return null;
+}
+
+/** @param array<string, string> $a */
+function stringMap(array $a): mixed
+{
+    if (is_callable($a)) {
+        takesInt($a); // want P2103 "expects int, list{string, string} given"
+        return takesCallable($a);
+    }
+    return null;
+}
+
+/** @param list<int> $a */
+function listOfInts(array $a): int
+{
+    if (is_callable($a)) {
+        return takesInt($a);
+    }
+    return 0;
+}
+
+/** @param array<object> $a */
+function arrayOfObjects(array $a): int
+{
+    if (is_callable($a)) {
+        return takesInt($a);
+    }
+    return 0;
+}
+
+/** @param array{string, string} $a */
+function pair(array $a): int
+{
+    if (is_callable($a)) {
+        return takesInt($a); // want P2103 "expects int, array{0: string, 1: string} given"
+    }
+    return takesInt($a); // want P2103 "expects int, array{0: string, 1: string} given"
+}
+
+/** @param array{int, int} $a */
+function pairOfInts(array $a): int
+{
+    if (is_callable($a)) {
+        return takesInt($a); // want P2103 "expects int, list{int, int} given"
+    }
+    return takesInt($a); // want P2103 "expects int, array{0: int, 1: int} given"
+}
+
+/** @param array{a: string, b: string} $a */
+function keyed(array $a): int
+{
+    if (is_callable($a)) {
+        return takesInt($a);
+    }
+    return takesInt($a); // want P2103 "expects int, array{a: string, b: string} given"
+}
+
+/** @param array{string, string, string} $a */
+function triple(array $a): int
+{
+    if (is_callable($a)) {
+        return takesInt($a);
+    }
+    return 0;
+}
+
+/** @param iterable<mixed> $i */
+function anIterable(iterable $i): mixed
+{
+    if (is_callable($i)) {
+        takesInt($i); // want P2103 "expects int, list{string|object, string}|(Traversable&callable) given"
+        return takesCallable($i);
+    }
+    return null;
+}
+
+/** @param string|array<mixed> $v */
+function stringOrArray(string|array $v): mixed
+{
+    if (is_callable($v)) {
+        takesInt($v); // want P2103 "expects int, callable-string|list{string|object, string} given"
+        return takesCallable($v);
+    }
+    return takesCallable($v); // want P2103 "expects callable, string|array given"
+}
+
+function aMixed(mixed $m): mixed
+{
+    if (is_callable($m)) {
+        takesInt($m); // want P2103 "expects int, callable given"
+        return takesCallable($m);
+    }
+    return takesCallable($m); // want P2103 "expects callable, mixed given"
+}
+
+function anObject(object $o): mixed
+{
+    if (is_callable($o)) {
+        takesInt($o); // want P2103 "expects int, object&callable given"
+        return takesCallable($o);
+    }
+    return null;
+}
+
+function objects(\Closure $c, Row $r, Invokable $i, int $n): int
+{
+    if (is_callable($c)) { // want P2402 "is always true"
+        return 1;
+    }
+    if (is_callable($r)) { // want P2402 "is always false"
+        return 2;
+    }
+    if (is_callable($i)) { // want P2402 "is always true"
+        return 3;
+    }
+    if (is_callable($n)) { // want P2402 "is always false"
+        return 4;
+    }
+    return 0;
+}
+
+function invokedEnum(Invoked $i): int
+{
+    if (is_callable($i)) { // want P2402 "is always true"
+        return 1;
+    }
+    return 0;
+}
+
+function invokedCase(): int
+{
+    $one = Invoked::One;
+    if (is_callable($one)) { // want P2402 "is always true"
+        return 1;
+    }
+    return 0;
+}
+
+function plainEnum(Plain $p): int
+{
+    if (is_callable($p)) { // want P2402 "is always false"
+        return takesInt($p);
+    }
+    return 0;
+}
+
+function methodArrays(Row $r, Open $o, object $any, string $name, Runs $runs): int
+{
+    $known = [$r, 'm'];
+    $missing = [$r, 'nosuch'];
+    $maybe = [$o, 'nosuch'];
+    $anyObject = [$any, 'm'];
+    $anyName = [$r, $name];
+    $static = ['App\IsCallable\Row', 'make'];
+    $notStatic = ['App\IsCallable\Row', 'm'];
+    $byInterface = [$runs, 'run'];
+    $byString = [$name, 'm'];
+    if (is_callable($known)) { // want P2402 "is always true"
+        takesInt($known); // want P2103 "expects int, list{App\IsCallable\Row, 'm'} given"
+    }
+    if (is_callable($missing)) { // want P2402 "is always false"
+        takesInt($missing);
+    }
+    if (is_callable($maybe)) {
+        takesInt($maybe); // want P2103 "expects int, list{App\IsCallable\Open, 'nosuch'} given"
+    }
+    if (is_callable($anyObject)) {
+        takesInt($anyObject); // want P2103 "expects int, list{object, 'm'} given"
+    }
+    if (is_callable($anyName)) {
+        takesInt($anyName); // want P2103 "expects int, list{App\IsCallable\Row, string} given"
+    }
+    if (is_callable($static)) { // want P2402 "is always true"
+        takesInt($static); // want P2103 "expects int, list{'App\\IsCallable\\Row', 'make'} given"
+    }
+    if (is_callable($notStatic)) { // want P2402 "is always false"
+        takesInt($notStatic);
+    }
+    if (is_callable($byInterface)) { // want P2402 "is always true"
+        takesInt($byInterface); // want P2103 "expects int, list{App\IsCallable\Runs, 'run'} given"
+    }
+    if (is_callable($byString)) {
+        return 1;
+    }
+    return takesInt($byString); // want P2103 "expects int, list{string, 'm'} given"
+}
+
+// An array written in the call is a test of the method, which PHPStan
+// never calls always true.
+function writtenKnown(Row $r): int
+{
+    if (is_callable([$r, 'm'])) {
+        return 1;
+    }
+    return 0;
+}
+
+function writtenOpen(Open $o): int
+{
+    if (is_callable([$o, 'm'])) {
+        return 1;
+    }
+    return 0;
+}
+
+function writtenMissing(Row $r): int
+{
+    if (is_callable([$r, 'nosuch'])) { // want P2402 "is always false"
+        return 1;
+    }
+    return 0;
+}
+
+// PHP calls __call() for a method the class lacks; PHPStan does not count
+// it, and has the test always false.
+function magic(Magic $m): int
+{
+    $c = [$m, 'anything'];
+    if (is_callable($c)) {
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * @param list<string> $xs
+ * @return list<string>
+ */
+function mapped(array $xs, string $f): array
+{
+    $upper = array_map('strtoupper', $xs);
+    takesList(array_map($f, $xs)); // want P2103 "expects list<string>, list given", P2103 "expects callable(string): mixed, string given"
+    if (is_callable($f)) {
+        takesList(array_map($f, $xs)); // want P2103 "expects list<string>, list given"
+    }
+    return $upper;
+}
+
+// A class final only by a docblock's @final may have a subclass with
+// __invoke(): PHPStan asks the keyword alone where an object is callable,
+// and the docblock too where an array names a method the class lacks.
+
+/** @final */
+class Listener
+{
+    public function handle(): void
+    {
+    }
+}
+
+function finalByDocblock(Listener $l): int
+{
+    if (is_callable($l)) {
+        return 1;
+    }
+    return 0;
+}
+
+function callableListener(callable $c, Listener $l): int
+{
+    if ($c instanceof Listener) {
+        return 1;
+    }
+    return $c === $l ? 2 : 0;
+}
+
+function missingByDocblock(Listener $l): int
+{
+    $c = [$l, 'nosuch'];
+    if (is_callable($c)) { // want P2402 "is always false"
+        return 1;
+    }
+    return 0;
+}
+
+// `$f(...)` of what a string or an array names is a Closure with the
+// target's signature.
+
+final class Normalizer
+{
+    private const SANITIZER = 'trim';
+
+    public function size(): int
+    {
+        return 1;
+    }
+
+    /**
+     * @param list<string> $xs
+     * @return list<string>
+     */
+    public function clean(array $xs): array
+    {
+        return array_map((self::SANITIZER)(...), $xs);
+    }
+
+    /** @return \Closure(): int */
+    public function sized(): \Closure
+    {
+        $c = [$this, 'size'];
+        return $c(...);
+    }
+}
+
+/**
+ * @param list<string> $xs
+ * @return list<string>
+ */
+function upper(array $xs): array
+{
+    $f = 'strtoupper';
+    return array_map($f(...), $xs);
+}
+
+/** @return list<int> */
+function lengths(): array
+{
+    $f = 'strlen';
+    return array_map($f(...), [1, 2]); // want P2103 "expects callable(int<1, 2>): int<0, max>, Closure(string|bytes $string): int<0, max> given"
+}
+
+// A callable-string a docblock declares proves nothing to a comparison,
+// through a join too; one a test proved is never empty and never a
+// number. The checker does not take the first for a non-empty-string,
+// where PHPStan does, and takes the second for a non-falsy-string, which
+// it reads as non-empty, where PHPStan does not: '0' names no function.
+
+/** @param non-empty-string $s */
+function takesNonEmpty(string $s): string
+{
+    return $s;
+}
+
+/** @param non-falsy-string $s */
+function takesNonFalsy(string $s): string
+{
+    return $s;
+}
+
+/** @param list<callable-string> $xs */
+function filtered(array $xs): int
+{
+    return count(array_filter($xs, static fn (string $x): bool => $x !== ''));
+}
+
+/** @param callable-string $s */
+function declaredCallable(string $s): string
+{
+    takesNonFalsy($s); // want P2103 "expects non-empty-string, callable-string given"
+    return takesNonEmpty($s); // want P2103 "expects non-empty-string, callable-string given"
+}
+
+function provedCallable(callable $c): string
+{
+    if (is_string($c)) {
+        takesNonFalsy($c);
+        return takesNonEmpty($c);
+    }
+    return '';
+}
+
+/**
+ * @param callable-string $a
+ * @param non-empty-string $b
+ */
+function joined(string $a, string $b, bool $c): string
+{
+    $x = $c ? $a : $b;
+    if ($x === '') {
+        return 'e';
+    }
+    return $x;
+}
+
+/** @template T */
+final class Holder
+{
+    /** @param T $v */
+    public function __construct(private mixed $v)
+    {
+    }
+
+    /** @return T */
+    public function get(): mixed
+    {
+        return $this->v;
+    }
+}
+
+/** @param callable(): string $f */
+function takesStringFn(callable $f): string
+{
+    return $f();
+}
+
+/** @param Holder<string> $h */
+function heldGetter(Holder $h): string
+{
+    $f = [$h, 'get'];
+    return takesStringFn($f(...));
+}
+
+function notNumber(string $s): int
+{
+    if (is_callable($s) && is_numeric($s)) { // want P2402 "is always false"
+        return 1;
+    }
+    if (is_callable($s) && $s === '123') { // want P2305 "is always false"
+        return 2;
+    }
+    return 0;
+}
+
+/** @param iterable<int> $i */
+function iterableOrClosure(iterable $i, \Closure $c): bool
+{
+    return $i === $c; // want P2305 "is always false"
+}
+
+class Made
+{
+    public static function create(): self
+    {
+        return new self();
+    }
+
+    public function made(): int
+    {
+        $c = [static::class, 'create'];
+        if (is_callable($c)) {
+            return 1;
+        }
+        return 0;
+    }
+}
