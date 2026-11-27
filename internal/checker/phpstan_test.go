@@ -157,6 +157,14 @@ func TestPHPStanParity(t *testing.T) {
 		// holding that one reading to a user's tag reports code PHPStan
 		// passes (paramout.go).
 		"param-out-inherited.phn": {"paramOut.type": {356}},
+		// A `break` under in_array($field, ['b'], true) in a loop over the
+		// keys 'a', 'b', 'c': $field, which nothing wrote since the
+		// iteration began, is 'b' there, so the `break` is taken in that
+		// key's iteration at the earliest, and $row['b'] was tested on the
+		// way. PHPStan, which runs the body once for each key, does not
+		// decide in_array() in a key's run, takes the `break` in any of them
+		// and reports the offset (literalLoopOffsets).
+		"inference.phn": {"argument.type": {535}},
 	}
 	// besideExtra are the lines whose findings are all extra checks and on
 	// which PHPStan speaks all the same, under an identifier the lists
@@ -502,6 +510,9 @@ var checkerAlone = map[string][]struct {
 	"benevolent.phn": {{P2105, []int{15}, notToldApartYet, "DOMDocument::createElement() kept in a variable: PHPStan's union stays benevolent there"}},
 	"call-invalidation.phn": {{P2202, []int{103}, notToldApartYet, "a static call of the class forgets what was narrowed of $this->label; " +
 		"PHPStan forgets it after an instance call only"}},
+	"inference.phn": {{P2103, []int{554, 569}, falseFinding, "an offset after a loop over literal keys whose `break` follows a test of a copy " +
+		"of the key, or a by-reference argument of the key: the checker narrows the first key's offset alone, where PHPStan, which runs the body " +
+		"once for each key, narrows those of the keys up to the one whose iteration takes the `break`"}},
 	"count-narrowing.phn": {{P2103, []int{215}, notToldApartYet, "the namespace's own count() says nothing of the list; PHPStan narrows by the function's short name"}},
 	"generator-arrows.phn": {
 		{P2202, []int{51}, notToldApartYet, "a generator arrow function returned where the docblock's Closure yields strings: PHPStan types the closure " +

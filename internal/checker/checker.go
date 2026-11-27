@@ -996,6 +996,15 @@ type fnCtx struct {
 	// the closure returns or ends: what array_walk() writes back with it
 	// (phpwrites.go).
 	refExits map[*ast.Closure]types.Type
+	// keyedTests holds, by the path of its mark (testedMark), each offset
+	// a test of `$row[$field]` may have narrowed, $field one of a few
+	// literals: where a foreach over them ends, the offset is narrowed as
+	// the test narrowed it (literalLoopOffsets).
+	keyedTests map[string]keyedTest
+	// literalKeys counts, by name, the value variables of the foreach
+	// loops over literal keys being checked (unwrittenMark), which == with
+	// a literal narrows where it compares as === does.
+	literalKeys map[string]int
 	// neverEnvs collects, while trackNever is set, the state at every
 	// statement of type never in a closure whose first parameter is taken
 	// by reference: an exit PHPStan gathers for array_walk() as a return.

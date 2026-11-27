@@ -2,6 +2,7 @@ package checker
 
 import (
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -230,17 +231,37 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 			x.narrowPath(env, p.Object, types.StripNull(x.pathType(p.Object, env)), false)
 		}
 	case *ast.Index:
-		// `is_string($data[$field])` with $field one of a few literals (a
-		// foreach over them) narrows each of those offsets, as PHPStan does.
+		// `is_string($data[$field])` with $field one of a few literals
+		// narrows the offset as written, as PHPStan narrows it: which of
+		// the offsets $field may name was tested is not known, and each
+		// holds what it held. One literal names one offset, which is
+		// narrowed as if written. Where a foreach over the literals ends,
+		// PHPStan, which runs such a loop once for each of them, has each
+		// offset narrowed as the test narrowed it, and so does the checker
+		// (literalLoopOffsets): what the test leaves of each offset is
+		// kept under a mark of its own, which a write under the array
+		// drops and a join keeps only where every way to it made the test.
 		if v, ok := p.Index.(*ast.Variable); ok {
-			if base, ok := x.pathKey(p.Array); ok {
-				if keys := literalOffsetKeys(x.pathType(v, env)); keys != nil {
-					for _, k := range keys {
-						env.setPath(base+k, t)
+			if _, ok := x.pathKey(p.Array); ok {
+				keyType := x.pathType(v, env)
+				if keys := literalOffsetKeys(keyType); keys != nil {
+					offsets := literalOffsets(p, keyType)
+					if len(offsets) == 1 {
+						x.narrowPath(env, offsets[0], t, define)
+					} else {
+						for _, o := range offsets {
+							key, ok := x.pathKey(o)
+							if !ok {
+								continue
+							}
+							nt := types.Intersect(x.pathType(o, env), t, x.p())
+							env.setPath(key+testedMark, nt)
+							if x.keyedTests == nil {
+								x.keyedTests = map[string]keyedTest{}
+							}
+							x.keyedTests[key+testedMark] = keyedTest{offset: o, key: v.Name}
+						}
 					}
-					// And the offset as written, which a write under the
-					// same variable sets too: a join of the two keeps it,
-					// `if (!isset($c[$k])) { $c[$k] = 1; }`.
 					if key, ok := x.pathKey(p); ok {
 						env.setPath(key, t)
 					}
@@ -294,6 +315,162 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 	}
 }
 
+// unwrittenMark is the path, under a foreach's value variable, that holds
+// while the variable holds the loop's key unchanged: set where an
+// iteration over literal keys starts (literalKeys), dropped by a write of
+// the variable, as a path under it, and kept by a join only where every
+// way in has it (literalLoopOffsets). It names the loop, so that an inner
+// loop that reuses the name marks its own.
+func unwrittenMark(s *ast.Foreach, name string) string {
+	return "$" + name + "[?unwritten " + strconv.Itoa(s.S.Start) + "]"
+}
+
+// looseIsStrict reports two types == compares as === does: strings that
+// are not numeric, or ints. A numeric string, or a string beside an int,
+// compares by its number.
+func looseIsStrict(a, b types.Type) bool {
+	strs, ints := true, true
+	for _, m := range append(types.Members(a), types.Members(b)...) {
+		switch m := m.(type) {
+		case types.StringLit:
+			ints = false
+			if isNumericLiteral(m.V) {
+				strs = false
+			}
+		case types.Int:
+			strs = false
+		default:
+			return false
+		}
+	}
+	return strs || ints
+}
+
+// testedMark follows the path of an offset in the path that holds what a
+// test of the offset under a variable key left of it (narrowPath).
+const testedMark = "?tested"
+
+// keyedTest is an offset a test of `$row[$field]` may have narrowed: the
+// offset written with the literal key, and the variable that named it.
+type keyedTest struct {
+	offset *ast.Index
+	key    string
+}
+
+// literalOffsets writes e, an offset under a variable key of type keyType,
+// once with each literal the key may be.
+func literalOffsets(e *ast.Index, keyType types.Type) []*ast.Index {
+	var out []*ast.Index
+	for _, m := range types.Members(keyType) {
+		var k ast.Expr
+		switch lit := m.(type) {
+		case types.StringLit:
+			k = &ast.StringLit{S: e.Index.Span(), Raw: "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(lit.V) + "'"}
+		case types.Int:
+			if lit.Hi < lit.Lo || uint64(lit.Hi)-uint64(lit.Lo) >= literalRange {
+				return nil
+			}
+			for i := lit.Lo; i <= lit.Hi; i++ {
+				out = append(out, &ast.Index{S: e.S, Array: e.Array, Index: &ast.IntLit{S: e.Index.Span(), Raw: strconv.FormatInt(i, 10)}})
+			}
+			continue
+		default:
+			return nil
+		}
+		out = append(out, &ast.Index{S: e.S, Array: e.Array, Index: k})
+	}
+	return out
+}
+
+// literalRange bounds the int range read as the literals in it (a key of
+// one of a few offsets).
+const literalRange = 16
+
+// literalLoopOffsets narrows, where a foreach over a list of literal keys
+// ends (s, iterating it), each offset a test under its value variable may
+// have narrowed, `$row['name']` and `$row['age']` for a test of
+// `$row[$field]` under `foreach (['name', 'age'] as $field)`: PHPStan runs
+// the loop once for each literal, and where every way to the end made the
+// test, each offset holds what the test left of it. A way out through
+// `break` leaves the loop in an iteration that tested its own literal and
+// those before it. Where nothing wrote the variable on the way to the
+// `break` (unwrittenMark), it holds that iteration's literal, so the
+// earliest literal its type there admits is the earliest iteration the
+// `break` is taken in: the offsets of the literals up to that one are
+// narrowed, and where the variable was written, or its type admits the
+// first literal, the first one's alone.
+func (x *fnCtx) literalLoopOffsets(s *ast.Foreach, it types.Type, after *state, breaks []*state) {
+	value, ok := s.Value.(*ast.Variable)
+	if !ok || len(x.keyedTests) == 0 {
+		return
+	}
+	sh, ok := it.(types.Shape)
+	if !ok || sh.Unsealed || len(sh.Entries) == 0 {
+		return
+	}
+	for _, e := range sh.Entries {
+		if e.Optional {
+			return
+		}
+		switch lit := e.Type.(type) {
+		case types.StringLit:
+		case types.Int:
+			if lit.Lo != lit.Hi {
+				return
+			}
+		default:
+			return
+		}
+	}
+	position := func(t types.Type) int {
+		return slices.IndexFunc(sh.Entries, func(e types.ShapeEntry) bool { return types.Equal(e.Type, t) })
+	}
+	// tested is how many of the literals, in the list's order, every way
+	// out has tested.
+	tested := len(sh.Entries)
+	mark := unwrittenMark(s, value.Name)
+	for _, b := range breaks {
+		at := 0
+		if info, ok := b.get(value.Name); ok {
+			if _, unwritten := b.getPath(mark); unwritten {
+				if i := slices.IndexFunc(sh.Entries, func(e types.ShapeEntry) bool { return types.Overlaps(e.Type, info.t, x.p()) }); i >= 0 {
+					at = i
+				}
+			}
+		}
+		tested = min(tested, at+1)
+	}
+	delete(after.paths, mark)
+	for mark, test := range x.keyedTests {
+		if test.key != value.Name {
+			continue
+		}
+		t, ok := after.getPath(mark)
+		if !ok {
+			continue
+		}
+		if i := position(x.literalOf(test.offset.Index)); i < 0 || i >= tested {
+			continue
+		}
+		nt := types.Intersect(x.pathType(test.offset, after), t, x.p())
+		if _, never := nt.(types.Never); never {
+			continue // no value of it passes: the loop does not end so
+		}
+		x.narrowPath(after, test.offset, nt, false)
+	}
+}
+
+// literalOf is the type of a literal key literalOffsets wrote.
+func (x *fnCtx) literalOf(e ast.Expr) types.Type {
+	switch k := e.(type) {
+	case *ast.StringLit:
+		return types.StringLit{V: program.StringValue(k)}
+	case *ast.IntLit:
+		return intLitType(k.Raw)
+	}
+	return nil
+}
+
 // literalOffsetKeys spells a union of literal keys the way pathKey spells
 // offsets ("['service']", "[3]"); nil when a member is not a literal.
 func literalOffsetKeys(t types.Type) []string {
@@ -303,10 +480,14 @@ func literalOffsetKeys(t types.Type) []string {
 		case types.StringLit:
 			keys = append(keys, "['"+m.V+"']")
 		case types.Int:
-			if m.Lo != m.Hi {
+			// The lattice writes consecutive literals as a range: a few
+			// of them are the literals still.
+			if m.Hi < m.Lo || uint64(m.Hi)-uint64(m.Lo) >= literalRange {
 				return nil
 			}
-			keys = append(keys, "["+strconv.FormatInt(m.Lo, 10)+"]")
+			for i := m.Lo; i <= m.Hi; i++ {
+				keys = append(keys, "["+strconv.FormatInt(i, 10)+"]")
+			}
 		default:
 			return nil
 		}
@@ -1018,6 +1199,20 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 	}
 	narrowBy(e.Left, lt, rt)
 	narrowBy(e.Right, rt, lt)
+	if !strict {
+		// `$field == 'age'`, $field the value variable of a loop over
+		// literal keys: where == compares as === does, it narrows as ===
+		// does (literalLoopOffsets).
+		for _, side := range []struct {
+			e        ast.Expr
+			t, other types.Type
+		}{{e.Left, lt, rt}, {e.Right, rt, lt}} {
+			if v, ok := unparen(side.e).(*ast.Variable); ok && x.literalKeys[v.Name] > 0 && oneValue(side.other) && looseIsStrict(side.t, side.other) {
+				x.narrowPath(then, side.e, types.Intersect(side.t, side.other, x.p()), true)
+				x.narrowPath(els, side.e, x.subtract(side.t, side.other, x.p()), false)
+			}
+		}
+	}
 	// `1 === preg_match(…)`: the subject matched (with !==, in the branch
 	// the swap below makes the else branch).
 	for _, side := range []struct {
