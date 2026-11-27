@@ -2213,12 +2213,27 @@ func (x *fnCtx) stringCast(e *ast.Cast, t types.Type) []types.Type {
 	return out
 }
 
+// incDec types ++ and -- and reports the operands PHPStan refuses
+// (InvalidIncDecOperationRule, PHP 8.5): what it allows is an int, a
+// float, a numeric string, a GMP, a SimpleXMLElement or a BcMath\Number,
+// and null for ++, which PHP makes 1. On a decrement PHP leaves null as it
+// is and warns that it does, and PHPStan refuses it, the null of a
+// nullable type included. A step is typed as PHPStan types it, as the sum
+// or the difference with 1 where null counts as 0: `?int` stepped either
+// way is an int, null decremented stays null, and mixed, which PHPStan
+// refuses too, is the benevolent (int|float).
 func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 	t := x.expr(e.Expr, env, nil)
 	since := len(x.c.diags)
+	// The members beside null are stepped as the operand would be
+	// without it; null is added back below.
+	stepped, withNull := t, false
+	if !types.IsMixed(t) && types.IsNullable(t) && !types.IsSubtype(t, types.TNull, nil) {
+		stepped, withNull = types.StripNull(t), true
+	}
 	var result types.Type
 	switch {
-	case types.IsSubtype(t, types.TInt, nil):
+	case types.IsSubtype(stepped, types.TInt, nil):
 		// A step is the sum or the difference with 1, typed as that one
 		// is: 5 stepped is 6, and the last integer stepped is a float, so
 		// that a second step from 9223372036854775806 is one too.
@@ -2226,15 +2241,15 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 		if e.Inc {
 			op = token.Kind('+')
 		}
-		result = x.binaryTypes(op, t, types.IntLit(1), e)
-	case types.IsSubtype(t, types.TFloat, nil):
+		result = x.binaryTypes(op, stepped, types.IntLit(1), e)
+	case types.IsSubtype(stepped, types.TFloat, nil):
 		result = types.TFloat
-	case types.IsSubtype(t, types.MakeUnion(types.TInt, types.TFloat), nil):
+	case types.IsSubtype(stepped, types.MakeUnion(types.TInt, types.TFloat), nil):
 		// A counter that may have passed the last integer, or an int|float
 		// as declared: PHP steps either, and the result is one of the two,
 		// benevolent as the value was (`$q = $a / $b; $q++;`).
-		result = intOrFloat(t, t)
-	case numbersOrStrings(t):
+		result = intOrFloat(stepped, stepped)
+	case numbersOrStrings(stepped):
 		// Each member as PHP turns it: a numeric string becomes the number
 		// it reads as, so `$n = '5'; $n++; $n++;` is 6 and then 7. A string
 		// that is no number, or may be none, PHP steps as text, which it
@@ -2244,7 +2259,7 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 		// that nothing else follows from the step.
 		var refused, all bool
 		var since string
-		if result, refused, all, since = x.stepMembers(t, e); refused {
+		if result, refused, all, since = x.stepMembers(stepped, e); refused {
 			// The message names the release that deprecated the step where
 			// the operand's literals tell it, and none where they do not: --
 			// is 8.3's, ++ is 8.3's of a string that is not alphanumeric,
@@ -2274,26 +2289,49 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 			}
 		}
 	case types.IsSubtype(t, types.TNull, nil):
-		if e.Inc {
-			result = types.IntLit(1)
-		} else {
+		result = types.IntLit(1)
+		if !e.Inc {
+			x.report(e.S, P2301, "cannot decrement %s: a decrement of null has no effect, which PHP warns of", x.typeName(t))
 			result = types.TNull
 		}
 	case types.IsMixed(t):
-		result = types.TMixed
-	case isGMP(t):
-		result = t // GMP overloads ++ and --, as its other operators
-	case besideGMP(t):
+		result = t // a type an earlier finding left unknown
+		if _, explicit := t.(types.Mixed); explicit {
+			x.report(e.S, P2301, "cannot increment or decrement mixed")
+			result = types.Benevolent(types.MakeUnion(types.TInt, types.TFloat))
+		}
+	case isGMP(stepped):
+		result = stepped // GMP overloads ++ and --, as its other operators
+		if withNull {
+			result = types.MakeUnion(types.TInt, types.TFloat) // as besideGMP
+		}
+	case types.IsSubtype(stepped, types.NewClass("BcMath\\Number"), x.p()):
+		result = stepped // so does BcMath\Number
+	case types.IsSubtype(stepped, types.NewClass("SimpleXMLElement"), x.p()):
+		// The element's text read as a number, as PHPStan types it.
+		result = types.MakeUnion(types.TInt, types.TFloat)
+	case besideGMP(stepped):
 		// A GMP beside other types is stepped as the number PHPStan
 		// converts it to, and the others are to be numbers too.
 		result = types.MakeUnion(types.TInt, types.TFloat)
-		if !types.IsSubtype(gmpAsNumber(t), result, nil) {
+		if !types.IsSubtype(gmpAsNumber(stepped), result, nil) {
 			x.report(e.S, P2301, "cannot increment or decrement %s", x.typeName(t))
 			result = t
 		}
 	default:
 		x.report(e.S, P2301, "cannot increment or decrement %s", x.typeName(t))
 		result = t
+	}
+	if withNull && len(x.c.diags) == since {
+		if e.Inc {
+			// Null made 1, beside the others' sum; PHPStan's union of the
+			// two is benevolent no longer.
+			result = types.MakeUnion(append(types.Members(result), types.IntLit(1))...)
+		} else {
+			// The null left as it is drops out of the type, as PHPStan
+			// types the decrement of null as -1: the one finding is this.
+			x.report(e.S, P2301, "cannot decrement %s: a decrement of null has no effect, which PHP warns of", x.typeName(t))
+		}
 	}
 	unchecked := x.outUnchecked
 	x.outUnchecked = unchecked || x.refusedSince(since) // the refused step is the one finding (paramout.go)

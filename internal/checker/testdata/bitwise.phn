@@ -194,5 +194,5 @@ function gmpInUnionStepped($ig, $sg, ?\GMP $ng, \GMP $g): void
     $h = $ig;
     $h += $g; // want P2301 "operator + on int|GMP"
     $sg++; // want P2301 "cannot increment or decrement string|GMP"
-    $ng--; // want P2301 "cannot increment or decrement GMP|null"
+    $ng--; // want P2301 "cannot decrement GMP|null"
 }

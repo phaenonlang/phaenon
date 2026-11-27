@@ -1,0 +1,139 @@
+namespace Steps;
+
+// ++ and -- on an operand that is not a string (string-steps.phn has
+// those), as PHPStan allows them on PHP 8.5 (InvalidIncDecOperationRule):
+// an int, a float, a numeric string, a GMP, a SimpleXMLElement or a
+// BcMath\Number, and null for ++, which PHP makes 1. PHP leaves null as it
+// is on a decrement and warns that it does, and PHPStan refuses it there,
+// the null of a nullable type too; it refuses bool, mixed, an array and an
+// object either way. A step is typed as PHPStan types the sum or the
+// difference with 1, null counting as 0: a nullable int stepped either way
+// is an int, and mixed stepped is the benevolent (int|float).
+
+function takesInt(int $i): void
+{
+}
+
+function takesFloat(float $f): void
+{
+}
+
+function nullableInt(?int $n): int
+{
+    $n++;
+    return $n;
+}
+
+function prefix(?int $n): int
+{
+    return ++$n;
+}
+
+function postfixValue(?int $n): ?int
+{
+    return $n++;
+}
+
+function decremented(?int $n): int
+{
+    $n--; // want P2301 "cannot decrement int|null: a decrement of null has no effect"
+    return $n;
+}
+
+function nullAlone(): void
+{
+    $n = null;
+    $n++;
+    takesInt($n);
+    $m = null;
+    --$m; // want P2301 "cannot decrement null"
+}
+
+function nullableFloat(?float $f): float
+{
+    $f++;
+    return $f;
+}
+
+final class Counter
+{
+    public ?int $count = null;
+
+    public ?float $ratio = null;
+}
+
+function property(Counter $c): void
+{
+    $c->count++;
+    takesInt($c->count);
+    $c->ratio--; // want P2301 "cannot decrement float|null"
+}
+
+/** @param array<string, ?int> $counts */
+function offset(array $counts): int
+{
+    $counts['a']++;
+    return $counts['a'];
+}
+
+function objects(\SimpleXMLElement $x, ?\GMP $g, \BcMath\Number $b): void
+{
+    $x++;
+    $g++;
+    $b--;
+    takesFloat($x);
+}
+
+/** @param numeric-string|null $s */
+function numericString(?string $s): void
+{
+    $s++;
+    takesFloat($s);
+}
+
+/** @param list<int> $a */
+function refused(?string $s, bool $b, ?bool $nb, mixed $m, array $a, object $o): void
+{
+    $s++; // want P2301 "cannot increment string|null"
+    $b++; // want P2301 "cannot increment or decrement bool"
+    $nb++; // want P2301 "cannot increment or decrement bool|null"
+    $m++; // want P2301 "cannot increment or decrement mixed"
+    takesInt($m);
+    $a++; // want P2301 "cannot increment or decrement list<int>"
+    $o--; // want P2301 "cannot increment or decrement object"
+}
+
+/**
+ * A ranged int stepped is a plain int: the checker computes with no
+ * range, where PHPStan has int<1, max>, and the use after the step is
+ * reported, a false finding the parity table names (checkerAlone).
+ *
+ * @param non-negative-int|null $count
+ * @return non-negative-int|null
+ */
+function rangedNullable(?int $count): ?int
+{
+    $count++;
+    return $count; // want P2202 "should return int<0, max>|null but returns int"
+}
+
+/**
+ * @param non-negative-int $count
+ * @return non-negative-int
+ */
+function ranged(int $count): int
+{
+    $count++;
+    return $count; // want P2202 "should return int<0, max> but returns int"
+}
+
+final class Hits
+{
+    /** @var non-negative-int|null */
+    public ?int $hits = null;
+
+    public function hit(): void
+    {
+        $this->hits++; // want P2201 "does not accept int"
+    }
+}
