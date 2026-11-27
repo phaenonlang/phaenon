@@ -1,0 +1,175 @@
+namespace App\SelfInTraitSignature;
+
+// A trait's member, seen through the class that uses it, reads self as
+// that class: PHP resolves self in the trait's declarations to the class
+// using it, and PHPStan reads the member in that class's context. So do
+// static and $this, and self inside a type argument, a callable's
+// signature or a nullable type, in a native type or a docblock, of a
+// parameter, a return or a property, through a trait used by a trait and
+// through an alias. A class that implements the trait's abstract method,
+// or an interface the trait's method implements, is held to nothing more
+// here than before. Plain PHP, so that PHPStan reads this file as
+// written.
+
+function takesNamed(Named $n): void
+{
+}
+
+/** @param list<Named> $l */
+function takesNamedList(array $l): void
+{
+}
+
+trait Names
+{
+    public ?self $next = null;
+
+    /** @var list<self> */
+    public array $all = [];
+
+    public function same(self $o): self
+    {
+        return $o;
+    }
+
+    /** @return list<self> */
+    public function many(): array
+    {
+        return [$this];
+    }
+
+    /** @param callable(self): int $f */
+    public function apply(callable $f): int
+    {
+        return $f($this);
+    }
+
+    public function fluent(): static
+    {
+        return $this;
+    }
+
+    /** @return $this */
+    public function chain(): self
+    {
+        return $this;
+    }
+
+    /** @param self|null $o */
+    public function maybe($o): ?self
+    {
+        return $o;
+    }
+}
+
+final class Named
+{
+    use Names;
+}
+
+trait Inner
+{
+    public function inner(self $o): self
+    {
+        return $o;
+    }
+}
+
+trait Outer
+{
+    use Inner;
+}
+
+final class Nested
+{
+    use Outer;
+}
+
+trait Greets
+{
+    public function hello(self $o): string
+    {
+        return 'a';
+    }
+}
+
+trait GreetsToo
+{
+    public function hello(self $o): string
+    {
+        return 'b';
+    }
+}
+
+final class Aliased
+{
+    use Greets, GreetsToo {
+        Greets::hello insteadof GreetsToo;
+        GreetsToo::hello as protected helloToo;
+        Greets::hello as greet;
+    }
+
+    public function both(self $o): string
+    {
+        return $this->helloToo($o) . $this->greet($o);
+    }
+}
+
+trait Equals
+{
+    abstract public function equals(self $other): bool;
+
+    public function differs(self $other): bool
+    {
+        return !$this->equals($other);
+    }
+}
+
+final class Money
+{
+    use Equals;
+
+    public function __construct(private int $amount)
+    {
+    }
+
+    public function equals(self $other): bool
+    {
+        return $this->amount === $other->amount;
+    }
+}
+
+interface Selfish
+{
+    public function me(): self;
+}
+
+trait Me
+{
+    public function me(): self
+    {
+        return $this;
+    }
+}
+
+final class Person implements Selfish
+{
+    use Me;
+}
+
+function useThem(Named $n, Nested $x, Aliased $a, Money $m, Person $p): bool
+{
+    takesNamed($n->same($n));
+    takesNamedList($n->many());
+    $n->apply(fn (Named $o): int => 1);
+    takesNamed($n->fluent());
+    takesNamed($n->chain());
+    takesNamed($n->maybe($n) ?? $n);
+    takesNamed($n->next ?? $n);
+    takesNamedList($n->all);
+    $n->next = $n;
+    takesNamed($n->same($x)); // want P2103 "expects App\SelfInTraitSignature\Named, App\SelfInTraitSignature\Nested given"
+    $x->inner($x)->inner($x);
+    $a->greet($a);
+    return $m->differs($m) && $p->me() === $p;
+}

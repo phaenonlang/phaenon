@@ -1546,7 +1546,17 @@ func (x *fnCtx) instanceofCond(e *ast.Instanceof, env *state) (then, els *state)
 		return then, els
 	}
 	_, literalClass := e.Class.(*ast.Name)
-	if nt := x.nativeOr(e.Expr, t, env); !types.IsMixed(t) && literalClass {
+	if c, ok := target.(types.Class); ok && literalClass && !types.IsMixed(t) && !x.traitTyped(target) {
+		// No object is an instance of a trait, whatever classes use it:
+		// PHP's instanceof is false, as PHPStan reports it.
+		if cl := x.p().Class(c.Name); cl != nil && cl.Kind == ast.KindTrait {
+			x.condValueType = types.TFalse
+			x.report(e.S, P2306, "%s is never an instance of %s", x.typeName(t), x.typeName(target))
+			x.narrowPath(then, e.Expr, types.Intersect(t, target, x.p()), true) // an object read as the trait, as PHPStan reads it
+			return then, els
+		}
+	}
+	if nt := x.nativeOr(e.Expr, t, env); !types.IsMixed(t) && literalClass && !x.traitTyped(t) && !x.traitTyped(target) {
 		// `$x instanceof $class` with a class-string<Foo> tests for a
 		// subclass the string names: never decided here, as PHPStan.
 		if _, isObject := target.(types.Object); !isObject {
@@ -1586,6 +1596,12 @@ func isParamType(t types.Type) bool {
 func (x *fnCtx) instanceofTarget(e *ast.Instanceof, env *state) types.Type {
 	switch c := e.Class.(type) {
 	case *ast.Name:
+		if specialClassName(c) == "parent" && x.inTraitBody() {
+			if parents := x.traitParents(c.S); len(parents) > 0 {
+				return classTypes(parents)
+			}
+			return types.TObject
+		}
 		if specialClassName(c) == "parent" && x.class != nil {
 			if pc := x.class.ParentClass(); pc != nil {
 				return types.Class{Name: pc.Name}
@@ -1681,18 +1697,35 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 			}
 			x.call(e, env, nil)
 			ct := x.pathType(e.Args.Args[1].Value, env)
-			var cls types.Type
-			switch c := ct.(type) {
-			case types.StringLit:
-				cls = types.Class{Name: c.V}
-			case types.ClassString:
-				cls = types.TObject // some class: the subject is an object, or a class-string
-				if c.Of != nil {
-					cls = c.Of
+			// One class or several, `self::class` in a trait two classes
+			// use: the subject is one of them where the test holds, and
+			// not the one it is tested against, whichever that is, where
+			// it fails, which only a single class says.
+			var classes []types.Type
+			for _, m := range types.Members(ct) {
+				switch c := m.(type) {
+				case types.StringLit:
+					classes = append(classes, types.Class{Name: c.V})
+				case types.ClassString:
+					if c.Of != nil {
+						classes = append(classes, c.Of)
+					} else {
+						classes = append(classes, types.TObject) // some class: the subject is an object, or a class-string
+					}
+				case types.String:
+					classes = append(classes, types.TObject)
+				default:
+					classes = nil
 				}
-			case types.String:
-				cls = types.TObject
+				if classes == nil {
+					break
+				}
 			}
+			var cls types.Type
+			if classes != nil {
+				cls = types.MakeUnion(classes...)
+			}
+			single := len(classes) == 1
 			then, els = env.clone(), env.clone()
 			x.condValueType = types.TBool
 			if cls == nil {
@@ -1711,7 +1744,9 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 				x.narrowPath(then, arg, types.Intersect(at, types.MakeUnion(cls, types.ClassString{Of: cls}), x.p()), true)
 			} else {
 				x.narrowPath(then, arg, types.Intersect(at, cls, x.p()), true)
-				x.narrowPath(els, arg, x.subtract(at, cls, x.p()), false)
+				if single {
+					x.narrowPath(els, arg, x.subtract(at, cls, x.p()), false)
+				}
 			}
 			return then, els, true
 		case "mb_check_encoding":
@@ -1825,7 +1860,7 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 		x.excluded(els, arg, target)
 	}
 	nt := x.nativeOr(arg, at, env)
-	if !types.IsMixed(at) {
+	if !types.IsMixed(at) && !x.traitTyped(at) {
 		held := x.heldExpression(arg, env)
 		if _, isNever := types.Intersect(at, target, x.p()).(types.Never); isNever {
 			x.condValueType = types.TFalse
@@ -2081,7 +2116,11 @@ func (x *fnCtx) calleeOf(e ast.Expr, env *state) (callee, bool) {
 					classes = []*program.Class{x.class}
 				}
 			case "parent":
-				if x.class != nil {
+				if x.inTraitBody() {
+					saved := x.c.mark()
+					classes = x.traitParents(n.S)
+					x.c.rollback(saved) // the call reports it
+				} else if x.class != nil {
 					if pc := x.class.ParentClass(); pc != nil {
 						classes = []*program.Class{pc}
 					}

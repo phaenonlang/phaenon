@@ -751,6 +751,7 @@ func (c *Class) useTrait(tu *ast.TraitUse) {
 			if copyM.FromTrait == nil {
 				copyM.FromTrait = t
 			}
+			copyM.rebindSelf(t, c)
 			for _, rule := range aliases {
 				if rule.method != key || (rule.trait != "" && rule.trait != strings.ToLower(t.Name)) {
 					continue
@@ -776,14 +777,66 @@ func (c *Class) useTrait(tu *ast.TraitUse) {
 			if copyP.FromTrait == nil {
 				copyP.FromTrait = t
 			}
+			copyP.Type, copyP.NativeType = asUser(copyP.Type, t, c), asUser(copyP.NativeType, t, c)
 			c.addProp(&copyP)
 		}
 		for _, tk := range t.Consts {
 			copyK := *tk
 			copyK.Class = c
+			copyK.Type = asUser(copyK.Type, t, c)
 			c.addConst(&copyK)
 		}
 	}
+}
+
+// rebindSelf makes a method copied from trait into user the user's: its
+// parameters, return and @phpstan-self-out read self as the user.
+func (m *Method) rebindSelf(trait, user *Class) {
+	params := make([]*Param, len(m.Params))
+	for i, p := range m.Params {
+		cp := *p
+		cp.Type, cp.NativeType, cp.Out = asUser(cp.Type, trait, user), asUser(cp.NativeType, trait, user), asUser(cp.Out, trait, user)
+		params[i] = &cp
+	}
+	m.Params = params
+	m.Return, m.NativeReturn = asUser(m.Return, trait, user), asUser(m.NativeReturn, trait, user)
+	m.SelfOut = asUser(m.SelfOut, trait, user)
+}
+
+// asUser is a type a trait's member declares as the class using the trait
+// sees it. PHP resolves `self` in a trait's declarations to the class
+// using it, and `static` and `$this` to that class or a subclass, as
+// PHPStan reads the member in the class's context; the trait's own types
+// read them as the trait, in its body. A trait is no type a value can
+// have, so its name in a type, written or as self, is the user's, inside a
+// type argument, a callable's signature or a shape as well. A trait
+// copied into a trait passes the question on to that trait's users.
+func asUser(t types.Type, trait, user *Class) types.Type {
+	if t == nil {
+		return nil
+	}
+	var args []types.Type
+	if tt, ok := user.TypeOf().(types.Class); ok {
+		args = tt.Args
+	}
+	own := func(c *types.Class) bool { return c != nil && strings.EqualFold(c.Name, trait.Name) }
+	return types.MapDeep(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Class:
+			if own(&m) {
+				return types.Class{Name: user.Name, Args: args}
+			}
+		case types.Static:
+			if own(m.Of) {
+				return types.Static{Of: &types.Class{Name: user.Name, Args: args}}
+			}
+		case types.This:
+			if own(m.Of) {
+				return types.This{Of: &types.Class{Name: user.Name, Args: args}}
+			}
+		}
+		return m
+	})
 }
 
 // ------------------------------------------------------------------ lookup

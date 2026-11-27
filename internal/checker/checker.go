@@ -1180,6 +1180,12 @@ func (x *fnCtx) resolveClassName(n *ast.Name, span ast.Span) (string, bool) {
 			x.reportRefused(x.scopeKnown(), span, P2012, "parent used outside a class")
 			return "", false
 		}
+		if x.inTraitBody() {
+			if parents := x.traitParents(span); len(parents) > 0 {
+				return parents[0].Name, true
+			}
+			return "", false
+		}
 		x.reportRefused(x.scopeKnown(), span, P2011, "class %s has no parent", x.class.Name)
 		return "", false
 	}

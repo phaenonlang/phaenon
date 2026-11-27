@@ -1781,13 +1781,22 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 				x.argsOnly(e.Args, env)
 				return types.TMixed
 			}
-			pc := x.class.ParentClass()
-			if pc == nil {
-				x.reportRefused(x.scopeKnown(), n.S, P2011, "class %s has no parent", x.class.Name)
-				x.argsOnly(e.Args, env)
-				return types.TMixed
+			if x.inTraitBody() {
+				parents := x.traitParents(n.S)
+				if len(parents) == 0 {
+					x.argsOnly(e.Args, env)
+					return types.TMixed
+				}
+				classes = parents
+			} else {
+				pc := x.class.ParentClass()
+				if pc == nil {
+					x.reportRefused(x.scopeKnown(), n.S, P2011, "class %s has no parent", x.class.Name)
+					x.argsOnly(e.Args, env)
+					return types.TMixed
+				}
+				classes = []*program.Class{pc}
 			}
-			classes = []*program.Class{pc}
 			viaParent = true
 			if x.static {
 				recv = types.Static{Of: &types.Class{Name: x.class.Name, Args: selfArgs(x.class)}}
@@ -1873,7 +1882,9 @@ func (x *fnCtx) staticCall(e *ast.StaticCall, env *state, expected types.Type) t
 		}
 		if !meth.Static {
 			// Allowed for parent::/self:: from an instance context of a related class.
-			related := x.class != nil && !x.static && (x.class.IsSubclassOf(cl.Name) || cl.IsSubclassOf(x.class.Name))
+			// In a trait's body, parent:: is the parent of the class that
+			// runs it.
+			related := x.class != nil && !x.static && (x.class.IsSubclassOf(cl.Name) || cl.IsSubclassOf(x.class.Name) || viaParent && x.inTraitBody())
 			if !related {
 				x.report(e.Name.Span(), P2106, "non-static method %s::%s() called statically", meth.Class.Name, name)
 			}
@@ -2063,6 +2074,141 @@ func (x *fnCtx) traitUserMethod(trait *program.Class, name string) *program.Meth
 	return nil
 }
 
+// traitRunners are the classes the trait's body being checked runs in,
+// which `self`, `static` and `parent` name there: the classes that use the
+// trait, those using a trait that uses it included, but a class whose own
+// method replaces the one being checked. PHPStan analyses the body in the
+// context of each. None for a trait no class uses, whose body never runs.
+func (x *fnCtx) traitRunners(trait *program.Class) []*program.Class {
+	var out []*program.Class
+	seen := map[string]bool{}
+	var walk func(t *program.Class)
+	walk = func(t *program.Class) {
+		if seen[strings.ToLower(t.Name)] {
+			return
+		}
+		seen[strings.ToLower(t.Name)] = true
+		for _, u := range x.p().TraitUsers(t.Name) {
+			u.Signature()
+			if x.method != nil && !runsBody(u, x.method) {
+				continue
+			}
+			if u.Kind == ast.KindTrait {
+				walk(u)
+				continue
+			}
+			out = append(out, u)
+		}
+	}
+	walk(trait)
+	return out
+}
+
+// traitTyped reports, in a trait's body, a type that holds the trait's
+// own type: self, static or $this, a value narrowed to one, its name
+// (self::class) or a class-string of one. A type test of such a type is
+// decided for no class using the trait, as the body serves them all:
+// PHPStan, which tests in each user's context, makes no such finding of
+// `$this instanceof Loggable` in a trait where it does in a class. A
+// strict comparison is decided as every user decides it
+// (traitComparison).
+func (x *fnCtx) traitTyped(t types.Type) bool {
+	if !x.inTraitBody() {
+		return false
+	}
+	found := false
+	types.Walk(t, func(m types.Type) {
+		switch m := m.(type) {
+		case types.Class:
+			found = found || strings.EqualFold(m.Name, x.class.Name)
+		case types.Static:
+			found = found || m.Of != nil && strings.EqualFold(m.Of.Name, x.class.Name)
+		case types.This:
+			found = found || m.Of != nil && strings.EqualFold(m.Of.Name, x.class.Name)
+		case types.StringLit:
+			found = found || strings.EqualFold(m.V, x.class.Name)
+		}
+	})
+	return found
+}
+
+// asRunner is t with the trait's own type read as the class u that runs
+// the body: self and its name as u, static and $this as u's.
+func (x *fnCtx) asRunner(t types.Type, u *program.Class) types.Type {
+	own := func(name string) bool { return strings.EqualFold(name, x.class.Name) }
+	return types.MapDeep(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Class:
+			if own(m.Name) {
+				return types.Class{Name: u.Name}
+			}
+		case types.Static:
+			if m.Of != nil && own(m.Of.Name) {
+				return types.Static{Of: &types.Class{Name: u.Name}}
+			}
+		case types.This:
+			if m.Of != nil && own(m.Of.Name) {
+				return types.This{Of: &types.Class{Name: u.Name}}
+			}
+		case types.StringLit:
+			if own(m.V) {
+				return types.StringLit{V: u.Name}
+			}
+		}
+		return m
+	})
+}
+
+// traitComparison decides a strict comparison of types the trait's own
+// type is in as PHPStan does, which reports one only where every class
+// that runs the body decides it alike: apart is that the operands, read
+// as each user, never meet, as `self::class === Other::class` for an
+// Other no user is.
+func (x *fnCtx) traitComparison(l, r types.Type) (apart bool) {
+	runners := x.traitRunners(x.class)
+	if len(runners) == 0 {
+		return false
+	}
+	for _, u := range runners {
+		if types.Overlaps(x.asRunner(l, u), x.asRunner(r, u), x.p()) {
+			return false
+		}
+	}
+	return true
+}
+
+// inTraitBody reports a trait whose body is being checked, where `self`,
+// `static` and `parent` name the class that uses it (traitRunners).
+func (x *fnCtx) inTraitBody() bool {
+	return x.class != nil && x.class.Kind == ast.KindTrait
+}
+
+// traitParents is what `parent`, written at span, names in a trait's
+// body: the parent of each class that runs it. A class that runs it and
+// has no parent is reported (P2011): PHP refuses `parent` there when the
+// body runs, and PHPStan reports it in that class's context
+// (class.noParent).
+func (x *fnCtx) traitParents(span ast.Span) []*program.Class {
+	var parents []*program.Class
+	var orphan *program.Class
+	for _, u := range x.traitRunners(x.class) {
+		pc := u.ParentClass()
+		if pc == nil {
+			if orphan == nil {
+				orphan = u
+			}
+			continue
+		}
+		if !slices.Contains(parents, pc) {
+			parents = append(parents, pc)
+		}
+	}
+	if orphan != nil {
+		x.report(span, P2011, "class %s, which uses trait %s, has no parent", orphan.Name, x.class.Name)
+	}
+	return parents
+}
+
 // traitUserProperties finds a property a trait body uses on $this among the
 // classes using the trait: the users' declarations, the users that lack it
 // (they neither declare it nor allow dynamic properties), and whether a
@@ -2139,7 +2285,17 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 	viaString := false
 	switch c := e.Class.(type) {
 	case *ast.Name:
-		if specialClassName(c) == "parent" && x.class != nil {
+		if specialClassName(c) == "parent" && x.inTraitBody() {
+			// The parent of the class that runs the body; the first one's
+			// constructor decides, as the first user's method does.
+			parents := x.traitParents(c.S)
+			if len(parents) == 0 {
+				x.argsOnly(e.Args, env)
+				return types.TObject
+			}
+			cl = parents[0]
+			recv = types.Class{Name: cl.Name}
+		} else if specialClassName(c) == "parent" && x.class != nil {
 			cl = x.class.ParentClass()
 			if cl == nil {
 				x.reportRefused(x.scopeKnown(), c.S, P2011, "class %s has no parent", x.class.Name)
@@ -2187,7 +2343,31 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 		return recv
 	}
 	_, viaParam := recv.(types.Param)
-	if !cl.IsInstantiable() && !viaParam && !viaString {
+	// ctorClass is the class whose constructor runs: the class itself, but
+	// in a trait's body, where `new self` and `new static` make the class
+	// that uses the trait, the first of those (traitRunners).
+	ctorClass := cl
+	if n, ok := e.Class.(*ast.Name); ok && cl == x.class && x.inTraitBody() && specialClassName(n) != "" {
+		runners := x.traitRunners(cl)
+		if len(runners) == 0 {
+			x.argsOnly(e.Args, env)
+			return recv
+		}
+		_, isStatic := recv.(types.Static)
+		for _, u := range runners {
+			// A subclass of an abstract user may run `new static`, as in a
+			// class's own body; an enum makes no object either way.
+			if !u.IsInstantiable() && (!isStatic || u.Kind == ast.KindEnum) {
+				what := "abstract class"
+				if u.Kind == ast.KindEnum {
+					what = "enum"
+				}
+				x.report(e.S, P2107, "cannot instantiate %s %s, which uses trait %s", what, u.Name, cl.Name)
+				break
+			}
+		}
+		ctorClass = runners[0]
+	} else if !cl.IsInstantiable() && !viaParam && !viaString {
 		what := "abstract class"
 		switch {
 		case cl.Kind == ast.KindInterface:
@@ -2201,7 +2381,7 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 			x.report(e.S, P2107, "cannot instantiate %s %s", what, cl.Name)
 		}
 	}
-	ctor := cl.FindMethod("__construct")
+	ctor := ctorClass.FindMethod("__construct")
 	result := recv
 	// Explicit arguments close the class type: new Foo<User>(…).
 	if c, ok := recv.(types.Class); ok && len(c.Args) == 0 && len(e.TypeArgs) > 0 {
@@ -2228,15 +2408,15 @@ func (x *fnCtx) newExpr(e *ast.New, env *state, expected types.Type) types.Type 
 			x.markResolved(e.S) // a class without a constructor throws nothing
 		}
 		if e.Args != nil && len(e.Args.Args) > 0 && !(viaString && !cl.IsInstantiable()) {
-			x.report(e.Args.S, P2102, "class %s has no constructor but %d arguments are given", cl.Name, len(e.Args.Args))
+			x.report(e.Args.S, P2102, "class %s has no constructor but %d arguments are given", ctorClass.Name, len(e.Args.Args))
 		}
 		x.argsOnly(e.Args, env)
 		return result
 	}
 	if !x.canAccess(ctor.Vis, ctor.Class) {
-		x.report(e.S, P2108, "constructor of %s is %s", cl.Name, ctor.Vis)
+		x.report(e.S, P2108, "constructor of %s is %s", ctorClass.Name, ctor.Vis)
 	}
-	sig := &signature{name: cl.Name + "::__construct()", params: ctor.Params, ret: types.TVoid, typeParams: ctor.TypeParams, recv: recv, decl: ctor.Class, file: methodFile(ctor), node: e, meth: ctor}
+	sig := &signature{name: ctorClass.Name + "::__construct()", params: ctor.Params, ret: types.TVoid, typeParams: ctor.TypeParams, recv: recv, decl: ctor.Class, file: methodFile(ctor), node: e, meth: ctor}
 	// Infer the class's own type arguments from the constructor call.
 	if c, ok := recv.(types.Class); ok && len(c.Args) == 0 && len(cl.TypeParams) > 0 {
 		sig.typeParams = append(append([]*program.TypeParam{}, cl.TypeParams...), ctor.TypeParams...)

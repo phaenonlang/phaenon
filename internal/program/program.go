@@ -447,7 +447,55 @@ func (p *Program) IsSubclassOf(sub, super string) bool {
 	if c == nil {
 		return false
 	}
-	return c.IsSubclassOf(super)
+	if c.IsSubclassOf(super) {
+		return true
+	}
+	return p.traitStandsFor(c, super)
+}
+
+// traitStandsFor answers IsSubclassOf where the subtype is a trait. A
+// trait is no type a value has: in its body, self, static, $this and the
+// type of `new self` are the trait's own type, and stand for the classes
+// that use it, which PHPStan reads the body as. So a trait is a type
+// every class using it is (`$registry->add(new self())` where each user
+// implements the parameter's interface), which a trait no class uses is
+// not. One way only: no class is a trait, so another user's object is
+// not taken for self, and a trait named as a type in plain code accepts
+// nothing, as in PHP. Every user, not one: a test one user alone decides
+// is decided for no one, as the trait's body serves them all
+// (design/checker.md §9, "A trait sees its users").
+func (p *Program) traitStandsFor(sub *Class, super string) bool {
+	if sub.Kind != ast.KindTrait {
+		return false
+	}
+	users := p.traitRunners(sub, map[string]bool{})
+	if len(users) == 0 {
+		return false
+	}
+	for _, u := range users {
+		if !p.IsSubclassOf(u.Name, super) {
+			return false
+		}
+	}
+	return true
+}
+
+// traitRunners are the classes that use a trait, directly or through a
+// trait that uses it.
+func (p *Program) traitRunners(t *Class, seen map[string]bool) []*Class {
+	if seen[strings.ToLower(t.Name)] {
+		return nil
+	}
+	seen[strings.ToLower(t.Name)] = true
+	var out []*Class
+	for _, u := range p.TraitUsers(t.Name) {
+		if u.Kind == ast.KindTrait {
+			out = append(out, p.traitRunners(u, seen)...)
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 // Canonical is the class a name stands for: the class itself, or the one
@@ -471,6 +519,18 @@ func (p *Program) IsAlias(name string) bool {
 // IsFinal implements types.Hierarchy.
 func (p *Program) IsFinal(name string) bool {
 	c := p.Class(name)
+	if c != nil && c.Kind == ast.KindTrait {
+		// static in a trait's body is the class using it or a subclass,
+		// the class itself where every class using the trait is final
+		// (traitStandsFor).
+		users := p.traitRunners(c, map[string]bool{})
+		for _, u := range users {
+			if !p.IsFinal(u.Name) {
+				return false
+			}
+		}
+		return len(users) > 0
+	}
 	return c != nil && (c.Final || c.Kind == ast.KindEnum || c.Anonymous)
 }
 
