@@ -235,18 +235,26 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 		return
 	}
 	vt := x.expr(assign.Value, env, declared)
-	// A literal value must fit the tag; any other value's PHP type must be
-	// narrowed by it, never widened or contradicted (PHPStan's
-	// varTag.nativeType), unless the tag narrows a refinement that leaves
-	// PHP's type (refinesOutside).
+	// A value written out must have something in common with the tag;
+	// any other value's PHP type must be narrowed by it, never widened or
+	// contradicted (PHPStan's varTag.nativeType), unless the tag narrows a
+	// refinement that leaves PHP's type (refinesOutside).
 	native := x.nativeOf(assign.Value, env)
 	if native == nil {
 		native = vt
 	}
 	switch {
-	case isLiteralExpr(assign.Value):
-		if !types.IsAcceptable(vt, declared, x.p()) {
-			x.report(s.S, P2212, "@var %s does not accept the assigned %s", x.typeName(declared), x.typeName(vt))
+	case varTagLiteral(assign.Value):
+		if !x.varTagMeets(assign.Value, native, declared) {
+			x.report(s.S, P2212, "@var %s does not accept the assigned %s", x.typeName(declared), x.typeName(native))
+		}
+	case isNewExpr(assign.Value) || isClassConstExpr(assign.Value):
+		held := vt
+		if isNewExpr(assign.Value) {
+			held = withoutTypeArgs(vt)
+		}
+		if !x.varTagHolds(held, declared, 0) {
+			x.report(s.S, P2212, "@var %s is not a subtype of the assigned %s", x.typeName(declared), x.typeName(vt))
 		}
 	case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native), x.p()) && !refinesOutside(declared, vt, native, x.p()):
 		x.report(s.S, P2212, "@var %s is not a subtype of the assigned %s", x.typeName(declared), x.typeName(native))
@@ -347,9 +355,208 @@ func withoutTypeArgs(t types.Type) types.Type {
 	})
 }
 
+// varTagLiteral reports a value a @var tag above it only has to share a
+// value with, as PHPStan's VarTagTypeRuleHelper reads an array literal, a
+// constant fetch (null, true, false, a named constant) and a scalar
+// written out (a number, a string, a magic constant): so that `/** @var
+// string|null $last */ $last = null;` passes and `@var int` over 'x' does
+// not. `-1` is no scalar to PHPStan, but a constant value that it holds to
+// the same. A class's constant and `new` are held to their type by
+// varTagHolds, any other value to its PHP type, which the tag must narrow.
+func varTagLiteral(e ast.Expr) bool {
+	switch e := e.(type) {
+	case *ast.Paren:
+		return varTagLiteral(e.Expr)
+	case *ast.ArrayLit, *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.InterpolatedString, *ast.MagicConst, *ast.ConstFetch, *ast.Name:
+		return true
+	case *ast.Unary:
+		switch e.Expr.(type) {
+		case *ast.IntLit, *ast.FloatLit:
+			return e.Op == token.Kind('-') || e.Op == token.Kind('+')
+		}
+	}
+	return false
+}
+
+// varTagMeets reports a tag that may share a value with the type t of a
+// value written out (varTagLiteral), as PHPStan asks of it: `[]` is any
+// array, so that `@var non-empty-list<int>` over it passes too, and any
+// other array literal is compared as mayHold compares it.
+func (x *fnCtx) varTagMeets(value ast.Expr, t, declared types.Type) bool {
+	if a, ok := unparen(value).(*ast.ArrayLit); ok && len(a.Items) == 0 {
+		t = types.TArray
+	}
+	return x.mayHold(t, declared)
+}
+
+// isNewExpr reports `new Foo(…)`, parentheses aside.
+func isNewExpr(e ast.Expr) bool {
+	_, ok := unparen(e).(*ast.New)
+	return ok
+}
+
+// isClassConstExpr reports `Foo::BAR`, `Suit::Hearts` and `Foo::class`.
+func isClassConstExpr(e ast.Expr) bool {
+	_, ok := unparen(e).(*ast.ClassConstFetch)
+	return ok
+}
+
+// varTagHolds reports a tag over a value of type t that PHPStan's
+// isValidSuperType takes, the check of `new` (its type arguments left
+// out) and of a class's constant: t and the tag both iterable, the tag
+// one t may hold (mayHold) whose values those of t hold in turn, by the
+// same rule one level down, so that `@var \IteratorAggregate<int, User>`
+// over a collection of users passes and the bare `@var
+// \IteratorAggregate`, whose values are mixed, does not; otherwise a
+// constant value at the top, a number, a string, a constant array, that
+// may hold the tag, and anything else, an enum's case among them, a type
+// the tag narrows.
+func (x *fnCtx) varTagHolds(t, declared types.Type, depth int) bool {
+	h := x.p()
+	if s, ok := t.(types.Shape); ok && len(s.Entries) == 0 {
+		return x.mayHold(types.TArray, declared)
+	}
+	v, iterable := x.iterableValue(t)
+	dv, tagIterable := x.iterableValue(declared)
+	if iterable && tagIterable {
+		if !x.mayHold(t, declared) {
+			return false
+		}
+		if depth >= 4 || types.Equal(t, v) || types.Equal(declared, dv) {
+			return types.IsSubtype(dv, v, h)
+		}
+		return x.varTagHolds(v, dv, depth+1)
+	}
+	if depth == 0 && constantValue(t) {
+		return x.mayHold(t, declared)
+	}
+	return types.IsSubtype(declared, t, h)
+}
+
+// iterableValue is the type of t's values, where t is iterable; an
+// intersection is where one of its types is, its values those of each
+// such type together, as PHPStan reads `\IteratorAggregate<int, User>&\Countable`.
+func (x *fnCtx) iterableValue(t types.Type) (types.Type, bool) {
+	in, ok := t.(types.Intersection)
+	if !ok {
+		_, v, ok := types.IterableKV(t, x.p())
+		return v, ok
+	}
+	var value types.Type
+	for _, m := range in.Types {
+		if _, v, ok := types.IterableKV(m, x.p()); ok {
+			if value == nil {
+				value = v
+			} else {
+				value = types.Intersect(value, v, x.p())
+			}
+		}
+	}
+	return value, value != nil
+}
+
+// constantValue reports a type of one value: a number, a string, a bool,
+// null or an array of such entries.
+func constantValue(t types.Type) bool {
+	switch t := t.(type) {
+	case types.Null, types.BoolLit, types.FloatLit, types.StringLit:
+		return true
+	case types.Int:
+		return t.Lo == t.Hi
+	case types.Shape:
+		return !t.Unsealed && !slices.ContainsFunc(t.Entries, func(e types.ShapeEntry) bool { return e.Optional || !constantValue(e.Type) })
+	}
+	return false
+}
+
+// mayHold reports a type t PHPStan takes for maybe a supertype of the tag:
+// one of the tag's union or intersection, one of t's union. An array
+// shape is compared entry by entry with a shape, every key of t one the
+// tag has (or an unsealed tag may have) and its value one that may hold
+// the tag's, and with any other array by the keys and the values of t
+// together; a tag's key t lacks is no difference to PHPStan. A class may
+// hold a class it is, extends or implements, or that extends or
+// implements it, and an interface the other, not final, may come to
+// implement; two classes neither of which extends the other share no
+// object.
+func (x *fnCtx) mayHold(t, tag types.Type) bool {
+	h := x.p()
+	switch g := tag.(type) {
+	case types.Union:
+		return slices.ContainsFunc(g.Types, func(m types.Type) bool { return x.mayHold(t, m) })
+	case types.Intersection:
+		return slices.ContainsFunc(g.Types, func(m types.Type) bool { return x.mayHold(t, m) })
+	}
+	switch v := t.(type) {
+	case types.Union:
+		return slices.ContainsFunc(v.Types, func(m types.Type) bool { return x.mayHold(m, tag) })
+	case types.Shape:
+		if len(v.Entries) == 0 {
+			return types.Overlaps(types.TArray, tag, h)
+		}
+		switch g := tag.(type) {
+		case types.Shape:
+			for _, e := range v.Entries {
+				ge, found := shapeEntryAt(g, e)
+				if !found {
+					if g.Unsealed {
+						continue
+					}
+					return false
+				}
+				if !x.mayHold(e.Type, ge.Type) {
+					return false
+				}
+			}
+			return true
+		case types.Array:
+			k, val, ok := types.IterableKV(v, h)
+			if !ok {
+				break
+			}
+			key, value := g.Key, g.Value
+			if key == nil {
+				key = types.TArrayKey
+			}
+			if g.List {
+				key = types.TInt
+			}
+			return types.Overlaps(k, key, h) && (value == nil || x.mayHold(val, value))
+		}
+	}
+	if a, ok := className(t); ok {
+		if b, ok := className(tag); ok && x.p().Class(a) != nil && x.p().Class(b) != nil {
+			return x.p().IsSubclassOf(a, b) || x.p().IsSubclassOf(b, a) ||
+				x.p().IsInterface(a) && !x.p().IsFinal(b) || x.p().IsInterface(b) && !x.p().IsFinal(a)
+		}
+	}
+	return types.Overlaps(t, tag, h)
+}
+
+// shapeEntryAt is the entry of s at e's key.
+func shapeEntryAt(s types.Shape, e types.ShapeEntry) (types.ShapeEntry, bool) {
+	for _, o := range s.Entries {
+		if o.IsInt == e.IsInt && (e.IsInt && o.IntKey == e.IntKey || !e.IsInt && o.Key == e.Key) {
+			return o, true
+		}
+	}
+	return types.ShapeEntry{}, false
+}
+
+// className is the name of a class type, as a value or a pointer.
+func className(t types.Type) (string, bool) {
+	switch c := t.(type) {
+	case types.Class:
+		return c.Name, true
+	case *types.Class:
+		return c.Name, true
+	}
+	return "", false
+}
+
 // isLiteralExpr reports whether e is written out in full — a literal, a
-// constant, a `new` — so that a `@var` above it is checked for acceptance
-// rather than narrowing.
+// constant, a `new` — so that a parameter's default a call leaves out is
+// priced where the parameter is declared.
 func isLiteralExpr(e ast.Expr) bool {
 	switch e := e.(type) {
 	case *ast.Paren:
@@ -1904,9 +2111,17 @@ func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
 	if declared != nil && s.Expr != nil {
 		native := x.nativeOr(s.Expr, t, env)
 		switch {
-		case isLiteralExpr(s.Expr):
-			if !types.IsAcceptable(t, declared, x.p()) {
-				x.report(s.S, P2212, "@var %s does not accept the returned %s", x.typeName(declared), x.typeName(t))
+		case isNewExpr(s.Expr) || isClassConstExpr(s.Expr):
+			held := t
+			if isNewExpr(s.Expr) {
+				held = withoutTypeArgs(t)
+			}
+			if !x.varTagHolds(held, declared, 0) {
+				x.report(s.S, P2212, "@var %s is not a subtype of the returned %s", x.typeName(declared), x.typeName(t))
+			}
+		case varTagLiteral(s.Expr):
+			if !x.varTagMeets(s.Expr, native, declared) {
+				x.report(s.S, P2212, "@var %s does not accept the returned %s", x.typeName(declared), x.typeName(native))
 			}
 		case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native), x.p()) && !refinesOutside(declared, t, native, x.p()):
 			x.report(s.S, P2212, "@var %s is not a subtype of the returned %s", x.typeName(declared), x.typeName(native))
