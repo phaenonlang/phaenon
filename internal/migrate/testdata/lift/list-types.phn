@@ -59,7 +59,7 @@ final class Registry implements Source
 
     private map<int, list<string>> $grid = [];
 
-    private array<string> $found = [];
+    private list<string> $found = [];
 
     add(User $user): void {
         $this->names[] = $user->name;

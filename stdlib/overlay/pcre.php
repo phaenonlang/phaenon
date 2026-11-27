@@ -18,7 +18,7 @@ function preg_match(string $pattern, string $subject, &$matches = null, int $fla
 function preg_match_all(string $pattern, string $subject, &$matches = null, int $flags = 0, int $offset = 0): int|false {}
 
 /**
- * @param-out int $count
+ * @param-out int<0, max> $count
  * @return ($subject is array ? array<int|string, string>|null : string|null)
  */
 function preg_replace(string|array $pattern, string|array $replacement, string|array $subject, int $limit = -1, &$count = null): string|array|null {}
@@ -35,7 +35,7 @@ function preg_split(string $pattern, string $subject, int $limit = -1, int $flag
  * The callback receives the match the way preg_match() fills $matches.
  *
  * @param callable(array<int|string, string>): string $callback
- * @param-out int $count
+ * @param-out int<0, max> $count
  * @return ($subject is array ? array<int|string, string>|null : string|null)
  */
 function preg_replace_callback(string|array $pattern, callable $callback, string|array $subject, int $limit = -1, &$count = null, int $flags = 0): string|array|null {}

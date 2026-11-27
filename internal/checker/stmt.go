@@ -53,7 +53,19 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 	}
 	switch s := s.(type) {
 	case *ast.ExprStmt:
+		alive := !env.dead
 		x.exprStmt(s, env)
+		if _, throws := unparen(s.Expr).(*ast.Throw); alive && env.dead && x.trackNever && !(throws && x.inTry > 0) {
+			// A statement of type never, a throw, an exit or a call of a
+			// never function, is an exit of the closure (refExits). A
+			// throw statement in a try statement's body or catch blocks is
+			// none, whether a catch takes it or not, as PHPStan's try
+			// statement drops it from its exit points; an exit or a call
+			// of a never function there stays one.
+			exit := env.clone()
+			exit.dead = false
+			x.neverEnvs = append(x.neverEnvs, exit)
+		}
 	case *ast.VoidCastStmt:
 		x.expr(s.Expr, env, nil)
 	case *ast.Echo:
@@ -1318,6 +1330,8 @@ func sameKind(a, b types.Type) bool {
 
 func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 	returns := len(x.returnEnvs) // the returns the finally block runs after
+	nevers := len(x.neverEnvs)
+	x.inTry++ // the body and the catch blocks, not the finally block
 	bodyEnv := env.clone()
 	// The catch blocks start from where the body can first throw (calls
 	// throw, as PHPStan's throw points are): after the leading statements
@@ -1462,6 +1476,7 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		}
 	}
 	x.addThrows(points...) // what no catch takes leaves the try statement
+	x.inTry--
 	if s.HasFinally {
 		fEnv := joinAll(append(append([]*state{}, ends...), thrown)...)
 		fEnv.dead = false
@@ -1469,9 +1484,19 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		// writes on every way out of the try, at a return inside it too.
 		entered := fEnv.outs
 		fEnv.outs = nil
+		start := fEnv.clone()
+		exits := slices.Concat(x.returnEnvs[min(returns, len(x.returnEnvs)):], x.neverEnvs[min(nevers, len(x.neverEnvs)):])
 		x.inFinally++
 		x.stmts(s.Finally, fEnv)
 		x.inFinally--
+		if x.trackNever && !fEnv.dead {
+			// The block runs on the way out of the closure's exits in the
+			// try statement as well, and what they leave is what it
+			// writes (PHPStan's processFinallyScope).
+			for _, e := range exits {
+				finallyRan(e, start, fEnv)
+			}
+		}
 		wrote := fEnv.outs
 		fEnv.outs = entered
 		mergeOuts(fEnv, wrote)
@@ -1493,6 +1518,19 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		return
 	}
 	*env = *joinAll(ends...)
+}
+
+// finallyRan gives exit, a state that leaves a try statement, what its
+// finally block wrote, the block having started in start and ended in
+// end: each variable the block assigned another type or defined, as
+// PHPStan's processFinallyScope has it.
+func finallyRan(exit, start, end *state) {
+	for k, v := range end.vars {
+		if was, ok := start.vars[k]; ok && types.Equal(was.t, v.t) {
+			continue
+		}
+		exit.vars[k] = v
+	}
 }
 
 // catchesUnhandledMatch reports a try statement one of whose catches takes
@@ -2414,6 +2452,40 @@ func capturedOffset(k string, captured map[string]bool) bool {
 	}
 }
 
+// callEntry is the state a call of a closure starts with, the closure's
+// body iterated to a fixed point for its by-reference uses: its parameters
+// and what it captured by value as entry has them, and what it captured
+// by reference as head, where the calls before it left it.
+func callEntry(entry, head *state, uses []*ast.ClosureUse) *state {
+	call := entry.clone()
+	for _, u := range uses {
+		if !u.ByRef {
+			continue
+		}
+		name := u.Var.Name
+		if info, ok := head.vars[name]; ok {
+			call.vars[name] = info
+		}
+		for k := range call.paths {
+			if pathOf(k, name) {
+				delete(call.paths, k)
+			}
+		}
+		for k, t := range head.paths {
+			if pathOf(k, name) {
+				call.paths[k] = t
+			}
+		}
+	}
+	return call
+}
+
+// pathOf reports a path, `$r['k']` or `$r->p`, that starts at the variable
+// of that name.
+func pathOf(path, name string) bool {
+	return strings.HasPrefix(path, "$"+name+"[") || strings.HasPrefix(path, "$"+name+"->")
+}
+
 func closureHasByRefUse(e *ast.Closure) bool {
 	for _, u := range e.Uses {
 		if u.ByRef {
@@ -2499,22 +2571,34 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		// `use (&$server)` with `$server = null` inside is resource|null
 		// throughout, `use (&$rows)` with `$rows[] = …` a list however often
 		// the closure runs. The body is iterated to a fixed point like a
-		// loop's, every return an exit (PHPStan's processClosureNode).
+		// loop's, every return an exit (PHPStan's processClosureNode). Each
+		// pass is a call of its own: it starts from the closure's
+		// parameters and what it captured by value, and only what it
+		// captured by reference carries over from the calls before.
 		c.trackReturns = true
+		c.trackNever = refFirst(e)
 		var end *state
 		exits = c.fixpoint(cenv, func(head *state) (*state, *state) {
 			c.returnTypes = nil
 			c.returnEnvs = nil
+			c.neverEnvs = nil
 			c.yieldKeys, c.yieldValues = nil, nil
-			c.stmts(e.Body, head)
-			end = head
-			all := joinAll(append([]*state{head}, c.returnEnvs...)...)
+			call := callEntry(cenv, head, e.Uses)
+			c.stmts(e.Body, call)
+			end = call
+			all := joinAll(append([]*state{call}, c.returnEnvs...)...)
 			return all, all
 		})
 		c.trackReturns = false
 		cenv = end
 	} else {
+		c.trackReturns = refFirst(e)
+		c.trackNever = refFirst(e)
 		c.stmts(e.Body, cenv)
+		c.trackReturns = false
+	}
+	if refFirst(e) {
+		x.recordRefExit(e, cenv, c.returnEnvs, c.neverEnvs)
 	}
 	// What the body assigns to a by-reference use is what the enclosing
 	// scope may see once the closure has run — at any of its exits, an
