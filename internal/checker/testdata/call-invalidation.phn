@@ -202,6 +202,32 @@ function kept(Ticket $t, \Closure $f): void
     }
 }
 
+// PHPStan reads the tag as @phpstan-impure and as @impure, not in Psalm's
+// spelling: a callee tagged @psalm-impure forgets nothing.
+/** @psalm-impure */
+function psalmSaysImpure(Ticket $t): bool
+{
+    return $t->ref === null;
+}
+
+/** @impure */
+function plainlyImpure(Ticket $t): bool
+{
+    $t->state = 'open';
+    return true;
+}
+
+function spellings(Ticket $t): void
+{
+    if ($t->ref !== null) {
+        $a = psalmSaysImpure($t);
+        takesRef($t->ref);
+        $b = plainlyImpure($t);
+        takesRef($t->ref); // want P2103 "string|null given"
+        echo $a, $b;
+    }
+}
+
 function nested(Ticket $t): void
 {
     if ($t->parent !== null && $t->parent->ref !== null && $t->ref !== null) {

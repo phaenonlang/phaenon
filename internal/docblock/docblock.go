@@ -186,6 +186,7 @@ func (d *Doc) fail(t tagText, msg string) {
 // psalm-prefixed are accepted as aliases.
 func (d *Doc) handle(t tagText) {
 	name := strings.ToLower(t.name)
+	written := name
 	prefixed := false
 	for _, p := range []string{"@phpstan-", "@psalm-", "@phan-"} {
 		if strings.HasPrefix(name, p) {
@@ -364,7 +365,12 @@ func (d *Doc) handle(t tagText) {
 	case "@pure":
 		d.Pure = true
 	case "@impure":
-		d.Impure = true
+		// PHPStan reads the tag in its own spelling and bare, and not in
+		// Psalm's (PhpDocNodeResolver::resolveIsImpure()): a callee tagged
+		// @psalm-impure has side effects to it no more than an untagged one.
+		if written == "@impure" || written == "@phpstan-impure" {
+			d.Impure = true
+		}
 	case "@immutable", "@readonly":
 		d.Immutable = true
 	case "@final":
