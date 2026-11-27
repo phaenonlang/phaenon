@@ -158,6 +158,14 @@ type (
 		Optional bool
 		Variadic bool
 		ByRef    bool
+		// Reads marks a by-reference parameter of a function of PHP's own
+		// that reads what it is given and writes nothing back PHPStan
+		// follows (a sort's): a call through the closure leaves the
+		// argument its type. Out is what one made from a declaration
+		// documented @param-out leaves in its argument. Neither is part of
+		// the type's spelling.
+		Reads bool
+		Out   Type
 	}
 	// Iterable is iterable<Key, Value>.
 	Iterable struct{ Key, Value Type }
@@ -379,7 +387,7 @@ func Equal(a, b Type) bool {
 		}
 		for i := range a.Params {
 			x, y := a.Params[i], b.Params[i]
-			if x.Optional != y.Optional || x.Variadic != y.Variadic || x.ByRef != y.ByRef || !equalOrNil(x.Type, y.Type) {
+			if x.Optional != y.Optional || x.Variadic != y.Variadic || x.ByRef != y.ByRef || x.Reads != y.Reads || !equalOrNil(x.Type, y.Type) || !equalOrNil(x.Out, y.Out) {
 				return false
 			}
 		}
@@ -1420,6 +1428,9 @@ func MapDeep(t Type, f func(Type) Type) Type {
 			params := make([]CallableParam, len(v.Params))
 			for i, p := range v.Params {
 				p.Type = MapDeep(p.Type, f)
+				if p.Out != nil {
+					p.Out = MapDeep(p.Out, f)
+				}
 				params[i] = p
 			}
 			v.Params = params
@@ -1501,6 +1512,7 @@ func Substitute(t Type, subst map[string]Type) Type {
 		ps := make([]CallableParam, len(t.Params))
 		for i, p := range t.Params {
 			p.Type = Substitute(p.Type, subst)
+			p.Out = Substitute(p.Out, subst)
 			ps[i] = p
 		}
 		return Callable{Params: ps, Return: Substitute(t.Return, subst), Closure: t.Closure, Pure: t.Pure, HasSig: true}
@@ -1560,6 +1572,9 @@ func Walk(t Type, f func(Type)) {
 	case Callable:
 		for _, p := range t.Params {
 			Walk(p.Type, f)
+			if p.Out != nil {
+				Walk(p.Out, f)
+			}
 		}
 		Walk(t.Return, f)
 	case Conditional:

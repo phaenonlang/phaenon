@@ -1,0 +1,83 @@
+namespace CallableByReference;
+
+// A call of a closure value has no reflection of its callee to PHPStan,
+// and it types what the call leaves in an argument passed by reference
+// from the closure's parameter alone: a by-reference parameter of PHP's
+// own that reads its argument (a sort's) leaves it as it was, and one made
+// from a declaration documented @param-out leaves the tag's type. A
+// direct call of the same function leaves what it always did.
+
+/** @param list<int> $xs */
+function takesList(array $xs): void
+{
+}
+
+/** @param list<string> $xs */
+function takesStrings(array $xs): void
+{
+}
+
+/** @param array<string, int> $m */
+function takesMap(array $m): void
+{
+}
+
+/** @param list<int> $xs */
+function touch(array &$xs): void
+{
+}
+
+/**
+ * @param list<int> $xs
+ * @param-out list<string> $xs
+ */
+function names(array &$xs): void
+{
+    $xs = ['a'];
+}
+
+// ---- PHP's own: a parameter that reads its argument leaves its type
+
+/**
+ * @param list<int> $ints
+ * @param array<string, int> $counts
+ */
+function phpOwn(array $ints, array $counts): void
+{
+    $sort = sort(...);
+    $a = $ints;
+    $sort($a);
+    takesList($a);
+    $asort = asort(...);
+    $b = $ints;
+    $asort($b);
+    takesList($b);
+    $usort = usort(...);
+    $c = $counts;
+    $usort($c, fn (int $p, int $q): int => $p <=> $q);
+    takesMap($c);
+    $fromCallable = \Closure::fromCallable('sort');
+    $d = $ints;
+    $fromCallable($d);
+    takesList($d);
+    $e = $ints;
+    sort($e);
+    takesList($e);
+}
+
+// ---- user code: a parameter documented @param-out leaves the tag's type
+
+/** @param list<int> $ints */
+function userCode(array $ints): void
+{
+    $names = names(...);
+    $b = $ints;
+    $names($b);
+    takesStrings($b);
+    $c = $ints;
+    $names($c);
+    takesList($c); // want P2103 "list<string> given"
+    $direct = $ints;
+    touch($direct);
+    takesList($direct);
+}
