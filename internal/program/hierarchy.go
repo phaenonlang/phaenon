@@ -485,6 +485,23 @@ func (m *Method) docParent(depth int) *Method {
 	return nil
 }
 
+// Impure reports whether PHPStan reads m as impure: as its own docblock
+// says, where it says @phpstan-pure or @phpstan-impure (pure where it says
+// both), and otherwise, its docblock saying nothing of purity or m having
+// none, as the declaration its docblock is merged with says, read the same
+// way (docParent, ResolvedPhpDocBlock::mergePureTags). That declaration is
+// the one PHPStan merges with, whatever it says: where it says nothing of
+// purity, m is not impure, though a method further up may be.
+func (m *Method) Impure() bool {
+	for depth := 0; m != nil && depth <= maxOverrideDepth; depth++ {
+		if d := m.Doc; d != nil && (d.Pure || d.Impure) {
+			return !d.Pure
+		}
+		m = m.docParent(depth)
+	}
+	return false
+}
+
 // hasDoc reports whether PHPStan resolves a docblock for m: its own, or one
 // it inherits (docParent).
 func (m *Method) hasDoc(depth int) bool {
