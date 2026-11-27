@@ -3,6 +3,7 @@ package program
 import (
 	"math"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/phaenonlang/phaenon/internal/ast"
@@ -1211,6 +1212,9 @@ func (r *resolver) buildParams(ps []*ast.Param, doc *docblock.Doc) []*Param {
 					p.Out = r.docType(pt.Type)
 				}
 			}
+			// PHP reads the tag from php-src's stubs alone (gen_stub.php):
+			// a function of user code takes its arguments as declared.
+			p.PreferRef = r.f.IsStub() && slices.Contains(doc.PreferRef, p.Name)
 		}
 		if docT == nil && ap.Doc != "" {
 			// `/** @var T */` on a promoted property types the parameter too.

@@ -31,8 +31,12 @@ type Doc struct {
 	Immutable   bool
 	Final       bool
 	ParamOut    []ParamTag // @param-out
-	Asserts     []AssertTag
-	SelfOut     *TypeNode // @phpstan-self-out / @psalm-self-out
+	// PreferRef names the parameters of a `@prefer-ref $name` tag, which
+	// php-src's stubs write for an argument PHP takes by reference when it
+	// is a variable and by value otherwise (ZEND_SEND_PREFER_REF).
+	PreferRef []string
+	Asserts   []AssertTag
+	SelfOut   *TypeNode // @phpstan-self-out / @psalm-self-out
 	// Errors lists tags whose type did not parse; the tag is dropped.
 	Errors []TagError
 }
@@ -353,6 +357,10 @@ func (d *Doc) handle(t tagText) {
 		a.Type = typ
 		a.Var = strings.TrimPrefix(rest, "$")
 		d.Asserts = append(d.Asserts, a)
+	case "@prefer-ref":
+		if rest := strings.TrimSpace(t.text); !prefixed && strings.HasPrefix(rest, "$") {
+			d.PreferRef = append(d.PreferRef, identPrefix(rest[1:]))
+		}
 	case "@self-out", "@this-out":
 		typ, _, err := parseTypePrefix(t.text)
 		if err == nil {

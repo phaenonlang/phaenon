@@ -1311,7 +1311,7 @@ func (x *fnCtx) sigOfCallable(c types.Callable) *signature {
 		if name == "" {
 			name = fmt.Sprintf("%d", i+1)
 		}
-		sig.params = append(sig.params, &program.Param{Name: name, Type: p.Type, HasDefault: p.Optional, Variadic: p.Variadic, ByRef: p.ByRef})
+		sig.params = append(sig.params, &program.Param{Name: name, Type: p.Type, HasDefault: p.Optional, Variadic: p.Variadic, ByRef: p.ByRef, PreferRef: p.PreferRef})
 	}
 	return sig
 }
@@ -1352,7 +1352,7 @@ func (x *fnCtx) openCallable(sig *signature) (types.Callable, []*program.TypePar
 		if sig.recv != nil {
 			t = replaceStatic(t, sig.recv)
 		}
-		c.Params = append(c.Params, types.CallableParam{Name: p.Name, Type: t, Optional: p.HasDefault, Variadic: p.Variadic, ByRef: p.ByRef})
+		c.Params = append(c.Params, types.CallableParam{Name: p.Name, Type: t, Optional: p.HasDefault, Variadic: p.Variadic, ByRef: p.ByRef, PreferRef: p.PreferRef})
 	}
 	c.Return = types.Substitute(types.Substitute(c.Return, rename), sig.subst)
 	if sig.recv != nil {
@@ -2913,6 +2913,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		arg   *ast.Arg
 		param *program.Param
 		idx   int
+		byRef bool // the argument is passed by reference (sentByRef)
 	}
 	var bindings []bound
 	seenNamed := false
@@ -2933,7 +2934,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				if n := len(sig.params); n > 0 && sig.params[n-1].Variadic && a.Name == nil {
 					// `f(...$xs)` into `X ...$values`: the elements are the
 					// arguments, typed and unified as such (array_push).
-					bindings = append(bindings, bound{a, sig.params[n-1], i})
+					bindings = append(bindings, bound{arg: a, param: sig.params[n-1], idx: i})
 					continue
 				}
 				t := x.expr(a.Value, env, nil)
@@ -2969,7 +2970,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 						continue
 					}
 				}
-				bindings = append(bindings, bound{a, p, i})
+				bindings = append(bindings, bound{arg: a, param: p, idx: i})
 				continue
 			}
 			if seenNamed {
@@ -2989,8 +2990,11 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				x.expr(a.Value, env, nil)
 				continue
 			}
-			bindings = append(bindings, bound{a, p, i})
+			bindings = append(bindings, bound{arg: a, param: p, idx: i})
 		}
+	}
+	for i := range bindings {
+		bindings[i].byRef = x.sentByRef(bindings[i].param, bindings[i].arg.Value)
 	}
 	if sig.stub {
 		for _, b := range bindings {
@@ -3062,13 +3066,13 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		return false
 	}
 	for i, b := range bindings {
-		if x.pipeLeft > 0 && !b.param.ByRef {
+		if x.pipeLeft > 0 && !b.byRef {
 			if x.byValue == nil {
 				x.byValue = map[*ast.Arg]bool{}
 			}
 			x.byValue[b.arg] = true
 		}
-		if isClosure(b.arg.Value) && !b.param.ByRef {
+		if isClosure(b.arg.Value) && !b.byRef {
 			continue
 		}
 		pt := paramType(b.param)
@@ -3076,7 +3080,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		if b.arg.Value != nil && b.arg.Value == x.pipeOperand {
 			x.pipeParam, x.pipeSig = b.param, sig
 		}
-		if b.param.ByRef {
+		if b.byRef {
 			x.noteByRef(b.arg.Value)
 			// The variable, or the one an element passed is of: a pipe's
 			// bound argument may not pass it (boundInClosure).
@@ -3141,7 +3145,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		}
 	}
 	for i, b := range bindings {
-		if isClosure(b.arg.Value) && !b.param.ByRef || argTypes[i] == nil || !isCallableType(argTypes[i]) {
+		if isClosure(b.arg.Value) && !b.byRef || argTypes[i] == nil || !isCallableType(argTypes[i]) {
 			continue
 		}
 		// A closure with open type parameters given to another one's call
@@ -3196,7 +3200,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 			}
 			pt := finalizeParams(paramType(b.param), tps)
 			switch {
-			case b.param.ByRef:
+			case b.byRef:
 				out[i] = "&" + types.PrintQualified(pt)
 			case types.IsAcceptable(types.Substitute(argTypes[i], freshOnly(subst)), pt, x.p()):
 				out[i] = "taken"
@@ -3232,7 +3236,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		choice.generalise(general)
 	}
 	for i, b := range bindings {
-		if !isClosure(b.arg.Value) || b.param.ByRef {
+		if !isClosure(b.arg.Value) || b.byRef {
 			continue
 		}
 		pt := paramType(b.param)
@@ -3317,7 +3321,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		found := false
 		for i, b := range bindings {
 			native := b.param.NativeType
-			if b.param.ByRef || b.arg.Unpack || argTypes[i] == nil || native == nil || mentionsParam(native) || !mentionsTemplate(b.param.Type, template) {
+			if b.byRef || b.arg.Unpack || argTypes[i] == nil || native == nil || mentionsParam(native) || !mentionsTemplate(b.param.Type, template) {
 				continue
 			}
 			at := types.Substitute(argTypes[i], freshOnly(subst))
@@ -3376,7 +3380,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 	}
 	// Check acceptability with the final substitution.
 	for i, b := range bindings {
-		if b.param.ByRef || over[b.arg] {
+		if b.byRef || over[b.arg] {
 			continue
 		}
 		pt := paramType(b.param)
@@ -3435,7 +3439,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		env.invalidateCalls(key)
 		// An argument that may be an object or a resource, PHPStan's
 		// `!isObject()->no()`: an array holding objects is none.
-		if forgets && !b.param.ByRef && !b.arg.Unpack && argTypes[i] != nil && mayBeObject(argTypes[i]) {
+		if forgets && !b.byRef && !b.arg.Unpack && argTypes[i] != nil && mayBeObject(argTypes[i]) {
 			x.forgetArgument(env, key, argTypes[i])
 		}
 	}
@@ -3496,7 +3500,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 	}
 	// By-reference parameters define or retype their arguments.
 	for i, b := range bindings {
-		if !b.param.ByRef || b.arg.Value == x.pipeOperand {
+		if !b.byRef || b.arg.Value == x.pipeOperand {
 			continue // a piped value is a temporary (P2114): nothing is written back
 		}
 		out := b.param.Out
@@ -3789,6 +3793,51 @@ func isWritable(e ast.Expr) bool {
 		return isWritable(e.Expr)
 	}
 	return false
+}
+
+// sentByRef reports whether PHP passes e to p by reference. A parameter
+// php-src's stub tags @prefer-ref (program.Param.PreferRef) takes a
+// variable by reference and any other argument by value, with no notice:
+// a literal, a constant, a call's result, a member of a nullsafe chain and
+// the left side of |>, which PHP sends as a value. So
+// array_multisort($data, SORT_DESC, $rows) sorts $data and $rows and
+// reads the flag. PHPStan's function map has these parameters by value
+// and writes nothing back to a variable; the checker keeps the variable's
+// type as it does for the other sorts of PHP's own.
+func (x *fnCtx) sentByRef(p *program.Param, e ast.Expr) bool {
+	if !p.ByRef {
+		return false
+	}
+	return !p.PreferRef || isWritable(e) && !shortCircuited(e) && e != x.pipeOperand
+}
+
+// shortCircuited reports a member or an offset of a nullsafe chain, which
+// PHP does not pass by reference (zend_ast_is_short_circuited).
+func shortCircuited(e ast.Expr) bool {
+	for {
+		switch n := e.(type) {
+		case *ast.Paren:
+			e = n.Expr
+		case *ast.Index:
+			e = n.Array
+		case *ast.StaticPropertyFetch:
+			e = n.Class
+		case *ast.StaticCall:
+			e = n.Class
+		case *ast.PropertyFetch:
+			if n.NullSafe {
+				return true
+			}
+			e = n.Object
+		case *ast.MethodCall:
+			if n.NullSafe {
+				return true
+			}
+			e = n.Object
+		default:
+			return false
+		}
+	}
 }
 
 // finalizeParams replaces the callee's own type parameters that were not

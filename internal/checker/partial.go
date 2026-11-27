@@ -1406,7 +1406,8 @@ func (x *fnCtx) boundInClosure(e ast.Expr) string {
 // call, from argument position from, that land on a by-reference
 // parameter (P2112): an element is a value, not a variable, even written
 // `&$o`, and PHPStan refuses it (argument.byRef). One into a variadic
-// parameter is the argument the bindings check.
+// parameter is the argument the bindings check, and one into a parameter
+// that prefers a reference (sentByRef) is a value PHP takes.
 func (x *fnCtx) unpackedByRef(lit *ast.ArrayLit, from int, sig *signature) {
 	n := from
 	for _, it := range lit.Items {
@@ -1429,7 +1430,7 @@ func (x *fnCtx) unpackedByRef(lit *ast.ArrayLit, from int, sig *signature) {
 		default:
 			return
 		}
-		if p != nil && p.ByRef && !p.Variadic {
+		if p != nil && p.ByRef && !p.PreferRef && !p.Variadic {
 			x.report(it.Value.Span(), P2112, "argument %d of %s is by reference and needs a variable", slices.Index(sig.params, p)+1, sig.name)
 		}
 	}

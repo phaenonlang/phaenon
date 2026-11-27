@@ -1,0 +1,112 @@
+namespace PreferRef;
+
+// A parameter php-src's stub tags @prefer-ref takes a variable by
+// reference and any other argument by value, with no notice:
+// array_multisort() sorts the arrays it is given as variables and reads
+// the sort orders and flags between them, written as constants, literals
+// or results. PHPStan's function map has these parameters by value, so it
+// holds every argument to the parameter's type and keeps a variable's
+// type after the call; the checker keeps it too. A parameter that is by
+// reference alone, sort()'s, still needs a variable.
+
+/** @param list<int> $x */
+function takesList(array $x): void
+{
+}
+
+/** @param list<string> $x */
+function takesStrings(array $x): void
+{
+}
+
+function takesInt(int $x): void
+{
+}
+
+/** @return list<int> */
+function numbers(): array
+{
+    return [3, 1, 2];
+}
+
+final class Table
+{
+    /** @var list<int> */
+    public array $ids = [];
+    /** @var list<int> */
+    public static array $all = [];
+}
+
+// ---- a flag between the arrays is a value; an array is a variable, a
+// property, a static property or an offset, and keeps its type
+
+/**
+ * @param list<int> $data
+ * @param list<string> $rows
+ * @param array<string, list<int>> $columns
+ */
+function flagsBetween(array $data, array $rows, array $columns, Table $table): void
+{
+    array_multisort($data, SORT_DESC, $rows);
+    array_multisort($data, SORT_ASC, SORT_NUMERIC, $rows, SORT_DESC, SORT_STRING);
+    array_multisort($data, SORT_DESC | SORT_FLAG_CASE, $rows);
+    array_multisort($table->ids, SORT_DESC);
+    array_multisort(Table::$all, SORT_ASC, $data);
+    array_multisort($columns['id'], SORT_DESC, $rows);
+    array_multisort(($data), (SORT_DESC));
+    $order = SORT_DESC;
+    array_multisort($data, $order, $rows);
+    takesInt($order);
+    takesList($data);
+    takesStrings($rows);
+}
+
+// ---- an array that is no variable is sorted as a value
+
+function values(): void
+{
+    array_multisort(numbers());
+    array_multisort(numbers(), SORT_DESC);
+    array_multisort([3, 1, 2]);
+    array_multisort(...[[2, 1]]);
+    array_multisort(...[numbers(), SORT_DESC]);
+}
+
+// ---- a value is held to the parameter's type, as PHPStan holds it; a
+// nullsafe chain is a value
+
+/** @param list<int> $data */
+function wrongValues(array $data, ?Table $maybe): void
+{
+    array_multisort($data, 'desc'); // want P2103 "argument 2 ($rest) of array_multisort() expects int|array, 'desc' given"
+    array_multisort($data, null); // want P2103 "null given"
+    array_multisort($data, 1.5); // want P2103 "1.5 given"
+    array_multisort(5); // want P2103 "argument 1 ($array) of array_multisort() expects array, 5 given"
+    array_multisort($maybe?->ids, SORT_DESC); // want P2103 "list<int>|null given"
+}
+
+// ---- the left side of |> is a value, and so is an argument of the
+// closure array_multisort(...) makes, which keeps the parameters as PHP
+// declares them
+
+/** @param list<int> $data */
+function piped(array $data): bool
+{
+    return $data |> array_multisort(...);
+}
+
+/** @param list<int> $data */
+function throughClosure(array $data): void
+{
+    $sort = array_multisort(...);
+    $sort($data, SORT_DESC);
+    $sort([3, 1, 2]);
+}
+
+// ---- by reference alone
+
+function byReferenceStill(): void
+{
+    sort(numbers()); // want P2112 "argument 1 of sort() is by reference"
+    $sorted = [3, 1] |> sort(...); // want P2114
+}
