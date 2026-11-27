@@ -366,8 +366,10 @@ func (pr *printer) print(t Type, nested bool) {
 		// A signature's return type takes what follows it. In the text
 		// PHPStan reads, a callable among the members of a union or an
 		// intersection stands in parentheses, `(\Closure(int): int)|null`,
-		// and so does a return type that is one.
-		if nested && t.HasSig && pr.qualified {
+		// and so does a return type that is one; a message writes it so too,
+		// as PHPStan's do, where `callable(int): string|null` would read as
+		// a callable that may return null.
+		if nested && t.HasSig && !pr.phaenon {
 			b.WriteString("(")
 			defer b.WriteString(")")
 		}

@@ -166,3 +166,75 @@ function pointers(array $words, array $any, string $path): void
     takesString(end($parts));
     takesString(substr(end($parts), 0, 7));
 }
+
+/** @param array{a: int, b: string} $s */
+function takesShape(array $s): void
+{
+}
+
+/** @param list<array{int|null, string|null}> $rows */
+function takesPairs(array $rows): void
+{
+}
+
+/** @param list<array{int, int}> $rows */
+function takesIntPairs(array $rows): void
+{
+}
+
+/**
+ * array_map() without a callback, as PHPStan types it: the array itself
+ * where one is given, and where several are, a list of tuples that hold a
+ * value of each array by position, null where an array may be shorter
+ * than another.
+ *
+ * @param list<string> $strs
+ * @param list<int> $ints
+ * @param array<string, int> $counts
+ * @param array{a: int, b: string} $shape
+ */
+function withoutCallback(array $strs, array $ints, array $counts, array $shape, ?callable $maybe): void
+{
+    takesStrings(array_map(null, $strs));
+    takesCounts(array_map(null, $counts));
+    takesShape(array_map(null, $shape));
+    takesPairs(array_map(null, $ints, $strs));
+    takesIntPairs(array_map(null, $ints, $ints));
+    takesIntPairs(array_map(null, [1, 2], [3, 4]));
+    takesIntPairs(array_map(null, $ints, [3, 4])); // want P2103 "list<list{int|null, int<3, 4>|null}> given"
+    foreach (array_map(null, $ints, $strs) as [$i, $s]) {
+        takesInt($i); // want P2103 "int|null given"
+    }
+    takesStrings(array_map($maybe, $strs)); // want P2103 "list given"
+    takesStrings(array_map(null, 5)); // want P2103, P2103 "argument 2 ($array) of array_map() expects array, 5 given"
+}
+
+/**
+ * A callback that may be null maps the values or gives the array back:
+ * PHPStan, sure of neither, has the values mixed, the keys and the list
+ * kept, and so does the checker, whatever expression the callback is.
+ * PHPStan maps the values of a sealed shape through it still, `list{int,
+ * int}` to `array{string, string}`, where the checker keeps them mixed.
+ *
+ * @param list<int> $ints
+ * @param array<string, int> $counts
+ * @param (callable(int): string)|null $maybe
+ * @param array{fn?: \Closure(int): string} $opts
+ */
+function maybeCallback(array $ints, array $counts, ?callable $maybe, array $opts, bool $b, int $mode): void
+{
+    takesStrings(array_map($maybe, $ints)); // want P2103 "list given"
+    takesMap(array_map($maybe, $counts)); // want P2103 "array<string, mixed> given"
+    takesStrings(array_map($maybe, $ints, $ints)); // want P2103 "list given"
+    takesStrings(array_map(maybeMapper($b), $ints)); // want P2103 "list given"
+    takesStrings(array_map($b ? static fn (int $i): string => 'a' : null, $ints)); // want P2103 "list given"
+    takesStrings(array_map($opts['fn'] ?? null, $ints)); // want P2103 "list given"
+    takesStrings(array_map(match ($mode) { 1 => static fn (int $i): string => 'x', default => null }, $ints)); // want P2103 "list given"
+    takesStrings(array_map(static fn (int $i): string => 'a', $ints));
+}
+
+/** @return (\Closure(int): string)|null */
+function maybeMapper(bool $b): ?\Closure
+{
+    return $b ? static fn (int $i): string => (string) $i : null;
+}

@@ -503,7 +503,7 @@ func TestPrintQualifiedClosure(t *testing.T) {
 	}{
 		{closure, `\Closure(int): int`, `Closure(int): int`},
 		{TClosure, `\Closure`, `Closure`},
-		{Nullable(closure), `(\Closure(int): int)|null`, `Closure(int): int|null`},
+		{Nullable(closure), `(\Closure(int): int)|null`, `(Closure(int): int)|null`},
 		{Callable{Closure: true, HasSig: true, Return: MakeUnion(TInt, TString)}, `\Closure(): (int|string)`, `Closure(): int|string`},
 		{Shape{Entries: []ShapeEntry{{Key: "run", Type: closure}, {Key: "who", Type: NewClass(`App\User`)}}}, `array{run: \Closure(int): int, who: \App\User}`, `array{run: Closure(int): int, who: App\User}`},
 		{Array{Key: TInt, Value: closure, List: true}, `list<\Closure(int): int>`, `list<Closure(int): int>`},
