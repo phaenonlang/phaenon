@@ -308,10 +308,10 @@ function writtenByArrayWalk(array $values): void
         $value = 1;
     });
     if (null !== $loose) {
-        takesStd($values['k']); // want P2103 "mixed given"
+        takesStd($values['k']); // want P2103 "1 given"
     }
     if ($isStd) {
-        takesStd($values['k']); // want P2103 "mixed given"
+        takesStd($values['k']); // want P2103 "1 given"
     }
 }
 
