@@ -46,8 +46,17 @@ func (x *fnCtx) guaranteedOr(e ast.Expr, t types.Type, env *state) types.Type {
 	return t
 }
 
-// phpType is nativeOf, or guaranteedOf with guaranteed set.
+// phpType is nativeOf, or guaranteedOf with guaranteed set. A property or
+// an offset a test narrowed has the PHP type the test left of it, as a
+// variable has.
 func (x *fnCtx) phpType(e ast.Expr, env *state, guaranteed bool) types.Type {
+	if env != nil {
+		if key, ok := x.narrowedPathKey(e); ok {
+			if t, ok := env.getPath(nativePathKey(key)); ok {
+				return t
+			}
+		}
+	}
 	switch e := e.(type) {
 	case *ast.Paren:
 		return x.phpType(e.Expr, env, guaranteed)

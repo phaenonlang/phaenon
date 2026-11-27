@@ -41,6 +41,14 @@ type varInfo struct {
 	// is expected says where it stopped being one. An assignment of the
 	// whole variable forgets it, as it forgets the rest.
 	rewritten *paramWrite
+	// found is the type the variable had right after a test of its
+	// truthiness: while it still has that type, the value is the one the
+	// test found truthy or falsy, and the same test again is decided by
+	// that type, as PHPStan decides it by a native type the first test
+	// narrowed, mixed~falsy too. A narrowing carries it, any write takes
+	// it away. foundTruth is what the test found: 1 truthy, -1 falsy.
+	found      types.Type
+	foundTruth int
 }
 
 // paramWrite is a write into a value of a type parameter: the parameter,
@@ -260,8 +268,8 @@ func (e *state) written(name string) {
 }
 
 func (e *state) writtenOne(name string) {
-	if info, ok := e.vars[name]; ok && info.conds != nil {
-		info.conds = nil
+	if info, ok := e.vars[name]; ok && (info.conds != nil || info.found != nil) {
+		info.conds, info.found = nil, nil
 		e.vars[name] = info
 	}
 	e.dropConds(name)
@@ -278,8 +286,8 @@ func (e *state) reordered(name string) {
 }
 
 func (e *state) reorderedOne(name string) {
-	if info, ok := e.vars[name]; ok && info.conds != nil {
-		info.conds = nil
+	if info, ok := e.vars[name]; ok && (info.conds != nil || info.found != nil) {
+		info.conds, info.found = nil, nil
 		e.vars[name] = info
 	}
 	e.forgetInConds(func(k string) bool { return k == name }, func(k string) bool {
@@ -463,6 +471,7 @@ func (e *state) invalidateMentions(name string) {
 			end := j + len(needle)
 			if j > 0 && strings.ContainsRune("([,", rune(k[j-1])) && end < len(k) && strings.ContainsRune(",)]", rune(k[end])) {
 				delete(e.paths, k)
+				e.dropKept(k)
 				break
 			}
 			i = end
@@ -539,8 +548,45 @@ func (e *state) unset(name string) {
 	e.dropConds(name)
 }
 
+// setPath gives a path the type of the value it holds now, which forgets
+// what a test kept beside its type (dropKept), whatever wrote the value.
 func (e *state) setPath(key string, t types.Type) {
 	e.paths[key] = t
+	e.dropKept(key)
+}
+
+// nativePathKey is the key the PHP type of a path is kept under among the
+// narrowed paths, where a test narrowed it or a write gave it one;
+// foundPathKey that of the type the path had right after a test of its
+// truthiness found it truthy (truth 1) or falsy (-1), varInfo.found's
+// counterpart. Each is spelled as a member of the path, and setPath,
+// invalidate and invalidateCalls drop them with the path: what a test
+// kept goes with any change of the path's type, as a variable's does.
+func nativePathKey(key string) string { return key + "->\x00native" }
+
+func foundPathKey(key string, truth int) string {
+	if truth > 0 {
+		return key + "->\x00truthy"
+	}
+	return key + "->\x00falsy"
+}
+
+// keptKey reports a key nativePathKey or foundPathKey spells.
+func keptKey(key string) bool { return strings.Contains(key, "->\x00") }
+
+// dropKept forgets what a test kept of a path beside its type.
+func (e *state) dropKept(key string) {
+	if keptKey(key) {
+		return
+	}
+	delete(e.paths, nativePathKey(key))
+	delete(e.paths, foundPathKey(key, 1))
+	delete(e.paths, foundPathKey(key, -1))
+}
+
+// keepNative gives a path the PHP type a test or a write left it.
+func (e *state) keepNative(key string, native types.Type) {
+	e.paths[nativePathKey(key)] = native
 }
 
 func (e *state) getPath(key string) (types.Type, bool) {
@@ -576,6 +622,7 @@ func (e *state) invalidate(drop func(key string) bool) {
 	for k := range e.paths {
 		if drop(k) {
 			delete(e.paths, k)
+			e.dropKept(k)
 		}
 	}
 	e.forgetInConds(func(string) bool { return false }, drop)
@@ -608,6 +655,7 @@ func (e *state) invalidateCalls(receiver string) {
 	for k := range e.paths {
 		if strings.HasPrefix(k, receiver+"->") && strings.Contains(k[len(receiver):], "(") {
 			delete(e.paths, k)
+			e.dropKept(k)
 		}
 	}
 }
@@ -814,7 +862,12 @@ func (e *state) widen(prev *state) {
 	}
 	for k, t := range e.paths {
 		if pt, ok := prev.paths[k]; ok && !types.Equal(pt, t) {
+			if keptKey(k) {
+				delete(e.paths, k)
+				continue
+			}
 			e.paths[k] = generalize(pt, t, 0) // `$this->rows[] = …` in a loop grows a path as a variable
+			e.dropKept(k)
 		}
 	}
 }

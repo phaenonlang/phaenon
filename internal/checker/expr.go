@@ -2295,10 +2295,12 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 		x.report(e.S, P2301, "cannot increment or decrement %s", x.typeName(t))
 		result = t
 	}
+	certain := x.certainPath(e.Expr, t, env)
 	unchecked := x.outUnchecked
 	x.outUnchecked = unchecked || x.refusedSince(since) // the refused step is the one finding (paramout.go)
 	x.assignTo(e.Expr, result, env, e.S)
 	x.outUnchecked = unchecked
+	x.keepComputed(env, e.Expr, result, certain)
 	if e.Prefix {
 		return result
 	}
@@ -3540,6 +3542,11 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 			x.byRef[target.Name] = true
 		}
 		x.bind(nil, e.Target, vt, env, e.S)
+		// A property made a reference holds the value's PHP type, as for
+		// `=`: PHPStan follows the reference no more than the checker does.
+		if key, ok := x.narrowedPathKey(e.Target); ok {
+			env.keepNative(key, x.nativeOr(e.Value, vt, env))
+		}
 		// `$alias = &$r`: one value from here on, which a write to either
 		// writes (env.set). A reference to an offset or a property is
 		// not followed, as PHPStan does not follow it.
@@ -3571,9 +3578,11 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 		cur := x.exprLenient(e.Target, env)
 		rightEnv := env.clone()
 		vt := x.expr(e.Value, rightEnv, x.targetType(e.Target, env))
+		certain := x.certainPath(e.Target, cur, env) && x.nativeOf(e.Value, rightEnv) == nil
 		*env = *join(env, rightEnv)
 		res := types.MakeUnion(types.StripNull(cur), vt)
 		x.bind(nil, e.Target, res, env, e.S)
+		x.keepComputed(env, e.Target, res, certain)
 		return res
 	}
 	cur := x.expr(e.Target, env, nil)
@@ -3596,11 +3605,42 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 			env.setPath(key, cur)
 		}
 	}
+	certain := x.certainPath(e.Target, cur, env) && x.nativeOf(e.Value, env) == nil
 	unchecked := x.outUnchecked
 	x.outUnchecked = unchecked || x.refusedSince(since) // the refused operation is the one finding (paramout.go)
 	x.assignTo(e.Target, res, env, e.S)
 	x.outUnchecked = unchecked
+	x.keepComputed(env, e.Target, res, certain)
 	return res
+}
+
+// certainPath reports a property, a static property or an offset whose
+// type t is the one PHP guarantees: no docblock refines it, or a test
+// narrowed its PHP type to the same.
+func (x *fnCtx) certainPath(e ast.Expr, t types.Type, env *state) bool {
+	if _, ok := x.narrowedPathKey(e); !ok {
+		return false
+	}
+	n := x.nativeOf(e, env)
+	return n == nil || types.Equal(n, t) || types.IsSubtype(n, t, x.p()) && types.IsSubtype(t, n, x.p())
+}
+
+// keepComputed gives a path a step or a compound assignment wrote the PHP
+// type of the result, where it and the operand were certain before
+// (certainPath): PHP's types give the result the checker computed, as
+// `self::$count++` after `!self::$count` is 1 to PHPStan's native type.
+// Otherwise the path has its declared PHP type again, a docblock's
+// claims about it not carried into a certainty.
+func (x *fnCtx) keepComputed(env *state, target ast.Expr, res types.Type, certain bool) {
+	key, ok := x.narrowedPathKey(target)
+	if !ok {
+		return
+	}
+	if certain {
+		env.keepNative(key, res)
+	} else {
+		delete(env.paths, nativePathKey(key)) // an operand a docblock alone refines
+	}
 }
 
 func compoundOp(k token.Kind) token.Kind {
@@ -3745,10 +3785,12 @@ func (x *fnCtx) assignFrom(value ast.Expr, target ast.Expr, vt types.Type, env *
 			}
 		}
 		if key, ok := x.pathKey(t); ok {
+			certain := x.certainPath(t, x.pathType(t, env), env)
 			if pr != nil {
 				vt = storedBenevolent(vt, pr.NativeType, x.p())
 			}
 			env.setPath(key, vt)
+			x.keepWritten(env, key, value, vt, certain)
 		}
 	case *ast.Index:
 		x.assignIndex(t, vt, env, span)
@@ -3806,12 +3848,57 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 		env.initialise(name)
 	}
 	if key, ok := x.pathKey(t); ok {
+		certain := x.certainPath(t, x.pathType(t, env), env)
 		env.invalidatePrefix(key)
 		if len(declared) == 1 {
 			vt = storedBenevolent(vt, declared[0], x.p())
 		}
 		env.setPath(key, vt)
+		x.keepWritten(env, key, value, vt, certain)
 	}
+}
+
+// keepWritten gives a property assigned a value the PHP type of the value,
+// as PHPStan's native type of the property has it after the write, so
+// that `$this->map = []; if ($this->map)` is decided as for a variable. A
+// write with no value of its own, a write back of an array an offset of
+// it was written into or unset from, a by-reference argument, `??=`, a
+// step, gives the type written to a property that was certain before it
+// (certainPath), whose PHP type the operation keeps as the checker reads
+// it, `array_pop()` of `['x']` an empty array; another keeps its declared
+// PHP type, and keepOffsetWritten or keepComputed say more where they can.
+func (x *fnCtx) keepWritten(env *state, key string, value ast.Expr, vt types.Type, certain bool) {
+	switch {
+	case value != nil:
+		env.keepNative(key, x.nativeOr(value, vt, env))
+	case certain:
+		env.keepNative(key, vt)
+	}
+}
+
+// keepOffsetWritten gives a property, a static property or an offset an
+// offset of it was written into, or appended to, the PHP type it had
+// before the write as PHPStan's native type has it after: an array that
+// is not empty now, of any keys and values, the value written being
+// another than the ones before.
+func (x *fnCtx) keepOffsetWritten(env *state, root ast.Expr, before types.Type) {
+	key, ok := x.narrowedPathKey(root)
+	if !ok || before == nil {
+		return
+	}
+	nonEmpty := types.Array{Key: types.TArrayKey, Value: types.TMixed, NonEmpty: true}
+	var members []types.Type
+	for _, m := range types.Members(before) {
+		switch m.(type) {
+		case types.Mixed:
+			return
+		case types.Array, types.Shape, types.Null:
+			members = append(members, nonEmpty)
+		default:
+			members = append(members, m)
+		}
+	}
+	env.keepNative(key, types.MakeUnion(members...))
 }
 
 // storedBenevolent is what a property PHP declares d holds once a value of
@@ -4081,7 +4168,9 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 		newT = arrayWithEntry(types.Shape{}, keyT, vt)
 	}
 	before := rewrittenOf(t.Array, env)
+	nativeBefore := x.nativeVar(t.Array, env)
 	x.assignTo(t.Array, newT, env, span)
+	x.keepOffsetWritten(env, t.Array, nativeBefore)
 	x.keepRewritten(t.Array, before, rewritten, t.S, newT, env)
 	if key, ok := x.pathKey(t); ok {
 		env.setPath(key, vt)

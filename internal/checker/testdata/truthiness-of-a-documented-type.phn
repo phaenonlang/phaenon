@@ -1,0 +1,488 @@
+namespace TruthinessOfADocumentedType;
+
+// A test of truthiness is always true or always false only where the type
+// PHP guarantees decides it, as PHPStan decides it with
+// treatPhpDocTypesAsCertain off: an object, a literal array, a value
+// assigned from a literal, an int a native comparison narrowed. A range
+// or a shape a docblock alone gives, of a parameter, a property or a
+// method's result, decides nothing, in an if, a ternary, `!`, an operand
+// of && or ||, `?:` or a loop's condition, and the branch it would rule
+// out stays reachable. A comparison narrows PHP's type as PHPStan narrows
+// the native type, by the bound as typed: `$a > 0`, or `$a >= $p` with a
+// documented positive-int $p, makes a documented int<0, max> over `int $a`
+// an int<1, max> to PHP. Plain PHP, so that PHPStan reads this file as
+// written.
+
+/**
+ * @param int<1, max> $a
+ * @param non-empty-list<int> $xs
+ * @param array{a: int} $shape
+ */
+function documented(int $a, array $xs, array $shape): int
+{
+    echo $a ? 1 : 2;
+    if ($a) {
+        echo 'a';
+    }
+    if (!$a) {
+        echo 'b';
+    }
+    if ($a && $xs) {
+        echo 'c';
+    }
+    if ($a || $shape) {
+        echo 'd';
+    }
+    echo $a ?: 0;
+    while ($xs) {
+        $xs = [];
+    }
+    return $a;
+}
+
+final class Bag
+{
+    /** @var non-empty-list<int> */
+    public array $items = [1];
+
+    /** @return non-empty-list<int> */
+    public function all(): array
+    {
+        return $this->items;
+    }
+
+    public function show(): void
+    {
+        if ($this->items) {
+            echo 'a';
+        }
+        if ($this->all()) {
+            echo 'b';
+        }
+    }
+}
+
+function native(object $o, int $i): void
+{
+    if ($o) { echo 'a'; } // want P2402 "condition is always true (object)"
+    $list = [1];
+    if ($list) { echo 'b'; } // want P2402 "always true"
+    $five = 5;
+    echo $five ? 'c' : 'd'; // want P2402 "always true (5)"
+    $zero = 0;
+    if ($zero) { echo 'e'; } // want P2402 "always false (0)", P2401
+    if (!$o) { echo 'f'; } // want P2402 "always true (object)", P2401
+    if ($i > 0) {
+        if ($i) { echo 'g'; } // want P2402 "always true (int<1, max>)"
+    }
+}
+
+/** @param int<0, max> $a */
+function narrowedNatively(int $a): void
+{
+    if ($a > 0) {
+        if ($a) { echo 'h'; } // want P2402 "always true (int<1, max>)"
+    }
+}
+
+/**
+ * @param int<0, max> $a
+ * @param positive-int $p
+ */
+function narrowedByADocumentedBound(int $a, int $p): void
+{
+    if ($a >= $p) {
+        if ($a) { echo 'i'; } // want P2402 "always true (int<1, max>)"
+    }
+}
+
+/**
+ * A test of truthiness narrows PHP's type as it narrows the refined one:
+ * the outer test of a documented value is open, the inner one is not, as
+ * PHPStan has them.
+ *
+ * @param positive-int $a
+ * @param non-empty-list<int> $xs
+ */
+function repeated(int $a, array $xs): void
+{
+    if ($a) {
+        if ($a) { echo 'a'; } // want P2402 "always true"
+    }
+    if (!$a) {
+        return;
+    }
+    if ($a) { echo 'b'; } // want P2402 "always true"
+    if ($xs) {
+        if ($xs) { echo 'c'; } // want P2402 "always true"
+    }
+}
+
+/** @param non-empty-string $mode */
+function among(string $mode): bool
+{
+    return in_array($mode, ['a', 'b'], true) && $mode; // want P2402 "always true"
+}
+
+/**
+ * The last condition of a chain, an elseif with no else after it, is not
+ * reported always true, as PHPStan does not report it; what follows it is
+ * unreachable all the same.
+ *
+ * @param non-empty-list<int> $xs
+ */
+function chained(array $xs): string
+{
+    if ($xs) {
+        return 'some';
+    } elseif (!$xs) {
+        return 'none';
+    }
+    return 'x'; // want P2401
+}
+
+/**
+ * A variable an inline @var declares holds what the tag says and nothing
+ * PHP guarantees, whatever value it is given.
+ */
+function declared(): void
+{
+    /** @var list<string> $errors */
+    $errors = [];
+    if ($errors) {
+        echo 'e';
+    }
+    /** @var int $n */
+    $n = 0;
+    if ($n) {
+        echo 'n';
+    }
+    /** @var bool $flag */
+    $flag = false;
+    if (!$flag) {
+        echo 'f';
+    }
+}
+
+/**
+ * A test leaves what it found of a property, as of a variable, until the
+ * property is written or a call may change it: its PHP type narrowed, by
+ * a test of truthiness, a comparison or ===, and, where no type spells
+ * what was found (a string that is not '0', a mixed that is not falsy),
+ * the finding itself, so that the same test again is decided.
+ */
+final class Kept
+{
+    /** @var non-empty-string */
+    public string $name = 'x';
+
+    /** @var non-empty-list<int> */
+    public array $ids = [1];
+
+    /** @var int<0, max> */
+    public int $n = 0;
+
+    public function reset(): void
+    {
+        $this->ids = [1];
+    }
+
+    public function kept(string $other): void
+    {
+        if ($this->name) {
+            if ($this->name) { // want P2402 "always true"
+                echo 'a';
+            }
+        }
+        if (!$this->ids) {
+            return;
+        }
+        if ($this->ids) { // want P2402 "always true"
+            echo 'b';
+        }
+        if ($this->n > 3) {
+            if ($this->n > 1) { // want P2402 "always true"
+                echo 'c';
+            }
+        }
+    }
+
+    public function changed(string $other): void
+    {
+        if ($this->name) {
+            $this->name = $other === '' ? 'y' : $other;
+            if ($this->name) {
+                echo 'a';
+            }
+        }
+        if (!$this->ids) {
+            return;
+        }
+        $this->reset();
+        if ($this->ids) {
+            echo 'b';
+        }
+    }
+}
+
+/**
+ * A variable an inline @var declares, tested twice, is decided the second
+ * time, though PHP's type of it, mixed, spells nothing of the first: until
+ * it is written, an offset of it, or by reference.
+ */
+function twice(): void
+{
+    /** @var list<string> $errors */
+    $errors = [];
+    if ($errors) {
+        if ($errors) { // want P2402 "always true"
+            echo 'e';
+        }
+    }
+    /** @var string $s */
+    $s = '';
+    if (!$s) {
+        if (!$s) { // want P2402 "always false (''|'0')"
+            echo 's';
+        }
+    }
+    if ($errors) {
+        array_pop($errors);
+        if ($errors) {
+            echo 'p';
+        }
+    }
+    if ($s) {
+        echo 'l';
+    } elseif (!$s) {
+        echo 'm';
+    }
+}
+
+/** @return list<string> */
+function loaded(): array
+{
+    return [];
+}
+
+/**
+ * A write to a property, an instance's or a static one however it is
+ * spelled, an offset written, appended or unset, forgets what a test kept
+ * of it, and gives it the PHP type of what was written, as PHPStan's
+ * native type of it has it after the write: the lazy initialisation of a
+ * static decides nothing, nor a test after an offset of it is unset,
+ * `self::$map = []` makes `self::$map` empty to PHP, and an offset
+ * written makes an array non-empty.
+ */
+final class Written
+{
+    /** @var list<string> */
+    public static array $names = [];
+
+    /** @var array<string, string> */
+    public static array $map = [];
+
+    /** @var int<0, max> */
+    public static int $count = 0;
+
+    /** @var list<int> */
+    public array $queue = [];
+
+    /** @var array<string, string> */
+    public array $local = [];
+
+    public function names(): void
+    {
+        if (!self::$names) {
+            self::$names = loaded();
+            if (!self::$names) {
+                throw new \RuntimeException('nothing loaded');
+            }
+        }
+        if (Written::$map) {
+            unset(Written::$map['a']);
+            if (Written::$map) {
+                echo 'some';
+            }
+        }
+        if (static::$map) {
+            unset(static::$map['a']);
+            if (static::$map) {
+                echo 'some';
+            }
+        }
+        if (self::$map) {
+            self::$map = [];
+            if (!self::$map) { // want P2402 "always false"
+                echo 'cleared';
+            }
+        }
+    }
+
+    /**
+     * A step of a static PHP's type and the docblock's agree on, here after
+     * a test, is decided by the result, as PHPStan decides it.
+     */
+    public function counted(): void
+    {
+        if (!self::$count) {
+            self::$count++;
+            if (self::$count) { // want P2402 "always true (1)"
+                echo 'one';
+            }
+        }
+    }
+
+    public function written(): void
+    {
+        $this->queue[] = 1;
+        if ($this->queue) { // want P2402 "always true"
+            echo 'q';
+        }
+        $this->local = ['x' => 'y'];
+        if ($this->local) { // want P2402 "always true (array{x: 'y'})"
+            echo 'l';
+        }
+        $this->local['a'] = 'b';
+        if ($this->local) { // want P2402 "always true"
+            echo 'a';
+        }
+    }
+}
+
+/**
+ * A test that leaves an array empty or not narrows PHP's type of it as
+ * PHPStan narrows the native type, by the type the test specifies: a
+ * comparison with [], loose or strict, on either side, count() compared,
+ * empty() and array_key_exists(), so that a test of truthiness after it
+ * is decided.
+ *
+ * @param list<int> $a
+ */
+function emptiness(array $a): void
+{
+    if ($a !== []) {
+        echo $a ? 1 : 2; // want P2402 "always true"
+    } else {
+        echo $a ? 3 : 4; // want P2402 "always false"
+    }
+    if ([] != $a) {
+        echo $a ? 1 : 2; // want P2402 "always true"
+    }
+    if (count($a) > 0) {
+        echo $a ? 1 : 2; // want P2402 "always true"
+    } else {
+        echo $a ? 3 : 4; // want P2402 "always false"
+    }
+    if (count($a) === 0) {
+        echo $a ? 1 : 2; // want P2402 "always false"
+    } else {
+        echo $a ? 3 : 4; // want P2402 "always true"
+    }
+    if (!empty($a)) {
+        echo $a ? 1 : 2; // want P2402 "always true"
+    }
+    if (array_key_exists(0, $a)) {
+        echo $a ? 1 : 2; // want P2402 "always true"
+    }
+}
+
+/**
+ * A PHP type that is mixed takes what count() leaves of the documented
+ * type, as PHPStan computes the type count() specifies from it: a
+ * list<int> an inline tag declares, found above 0, is not empty.
+ * `$a !== []` leaves what is not the empty array, null and 0 among it.
+ */
+function mixedEmptiness(): void
+{
+    /** @var list<int> $a */
+    $a = loaded();
+    if (count($a) > 0) {
+        echo $a ? 1 : 2; // want P2402 "always true"
+    }
+    if ($a !== []) {
+        echo $a ? 1 : 2;
+    } else {
+        echo $a ? 3 : 4; // want P2402 "always false"
+    }
+}
+
+/**
+ * A test a value of the documented type cannot meet takes nothing from
+ * PHP's type where it fails, as PHPStan takes nothing: `$a !== 0` of a
+ * documented positive int, `$a !== []` of a shape with a key.
+ *
+ * @param int<1, max> $n
+ * @param array{id: int} $shape
+ */
+function unmet(int $n, array $shape): void
+{
+    if ($n !== 0) {
+        echo $n ? 1 : 2;
+    }
+    if ($shape !== []) {
+        echo $shape ? 1 : 2;
+    } else {
+        echo $shape ? 3 : 4; // want P2402 "always false"
+    }
+}
+
+/**
+ * A test of truthiness found truthy decides the same test again where
+ * PHPStan's narrowed native type does: a string, mixed; not a float or
+ * an iterable, from which it takes neither 0.0 nor the empty array.
+ *
+ * @param iterable<int> $items
+ */
+function testedAgain(iterable $items, float $f, string $s, mixed $m): void
+{
+    if ($items) {
+        echo $items ? 1 : 2;
+    }
+    if ($f) {
+        echo $f ? 1 : 2;
+    }
+    if ($s) {
+        echo $s ? 1 : 2; // want P2402 "always true"
+    }
+    if ($m) {
+        echo $m ? 1 : 2; // want P2402 "always true"
+    }
+}
+
+/**
+ * Loosely unlike the empty array decides truthiness only of an array: 0,
+ * 0.0, '' and '0' are unlike it too, and PHPStan decides nothing of a
+ * type with null or false beside the arrays. count() found exactly 0
+ * leaves a value documented as mixed an empty array or a Countable, which
+ * is truthy, and count() found positive leaves it mixed, to PHPStan.
+ *
+ * @param string|list<string> $s
+ * @param list<int>|null $v
+ */
+function looselyUnlike(mixed $m, string|array $s, ?array $v, string $json): void
+{
+    if ($m != []) {
+        echo $m ? 1 : 2;
+    }
+    if ([] != $s) {
+        echo $s ? 1 : 2;
+    }
+    if ($v != []) {
+        echo $v ? 1 : 2;
+    }
+    $data = json_decode($json, true);
+    if ($data != []) {
+        echo $data ? 1 : 2;
+    }
+}
+
+function countedMixed(mixed $m): void
+{
+    if (count($m) === 0) { // want P2103
+        echo $m ? 1 : 2;
+    }
+    if (count($m) > 0) { // want P2103
+        echo $m ? 1 : 2;
+    }
+}

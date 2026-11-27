@@ -973,6 +973,14 @@ type fnCtx struct {
 	// loopCond is set while a loop condition is evaluated: `while (true)`
 	// is idiomatic there and not an always-true finding.
 	loopCond bool
+	// lastCond is set while the last condition of an if/elseif chain is
+	// read, the last elseif with no else or one that only throws: 1, or -1
+	// under a `!`, while the expression read is the whole condition, 0
+	// inside it or anywhere else. Its always-true outcome is not reported,
+	// as PHPStan does not report it (LastConditionVisitor,
+	// reportAlwaysTrueInLastCondition off): the chain's last test is the
+	// one a reader writes out for the case left.
+	lastCond int
 	// testedNames are the names an `is` or `as` being checked tests its
 	// operand against, where a bare `list` is list<mixed> (testType).
 	testedNames map[*ast.NamedType]bool

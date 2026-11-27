@@ -2,6 +2,7 @@ package checker
 
 import (
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -15,15 +16,24 @@ import (
 // it is true and when it is false. env itself is left as the state after
 // evaluating the condition's side effects (assignments).
 func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
+	last := x.lastCond
 	switch e := e.(type) {
 	case *ast.Paren:
 		return x.cond(e.Expr, env)
 	case *ast.Unary:
 		if e.Op == token.Kind('!') {
+			x.lastCond = -last
 			t, f := x.cond(e.Expr, env)
+			x.lastCond = last
 			x.condValueType = types.TBool
 			return f, t
 		}
+	}
+	// What the whole condition holds is the last condition; its parts
+	// are not.
+	x.lastCond = 0
+	defer func() { x.lastCond = last }()
+	switch e := e.(type) {
 	case *ast.Binary:
 		switch e.Op {
 		case token.T_BOOLEAN_AND, token.T_LOGICAL_AND:
@@ -70,7 +80,7 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		for _, v := range e.Vars {
 			x.idleNullsafe(v, env, "isset()", "in isset()")
 			t := x.exprLenient(v, env)
-			x.narrowPath(then, v, types.StripNull(t), true)
+			x.narrowPathWith(then, v, t, types.StripNull, true)
 			x.excluded(then, v, types.TNull)
 			x.issetChain(then, v)
 		}
@@ -79,7 +89,7 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		if len(e.Vars) == 1 {
 			t := x.exprLenient(e.Vars[0], env)
 			if _, isVar := e.Vars[0].(*ast.Variable); isVar && !x.maybeUndefined(e.Vars[0], env) {
-				x.narrowPath(els, e.Vars[0], types.Intersect(t, types.TNull, x.p()), false)
+				x.narrowPathWith(els, e.Vars[0], t, func(m types.Type) types.Type { return types.Intersect(m, types.TNull, x.p()) }, false)
 			}
 		}
 		return then, els
@@ -87,8 +97,11 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		x.idleNullsafe(e.Expr, env, "empty()", "in empty()")
 		t := x.exprLenient(e.Expr, env)
 		then, els = env.clone(), env.clone()
-		x.narrowPath(then, e.Expr, types.Falsy(t), false)
-		x.narrowPath(els, e.Expr, types.Truthy(t), true)
+		// empty() is a test of truthiness of a value that may be unset.
+		x.narrowPathWith(then, e.Expr, t, types.Falsy, false)
+		x.narrowPathWith(els, e.Expr, t, types.Truthy, true)
+		x.markFound(then, e.Expr, -1)
+		x.markFound(els, e.Expr, 1)
 		x.excluded(els, e.Expr, falsyValues)
 		x.issetChain(els, e.Expr)
 		x.condValueType = types.TBool
@@ -117,49 +130,96 @@ func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
 		x.condValueType = t
 		then, els = env.clone(), env.clone()
 		if e.Op == token.Kind('=') {
-			x.narrowPath(then, e.Target, types.Truthy(t), true)
-			x.narrowPath(els, e.Target, types.Falsy(t), false)
+			x.narrowPathWith(then, e.Target, t, types.Truthy, true)
+			x.narrowPathWith(els, e.Target, t, types.Falsy, false)
 		}
 		return then, els
 	}
 	t := x.expr(e, env, nil)
 	x.condValueType = t
 	then, els = env.clone(), env.clone()
-	x.narrowPath(then, e, types.Truthy(t), true)
-	x.narrowPath(els, e, types.Falsy(t), false)
+	// The test narrows PHP's type of a variable a docblock refines too, as
+	// PHPStan narrows the native type: under `@param positive-int $a`,
+	// `if ($a) { if ($a) … }` decides the inner test.
+	if native := x.nativeVar(e, env); native != nil {
+		x.narrowPathNative(then, e, types.Truthy(t), types.Truthy(native), true)
+		x.narrowPathNative(els, e, types.Falsy(t), types.Falsy(native), false)
+	} else {
+		x.narrowPath(then, e, types.Truthy(t), true)
+		x.narrowPath(els, e, types.Falsy(t), false)
+	}
+	// What the test found holds on each way until the value changes, as
+	// PHPStan's native mixed~falsy holds it, which no type here spells:
+	// under `/** @var list<string> $errors */`, `if ($errors) { if
+	// ($errors) … }` decides the inner test.
+	x.markFound(then, e, 1)
+	x.markFound(els, e, -1)
 	x.excluded(then, e, falsyValues)
 	if c, ok := pregMatchCall(e); ok {
 		x.pregNarrow(c, then)
 	}
-	x.alwaysCheck(e, t)
+	// The outcome is fixed where the type PHP guarantees fixes it, as
+	// PHPStan decides a condition by the native type with
+	// treatPhpDocTypesAsCertain off: `@param int<1, max> $a` over `int $a`
+	// leaves `if ($a)` open, a PHP caller may pass 0, while an object, a
+	// literal array or a value narrowed by a native test decides it.
+	decided := x.nativeOr(e, t, env)
+	verdict := truthOf(decided)
+	if found := x.foundBefore(e, env); found != 0 && !isNeverType(t) {
+		decided, verdict = t, found
+	}
+	if !lastAlwaysTrue(verdict, last) {
+		x.alwaysCheck(e, decided, verdict)
+	}
 	// A fixed outcome makes the other branch unreachable (so `true ? 1 : 'a'` is 1).
-	if !types.IsMixed(t) {
-		if _, never := types.Truthy(t).(types.Never); never {
-			then.dead = true
-		} else if _, never := types.Falsy(t).(types.Never); never {
-			els.dead = true
-		}
+	switch verdict {
+	case -1:
+		then.dead = true
+	case 1:
+		els.dead = true
 	}
 	return then, els
 }
 
-// alwaysCheck reports conditions whose outcome is fixed by their type.
-func (x *fnCtx) alwaysCheck(e ast.Expr, t types.Type) {
+// truthOf is the outcome a test of truthiness of a value of type t has:
+// 1 always true, -1 always false, 0 either.
+func truthOf(t types.Type) int {
+	if types.IsMixed(t) {
+		return 0
+	}
+	if _, ok := t.(types.Never); ok {
+		return 0
+	}
+	if _, ok := types.Truthy(t).(types.Never); ok {
+		return -1
+	}
+	if _, ok := types.Falsy(t).(types.Never); ok {
+		return 1
+	}
+	return 0
+}
+
+// lastAlwaysTrue reports the last condition of a chain (last, lastCond's
+// value) that is always true, verdict its test of truthiness (truthOf),
+// under a `!` for -1.
+func lastAlwaysTrue(verdict, last int) bool {
+	return last != 0 && verdict != 0 && verdict == last
+}
+
+// alwaysCheck reports conditions whose outcome is fixed, verdict as
+// truthOf gives it for t, the type PHP guarantees, or as an earlier test
+// of the same value found it.
+func (x *fnCtx) alwaysCheck(e ast.Expr, t types.Type, verdict int) {
 	if x.loopCond {
 		switch e.(type) {
 		case *ast.ConstFetch, *ast.Name, *ast.IntLit, *ast.StringLit, *ast.FloatLit:
 			return // `while (true)` is idiomatic
 		}
 	}
-	if types.IsMixed(t) {
-		return
-	}
-	if _, ok := t.(types.Never); ok {
-		return
-	}
-	if _, ok := types.Truthy(t).(types.Never); ok {
+	switch verdict {
+	case -1:
 		x.report(e.Span(), P2402, "condition is always false (%s)", x.typeName(t))
-	} else if _, ok := types.Falsy(t).(types.Never); ok {
+	case 1:
 		x.report(e.Span(), P2402, "condition is always true (%s)", x.typeName(t))
 	}
 }
@@ -282,8 +342,13 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 		if _, isNever := t.(types.Never); isNever && !ok {
 			return
 		}
-		// Narrowing keeps the member paths: the object is the same one.
-		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define, native: narrowNative(info.native, t, x.p()), conds: info.conds, guaranteed: info.guaranteed, rewritten: info.rewritten}
+		// Narrowing keeps the member paths: the object is the same one, and
+		// what a test found of it.
+		var found types.Type
+		if ok && info.found != nil && types.Equal(info.found, info.t) {
+			found = t
+		}
+		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define, native: narrowNative(info.native, t, x.p()), conds: info.conds, guaranteed: info.guaranteed, rewritten: info.rewritten, found: found, foundTruth: info.foundTruth}
 		if ok {
 			env.applyConds(p.Name, t, x.p())
 		}
@@ -329,18 +394,165 @@ func (x *fnCtx) narrowPathNative(env *state, e ast.Expr, t, nt types.Type, defin
 			info.native = nt
 			env.vars[v.Name] = info
 		}
+		return
+	}
+	if key, ok := x.narrowedPathKey(e); ok && nt != nil {
+		if _, never := nt.(types.Never); !never {
+			env.keepNative(key, nt)
+		}
 	}
 }
 
-// nativeVar is the PHP type recorded for a variable expression, nil for
-// anything else or for a certain variable.
+// narrowPathWith is narrowPath by a test that leaves f(t) of a type t,
+// at e's type: PHP's type of e is narrowed by the same test, as PHPStan
+// narrows the native type by the type a test specifies.
+func (x *fnCtx) narrowPathWith(env *state, e ast.Expr, at types.Type, f func(types.Type) types.Type, define bool) {
+	var nt types.Type
+	if native := x.nativeVar(e, env); native != nil {
+		nt = f(native)
+	}
+	x.narrowPathNative(env, e, f(at), nt, define)
+}
+
+// boundsOf is t with every type parameter read as its bound, mixed where
+// it has none: what a value of it may be.
+func boundsOf(t types.Type) types.Type {
+	return types.MapDeep(t, func(n types.Type) types.Type {
+		p, ok := n.(types.Param)
+		if !ok {
+			return n
+		}
+		if p.Bound == nil {
+			return types.TMixed
+		}
+		return boundsOf(p.Bound)
+	})
+}
+
+// onlyArrays reports a type every member of which is an array.
+func onlyArrays(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Array, types.Shape:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// hasTypeParam reports a type of which a type parameter is a member.
+func hasTypeParam(t types.Type) bool {
+	return slices.ContainsFunc(types.Members(t), func(m types.Type) bool {
+		_, ok := m.(types.Param)
+		return ok
+	})
+}
+
+// narrowPathByFlow is narrowPathWith for count() and array_key_exists(),
+// whose type PHPStan computes from the documented type of the value and
+// narrows the native type by: a PHP type that is mixed becomes what the
+// test leaves of the documented type, an inline @var's list<int> a
+// non-empty-list<int> where count() is above 0, while a value documented
+// as mixed stays mixed (count($m) === 0 leaves array{}|Countable to
+// PHPStan, an empty Countable being truthy).
+func (x *fnCtx) narrowPathByFlow(env *state, e ast.Expr, at types.Type, f func(types.Type) types.Type, define bool) {
+	flow := f(at)
+	var nt types.Type
+	if native := x.nativeVar(e, env); native != nil {
+		nt = types.Map(native, func(m types.Type) types.Type {
+			if _, ok := m.(types.Mixed); ok {
+				return flow
+			}
+			return f(m)
+		})
+	}
+	x.narrowPathNative(env, e, flow, nt, define)
+}
+
+// nativeVar is the PHP type recorded for a variable expression, or a
+// property's or an offset's (narrowedPathKey) where a docblock refines
+// it, nil for anything else or for a certain one.
 func (x *fnCtx) nativeVar(e ast.Expr, env *state) types.Type {
 	if v, ok := variableOf(e); ok {
 		if info, ok := env.get(v.Name); ok {
 			return info.native
 		}
+		return nil
+	}
+	if _, ok := x.narrowedPathKey(e); ok {
+		return x.nativeOf(e, env)
 	}
 	return nil
+}
+
+// narrowedPathKey is the key of a property, a static property or an
+// offset among the narrowed paths, whose PHP type a test narrows as it
+// narrows a variable's.
+func (x *fnCtx) narrowedPathKey(e ast.Expr) (string, bool) {
+	e = unparen(e)
+	switch e.(type) {
+	case *ast.PropertyFetch, *ast.StaticPropertyFetch, *ast.Index:
+		return x.pathKey(e)
+	}
+	return "", false
+}
+
+// markFound records on a way that a test of e's truthiness found its
+// value truthy (truth 1) or falsy (-1) there.
+func (x *fnCtx) markFound(env *state, e ast.Expr, truth int) {
+	if truth > 0 && !truthyNarrowable(x.nativeOr(e, x.pathType(e, env), env)) {
+		return
+	}
+	if v, ok := variableOf(e); ok {
+		if info, ok := env.vars[v.Name]; ok {
+			info.found, info.foundTruth = info.t, truth
+			env.vars[v.Name] = info
+		}
+		return
+	}
+	if key, ok := x.narrowedPathKey(e); ok {
+		if t, ok := env.getPath(key); ok {
+			env.setPath(foundPathKey(key, truth), t)
+		}
+	}
+}
+
+// truthyNarrowable reports a PHP type a test of truthiness leaves truthy
+// to PHPStan, which narrows the native type by it: mixed to mixed~falsy, a
+// string to a non-falsy string, the rest without its falsy values. A
+// float and an iterable are not, to it: PHPStan takes neither 0.0 from a
+// float nor the empty array from an iterable, so a repeated test of one
+// stays open.
+func truthyNarrowable(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Float, types.FloatLit, types.Iterable, types.Param:
+			return false
+		}
+	}
+	return true
+}
+
+// foundBefore is what a test of truthiness found of a variable or a path
+// on this way, 1 truthy, -1 falsy, where the value has not changed since;
+// 0 where no test found anything.
+func (x *fnCtx) foundBefore(e ast.Expr, env *state) int {
+	if v, ok := variableOf(e); ok {
+		if info, ok := env.get(v.Name); ok && info.found != nil && types.Equal(info.found, info.t) {
+			return info.foundTruth
+		}
+		return 0
+	}
+	if key, ok := x.narrowedPathKey(e); ok {
+		t, has := env.getPath(key)
+		for _, truth := range []int{1, -1} {
+			if found, ok := env.getPath(foundPathKey(key, truth)); ok && has && types.Equal(found, t) {
+				return truth
+			}
+		}
+	}
+	return 0
 }
 
 func variableOf(e ast.Expr) (*ast.Variable, bool) {
@@ -430,7 +642,7 @@ func (x *fnCtx) issetChain(env *state, e ast.Expr) {
 		case *ast.PropertyFetch:
 			e = n.Object
 			if t := x.pathType(e, env); !types.IsMixed(t) {
-				x.narrowPath(env, e, types.StripNull(t), false)
+				x.narrowPathWith(env, e, t, types.StripNull, false)
 			}
 		default:
 			return
@@ -518,7 +730,13 @@ func (x *fnCtx) forgetOffset(t *ast.Index, env *state) {
 func (x *fnCtx) replaceOffset(env *state, e ast.Expr, vt types.Type) {
 	idx, ok := unparen(e).(*ast.Index)
 	if !ok {
+		// A property that was certain holds what replaced its value, to
+		// PHP as well (keepWritten).
+		certain := x.certainPath(e, x.pathType(e, env), env)
 		x.narrowPath(env, e, vt, false)
+		if key, ok := x.narrowedPathKey(e); ok && certain {
+			env.keepNative(key, vt)
+		}
 		return
 	}
 	if key, ok := x.pathKey(idx); ok {
@@ -961,10 +1179,10 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 		at := x.pathType(c.arg, env)
 		switch {
 		case c.n == 0:
-			x.narrowPath(then, c.arg, emptyArray(at), false)
-			x.narrowPath(els, c.arg, nonEmptyArray(at), false)
+			x.narrowPathByFlow(then, c.arg, at, emptyArray, false)
+			x.narrowPathWith(els, c.arg, at, nonEmptyArray, false)
 		case c.n > 0:
-			x.narrowPath(then, c.arg, countAtLeast(nonEmptyArray(at), c.n), false)
+			x.narrowPathByFlow(then, c.arg, at, func(t types.Type) types.Type { return countAtLeast(nonEmptyArray(t), c.n) }, false)
 		}
 		if negate {
 			return els, then
@@ -997,22 +1215,33 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 			// branch intersects, the else branch learns nothing — $x may
 			// still be any one value $y is not.
 			if strict {
-				x.narrowPath(then, target, types.Intersect(targetT, other, x.p()), true)
+				x.narrowPathWith(then, target, targetT, func(t types.Type) types.Type { return types.Intersect(t, other, x.p()) }, true)
 			}
 			return
 		}
 		if strict || isNullType(other) {
-			var nthen, nels types.Type
-			if nold := x.nativeVar(target, env); nold != nil {
-				nthen, nels = types.Intersect(nold, other, x.p()), x.subtract(nold, other, x.p())
+			// Where the test holds, PHP's type is narrowed to the value.
+			// Where it fails, PHPStan takes the value from the native type
+			// only where the docblock's type may hold it: `$a !== 0` of a
+			// documented int<1, max> leaves PHP's int as it was.
+			x.narrowPathWith(then, target, targetT, func(t types.Type) types.Type { return types.Intersect(t, other, x.p()) }, true)
+			if types.IsSubtype(other, boundsOf(targetT), x.p()) {
+				x.narrowPathWith(els, target, targetT, func(t types.Type) types.Type { return x.subtract(t, other, x.p()) }, false)
+			} else {
+				x.narrowPath(els, target, x.subtract(targetT, other, x.p()), false)
 			}
-			x.narrowPathNative(then, target, types.Intersect(targetT, other, x.p()), nthen, true)
-			x.narrowPathNative(els, target, x.subtract(targetT, other, x.p()), nels, false)
 			x.excluded(els, target, other)
 			if !strict {
-				// == null is truthiness-like.
-				x.narrowPath(then, target, types.Falsy(targetT), true)
-				x.narrowPath(els, target, types.Truthy(targetT), false)
+				// == null is truthiness-like, to PHP's type too; of a value
+				// of a type parameter, PHPStan takes the falsy values from
+				// its native type where it does not hold, not the truthy
+				// ones where it holds.
+				x.narrowPathWith(then, target, targetT, types.Falsy, true)
+				if hasTypeParam(targetT) {
+					x.narrowPath(els, target, types.Truthy(targetT), false)
+				} else {
+					x.narrowPathWith(els, target, targetT, types.Truthy, false)
+				}
 			}
 		}
 	}
@@ -1041,14 +1270,37 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 		}
 		if t, ok := gettypeNames[lit.V]; ok {
 			at := x.pathType(arg, env)
-			x.narrowPath(then, arg, types.Intersect(at, t, x.p()), true)
-			x.narrowPath(els, arg, x.subtract(at, t, x.p()), false)
+			x.narrowPathWith(then, arg, at, func(m types.Type) types.Type { return types.Intersect(m, t, x.p()) }, true)
+			x.narrowPathWith(els, arg, at, func(m types.Type) types.Type { return x.subtract(m, t, x.p()) }, false)
 		}
 	}
-	// `$x === []` / `$x !== []`
-	if isEmptyArrayLit(e.Right) {
-		x.narrowPath(then, e.Left, emptyArray(lt), false)
-		x.narrowPath(els, e.Left, nonEmptyArray(lt), false)
+	// `$x === []` / `$x !== []`, the empty array on either side. A value
+	// loosely unlike the empty array is truthy to PHPStan, which decides a
+	// test of its truthiness there, whatever its PHP type.
+	for _, side := range []struct {
+		target ast.Expr
+		t      types.Type
+		other  ast.Expr
+	}{{e.Left, lt, e.Right}, {e.Right, rt, e.Left}} {
+		if !isEmptyArrayLit(side.other) {
+			continue
+		}
+		native := x.nativeOr(side.target, side.t, env)
+		x.narrowPathWith(then, side.target, side.t, emptyArray, false)
+		if !types.IsSubtype(types.Shape{}, boundsOf(side.t), x.p()) {
+			// A value that cannot be the empty array: PHPStan takes
+			// nothing from PHP's type where the test fails.
+			x.narrowPath(els, side.target, nonEmptyArray(side.t), false)
+			break
+		}
+		x.narrowPathWith(els, side.target, side.t, nonEmptyArray, false)
+		// Loosely unlike the empty array is truthy of an array; 0, 0.0, ''
+		// and '0' are unlike it too in PHP 8, and PHPStan decides nothing
+		// of a type with null or false beside the arrays either.
+		if !strict && onlyArrays(side.t) && onlyArrays(native) {
+			x.markFound(els, side.target, 1)
+		}
+		break
 	}
 	if negate {
 		return els, then
@@ -1364,9 +1616,9 @@ func (x *fnCtx) countNarrow(env *state, c countComparison, op token.Kind, at typ
 	switch {
 	case lo > hi:
 	case hi == 0:
-		x.narrowPath(env, c.arg, emptyArray(at), false)
+		x.narrowPathWith(env, c.arg, at, emptyArray, false)
 	case lo >= 1:
-		x.narrowPath(env, c.arg, countAtLeast(nonEmptyArray(at), lo), false)
+		x.narrowPathByFlow(env, c.arg, at, func(t types.Type) types.Type { return countAtLeast(nonEmptyArray(t), lo) }, false)
 	}
 }
 
@@ -1460,25 +1712,56 @@ func (x *fnCtx) rangeNarrow(env *state, target ast.Expr, t, bound types.Type, op
 	if !ok {
 		return
 	}
-	var lo, hi int64 = math.MinInt64, math.MaxInt64
+	lo, hi, ok := orderingBounds(op, b)
+	if !ok {
+		return
+	}
+	out, narrowed := clipInts(t, lo, hi)
+	// The PHP type of a variable a docblock refines is narrowed by the
+	// comparison too, as PHPStan narrows the native type, by the bound as
+	// typed: `@param int<0, max> $a` over `int $a`, `$a > 0` makes PHP's
+	// int an int<1, max>; so is the int behind a type parameter, which
+	// the comparison leaves as it is.
+	if native := x.nativeVar(target, env); native != nil {
+		clipped, nativeNarrowed := clipInts(native, lo, hi)
+		if narrowed || nativeNarrowed {
+			x.narrowPathNative(env, target, out, clipped, false)
+		}
+		return
+	}
+	if narrowed {
+		x.narrowPath(env, target, out, false)
+	}
+}
+
+// orderingBounds is what `$x op b` says of $x, the bounds of an int range;
+// false for an operator that says nothing so.
+func orderingBounds(op token.Kind, b types.Int) (lo, hi int64, ok bool) {
+	lo, hi = math.MinInt64, math.MaxInt64
 	switch op {
 	case token.Kind('<'):
 		if b.Hi == math.MinInt64 {
-			return
+			return 0, 0, false
 		}
 		hi = b.Hi - 1
 	case token.T_IS_SMALLER_OR_EQUAL:
 		hi = b.Hi
 	case token.Kind('>'):
 		if b.Lo == math.MaxInt64 {
-			return
+			return 0, 0, false
 		}
 		lo = b.Lo + 1
 	case token.T_IS_GREATER_OR_EQUAL:
 		lo = b.Lo
 	default:
-		return
+		return 0, 0, false
 	}
+	return lo, hi, true
+}
+
+// clipInts is t with its integers within [lo, hi], never where none is,
+// and whether anything changed.
+func clipInts(t types.Type, lo, hi int64) (types.Type, bool) {
 	var out []types.Type
 	narrowed := false
 	for _, m := range types.Members(t) {
@@ -1495,14 +1778,10 @@ func (x *fnCtx) rangeNarrow(env *state, target ast.Expr, t, bound types.Type, op
 		narrowed = narrowed || i != m
 		out = append(out, i)
 	}
-	if !narrowed {
-		return
-	}
 	if len(out) == 0 {
-		x.narrowPath(env, target, types.Never{}, false)
-		return
+		return types.Never{}, narrowed
 	}
-	x.narrowPath(env, target, types.MakeUnion(out...), false)
+	return types.MakeUnion(out...), narrowed
 }
 
 // flipOrdering turns `N < $x` into `$x > N`: the comparison seen from the
@@ -1708,10 +1987,12 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 				allowString = !ok || lit != "false"
 			}
 			if allowString {
-				x.narrowPath(then, arg, types.Intersect(at, types.MakeUnion(cls, types.ClassString{Of: cls}), x.p()), true)
+				x.narrowPathWith(then, arg, at, func(t types.Type) types.Type {
+					return types.Intersect(t, types.MakeUnion(cls, types.ClassString{Of: cls}), x.p())
+				}, true)
 			} else {
-				x.narrowPath(then, arg, types.Intersect(at, cls, x.p()), true)
-				x.narrowPath(els, arg, x.subtract(at, cls, x.p()), false)
+				x.narrowPathWith(then, arg, at, func(t types.Type) types.Type { return types.Intersect(t, cls, x.p()) }, true)
+				x.narrowPathWith(els, arg, at, func(t types.Type) types.Type { return x.subtract(t, cls, x.p()) }, false)
 			}
 			return then, els, true
 		case "mb_check_encoding":
@@ -1747,8 +2028,8 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 			keyT := x.pathType(arg, env)
 			arrExpr := e.Args.Args[1].Value
 			at := x.pathType(arrExpr, env)
-			x.narrowPath(then, arrExpr, withKey(at, keyT, true), false)
-			x.narrowPath(els, arrExpr, withKey(at, keyT, false), false)
+			x.narrowPathByFlow(then, arrExpr, at, func(t types.Type) types.Type { return withKey(t, keyT, true) }, false)
+			x.narrowPathByFlow(els, arrExpr, at, func(t types.Type) types.Type { return withKey(t, keyT, false) }, false)
 			// `$r[$k]` is there where it holds, as isset($r[$k]) says,
 			// whichever literal $k is, with the value of an entry it names.
 			offset := &ast.Index{S: e.S, Array: arrExpr, Index: arg}
@@ -1768,11 +2049,19 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 			at := x.pathType(arg, env)
 			hay := x.pathType(e.Args.Args[1].Value, env)
 			_, v, _ := types.IterableKV(hay, x.p())
+			// PHP's type of a variable a docblock refines is narrowed by the
+			// haystack too, as PHPStan narrows the native type.
+			native := x.nativeVar(arg, env)
 			if isLiteralLike(v) {
-				x.narrowPath(then, arg, types.Intersect(at, v, x.p()), true)
-				x.narrowPath(els, arg, x.subtract(at, v, x.p()), false)
+				if native != nil {
+					x.narrowPathNative(then, arg, types.Intersect(at, v, x.p()), types.Intersect(native, v, x.p()), true)
+					x.narrowPathNative(els, arg, x.subtract(at, v, x.p()), x.subtract(native, v, x.p()), false)
+				} else {
+					x.narrowPath(then, arg, types.Intersect(at, v, x.p()), true)
+					x.narrowPath(els, arg, x.subtract(at, v, x.p()), false)
+				}
 			} else {
-				x.narrowPath(then, arg, types.Intersect(at, v, x.p()), true)
+				x.narrowPathWith(then, arg, at, func(t types.Type) types.Type { return types.Intersect(t, v, x.p()) }, true)
 			}
 			return then, els, true
 		case "assert":

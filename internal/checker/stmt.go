@@ -253,12 +253,11 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 	}
 	x.bind(nil, assign.Target, declared, env, s.S)
 	if isVar {
-		// The variable holds what PHP guarantees of the value, which for a
-		// declaration PHP gives no type is nothing.
-		if g := x.guaranteedOf(assign.Value, env); g != nil {
-			native = g
-		}
-		env.setNative(v.Name, native)
+		// The variable holds what the tag says, and nothing PHP
+		// guarantees: PHPStan's native type of a variable an inline @var
+		// declares is mixed, so that `/** @var list<string> $errors */
+		// $errors = [];` leaves `if ($errors)` open.
+		env.setNative(v.Name, types.TMixed)
 	}
 }
 
@@ -553,8 +552,10 @@ func (x *fnCtx) writeExisting(target ast.Expr, vt types.Type, env *state, span a
 			return
 		}
 		before := rewrittenOf(t.Array, env)
+		nativeBefore := x.nativeVar(t.Array, env)
 		now := withExistingOffset(base, normaliseKey(x.pathType(t.Index, env)), vt)
 		x.writeExisting(t.Array, now, env, span)
+		x.keepOffsetWritten(env, t.Array, nativeBefore)
 		x.keepRewritten(t.Array, before, p, t.S, now, env)
 		// What was known of this array, an is_array() of `$a['k']` that
 		// a general array's type cannot hold, stays known of what is left
@@ -692,8 +693,12 @@ func (x *fnCtx) ifStmt(s *ast.If, env *state) {
 	ends := []*state{thenEnv}
 	cur := elseEnv
 	negatives := []libraryGuard{negative}
-	for _, ei := range s.ElseIfs {
+	for i, ei := range s.ElseIfs {
+		if i == len(s.ElseIfs)-1 && (s.Else == nil || onlyThrows(s.Else)) {
+			x.lastCond = 1
+		}
 		t, f := x.cond(ei.Cond, cur)
+		x.lastCond = 0
 		p, n := x.guardOf(ei.Cond)
 		pops := []func(){x.c.pushGuard(p)}
 		for _, g := range negatives {
@@ -719,6 +724,22 @@ func (x *fnCtx) ifStmt(s *ast.If, env *state) {
 	}
 	ends = append(ends, cur)
 	*env = *joinAll(ends...)
+}
+
+// onlyThrows reports an else whose one statement is a throw.
+func onlyThrows(s ast.Stmt) bool {
+	if b, ok := s.(*ast.Block); ok {
+		if len(b.Stmts) != 1 {
+			return false
+		}
+		s = b.Stmts[0]
+	}
+	e, ok := s.(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	_, ok = e.Expr.(*ast.Throw)
+	return ok
 }
 
 // deepJump is a `break N` / `continue N` on its way out: levels counts the
