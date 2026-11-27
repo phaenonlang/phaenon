@@ -1,0 +1,94 @@
+namespace NeverValues;
+
+// A test reported as always true leaves the other branch a value that
+// cannot be: never. The test is the finding (one mistake, one finding),
+// and what the branch that does not run does with the value draws none,
+// as PHPStan reports none: an offset read or written, a foreach, a
+// destructuring, a call, a clone, a property written, an unpacking. An
+// offset of it, a property and a call's result read as mixed, as PHPStan
+// reads them. A value that is never where no test was reported so, which
+// the checker's own reading may have made so, draws its findings.
+
+final class Item
+{
+    public int $count = 1;
+}
+
+/** @param list<int> $xs */
+function takesList(array $xs): void
+{
+}
+
+function takesInt(int $i): void
+{
+}
+
+function unreachable(Item $item, int $n): void
+{
+    if (!$item instanceof Item) { // want P2306
+        $item[1] = 2;
+        foreach ($item as $key => $value) {
+            takesInt($value);
+        }
+        [$first, $second] = $item;
+        takesInt($first);
+        $item();
+        $copy = clone $item;
+        $item->count = 2;
+        takesList([...$item]);
+        takesInt(...$item);
+        echo $item[0]; // want P2312 "mixed"
+        echo $item->count; // want P2312 "mixed"
+        $read = function () use ($item): void {
+            $item[0] = 1;
+        };
+        $clone = fn () => clone $item;
+    }
+    if (!is_int($n)) { // want P2402
+        echo $n[0]; // want P2312 "mixed"
+        foreach ($n as $value) {
+            echo $value;
+        }
+    }
+}
+
+// A reference kept in an array, which the checker does not follow: $value
+// reads as null, and the test below as one that never holds, though it is
+// not reported so. PHPStan, which follows it, reports the foreach over an
+// int, and the checker reports it too.
+function referenceInArray(?int $n): int
+{
+    $value = null;
+    $refs = [&$value];
+    $refs[0] = $n;
+    $count = 0;
+    if ($value !== null) {
+        foreach ($value as $item) { // want P2303
+            $count++;
+        }
+    }
+    return $count;
+}
+
+// Only the value the reported test made never is silenced: another test
+// of the condition, or a test in a closure within it, leaves the
+// reference's value its findings.
+/** @param list<Item> $items */
+function referenceBesideReportedTest(?int $n, int $m, array $items): void
+{
+    $value = null;
+    $refs = [&$value];
+    $refs[0] = $n;
+    if (is_int($m) && $value !== null) { // want P2402
+        foreach ($value as $item) { // want P2303
+        }
+    }
+    if (is_string($m) || $value === null) { // want P2402
+        echo 'none';
+    } else {
+        $first = $value[0]; // want P2302
+    }
+    if (array_filter($items, fn (Item $i): bool => $i instanceof Item) !== [] && $value !== null) { // want P2306
+        $first = $value[0]; // want P2302
+    }
+}

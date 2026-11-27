@@ -362,6 +362,12 @@ type state struct {
 	vars  map[string]varInfo
 	paths map[string]types.Type // "$this->x", "$a['k']" → narrowed type
 	dead  bool
+	// silenced holds the variables ("$item") and paths a test reported as
+	// always true or always false narrowed to never in this branch, which
+	// cannot run: there such a value draws no second finding
+	// (silencedNever). The set is shared between clones and never changed
+	// in place.
+	silenced map[string]bool
 	// inits are the properties of $this the body has certainly assigned on
 	// the way here (readonly.go): unlike a path, nothing a call does takes
 	// one away, and a meet keeps those assigned on every way in.
@@ -382,7 +388,7 @@ func newEnv() *state {
 }
 
 func (e *state) clone() *state {
-	n := &state{vars: make(map[string]varInfo, len(e.vars)), paths: make(map[string]types.Type, len(e.paths)), dead: e.dead}
+	n := &state{vars: make(map[string]varInfo, len(e.vars)), paths: make(map[string]types.Type, len(e.paths)), dead: e.dead, silenced: e.silenced}
 	for k, v := range e.vars {
 		n.vars[k] = v
 	}
@@ -420,6 +426,9 @@ func (e *state) set(name string, t types.Type) {
 
 func (e *state) setOne(name string, t types.Type) {
 	e.vars[name] = varInfo{t: t}
+	if !isNeverType(t) {
+		e.unsilence("$" + name) // a value again: a later never is another test's
+	}
 	e.invalidatePrefix("$" + name)
 	e.invalidateMentions(name)
 	e.dropConds(name)
@@ -664,6 +673,58 @@ func (e *state) invalidateMembers() {
 	})
 }
 
+// bothSilenced is what two ways into a meet both hold silenced.
+func bothSilenced(a, b map[string]bool) map[string]bool {
+	if len(a) == 0 || len(b) == 0 {
+		return nil
+	}
+	var n map[string]bool
+	for k := range a {
+		if b[k] {
+			if n == nil {
+				n = map[string]bool{}
+			}
+			n[k] = true
+		}
+	}
+	return n
+}
+
+// silence adds keys to the silenced values of e.
+func (e *state) silence(keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+	n := make(map[string]bool, len(e.silenced)+len(keys))
+	for k := range e.silenced {
+		n[k] = true
+	}
+	for _, k := range keys {
+		n[k] = true
+	}
+	e.silenced = n
+}
+
+// unsilence drops what a write of the variable or path key ends: the key
+// and the paths under it.
+func (e *state) unsilence(key string) {
+	var n map[string]bool
+	for k := range e.silenced {
+		if k == key || strings.HasPrefix(k, key) && len(k) > len(key) && strings.ContainsRune("-:[", rune(k[len(key)])) {
+			if n == nil {
+				n = make(map[string]bool, len(e.silenced))
+				for k := range e.silenced {
+					n[k] = true
+				}
+			}
+			delete(n, k)
+		}
+	}
+	if n != nil {
+		e.silenced = n
+	}
+}
+
 // join merges two environments at a control-flow meet.
 func join(a, b *state) *state {
 	if a.dead {
@@ -673,6 +734,7 @@ func join(a, b *state) *state {
 		return a.clone()
 	}
 	n := newEnv()
+	n.silenced = bothSilenced(a.silenced, b.silenced)
 	for k, va := range a.vars {
 		if vb, ok := b.vars[k]; ok {
 			n.vars[k] = varInfo{t: joinTypes(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds),

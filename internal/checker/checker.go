@@ -996,6 +996,9 @@ type fnCtx struct {
 	// the closure returns or ends: what array_walk() writes back with it
 	// (phpwrites.go).
 	refExits map[*ast.Closure]types.Type
+	// decided counts the tests reported as always true or always false,
+	// so that cond can mark the branch such a test leaves unreachable.
+	decided int
 	// neverEnvs collects, while trackNever is set, the state at every
 	// statement of type never in a closure whose first parameter is taken
 	// by reference: an exit PHPStan gathers for array_walk() as a return.
@@ -1136,7 +1139,50 @@ func selfArgs(c *program.Class) []types.Type {
 }
 
 func (x *fnCtx) report(span ast.Span, code Code, format string, args ...any) {
+	switch code {
+	case P2305, P2306, P2402:
+		x.decided++ // a test always true or always false (cond)
+	}
 	x.c.report(span, code, format, args...)
+}
+
+// silencedNever reports a value e, of type t, that cannot be, in a branch
+// a test reported as always true or always false made so of e
+// (state.silenced): the test is the finding there (one mistake, one
+// finding), and PHPStan reports nothing of what such a branch does with
+// the value. A value that is never where no test said so, which the
+// checker's own reading may have made so, draws its findings.
+func (x *fnCtx) silencedNever(e ast.Expr, t types.Type, env *state) bool {
+	return isNeverType(t) && x.silencedAt(e, env)
+}
+
+// silencedAt reports e a variable or a path silenced in env.
+func (x *fnCtx) silencedAt(e ast.Expr, env *state) bool {
+	if len(env.silenced) == 0 || e == nil {
+		return false
+	}
+	key, ok := x.pathKey(unparen(e))
+	return ok && env.silenced[key]
+}
+
+// decidedAt reports a finding of a test always true or always false
+// (P2305, P2306, P2402) at span of the current file, which the check
+// keeps.
+func (c *Checker) decidedAt(span ast.Span) bool {
+	line, col := c.file.Position(span.Start)
+	end := span.End
+	if end > span.Start {
+		end--
+	}
+	endLine, endCol := c.file.Position(end)
+	for i := len(c.diags) - 1; i >= 0; i-- {
+		d := &c.diags[i]
+		if d.Line == line && d.Col == col && d.EndLine == endLine && d.EndCol == endCol+1 && d.File == c.file.Path &&
+			(d.Code == P2305.ID || d.Code == P2306.ID || d.Code == P2402.ID) {
+			return true
+		}
+	}
+	return false
 }
 
 func (x *fnCtx) p() *program.Program { return x.c.p }
