@@ -1,0 +1,130 @@
+namespace ComparisonOfInferredRange;
+
+// An integer comparison is always true or always false only where PHP
+// guarantees the range, as PHPStan decides it with treatPhpDocTypesAsCertain
+// off: a declared type, the range PHPStan's function map gives one of PHP's
+// own functions (count() and strlen() are int<0, max>, abs() is
+// int<0, max>|float), and what a comparison narrows of those. A range the
+// checker infers from the arguments, as PHPStan's return type extensions
+// do (max(), min(), abs() of an int), or a function's @return, decides
+// nothing for PHP: the comparison is not reported, and the branch it would
+// rule out stays reachable. Plain PHP, so that PHPStan reads this file as
+// written.
+
+/** @return int<1, max> */
+function positive(): int
+{
+    return 1;
+}
+
+function fromMax(int $m): int
+{
+    $n = max(1, $m);
+    if ($n <= 0) { return 0; }
+    if ($n < 1) { return 1; }
+    if ($n > 5) {
+        if ($n < 3) { return 3; }
+    }
+    return $n > 0 ? $n : -1;
+}
+
+function identicalFromMax(int $m): bool
+{
+    $n = max(1, $m);
+    return $n === 0;
+}
+
+function fromMin(int $m): int
+{
+    $k = min(-1, $m);
+    if ($k >= 0) { return 0; }
+    return $k;
+}
+
+function fromAbs(int $m): bool
+{
+    if (abs($m) < 0) { return false; }
+    return abs($m) === -1; // want P2305 "strict comparison between int<0, max> and -1 is always false"
+}
+
+function fromDocblock(): int
+{
+    $p = positive();
+    if ($p <= 0) { return 0; }
+    return $p;
+}
+
+function fromIntdiv(): bool
+{
+    return intdiv(10, 2) === 6;
+}
+
+/** @param list<int> $xs */
+function fromCount(array $xs, string $s): int
+{
+    $c = count($xs);
+    if ($c < 0) { return 0; } // want P2402 "comparison between int<0, max> and 0 is always false", P2401
+    if (count($xs) < 0) { return 1; } // want P2402 "always false", P2401
+    if (strlen($s) < 0) { return 2; } // want P2402 "always false", P2401
+    if ($c > 5) {
+        if ($c < 3) { return 3; } // want P2402 "comparison between int<6, max> and 3 is always false", P2401
+    }
+    if (count($xs) === -1) { return 4; } // want P2305 "always false"
+    return count($xs) > -1 ? 5 : 6; // want P2402 "always true"
+}
+
+/**
+ * A first-class callable of PHP's function is a Closure to PHP, whatever
+ * the function returns.
+ */
+function callables(): void
+{
+    $lower = strtolower(...);
+    if (is_string($lower)) { // want P2402 "is always false"
+        echo 'never';
+    }
+    $trim = trim(...);
+    if ($trim instanceof \Closure) { // want P2306 "is always an instance of Closure"
+        echo 'always';
+    }
+}
+
+/**
+ * A @var tag is held to the range PHP guarantees, as to the type: count()
+ * is int<0, max>, abs() int<0, max>|float. A range the checker infers, of
+ * a ternary, a match or an offset PHP gives no type, a docblock's range
+ * among them, is no guarantee the tag is held to, nor is a single
+ * integer.
+ *
+ * @param list<int> $xs
+ * @param positive-int $limit
+ */
+function tagged(array $xs, int $a, int $b, int $limit, bool $all, string $k): int
+{
+    /** @var int|float $diff */
+    $diff = abs($a - $b); // want P2212 "@var int|float is not a subtype of the assigned int<0, max>|float"
+    /** @var int $c */
+    $c = count($xs); // want P2212 "@var int is not a subtype of the assigned int<0, max>"
+    $five = 5;
+    /** @var int $f */
+    $f = $five;
+    /** @var int $size */
+    $size = $all ? 50 : $limit;
+    /** @var int $code */
+    $code = match ($k) {
+        'a' => $limit,
+        default => 1,
+    };
+    /** @var int $first */
+    $first = [max(1, $a), 5][0];
+    return (int) $diff + $c + $f + $size + $code + $first;
+}
+
+/**
+ * get_class() is a class-string, never empty, as PHPStan's function map
+ * has it.
+ */
+function className(\stdClass $o): bool
+{
+    return get_class($o) === ''; // want P2305 "always false"
+}

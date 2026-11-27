@@ -23,3 +23,10 @@ function enum_exists(string $enum, bool $autoload = true): bool {}
  * @phpstan-assert-if-true class-string $trait
  */
 function trait_exists(string $trait, bool $autoload = true): bool {}
+
+/**
+ * A class's name, never empty, as PHPStan's function map has it.
+ *
+ * @return class-string
+ */
+function get_class(object $object = UNKNOWN): string {}
