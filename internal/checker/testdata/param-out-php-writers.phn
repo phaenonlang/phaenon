@@ -1,0 +1,1751 @@
+namespace ParamOutPhpWriters;
+
+// A function of PHP's own that writes an argument it takes by reference
+// leaves there what PHPStan types it as: the @param-out of its stubs or of
+// its extension, mixed where it has neither (stdlib/overlay/writes.php). A
+// caller reads that type afterwards, and a parameter documented @param-out
+// passed there is held to its tag at the call (phpwrites.go). A parameter
+// PHPStan's map says the function reads is not written, but where PHPStan
+// writes it back all the same: a sort, shuffle(), array_splice(), and
+// array_walk() with a closure that takes the value by reference.
+
+function takesStd(\stdClass $o): void
+{
+}
+
+// ---- each function that writes: what the caller reads; a parameter whose
+// tag the write does not fit ($held) and one whose tag it does ($kept)
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterFtpAlloc(\FTP\Connection $ftp, int $size, mixed &$held, mixed &$kept): void
+{
+    $r = \ftp_alloc($ftp, $size, $response);
+    takesStd($response); // want P2103 "mixed given"
+    $r = \ftp_alloc($ftp, $size, $held); // want P2213 "writes mixed"
+    $r = \ftp_alloc($ftp, $size, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out array<\Socket>|null $kept
+ */
+function afterSocketSelect(\Socket $socket, ?int $seconds, mixed &$held, mixed &$kept): void
+{
+    $read = [$socket];
+    $write = null;
+    $except = [];
+    $r = \socket_select($read, $write, $except, $seconds);
+    takesStd($read); // want P2103 "array<Socket> given"
+    takesStd($write); // want P2103 "null given"
+    takesStd($except); // want P2103 "array<Socket> given"
+    $r = \socket_select($held, $write, $except, $seconds); // want P2213 "writes array<Socket>|null"
+    $r = \socket_select($kept, $write, $except, $seconds);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterSocketGetsockname(\Socket $socket, mixed &$held, mixed &$kept): void
+{
+    $r = \socket_getsockname($socket, $address, $port);
+    takesStd($address); // want P2103 "mixed given"
+    takesStd($port); // want P2103 "mixed given"
+    $r = \socket_getsockname($socket, $held, $port); // want P2213 "writes mixed"
+    $r = \socket_getsockname($socket, $kept, $port);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterSocketGetpeername(\Socket $socket, mixed &$held, mixed &$kept): void
+{
+    $r = \socket_getpeername($socket, $address, $port);
+    takesStd($address); // want P2103 "mixed given"
+    takesStd($port); // want P2103 "mixed given"
+    $r = \socket_getpeername($socket, $held, $port); // want P2213 "writes mixed"
+    $r = \socket_getpeername($socket, $kept, $port);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterSocketRecv(\Socket $socket, int $length, int $flags, mixed &$held, mixed &$kept): void
+{
+    $r = \socket_recv($socket, $data, $length, $flags);
+    takesStd($data); // want P2103 "mixed given"
+    $r = \socket_recv($socket, $held, $length, $flags); // want P2213 "writes mixed"
+    $r = \socket_recv($socket, $kept, $length, $flags);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterSocketRecvfrom(\Socket $socket, int $length, int $flags, mixed &$held, mixed &$kept): void
+{
+    $r = \socket_recvfrom($socket, $data, $length, $flags, $address, $port);
+    takesStd($data); // want P2103 "mixed given"
+    takesStd($address); // want P2103 "mixed given"
+    takesStd($port); // want P2103 "mixed given"
+    $r = \socket_recvfrom($socket, $held, $length, $flags, $address, $port); // want P2213 "writes mixed"
+    $r = \socket_recvfrom($socket, $kept, $length, $flags, $address, $port);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterSocketCreatePair(int $domain, int $type, int $protocol, mixed &$held, mixed &$kept): void
+{
+    $r = \socket_create_pair($domain, $type, $protocol, $pair);
+    takesStd($pair); // want P2103 "mixed given"
+    $r = \socket_create_pair($domain, $type, $protocol, $held); // want P2213 "writes mixed"
+    $r = \socket_create_pair($domain, $type, $protocol, $kept);
+}
+
+/**
+ * @param string|int|float|bool $message
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterMsgSend(\SysvMessageQueue $queue, int $message_type, $message, bool $serialize, bool $blocking, mixed &$held, mixed &$kept): void
+{
+    $r = \msg_send($queue, $message_type, $message, $serialize, $blocking, $error_code);
+    takesStd($error_code); // want P2103 "mixed given"
+    $r = \msg_send($queue, $message_type, $message, $serialize, $blocking, $held); // want P2213 "writes mixed"
+    $r = \msg_send($queue, $message_type, $message, $serialize, $blocking, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterMsgReceive(\SysvMessageQueue $queue, int $desired_message_type, int $max_message_size, bool $unserialize, int $flags, mixed &$held, mixed &$kept): void
+{
+    $r = \msg_receive($queue, $desired_message_type, $received_message_type, $max_message_size, $message, $unserialize, $flags, $error_code);
+    takesStd($received_message_type); // want P2103 "mixed given"
+    takesStd($message); // want P2103 "mixed given"
+    takesStd($error_code); // want P2103 "mixed given"
+    $r = \msg_receive($queue, $desired_message_type, $held, $max_message_size, $message, $unserialize, $flags, $error_code); // want P2213 "writes mixed"
+    $r = \msg_receive($queue, $desired_message_type, $kept, $max_message_size, $message, $unserialize, $flags, $error_code);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterNumfmtParseCurrency(\NumberFormatter $formatter, string $string, mixed &$held, mixed &$kept): void
+{
+    $r = \numfmt_parse_currency($formatter, $string, $currency);
+    takesStd($currency); // want P2103 "mixed given"
+    $r = \numfmt_parse_currency($formatter, $string, $held); // want P2213 "writes mixed"
+    $r = \numfmt_parse_currency($formatter, $string, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterGraphemeExtract(string $haystack, int $size, int $type, int $offset, mixed &$held, mixed &$kept): void
+{
+    $r = \grapheme_extract($haystack, $size, $type, $offset, $next);
+    takesStd($next); // want P2103 "mixed given"
+    $r = \grapheme_extract($haystack, $size, $type, $offset, $held); // want P2213 "writes mixed"
+    $r = \grapheme_extract($haystack, $size, $type, $offset, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterIdnToAscii(string $domain, int $flags, int $variant, mixed &$held, mixed &$kept): void
+{
+    $r = \idn_to_ascii($domain, $flags, $variant, $idna_info);
+    takesStd($idna_info); // want P2103 "mixed given"
+    $r = \idn_to_ascii($domain, $flags, $variant, $held); // want P2213 "writes mixed"
+    $r = \idn_to_ascii($domain, $flags, $variant, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterIdnToUtf8(string $domain, int $flags, int $variant, mixed &$held, mixed &$kept): void
+{
+    $r = \idn_to_utf8($domain, $flags, $variant, $idna_info);
+    takesStd($idna_info); // want P2103 "mixed given"
+    $r = \idn_to_utf8($domain, $flags, $variant, $held); // want P2213 "writes mixed"
+    $r = \idn_to_utf8($domain, $flags, $variant, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterIntltzGetCanonicalId(string $timezoneId, mixed &$held, mixed &$kept): void
+{
+    $r = \intltz_get_canonical_id($timezoneId, $isSystemId);
+    takesStd($isSystemId); // want P2103 "mixed given"
+    $r = \intltz_get_canonical_id($timezoneId, $held); // want P2213 "writes mixed"
+    $r = \intltz_get_canonical_id($timezoneId, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterIntltzGetOffset(\IntlTimeZone $timezone, float $timestamp, bool $local, mixed &$held, mixed &$kept): void
+{
+    $r = \intltz_get_offset($timezone, $timestamp, $local, $rawOffset, $dstOffset);
+    takesStd($rawOffset); // want P2103 "mixed given"
+    takesStd($dstOffset); // want P2103 "mixed given"
+    $r = \intltz_get_offset($timezone, $timestamp, $local, $held, $dstOffset); // want P2213 "writes mixed"
+    $r = \intltz_get_offset($timezone, $timestamp, $local, $kept, $dstOffset);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterLdapGetOption(?\LDAP\Connection $ldap, int $option, mixed &$held, mixed &$kept): void
+{
+    $r = \ldap_get_option($ldap, $option, $value);
+    takesStd($value); // want P2103 "mixed given"
+    $r = \ldap_get_option($ldap, $option, $held); // want P2213 "writes mixed"
+    $r = \ldap_get_option($ldap, $option, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterLdapParseResult(\LDAP\Connection $ldap, \LDAP\Result $result, mixed &$held, mixed &$kept): void
+{
+    $r = \ldap_parse_result($ldap, $result, $error_code, $matched_dn, $error_message, $referrals, $controls);
+    takesStd($error_code); // want P2103 "mixed given"
+    takesStd($matched_dn); // want P2103 "mixed given"
+    takesStd($error_message); // want P2103 "mixed given"
+    takesStd($referrals); // want P2103 "mixed given"
+    takesStd($controls); // want P2103 "mixed given"
+    $r = \ldap_parse_result($ldap, $result, $held, $matched_dn, $error_message, $referrals, $controls); // want P2213 "writes mixed"
+    $r = \ldap_parse_result($ldap, $result, $kept, $matched_dn, $error_message, $referrals, $controls);
+}
+
+/**
+ * @param list<array<string, mixed>>|null $controls
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterLdapExop(\LDAP\Connection $ldap, string $request_oid, ?string $request_data, ?array $controls, mixed &$held, mixed &$kept): void
+{
+    $r = \ldap_exop($ldap, $request_oid, $request_data, $controls, $response_data, $response_oid);
+    takesStd($response_data); // want P2103 "mixed given"
+    takesStd($response_oid); // want P2103 "mixed given"
+    $r = \ldap_exop($ldap, $request_oid, $request_data, $controls, $held, $response_oid); // want P2213 "writes mixed"
+    $r = \ldap_exop($ldap, $request_oid, $request_data, $controls, $kept, $response_oid);
+}
+
+/**
+ * @param list<array<string, mixed>>|null $controls
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterLdapExopSync(\LDAP\Connection $ldap, string $request_oid, ?string $request_data, ?array $controls, mixed &$held, mixed &$kept): void
+{
+    $r = \ldap_exop_sync($ldap, $request_oid, $request_data, $controls, $response_data, $response_oid);
+    takesStd($response_data); // want P2103 "mixed given"
+    takesStd($response_oid); // want P2103 "mixed given"
+    $r = \ldap_exop_sync($ldap, $request_oid, $request_data, $controls, $held, $response_oid); // want P2213 "writes mixed"
+    $r = \ldap_exop_sync($ldap, $request_oid, $request_data, $controls, $kept, $response_oid);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterLdapParseExop(\LDAP\Connection $ldap, \LDAP\Result $result, mixed &$held, mixed &$kept): void
+{
+    $r = \ldap_parse_exop($ldap, $result, $response_data, $response_oid);
+    takesStd($response_data); // want P2103 "mixed given"
+    takesStd($response_oid); // want P2103 "mixed given"
+    $r = \ldap_parse_exop($ldap, $result, $held, $response_oid); // want P2213 "writes mixed"
+    $r = \ldap_parse_exop($ldap, $result, $kept, $response_oid);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterXmlParseIntoStruct(\XMLParser $parser, string $data, mixed &$held, mixed &$kept): void
+{
+    $r = \xml_parse_into_struct($parser, $data, $values, $index);
+    takesStd($values); // want P2103 "mixed given"
+    takesStd($index); // want P2103 "mixed given"
+    $r = \xml_parse_into_struct($parser, $data, $held, $index); // want P2213 "writes mixed"
+    $r = \xml_parse_into_struct($parser, $data, $kept, $index);
+}
+
+/**
+ * @param list<string> $long_options
+ * @param-out \stdClass $held
+ * @param-out positive-int $kept
+ */
+function afterGetopt(string $short_options, array $long_options, mixed &$held, mixed &$kept): void
+{
+    $r = \getopt($short_options, $long_options, $rest_index);
+    takesStd($rest_index); // want P2103 "int<1, max> given"
+    $r = \getopt($short_options, $long_options, $held); // want P2213 "writes int<1, max>"
+    $r = \getopt($short_options, $long_options, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterDnsGetRecord(string $hostname, int $type, mixed &$held, mixed &$kept): void
+{
+    $r = \dns_get_record($hostname, $type, $authoritative_name_servers, $additional_records);
+    takesStd($authoritative_name_servers); // want P2103 "mixed given"
+    takesStd($additional_records); // want P2103 "mixed given"
+    $r = \dns_get_record($hostname, $type, $held, $additional_records); // want P2213 "writes mixed"
+    $r = \dns_get_record($hostname, $type, $kept, $additional_records);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterDnsGetMx(string $hostname, mixed &$held, mixed &$kept): void
+{
+    $r = \dns_get_mx($hostname, $hosts, $weights);
+    takesStd($hosts); // want P2103 "mixed given"
+    takesStd($weights); // want P2103 "mixed given"
+    $r = \dns_get_mx($hostname, $held, $weights); // want P2213 "writes mixed"
+    $r = \dns_get_mx($hostname, $kept, $weights);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out list<string> $kept
+ */
+function afterGetmxrr(string $hostname, mixed &$held, mixed &$kept): void
+{
+    $r = \getmxrr($hostname, $hosts, $weights);
+    takesStd($hosts); // want P2103 "list<string> given"
+    takesStd($weights); // want P2103 "list<int> given"
+    $r = \getmxrr($hostname, $held, $weights); // want P2213 "writes list<string>"
+    $r = \getmxrr($hostname, $kept, $weights);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out string $kept
+ */
+function afterHeadersSent(mixed &$held, mixed &$kept): void
+{
+    $r = \headers_sent($filename, $line);
+    takesStd($filename); // want P2103 "string given"
+    takesStd($line); // want P2103 "int given"
+    $r = \headers_sent($held, $line); // want P2213 "writes string"
+    $r = \headers_sent($kept, $line);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out float $kept
+ */
+function afterSimilarText(string $string1, string $string2, mixed &$held, mixed &$kept): void
+{
+    $r = \similar_text($string1, $string2, $percent);
+    takesStd($percent); // want P2103 "float given"
+    $r = \similar_text($string1, $string2, $held); // want P2213 "writes float"
+    $r = \similar_text($string1, $string2, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out array<int|string, array<mixed>|string> $kept
+ */
+function afterParseStr(string $string, mixed &$held, mixed &$kept): void
+{
+    \parse_str($string, $result);
+    takesStd($result); // want P2103 "array<string|array> given"
+    \parse_str('a=b', $lower);
+    takesStd($lower); // want P2103 "array<lowercase-string|array> given"
+    \parse_str($string, $held); // want P2213 "writes array<string|array>"
+    \parse_str($string, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out int $kept
+ */
+function afterSystem(string $command, mixed &$held, mixed &$kept): void
+{
+    $r = \system($command, $result_code);
+    takesStd($result_code); // want P2103 "int given"
+    $r = \system($command, $held); // want P2213 "writes int"
+    $r = \system($command, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out int $kept
+ */
+function afterPassthru(string $command, mixed &$held, mixed &$kept): void
+{
+    $r = \passthru($command, $result_code);
+    takesStd($result_code); // want P2103 "int given"
+    $r = \passthru($command, $held); // want P2213 "writes int"
+    $r = \passthru($command, $kept);
+}
+
+/**
+ * @param resource $stream
+ * @param-out \stdClass $held
+ * @param-out 0|1 $kept
+ */
+function afterFlock($stream, mixed &$held, mixed &$kept): void
+{
+    $r = \flock($stream, \LOCK_EX, $would_block);
+    takesStd($would_block); // want P2103 "int<0, 1> given"
+    $r = \flock($stream, \LOCK_EX, $held); // want P2213 "writes int<0, 1>"
+    $r = \flock($stream, \LOCK_EX, $kept);
+}
+
+/**
+ * @param resource $stream
+ * @param-out \stdClass $held
+ * @param-out string|int|float|null $kept
+ */
+function afterFscanf($stream, string $format, mixed &$held, mixed &$kept): void
+{
+    $r = \fscanf($stream, $format, $vars);
+    takesStd($vars); // want P2103 "int|float|string|null given"
+    $r = \fscanf($stream, $format, $held); // want P2213 "writes int|float|string|null"
+    $r = \fscanf($stream, $format, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out int $kept
+ */
+function afterFsockopen(string $hostname, int $port, mixed &$held, mixed &$kept): void
+{
+    $r = \fsockopen($hostname, $port, $error_code, $error_message);
+    takesStd($error_code); // want P2103 "int given"
+    takesStd($error_message); // want P2103 "string given"
+    $r = \fsockopen($hostname, $port, $held, $error_message); // want P2213 "writes int"
+    $r = \fsockopen($hostname, $port, $kept, $error_message);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterPfsockopen(string $hostname, int $port, mixed &$held, mixed &$kept): void
+{
+    $r = \pfsockopen($hostname, $port, $error_code, $error_message);
+    takesStd($error_code); // want P2103 "mixed given"
+    takesStd($error_message); // want P2103 "mixed given"
+    $r = \pfsockopen($hostname, $port, $held, $error_message); // want P2213 "writes mixed"
+    $r = \pfsockopen($hostname, $port, $kept, $error_message);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterGetimagesize(string $filename, mixed &$held, mixed &$kept): void
+{
+    $r = \getimagesize($filename, $image_info);
+    takesStd($image_info); // want P2103 "mixed given"
+    $r = \getimagesize($filename, $held); // want P2213 "writes mixed"
+    $r = \getimagesize($filename, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterGetimagesizefromstring(string $string, mixed &$held, mixed &$kept): void
+{
+    $r = \getimagesizefromstring($string, $image_info);
+    takesStd($image_info); // want P2103 "mixed given"
+    $r = \getimagesizefromstring($string, $held); // want P2213 "writes mixed"
+    $r = \getimagesizefromstring($string, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out int|null $kept
+ */
+function afterStreamSocketClient(string $address, mixed &$held, mixed &$kept): void
+{
+    $r = \stream_socket_client($address, $error_code, $error_message);
+    takesStd($error_code); // want P2103 "int|null given"
+    takesStd($error_message); // want P2103 "string|null given"
+    $r = \stream_socket_client($address, $held, $error_message); // want P2213 "writes int|null"
+    $r = \stream_socket_client($address, $kept, $error_message);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out int|null $kept
+ */
+function afterStreamSocketServer(string $address, mixed &$held, mixed &$kept): void
+{
+    $r = \stream_socket_server($address, $error_code, $error_message);
+    takesStd($error_code); // want P2103 "int|null given"
+    takesStd($error_message); // want P2103 "string|null given"
+    $r = \stream_socket_server($address, $held, $error_message); // want P2213 "writes int|null"
+    $r = \stream_socket_server($address, $kept, $error_message);
+}
+
+/**
+ * @param resource $socket
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterStreamSocketAccept($socket, ?float $timeout, mixed &$held, mixed &$kept): void
+{
+    $r = \stream_socket_accept($socket, $timeout, $peer_name);
+    takesStd($peer_name); // want P2103 "mixed given"
+    $r = \stream_socket_accept($socket, $timeout, $held); // want P2213 "writes mixed"
+    $r = \stream_socket_accept($socket, $timeout, $kept);
+}
+
+/**
+ * @param resource $socket
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterStreamSocketRecvfrom($socket, int $length, int $flags, mixed &$held, mixed &$kept): void
+{
+    $r = \stream_socket_recvfrom($socket, $length, $flags, $address);
+    takesStd($address); // want P2103 "mixed given"
+    $r = \stream_socket_recvfrom($socket, $length, $flags, $held); // want P2213 "writes mixed"
+    $r = \stream_socket_recvfrom($socket, $length, $flags, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out callable-string $kept
+ */
+function afterIsCallable(mixed $value, bool $syntax_only, mixed &$held, mixed &$kept): void
+{
+    $r = \is_callable($value, $syntax_only, $callable_name);
+    takesStd($callable_name); // want P2103 "callable-string given"
+    $r = \is_callable($value, $syntax_only, $held); // want P2213 "writes callable-string"
+    $r = \is_callable($value, $syntax_only, $kept);
+}
+
+/**
+ * @param array<string, int> $map
+ * @param non-empty-list<int> $nonEmpty
+ * @param array{a: int, b: string} $shape
+ * @param array<string, int> $held
+ * @param array<string, int> $kept
+ * @param-out \stdClass $held
+ * @param-out list<int> $kept
+ */
+function afterShuffle(array $map, array $nonEmpty, array $shape, array &$held, array &$kept): void
+{
+    $r = \shuffle($map);
+    takesStd($map); // want P2103 "list<int> given"
+    $r = \shuffle($nonEmpty);
+    takesStd($nonEmpty); // want P2103 "non-empty-list<int> given"
+    $r = \shuffle($shape);
+    takesStd($shape); // want P2103 "non-empty-list<int|string> given"
+    $r = \shuffle($held); // want P2213 "writes list<int>"
+    $r = \shuffle($kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterCurlMultiExec(\CurlMultiHandle $multi_handle, mixed &$held, mixed &$kept): void
+{
+    $r = \curl_multi_exec($multi_handle, $still_running);
+    takesStd($still_running); // want P2103 "mixed given"
+    $r = \curl_multi_exec($multi_handle, $held); // want P2213 "writes mixed"
+    $r = \curl_multi_exec($multi_handle, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterCurlMultiInfoRead(\CurlMultiHandle $multi_handle, mixed &$held, mixed &$kept): void
+{
+    $r = \curl_multi_info_read($multi_handle, $queued_messages);
+    takesStd($queued_messages); // want P2103 "mixed given"
+    $r = \curl_multi_info_read($multi_handle, $held); // want P2213 "writes mixed"
+    $r = \curl_multi_info_read($multi_handle, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOdbcFetchInto(\Odbc\Result $statement, mixed &$held, mixed &$kept): void
+{
+    $r = \odbc_fetch_into($statement, $array);
+    takesStd($array); // want P2103 "mixed given"
+    $r = \odbc_fetch_into($statement, $held); // want P2213 "writes mixed"
+    $r = \odbc_fetch_into($statement, $kept);
+}
+
+/**
+ * @param resource|string $file
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterExifThumbnail($file, mixed &$held, mixed &$kept): void
+{
+    $r = \exif_thumbnail($file, $width, $height, $image_type);
+    takesStd($width); // want P2103 "mixed given"
+    takesStd($height); // want P2103 "mixed given"
+    takesStd($image_type); // want P2103 "mixed given"
+    $r = \exif_thumbnail($file, $held, $height, $image_type); // want P2213 "writes mixed"
+    $r = \exif_thumbnail($file, $kept, $height, $image_type);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out int<0, max> $kept
+ */
+function afterPregFilter(string $subject, mixed &$held, mixed &$kept): void
+{
+    $r = \preg_filter('/a/', 'b', $subject, -1, $count);
+    takesStd($count); // want P2103 "int<0, max> given"
+    $r = \preg_filter('/a/', 'b', $subject, -1, $held); // want P2213 "writes int<0, max>"
+    $r = \preg_filter('/a/', 'b', $subject, -1, $kept);
+}
+
+/**
+ * @param array<string, callable(array<int|string, string>): string> $pattern
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterPregReplaceCallbackArray(array $pattern, string $subject, mixed &$held, mixed &$kept): void
+{
+    $r = \preg_replace_callback_array($pattern, $subject, -1, $count);
+    takesStd($count); // want P2103 "mixed given"
+    $r = \preg_replace_callback_array($pattern, $subject, -1, $held); // want P2213 "writes mixed"
+    $r = \preg_replace_callback_array($pattern, $subject, -1, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterPcntlWaitpid(int $process_id, int $flags, mixed &$held, mixed &$kept): void
+{
+    $r = \pcntl_waitpid($process_id, $status, $flags, $resource_usage);
+    takesStd($status); // want P2103 "mixed given"
+    takesStd($resource_usage); // want P2103 "mixed given"
+    $r = \pcntl_waitpid($process_id, $held, $flags, $resource_usage); // want P2213 "writes mixed"
+    $r = \pcntl_waitpid($process_id, $kept, $flags, $resource_usage);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterPcntlWaitid(int $idtype, ?int $id, int $flags, mixed &$held, mixed &$kept): void
+{
+    $r = \pcntl_waitid($idtype, $id, $info, $flags, $resource_usage);
+    takesStd($info); // want P2103 "mixed given"
+    takesStd($resource_usage); // want P2103 "mixed given"
+    $r = \pcntl_waitid($idtype, $id, $held, $flags, $resource_usage); // want P2213 "writes mixed"
+    $r = \pcntl_waitid($idtype, $id, $kept, $flags, $resource_usage);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterPcntlWait(int $flags, mixed &$held, mixed &$kept): void
+{
+    $r = \pcntl_wait($status, $flags, $resource_usage);
+    takesStd($status); // want P2103 "mixed given"
+    takesStd($resource_usage); // want P2103 "mixed given"
+    $r = \pcntl_wait($held, $flags, $resource_usage); // want P2213 "writes mixed"
+    $r = \pcntl_wait($kept, $flags, $resource_usage);
+}
+
+/**
+ * @param list<int> $signals
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterPcntlSigprocmask(int $mode, array $signals, mixed &$held, mixed &$kept): void
+{
+    $r = \pcntl_sigprocmask($mode, $signals, $old_signals);
+    takesStd($old_signals); // want P2103 "mixed given"
+    $r = \pcntl_sigprocmask($mode, $signals, $held); // want P2213 "writes mixed"
+    $r = \pcntl_sigprocmask($mode, $signals, $kept);
+}
+
+/**
+ * @param list<int> $signals
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterPcntlSigwaitinfo(array $signals, mixed &$held, mixed &$kept): void
+{
+    $r = \pcntl_sigwaitinfo($signals, $info);
+    takesStd($info); // want P2103 "mixed given"
+    $r = \pcntl_sigwaitinfo($signals, $held); // want P2213 "writes mixed"
+    $r = \pcntl_sigwaitinfo($signals, $kept);
+}
+
+/**
+ * @param list<int> $signals
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterPcntlSigtimedwait(array $signals, mixed &$held, mixed &$kept): void
+{
+    $r = \pcntl_sigtimedwait($signals, $info);
+    takesStd($info); // want P2103 "mixed given"
+    $r = \pcntl_sigtimedwait($signals, $held); // want P2213 "writes mixed"
+    $r = \pcntl_sigtimedwait($signals, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslX509Export(\OpenSSLCertificate|string $certificate, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_x509_export($certificate, $output);
+    takesStd($output); // want P2103 "mixed given"
+    $r = \openssl_x509_export($certificate, $held); // want P2213 "writes mixed"
+    $r = \openssl_x509_export($certificate, $kept);
+}
+
+/**
+ * @param \OpenSSLAsymmetricKey|\OpenSSLCertificate|array<mixed>|string $private_key
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslPkcs12Export(\OpenSSLCertificate|string $certificate, $private_key, string $passphrase, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_pkcs12_export($certificate, $output, $private_key, $passphrase);
+    takesStd($output); // want P2103 "mixed given"
+    $r = \openssl_pkcs12_export($certificate, $held, $private_key, $passphrase); // want P2213 "writes mixed"
+    $r = \openssl_pkcs12_export($certificate, $kept, $private_key, $passphrase);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslPkcs12Read(string $pkcs12, string $passphrase, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_pkcs12_read($pkcs12, $certificates, $passphrase);
+    takesStd($certificates); // want P2103 "mixed given"
+    $r = \openssl_pkcs12_read($pkcs12, $held, $passphrase); // want P2213 "writes mixed"
+    $r = \openssl_pkcs12_read($pkcs12, $kept, $passphrase);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslCsrExport(\OpenSSLCertificateSigningRequest|string $csr, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_csr_export($csr, $output);
+    takesStd($output); // want P2103 "mixed given"
+    $r = \openssl_csr_export($csr, $held); // want P2213 "writes mixed"
+    $r = \openssl_csr_export($csr, $kept);
+}
+
+/**
+ * @param array<string, string> $distinguished_names
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslCsrNew(array $distinguished_names, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_csr_new($distinguished_names, $private_key);
+    takesStd($private_key); // want P2103 "mixed given"
+    $r = \openssl_csr_new($distinguished_names, $held); // want P2213 "writes mixed"
+    $r = \openssl_csr_new($distinguished_names, $kept);
+}
+
+/**
+ * @param \OpenSSLAsymmetricKey|\OpenSSLCertificate|array<mixed>|string $key
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslPkeyExport($key, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_pkey_export($key, $output);
+    takesStd($output); // want P2103 "mixed given"
+    $r = \openssl_pkey_export($key, $held); // want P2213 "writes mixed"
+    $r = \openssl_pkey_export($key, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslPkcs7Read(string $data, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_pkcs7_read($data, $certificates);
+    takesStd($certificates); // want P2103 "mixed given"
+    $r = \openssl_pkcs7_read($data, $held); // want P2213 "writes mixed"
+    $r = \openssl_pkcs7_read($data, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslCmsRead(string $input_filename, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_cms_read($input_filename, $certificates);
+    takesStd($certificates); // want P2103 "mixed given"
+    $r = \openssl_cms_read($input_filename, $held); // want P2213 "writes mixed"
+    $r = \openssl_cms_read($input_filename, $kept);
+}
+
+/**
+ * @param \OpenSSLAsymmetricKey|\OpenSSLCertificate|array<mixed>|string $private_key
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslPrivateEncrypt(string $data, $private_key, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_private_encrypt($data, $encrypted_data, $private_key);
+    takesStd($encrypted_data); // want P2103 "mixed given"
+    $r = \openssl_private_encrypt($data, $held, $private_key); // want P2213 "writes mixed"
+    $r = \openssl_private_encrypt($data, $kept, $private_key);
+}
+
+/**
+ * @param \OpenSSLAsymmetricKey|\OpenSSLCertificate|array<mixed>|string $private_key
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslPrivateDecrypt(string $data, $private_key, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_private_decrypt($data, $decrypted_data, $private_key);
+    takesStd($decrypted_data); // want P2103 "mixed given"
+    $r = \openssl_private_decrypt($data, $held, $private_key); // want P2213 "writes mixed"
+    $r = \openssl_private_decrypt($data, $kept, $private_key);
+}
+
+/**
+ * @param list<string> $public_key
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslPublicEncrypt(string $data, $public_key, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_public_encrypt($data, $encrypted_data, $public_key);
+    takesStd($encrypted_data); // want P2103 "mixed given"
+    $r = \openssl_public_encrypt($data, $held, $public_key); // want P2213 "writes mixed"
+    $r = \openssl_public_encrypt($data, $kept, $public_key);
+}
+
+/**
+ * @param list<string> $public_key
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslPublicDecrypt(string $data, $public_key, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_public_decrypt($data, $decrypted_data, $public_key);
+    takesStd($decrypted_data); // want P2103 "mixed given"
+    $r = \openssl_public_decrypt($data, $held, $public_key); // want P2213 "writes mixed"
+    $r = \openssl_public_decrypt($data, $kept, $public_key);
+}
+
+/**
+ * @param list<string> $public_key
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslSeal(string $data, array $public_key, string $cipher_algo, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_seal($data, $sealed_data, $encrypted_keys, $public_key, $cipher_algo, $iv);
+    takesStd($sealed_data); // want P2103 "mixed given"
+    takesStd($encrypted_keys); // want P2103 "mixed given"
+    takesStd($iv); // want P2103 "mixed given"
+    $r = \openssl_seal($data, $held, $encrypted_keys, $public_key, $cipher_algo, $iv); // want P2213 "writes mixed"
+    $r = \openssl_seal($data, $kept, $encrypted_keys, $public_key, $cipher_algo, $iv);
+}
+
+/**
+ * @param \OpenSSLAsymmetricKey|\OpenSSLCertificate|array<mixed>|string $private_key
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslOpen(string $data, string $encrypted_key, $private_key, string $cipher_algo, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_open($data, $output, $encrypted_key, $private_key, $cipher_algo);
+    takesStd($output); // want P2103 "mixed given"
+    $r = \openssl_open($data, $held, $encrypted_key, $private_key, $cipher_algo); // want P2213 "writes mixed"
+    $r = \openssl_open($data, $kept, $encrypted_key, $private_key, $cipher_algo);
+}
+
+/**
+ * The tag of an AEAD cipher, as PHPStan's extension types it from a cipher
+ * named at the call; any other cipher leaves null.
+ *
+ * @param-out \stdClass $held
+ * @param-out non-empty-string|null $kept
+ */
+function afterOpensslEncrypt(string $data, string $cipher, string $passphrase, string $iv, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_encrypt($data, 'aes-256-gcm', $passphrase, \OPENSSL_RAW_DATA, $iv, $gcm);
+    takesStd($gcm); // want P2103 "non-empty-string given"
+    $r = \openssl_encrypt($data, 'AES-128-CCM', $passphrase, \OPENSSL_RAW_DATA, $iv, $ccm);
+    takesStd($ccm); // want P2103 "non-empty-string given"
+    $r = \openssl_encrypt($data, 'aes-256-cbc', $passphrase, \OPENSSL_RAW_DATA, $iv, $none);
+    takesStd($none); // want P2103 "null given"
+    $r = \openssl_encrypt($data, $cipher, $passphrase, \OPENSSL_RAW_DATA, $iv, $tag);
+    takesStd($tag); // want P2103 "non-empty-string|null given"
+    $r = \openssl_encrypt($data, $cipher, $passphrase, \OPENSSL_RAW_DATA, $iv, $held); // want P2213 "writes non-empty-string|null"
+    $r = \openssl_encrypt($data, $cipher, $passphrase, \OPENSSL_RAW_DATA, $iv, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out array<int|string, array<mixed>|string> $kept
+ */
+function afterMbParseStr(string $string, mixed &$held, mixed &$kept): void
+{
+    $r = \mb_parse_str($string, $result);
+    takesStd($result); // want P2103 "array<string|array> given"
+    $r = \mb_parse_str($string, $held); // want P2213 "writes array<string|array>"
+    $r = \mb_parse_str($string, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterSplfileobjectFlock(\SplFileObject $object, mixed &$held, mixed &$kept): void
+{
+    $r = $object->flock(\LOCK_EX, $wouldBlock);
+    takesStd($wouldBlock); // want P2103 "mixed given"
+    $r = $object->flock(\LOCK_EX, $held); // want P2213 "writes mixed"
+    $r = $object->flock(\LOCK_EX, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterIntltimezoneGetcanonicalid(string $timezoneId, mixed &$held, mixed &$kept): void
+{
+    $r = \IntlTimeZone::getCanonicalID($timezoneId, $isSystemId);
+    takesStd($isSystemId); // want P2103 "mixed given"
+    $r = \IntlTimeZone::getCanonicalID($timezoneId, $held); // want P2213 "writes mixed"
+    $r = \IntlTimeZone::getCanonicalID($timezoneId, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterIntltimezoneGetoffset(\IntlTimeZone $object, float $timestamp, bool $local, mixed &$held, mixed &$kept): void
+{
+    $r = $object->getOffset($timestamp, $local, $rawOffset, $dstOffset);
+    takesStd($rawOffset); // want P2103 "mixed given"
+    takesStd($dstOffset); // want P2103 "mixed given"
+    $r = $object->getOffset($timestamp, $local, $held, $dstOffset); // want P2213 "writes mixed"
+    $r = $object->getOffset($timestamp, $local, $kept, $dstOffset);
+}
+
+/**
+ * @param list<int> $source
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterUconverterFromucallback(\UConverter $object, int $reason, array $source, int $codePoint, mixed &$held, mixed &$kept): void
+{
+    $r = $object->fromUCallback($reason, $source, $codePoint, $error);
+    takesStd($error); // want P2103 "mixed given"
+    $r = $object->fromUCallback($reason, $source, $codePoint, $held); // want P2213 "writes mixed"
+    $r = $object->fromUCallback($reason, $source, $codePoint, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterUconverterToucallback(\UConverter $object, int $reason, string $source, string $codeUnits, mixed &$held, mixed &$kept): void
+{
+    $r = $object->toUCallback($reason, $source, $codeUnits, $error);
+    takesStd($error); // want P2103 "mixed given"
+    $r = $object->toUCallback($reason, $source, $codeUnits, $held); // want P2213 "writes mixed"
+    $r = $object->toUCallback($reason, $source, $codeUnits, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterNumberformatterParsecurrency(\NumberFormatter $object, string $string, mixed &$held, mixed &$kept): void
+{
+    $r = $object->parseCurrency($string, $currency);
+    takesStd($currency); // want P2103 "mixed given"
+    $r = $object->parseCurrency($string, $held); // want P2213 "writes mixed"
+    $r = $object->parseCurrency($string, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterIntldateformatterParse(\IntlDateFormatter $object, string $string, mixed &$held, mixed &$kept): void
+{
+    $r = $object->parse($string, $offset);
+    takesStd($offset); // want P2103 "mixed given"
+    $r = $object->parse($string, $held); // want P2213 "writes mixed"
+    $r = $object->parse($string, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterIntldateformatterParsetocalendar(\IntlDateFormatter $object, string $string, mixed &$held, mixed &$kept): void
+{
+    $r = $object->parseToCalendar($string, $offset);
+    takesStd($offset); // want P2103 "mixed given"
+    $r = $object->parseToCalendar($string, $held); // want P2213 "writes mixed"
+    $r = $object->parseToCalendar($string, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterIntldateformatterLocaltime(\IntlDateFormatter $object, string $string, mixed &$held, mixed &$kept): void
+{
+    $r = $object->localtime($string, $offset);
+    takesStd($offset); // want P2103 "mixed given"
+    $r = $object->localtime($string, $held); // want P2213 "writes mixed"
+    $r = $object->localtime($string, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterSpoofcheckerIssuspicious(\Spoofchecker $object, string $string, mixed &$held, mixed &$kept): void
+{
+    $r = $object->isSuspicious($string, $errorCode);
+    takesStd($errorCode); // want P2103 "mixed given"
+    $r = $object->isSuspicious($string, $held); // want P2213 "writes mixed"
+    $r = $object->isSuspicious($string, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterSpoofcheckerAreconfusable(\Spoofchecker $object, string $string1, string $string2, mixed &$held, mixed &$kept): void
+{
+    $r = $object->areConfusable($string1, $string2, $errorCode);
+    takesStd($errorCode); // want P2103 "mixed given"
+    $r = $object->areConfusable($string1, $string2, $held); // want P2213 "writes mixed"
+    $r = $object->areConfusable($string1, $string2, $kept);
+}
+
+/**
+ * @param list<mixed> $args
+ * @param array<string, mixed>|null $options
+ * @param \SoapHeader|array<mixed>|null $inputHeaders
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterSoapclientSoapcall(\SoapClient $object, string $name, array $args, ?array $options, $inputHeaders, mixed &$held, mixed &$kept): void
+{
+    $r = $object->__soapCall($name, $args, $options, $inputHeaders, $outputHeaders);
+    takesStd($outputHeaders); // want P2103 "mixed given"
+    $r = $object->__soapCall($name, $args, $options, $inputHeaders, $held); // want P2213 "writes mixed"
+    $r = $object->__soapCall($name, $args, $options, $inputHeaders, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterZiparchiveGetexternalattributesname(\ZipArchive $object, string $name, mixed &$held, mixed &$kept): void
+{
+    $r = $object->getExternalAttributesName($name, $opsys, $attr);
+    takesStd($opsys); // want P2103 "mixed given"
+    takesStd($attr); // want P2103 "mixed given"
+    $r = $object->getExternalAttributesName($name, $held, $attr); // want P2213 "writes mixed"
+    $r = $object->getExternalAttributesName($name, $kept, $attr);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterZiparchiveGetexternalattributesindex(\ZipArchive $object, int $index, mixed &$held, mixed &$kept): void
+{
+    $r = $object->getExternalAttributesIndex($index, $opsys, $attr);
+    takesStd($opsys); // want P2103 "mixed given"
+    takesStd($attr); // want P2103 "mixed given"
+    $r = $object->getExternalAttributesIndex($index, $held, $attr); // want P2213 "writes mixed"
+    $r = $object->getExternalAttributesIndex($index, $kept, $attr);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterMysqliPoll(int $seconds, mixed &$held, mixed &$kept): void
+{
+    $r = \mysqli::poll($read, $error, $reject, $seconds);
+    takesStd($read); // want P2103 "mixed given"
+    takesStd($error); // want P2103 "mixed given"
+    takesStd($reject); // want P2103 "mixed given"
+    $r = \mysqli::poll($held, $error, $reject, $seconds); // want P2213 "writes mixed"
+    $r = \mysqli::poll($kept, $error, $reject, $seconds);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterUrlParse(string $uri, ?\Uri\WhatWg\Url $baseUrl, mixed &$held, mixed &$kept): void
+{
+    $r = \Uri\WhatWg\Url::parse($uri, $baseUrl, $errors);
+    takesStd($errors); // want P2103 "mixed given"
+    $r = \Uri\WhatWg\Url::parse($uri, $baseUrl, $held); // want P2213 "writes mixed"
+    $r = \Uri\WhatWg\Url::parse($uri, $baseUrl, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterUrlConstruct(string $uri, ?\Uri\WhatWg\Url $baseUrl, mixed &$held, mixed &$kept): void
+{
+    $r = new \Uri\WhatWg\Url($uri, $baseUrl, $softErrors);
+    takesStd($softErrors); // want P2103 "mixed given"
+    $r = new \Uri\WhatWg\Url($uri, $baseUrl, $held); // want P2213 "writes mixed"
+    $r = new \Uri\WhatWg\Url($uri, $baseUrl, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterUrlResolve(\Uri\WhatWg\Url $object, string $uri, mixed &$held, mixed &$kept): void
+{
+    $r = $object->resolve($uri, $softErrors);
+    takesStd($softErrors); // want P2103 "mixed given"
+    $r = $object->resolve($uri, $held); // want P2213 "writes mixed"
+    $r = $object->resolve($uri, $kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out null $kept
+ */
+function afterSodiumMemzero(string $secret, string &$held, string &$kept): void
+{
+    \sodium_memzero($secret);
+    takesStd($secret); // want P2103 "null given"
+    \sodium_memzero($held); // want P2213 "writes null"
+    \sodium_memzero($kept);
+}
+
+/**
+ * @param-out \stdClass $held
+ * @param-out mixed $kept
+ */
+function afterOpensslRandomPseudoBytes(int $length, mixed &$held, mixed &$kept): void
+{
+    $r = \openssl_random_pseudo_bytes($length, $strong);
+    takesStd($strong); // want P2103 "mixed given"
+    $r = \openssl_random_pseudo_bytes($length, $held); // want P2213 "writes mixed"
+    $r = \openssl_random_pseudo_bytes($length, $kept);
+}
+
+// ---- writes back through a parameter PHPStan's map says the function reads
+
+/**
+ * array_splice() leaves what PHPStan's spliceArray() makes of the array:
+ * a shape spliced at constant offsets keeps its entries, the int keys
+ * renumbered; any other array keeps the union of its keys and values, a
+ * list where every key was an int.
+ *
+ * @param list<int> $list
+ * @param non-empty-list<int> $nonEmpty
+ * @param array<string, int> $map
+ * @param array{a: int, b: string} $shape
+ * @param list<string> $strings
+ */
+function splices(array $list, array $nonEmpty, array $map, array $shape, array $strings, int $at): void
+{
+    $removed = $list;
+    \array_splice($removed, 0, 1);
+    takesStd($removed); // want P2103 "list<int> given"
+    $inserted = $list;
+    \array_splice($inserted, 1, 0, ['x']);
+    takesStd($inserted); // want P2103 "non-empty-list<int|'x'> given"
+    $replaced = $list;
+    \array_splice($replaced, $at, null, $strings);
+    takesStd($replaced); // want P2103 "list<int|string> given"
+    $emptied = $nonEmpty;
+    \array_splice($emptied, 0);
+    takesStd($emptied); // want P2103 "array{} given"
+    $keyed = $map;
+    \array_splice($keyed, 0, 1, [1.5]);
+    takesStd($keyed); // want P2103 "non-empty-array<0|string, int|1.5> given"
+    $shaped = $shape;
+    \array_splice($shaped, 1, 1, [true]);
+    takesStd($shaped); // want P2103 "array{a: int, 0: true} given"
+    $tuple = [1, 2, 3];
+    \array_splice($tuple, 1, 1);
+    takesStd($tuple); // want P2103 "list{1, 3} given"
+}
+
+/**
+ * @param list<int> $xs
+ * @param-out list<int> $xs
+ */
+function splicesInAnother(array &$xs): void
+{
+    \array_splice($xs, 1, 0, ['x']); // want P2213 "writes non-empty-list<int|'x'>"
+}
+
+/**
+ * @param list<int> $xs
+ * @param-out list<int> $xs
+ */
+function splicesAsDocumented(array &$xs): void
+{
+    \array_splice($xs, 0, 1);
+}
+
+/**
+ * array_walk() whose callback is a closure written at the call that takes
+ * the value by reference: each value is what the closure leaves in it, at
+ * its returns and its end. Any other callback writes nothing back PHPStan
+ * follows, nor does array_walk_recursive().
+ *
+ * @param list<int> $list
+ * @param array{a: int, b: string} $shape
+ * @param non-empty-array<string, int> $map
+ */
+function walks(array $list, array $shape, array $map, bool $skip): void
+{
+    $strings = $list;
+    \array_walk($strings, function (int &$value): void {
+        $value = (string) $value;
+    });
+    takesStd($strings); // want P2103 "list<decimal-int-string> given"
+    $flags = $shape;
+    \array_walk($flags, function (&$value): void {
+        $value = true;
+    });
+    takesStd($flags); // want P2103 "array{a: true, b: true} given"
+    $some = $map;
+    \array_walk($some, function (int &$value) use ($skip): void {
+        if ($skip) {
+            return;
+        }
+        $value = 'x';
+    });
+    takesStd($some); // want P2103 "non-empty-array<string, int|'x'> given"
+    $arrow = $list;
+    \array_walk($arrow, fn (int &$value) => $value = 'y');
+    takesStd($arrow); // want P2103 "list<int> given"
+    $nested = $list;
+    \array_walk_recursive($nested, function (mixed &$value): void {
+        $value = 'z';
+    });
+    takesStd($nested); // want P2103 "list<int> given"
+}
+
+/**
+ * @param list<int> $xs
+ * @param-out list<int> $xs
+ */
+function walksInAnother(array &$xs): void
+{
+    \array_walk($xs, function (int &$value): void { // want P2213 "writes list<decimal-int-string>"
+        $value = (string) $value;
+    });
+}
+
+/**
+ * @param list<int> $xs
+ * @param-out list<int> $xs
+ */
+function walksAsDocumented(array &$xs): void
+{
+    \array_walk($xs, function (int &$value): void {
+        $value *= 2;
+    });
+}
+
+/**
+ * A sort that keeps the keys leaves a list an array of int<0, max> keys;
+ * sort() keeps a non-empty array non-empty.
+ *
+ * @param list<int> $list
+ * @param non-empty-list<int> $nonEmpty
+ * @param non-empty-array<string, int> $map
+ */
+function sorts(array $list, array $nonEmpty, array $map): void
+{
+    $byValue = $list;
+    \asort($byValue);
+    takesStd($byValue); // want P2103 "array<int<0, max>, int> given"
+    $byCallback = $nonEmpty;
+    \uasort($byCallback, fn (int $a, int $b): int => $a <=> $b);
+    takesStd($byCallback); // want P2103 "non-empty-array<int<0, max>, int> given"
+    $byKey = $map;
+    \uksort($byKey, fn (string $a, string $b): int => \strcmp($a, $b));
+    takesStd($byKey); // want P2103 "non-empty-array<string, int> given"
+    $sorted = $map;
+    \sort($sorted);
+    takesStd($sorted); // want P2103 "non-empty-list<int> given"
+}
+
+/**
+ * @param list<int> $xs
+ * @param-out list<int> $xs
+ */
+function uasortsAList(array &$xs): void
+{
+    \uasort($xs, fn (int $a, int $b): int => $a <=> $b); // want P2213 "writes array<int<0, max>, int>"
+}
+
+/**
+ * A closure that also uses a variable by reference runs to a fixed point
+ * for it; each run is a call of its own, which starts from the closure's
+ * parameters, and only what it uses by reference carries over.
+ *
+ * @param list<string> $names
+ * @param array<string, string> $env
+ * @return array<string, int>
+ */
+function walksWithAByReferenceUse(array $names, array $env): array
+{
+    $keys = [];
+    \array_walk($names, function (&$name, $key) use (&$keys): void {
+        $keys[] = $key;
+        $name = ['name' => $name];
+    });
+    takesStd($names); // want P2103 "list<array{name: string}> given"
+    $total = 0;
+    \array_walk($env, function (&$value) use (&$total): void {
+        $total += \strlen($value);
+        $value = \strlen($value);
+    });
+    return $env;
+}
+
+function countsItsCalls(): int
+{
+    $calls = 0;
+    $length = function (string $text) use (&$calls): int {
+        $calls++;
+        $size = \strlen($text);
+        $text = $size;
+        return $text;
+    };
+    return $length('a') + $calls;
+}
+
+function fail(string $message): never
+{
+    throw new \RuntimeException($message);
+}
+
+/**
+ * A statement that does not go on, a throw or a call of a never function,
+ * is an exit of the closure, as a return is: the value it leaves there is
+ * one the array may hold.
+ *
+ * @param list<string> $ids
+ * @return list<int>
+ */
+function walksToInts(array $ids): array
+{
+    \array_walk($ids, function (&$id): void {
+        if (!\ctype_digit($id)) {
+            throw new \InvalidArgumentException($id);
+        }
+        $id = (int) $id;
+    });
+    return $ids; // want P2202 "returns list<int|string>"
+}
+
+/**
+ * @param list<string> $ids
+ * @return list<int>
+ */
+function walksToIntsOrFails(array $ids): array
+{
+    \array_walk($ids, function (&$id): void {
+        if ($id === '') {
+            fail('empty');
+        }
+        $id = \strlen($id);
+    });
+    return $ids; // want P2202 "returns list<int<0, max>|''>"
+}
+
+/**
+ * array_splice() reads an offset and a length past the end as PHP does:
+ * the rest is removed, the replacement goes at the end, where PHPStan
+ * leaves it out.
+ */
+function splicesPastTheEnd(): void
+{
+    $rest = ['a', 'b', 'c'];
+    \array_splice($rest, 1, \PHP_INT_MAX);
+    takesStd($rest); // want P2103 "list{'a'} given"
+    $appended = ['a', 'b', 'c'];
+    \array_splice($appended, \PHP_INT_MAX, 0, ['x']);
+    takesStd($appended); // want P2103 "list{'a', 'b', 'c', 'x'} given"
+    $after = ['a', 'b', 'c'];
+    \array_splice($after, 5, 0, ['x']);
+    takesStd($after); // want P2103 "list{'a', 'b', 'c', 'x'} given"
+}
+
+/**
+ * array_pop() and array_shift() keep the keys; a shape loses its last
+ * entry or its first, array_shift() renumbering the int keys.
+ *
+ * @param array<string, int> $map
+ * @param array{a: int, b: string} $shape
+ * @param list{int, string} $pair
+ */
+function pops(array $map, array $shape, array $pair): void
+{
+    $popped = $map;
+    \array_pop($popped);
+    takesStd($popped); // want P2103 "array<string, int> given"
+    $last = $shape;
+    \array_pop($last);
+    takesStd($last); // want P2103 "array{a: int} given"
+    $first = $pair;
+    \array_shift($first);
+    takesStd($first); // want P2103 "list{string} given"
+}
+
+/** @param int<0, max> $count */
+function takesCount(int $count): void
+{
+}
+
+/**
+ * preg_replace() and preg_replace_callback() count what they replaced.
+ *
+ * @param-out int<0, max> $count
+ */
+function replaces(string $subject, ?int &$count = null): string
+{
+    $replaced = \preg_replace('/a/', 'b', $subject, -1, $times);
+    takesCount($times);
+    $called = \preg_replace_callback('/a/', fn (array $m): string => 'b', $subject, -1, $count);
+    return ($replaced ?? '') . ($called ?? '');
+}
+
+/**
+ * @param array<int, string> $queue
+ * @param non-empty-list<int> $stack
+ * @param array<string, int> $counts
+ * @param array{a: int, 5: string, b: bool} $mixed
+ */
+function popsAndShifts(array $queue, array $stack, array $counts, array $mixed): void
+{
+    $popped = $queue;
+    \array_pop($popped);
+    takesStd($popped); // want P2103 "array<int, string> given"
+    $shorter = $stack;
+    \array_pop($shorter);
+    takesStd($shorter); // want P2103 "list<int> given"
+    $rest = $counts;
+    \array_shift($rest);
+    takesStd($rest); // want P2103 "array<string, int> given"
+    $renumbered = $mixed;
+    \array_shift($renumbered);
+    takesStd($renumbered); // want P2103 "array{0: string, b: bool} given"
+}
+
+/**
+ * @param array<int, string> $queue
+ * @param-out array<int, string> $queue
+ */
+function popsAsDocumented(array &$queue): ?string
+{
+    return \array_pop($queue);
+}
+
+/**
+ * @param array<int, string> $queue
+ * @param-out list<string> $queue
+ */
+function shiftsAMap(array &$queue): ?string
+{
+    return \array_shift($queue); // want P2213 "writes array<int, string>"
+}
+
+/**
+ * preg_match() keys a group by its number, and by its name where it has
+ * one; a verb with a name, (*MARK:x), adds the key 'MARK'. A pattern
+ * written at the call with neither, under flags known there, leaves the
+ * groups numbered without a gap, a list, as PHPStan, which reads the
+ * pattern, has it. A double-quoted pattern may spell its name with an
+ * escape PHP decodes, and keeps both keys; a single-quoted one leaves
+ * \x3F to PCRE, a literal question mark.
+ *
+ * @param list<string> $list
+ */
+function takesList(array $list): void
+{
+}
+
+/** @param 0|256 $flags */
+function matchesGroups(string $subject, string $pattern, int $flags): void
+{
+    \preg_match('/^(\d+)-(\d+)$/', $subject, $numbered);
+    takesStd($numbered); // want P2103 "list<string> given"
+    takesList($numbered);
+    \preg_match('/^(?<year>\d+)-(\d+)$/', $subject, $named);
+    takesStd($named); // want P2103 "array<string> given"
+    \preg_match('/a(*MARK:first)|b(*MARK:second)/', $subject, $marked);
+    takesStd($marked); // want P2103 "array<string> given"
+    $mark = $marked['MARK'] ?? '';
+    \preg_match("/(\x3F<year>\\d{4})/", $subject, $escaped);
+    takesStd($escaped); // want P2103 "array<string> given"
+    \preg_match('/(\x3F<year>\d{4})/', $subject, $literal);
+    takesStd($literal); // want P2103 "list<string> given"
+    \preg_match($pattern, $subject, $unknown);
+    takesStd($unknown); // want P2103 "array<string> given"
+    \preg_match('/(\d)/', $subject, $unknownFlags, $flags);
+    takesStd($unknownFlags); // want P2103 "array<string> given"
+    \preg_match('/(\d)/', $subject, $offsets, 256);
+    takesStd($offsets); // want P2103 "list<list{string, int}> given"
+    $setOrder = \PREG_SET_ORDER;
+    \preg_match_all('/(\d+)-(\d+)/', $subject, $sets, $setOrder);
+    takesStd($sets); // want P2103 "list<list<string>> given"
+}
+
+function checked(int $n): int
+{
+    return $n;
+}
+
+/**
+ * A throw statement in a try statement's body or catch blocks is no exit
+ * of the closure, whether a catch takes it or not, as PHPStan has it; an
+ * exit or a call of a never function there is one.
+ *
+ * @param list<string> $raw
+ */
+function walksWithACatch(array $raw): void
+{
+    $decoded = $raw;
+    \array_walk($decoded, function (&$value): void {
+        try {
+            $value = \json_decode($value, flags: \JSON_THROW_ON_ERROR);
+            if (!\is_string($value)) {
+                throw new \UnexpectedValueException();
+            }
+        } catch (\JsonException|\UnexpectedValueException) {
+            $value = '';
+        }
+    });
+    takesList($decoded);
+    $counted = $raw;
+    \array_walk($counted, function (&$value): void {
+        try {
+            if ($value === '') {
+                throw new \LogicException();
+            }
+            $value = checked(1);
+        } catch (\RuntimeException) {
+            $value = 1;
+        }
+    });
+    takesStd($counted); // want P2103 "list<int> given"
+    $failing = $raw;
+    \array_walk($failing, function (&$value): void {
+        try {
+            if ($value === '') {
+                fail('empty');
+            }
+            $value = 1;
+        } catch (\LogicException) {
+            $value = 2;
+        }
+    });
+    takesStd($failing); // want P2103 "list<int<1, 2>|''> given"
+}
+
+/**
+ * @param array<int, string> $m
+ * @param-out array<int, string> $m
+ */
+function matchesNumbered(string $s, array &$m): bool
+{
+    return \preg_match('/^(\d+)-(\d+)$/', $s, $m) === 1;
+}
+
+/**
+ * @param array<int, string> $m
+ * @param-out array<int, string> $m
+ */
+function matchesNamed(string $s, array &$m): bool
+{
+    return \preg_match('/^(?<year>\d+)$/', $s, $m) === 1; // want P2213 "writes array<string>"
+}
+
+/**
+ * A finally block runs on the way out of an exit in its try statement:
+ * what the exit leaves is what the block writes, an enclosing block's
+ * after an inner one's.
+ *
+ * @param list<string> $raw
+ */
+function walksThroughAFinally(array $raw): void
+{
+    $lengths = $raw;
+    \array_walk($lengths, function (&$value): void {
+        try {
+            if ($value === '') {
+                fail('empty');
+            }
+            $value = \strlen($value);
+        } finally {
+            $value = (int) $value;
+        }
+    });
+    takesStd($lengths); // want P2103 "list<int> given"
+    $nested = $raw;
+    \array_walk($nested, function (&$value): void {
+        try {
+            try {
+                if ($value === '') {
+                    return;
+                }
+                $value = 1;
+            } finally {
+                $value = 2;
+            }
+        } finally {
+            $value = 3;
+        }
+    });
+    takesStd($nested); // want P2103 "list<3> given"
+    $wrapped = $raw;
+    \array_walk($wrapped, function (&$value): void {
+        try {
+            if ($value === '') {
+                (throw new \LogicException());
+            }
+            $value = 4;
+        } catch (\LogicException) {
+            $value = 5;
+        }
+    });
+    takesStd($wrapped); // want P2103 "list<int<4, 5>> given"
+}
+
+/**
+ * PREG_UNMATCHED_AS_NULL makes a group that took no part in the match
+ * null; which may not is the pattern's, so every value may be null.
+ */
+function matchesUnmatchedAsNull(string $subject): void
+{
+    \preg_match('/(a)(b)?/', $subject, $groups, \PREG_UNMATCHED_AS_NULL);
+    takesStd($groups); // want P2103 "list<string|null> given"
+    \preg_match('/(a)(b)?/', $subject, $offsets, \PREG_UNMATCHED_AS_NULL | \PREG_OFFSET_CAPTURE);
+    takesStd($offsets); // want P2103 "list<list{string|null, int}> given"
+    \preg_match_all('/(a)(b)?/', $subject, $all, \PREG_UNMATCHED_AS_NULL);
+    takesStd($all); // want P2103 "list<list<string|null>> given"
+    \preg_match_all('/(a)(b)?/', $subject, $sets, \PREG_UNMATCHED_AS_NULL | \PREG_SET_ORDER);
+    takesStd($sets); // want P2103 "list<list<string|null>> given"
+    if (\preg_match('/(a)(b)?/', $subject, $m, \PREG_UNMATCHED_AS_NULL) === 1) {
+        takesString($m[2]); // want P2103 "string|null given"
+    }
+}
+
+function takesString(string $s): void
+{
+}
+
+// ---- parameters PHPStan's map says the function reads: no write
+
+/**
+ * The argument keeps its type, and a parameter documented @param-out
+ * passed there is held where the body ends.
+ */
+function reads(\IntlDateFormatter $formatter, string $text): void
+{
+    $offset = 0;
+    \datefmt_parse($formatter, $text, $offset);
+    takesStd($offset); // want P2103 "0 given"
+}
+
+/**
+ * @param-out positive-int $offset
+ */
+function parsesFrom(\IntlDateFormatter $formatter, string $text, int &$offset): void
+{
+    \datefmt_parse($formatter, $text, $offset); // want P2213 "ends here with $offset holding int"
+}
+
+/**
+ * @param-out int $offset
+ */
+function parsesAsDocumented(\IntlDateFormatter $formatter, string $text, int &$offset): void
+{
+    \datefmt_parse($formatter, $text, $offset);
+}
+
+/**
+ * @param list<string> $words
+ * @param-out list<string> $words
+ */
+function collates(\Collator $collator, array &$words): void
+{
+    \collator_sort($collator, $words);
+}
+
+/**
+ * A function with side effects that reads the argument, given one that may
+ * be an object or a resource: PHPStan invalidates it and holds the
+ * parameter to nothing, as it does after settype().
+ *
+ * @param-out list<string> $value
+ */
+function binds(\mysqli_stmt $statement, mixed &$value): void
+{
+    \mysqli_stmt_bind_param($statement, 's', $value);
+}
+
+/**
+ * @param-out list<string> $value
+ */
+function bindsAString(\mysqli_stmt $statement, string &$value): void
+{
+    \mysqli_stmt_bind_param($statement, 's', $value); // want P2213 "ends here with $value holding string"
+}

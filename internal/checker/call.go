@@ -3,6 +3,7 @@ package checker
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -695,40 +696,136 @@ func pregSplitType(args *ast.ArgList) types.Type {
 }
 
 // pregMatchesType is what preg_match() / preg_match_all() leave in
-// $matches under the flags written at the call: PREG_OFFSET_CAPTURE pairs
-// every match with its offset, PREG_SET_ORDER lists the sets. nil when the
-// overlay's default applies.
-func pregMatchesType(sigName, param string, args *ast.ArgList) types.Type {
+// $matches under the flags given at the call: PREG_OFFSET_CAPTURE pairs
+// every match with its offset, PREG_SET_ORDER lists the sets, and
+// PREG_UNMATCHED_AS_NULL writes null for a group that took no part. A
+// group is keyed by its number and, where it has a name, by the name as
+// well. With flags known at the call (or none), a pattern known there in
+// which no group is named (unnamedGroups) keys its groups 0, 1, 2…
+// without a gap, an unmatched group in the middle the empty string (or
+// null), as PHP fills them: a list, as PHPStan, which reads the pattern,
+// has it. nil when the overlay's default applies.
+func pregMatchesType(sigName, param string, args *ast.ArgList, argByName map[string]types.Type) types.Type {
 	name := strings.ToLower(sigName)
 	if param != "matches" || (name != "preg_match()" && name != "preg_match_all()") || args == nil {
 		return nil
 	}
-	var flags ast.Expr
+	var flags, pattern ast.Expr
 	for i, a := range args.Args {
 		if (a.Name == nil && i == 3) || (a.Name != nil && a.Name.Name == "flags") {
 			flags = a.Value
 		}
+		if (a.Name == nil && i == 0) || (a.Name != nil && a.Name.Name == "pattern") {
+			pattern = a.Value
+		}
 	}
-	if flags == nil {
+	var offsets, setOrder, nulls, known bool
+	if v, ok := constInt(argByName["flags"]); ok {
+		// PREG_OFFSET_CAPTURE, PREG_SET_ORDER, PREG_UNMATCHED_AS_NULL
+		offsets, setOrder, nulls, known = v&256 != 0, v&2 != 0, v&512 != 0, true
+	} else if flags != nil {
+		offsets, setOrder = mentionsConst(flags, "preg_offset_capture"), mentionsConst(flags, "preg_set_order")
+		nulls = mentionsConst(flags, "preg_unmatched_as_null")
+	} else {
+		known = true // none given
+	}
+	unnamed := known && unnamedGroups(pattern, argByName["pattern"])
+	if !offsets && !setOrder && !unnamed {
 		return nil
 	}
-	offsets := mentionsConst(flags, "preg_offset_capture")
-	setOrder := mentionsConst(flags, "preg_set_order")
-	if !offsets && !setOrder {
-		return nil
-	}
+	// A group that took no part in the match is null under
+	// PREG_UNMATCHED_AS_NULL; which ones may not is the pattern's, so every
+	// value may be (PHPStan, which reads the pattern, has it of the
+	// optional groups).
 	var match types.Type = types.TString
+	if nulls {
+		match = types.Nullable(types.TString)
+	}
 	if offsets {
-		match = types.Shape{List: true, Entries: []types.ShapeEntry{{IsInt: true, IntKey: 0, Type: types.TString}, {IsInt: true, IntKey: 1, Type: types.TInt}}}
+		match = types.Shape{List: true, Entries: []types.ShapeEntry{{IsInt: true, IntKey: 0, Type: match}, {IsInt: true, IntKey: 1, Type: types.TInt}}}
 	}
 	group := types.Array{Key: types.TArrayKey, Value: match}
+	if unnamed {
+		group = types.Array{Key: types.TInt, Value: match, List: true}
+	}
 	if name == "preg_match()" {
 		return group
 	}
 	if setOrder {
 		return types.Array{Key: types.TInt, Value: group, List: true}
 	}
-	return types.Array{Key: types.TArrayKey, Value: types.Array{Key: types.TInt, Value: match, List: true}}
+	group.Value = types.Array{Key: types.TInt, Value: match, List: true}
+	return group
+}
+
+// unnamedGroups reports a pattern known at the call, a string or one of
+// several, in which no group is named: its groups are keyed by number
+// alone. A name is written (?<name>…), (?P<name>…) or (?'name'…), and a
+// backtracking verb with a name, (*MARK:x) or (*:x) and their kin, adds
+// the key 'MARK'; anything that may be one of them, escaped or in a class
+// or a comment, counts as one. A branch reset, (?|…), and the J option,
+// which lets names repeat, keep the keys of a named group too. So does a
+// pattern whose text may hold an escape PHP decodes and the literal's
+// value does not (decodedLiterally).
+func unnamedGroups(arg ast.Expr, pattern types.Type) bool {
+	if pattern == nil || !decodedLiterally(arg, pattern) {
+		return false
+	}
+	for _, m := range types.Members(pattern) {
+		lit, ok := m.(types.StringLit)
+		if !ok || namedGroup.MatchString(lit.V) {
+			return false
+		}
+	}
+	return true
+}
+
+var namedGroup = regexp.MustCompile(`\(\?(<[^=!]|P|'|\||[a-zA-Z^-]*J)|\(\*[A-Za-z_]*:`)
+
+// decodedLiterally reports a pattern whose value the checker reads as PHP
+// does. A single-quoted string or a nowdoc holds its text; a
+// double-quoted string or a heredoc holds an escape PHP decodes, \x3F,
+// \u{3F} or \077, as written (program.StringValue), and so does a value
+// from elsewhere, a constant's, whose spelling is not at hand: a backslash
+// before x, u, an octal digit, e, v or f there may be one.
+func decodedLiterally(arg ast.Expr, pattern types.Type) bool {
+	if lit, ok := unparen(arg).(*ast.StringLit); ok {
+		raw := strings.TrimLeft(lit.Raw, "bB")
+		if heredoc, ok := strings.CutPrefix(raw, "<<<"); ok {
+			raw = strings.TrimLeft(heredoc, " \t") // a nowdoc's label is quoted
+		}
+		if strings.HasPrefix(raw, "'") {
+			return true
+		}
+		return !mayHoldEscape(raw, true)
+	}
+	for _, m := range types.Members(pattern) {
+		if lit, ok := m.(types.StringLit); ok && mayHoldEscape(lit.V, false) {
+			return false
+		}
+	}
+	return true
+}
+
+// mayHoldEscape reports text with a backslash before x, u, an octal
+// digit, e, v or f: an escape PHP decodes in a double-quoted string. In
+// the source of a literal (pairs) an escaped backslash is skipped as a
+// pair, which PHP reads as one backslash.
+func mayHoldEscape(text string, pairs bool) bool {
+	for i := 0; i < len(text)-1; i++ {
+		if text[i] != '\\' {
+			continue
+		}
+		c := text[i+1]
+		if pairs && c == '\\' {
+			i++
+			continue
+		}
+		if strings.IndexByte("xu01234567evf", c) >= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // filteredValue is the value type array_filter() keeps under its callback:
@@ -2350,6 +2447,7 @@ var byRefReads = map[string]string{
 	"extract":                          "array",
 	"krsort":                           "array",
 	"ksort":                            "array",
+	"ldap_exop_passwd":                 "controls",
 	"ldap_parse_reference":             "referrals",
 	"mb_convert_variables":             "var vars",
 	"mysqli_poll":                      "read error reject",
@@ -2391,21 +2489,6 @@ func movesPointerOnly(sig *signature) bool {
 	}
 	switch strings.ToLower(sig.fn.Name) {
 	case "end", "next", "prev", "reset":
-		return true
-	}
-	return false
-}
-
-// keepsTheKeys reports a sort of php-src's with no @param-out in the
-// overlay that writes back the array it is given with its keys and values,
-// in another order (sortKeepingKeys). sort(), rsort() and usort(), which
-// leave a list, and uasort() and uksort() are in the overlay.
-func keepsTheKeys(sig *signature) bool {
-	if sig.fn == nil {
-		return false
-	}
-	switch strings.ToLower(sig.fn.Name) {
-	case "asort", "arsort", "ksort", "krsort", "natsort", "natcasesort":
 		return true
 	}
 	return false
@@ -3137,11 +3220,16 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 	}
 	// array_walk() whose callback takes the value by value writes none back.
 	walksByValue := false
+	var walkedBy ast.Expr // its callback
 	if sig.stub && sig.fn != nil {
 		switch strings.ToLower(sig.fn.Name) {
 		case "array_walk", "array_walk_recursive":
 			for i, b := range bindings {
-				if c, ok := argTypes[i].(types.Callable); ok && strings.EqualFold(b.param.Name, "callback") {
+				if !strings.EqualFold(b.param.Name, "callback") {
+					continue
+				}
+				walkedBy = b.arg.Value
+				if c, ok := argTypes[i].(types.Callable); ok {
 					walksByValue = c.HasSig && len(c.Params) > 0 && !c.Params[0].ByRef
 				}
 			}
@@ -3159,8 +3247,43 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				out = replaceStatic(out, sig.recv) // `@param-out static` is the receiver's class, as a `@return static` is
 			}
 		}
-		if pm := pregMatchesType(sig.name, b.param.Name, args); pm != nil {
+		if pm := pregMatchesType(sig.name, b.param.Name, args, argByName); pm != nil {
 			out = pm
+		}
+		if tag := openSSLTagType(sig.name, b.param.Name, argByName); tag != nil {
+			out = tag
+		}
+		if sig.stub && sig.fn != nil && argTypes[i] != nil && b.param.Name == "array" {
+			switch strings.ToLower(sig.fn.Name) {
+			case "array_pop":
+				out = poppedArray(argTypes[i], false, x.p())
+			case "array_shift":
+				out = poppedArray(argTypes[i], true, x.p())
+			}
+		}
+		if out == nil && sig.stub && sig.fn != nil && argTypes[i] != nil && b.param.Name == "array" {
+			// What PHPStan writes back through a parameter its map says the
+			// function reads (phpwrites.go).
+			switch strings.ToLower(sig.fn.Name) {
+			case "asort", "arsort", "ksort", "krsort", "natsort", "natcasesort", "uasort", "uksort":
+				out = sortKeepingKeys(argTypes[i])
+			case "array_splice":
+				offset, length, replacement := argByName["offset"], argByName["length"], argByName["replacement"]
+				if offset == nil {
+					offset = types.TInt
+				}
+				if length == nil {
+					length = types.Nullable(types.TInt)
+				}
+				if replacement == nil {
+					replacement = types.Shape{List: true}
+				}
+				out = splicedArray(argTypes[i], offset, length, replacement, x.p())
+			case "array_walk":
+				if walkedBy != nil {
+					out = x.walkedArray(walkedBy, argTypes[i])
+				}
+			}
 		}
 		if out == nil {
 			out = types.Substitute(types.Substitute(b.param.Type, rename), subst)
@@ -3169,18 +3292,18 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				if x.c.opts.ByRef != nil {
 					x.c.opts.ByRef(x.file, b.arg.Value, nil)
 				}
-				// The checker keeps the type, but the value may be another
-				// one (settype(), similar_text(), array_walk() with a
-				// callback that takes it by reference): what a condition
-				// said of the old one is gone. array_multisort() renumbers
-				// int keys and keeps a string key with its value.
-				// Of a parameter documented @param-out (paramout.go), a pointer
-				// moved or a walk by value is no write, and neither is
-				// array_multisort(), as PHPStan has them: the end of the body
-				// is held to what the parameter holds. A sort that keeps the
-				// type of the array writes it, held to the tag at the call;
-				// any other write is one the checker does not type, held to
-				// nothing.
+				// A parameter PHPStan's map says the function reads keeps
+				// its type, but the value may be another one (settype(),
+				// array_walk() with a callback that takes it by
+				// reference): what a condition said of the old one is
+				// gone. array_multisort() renumbers int keys and keeps a
+				// string key with its value.
+				// Of a parameter documented @param-out (paramout.go), such
+				// a call is no write, as PHPStan has it: the end of the
+				// body is held to what the parameter holds. settype() and
+				// a read PHPStan invalidates (invalidatesRead) hand the
+				// parameter over unchecked, and so does a write the
+				// overlay has no tag for.
 				v, isVar := b.arg.Value.(*ast.Variable)
 				switch {
 				case movesPointerOnly(sig) || walksByValue:
@@ -3188,9 +3311,8 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 					env.reordered(v.Name)
 				default:
 					x.writtenThrough(b.arg.Value, env)
-					if keepsTheKeys(sig) {
-						x.sortWrite(b.arg.Value, env, b.arg.S)
-					} else {
+					if sig.fn != nil && strings.EqualFold(sig.fn.Name, "settype") ||
+						!readsByRef(sig, b.param) || invalidatesRead(sig, argTypes[i], x.p()) {
 						x.handedOver(b.arg.Value, env)
 					}
 				}
