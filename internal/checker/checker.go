@@ -1435,7 +1435,14 @@ func (c *Checker) constType(k *program.Constant) types.Type {
 
 // ------------------------------------------------------------------ helpers
 
-func (x *fnCtx) typeName(t types.Type) string { return types.Print(t) }
+// typeName is t as a message names it; a benevolent union in parentheses,
+// as PHPStan writes one: `(int|float)`.
+func (x *fnCtx) typeName(t types.Type) string {
+	if types.IsBenevolent(t) {
+		return "(" + types.Print(t) + ")"
+	}
+	return types.Print(t)
+}
 
 // declaredReturn returns the return type to check against, nil when none.
 func (x *fnCtx) describeCallee() string { return x.name }

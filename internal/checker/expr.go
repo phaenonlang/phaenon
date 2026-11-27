@@ -2231,8 +2231,9 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 		result = types.TFloat
 	case types.IsSubtype(t, types.MakeUnion(types.TInt, types.TFloat), nil):
 		// A counter that may have passed the last integer, or an int|float
-		// as declared: PHP steps either, and the result is one of the two.
-		result = types.MakeUnion(types.TInt, types.TFloat)
+		// as declared: PHP steps either, and the result is one of the two,
+		// benevolent as the value was (`$q = $a / $b; $q++;`).
+		result = intOrFloat(t, t)
 	case numbersOrStrings(t):
 		// Each member as PHP turns it: a numeric string becomes the number
 		// it reads as, so `$n = '5'; $n++; $n++;` is 6 and then 7. A string
@@ -2605,18 +2606,23 @@ func (x *fnCtx) binaryTypes(op token.Kind, l, r types.Type, e ast.Node) types.Ty
 				return types.TFloat
 			}
 		}
+		if op == token.T_POW {
+			return x.powerType(l, r, span)
+		}
 		return pastTheIntegers(op, l, r, x.arithResult(l, r, span, opText(op)))
 	case token.Kind('/'):
 		x.arithResult(l, r, span, "/")
-		if a, ok := types.IsIntLit(l); ok {
-			if b, ok := types.IsIntLit(r); ok && b != 0 && a%b == 0 {
-				if a == math.MinInt64 && b == -1 {
-					return types.TFloat // PHP_INT_MIN / -1 is past PHP_INT_MAX
+		ln, _ := asInteger(l)
+		rn, _ := asInteger(r)
+		if a, ok := types.IsIntLit(ln); ok {
+			if b, ok := types.IsIntLit(rn); ok && b != 0 {
+				if a%b != 0 || a == math.MinInt64 && b == -1 {
+					return types.TFloat // 7 / 2 is 3.5, and PHP_INT_MIN / -1 is past PHP_INT_MAX
 				}
 				return types.IntLit(a / b)
 			}
 		}
-		return types.MakeUnion(types.TInt, types.TFloat)
+		return divisionType(l, r)
 	case token.Kind('%'):
 		x.arithResult(l, r, span, "%")
 		return types.TInt
@@ -2922,7 +2928,8 @@ func addInt(a, b int64) (int64, bool) {
 //     when every result is past the integers, int|float when some are.
 //
 // Anything else stays int, as a sum of two plain ints does: there the
-// overflow is possible and nobody's finding.
+// overflow is possible and nobody's finding. A power that stays int here
+// is typed further by powerType.
 func pastTheIntegers(op token.Kind, l, r, t types.Type) types.Type {
 	if !types.Equal(t, types.TInt) {
 		return t
@@ -3067,6 +3074,250 @@ func powInt(a, b int64) (int64, bool) {
 	return s, true
 }
 
+// divisionType is the type of l / r where the checker computes no value,
+// as PHPStan types it (InitializerExprTypeResolver::getDivType):
+//
+//   - a float where either operand is one: `$f / 2`, `(float) $a / $b`;
+//   - of two plain ints, ?int among them, a benevolent int|float
+//     (types.Union): `$a / $b` is passed for an int as for a float, as
+//     PHPStan passes it, and held to an int where a type is held, as a
+//     @param-out is;
+//   - of other integers, true, false and null among them, an ordinary
+//     int|float. PHPStan computes bounds where both operands are ranges or
+//     literals, int<0, 5>|float of `int<0, 10> / 2`, an ordinary union; and
+//     a plain int here may be a range to PHPStan, which computes with the
+//     ranges of time(), of `count($xs) - 1`, of a loop's counter, where
+//     the lattice does not. `$i / 2` is benevolent to PHPStan for a plain
+//     int and not for a range: it is ordinary here, which is stricter;
+//   - a benevolent operand keeps the result benevolent beside a literal,
+//     a range, a bool, null or another benevolent union, `($a / $b) / 2`,
+//     and, on the right of it, beside a numeric string or an int|float.
+//     Beside a plain int, ?int among them, on either side, PHPStan has an
+//     ordinary int|float, `$total / $users / $days`, as it has of an
+//     int|float or a numeric string divided by one;
+//   - an ordinary int|float otherwise: of a numeric string, of an
+//     int|float as declared, of mixed (which PHPStan reports).
+//
+// Of two ints, a zero divided is 0, and a division by 1 or -1 an int, as
+// PHPStan finds the remainder 0 there.
+func divisionType(l, r types.Type) types.Type {
+	l, r = gmpAsNumber(l), gmpAsNumber(r)
+	t := types.MakeUnion(types.TInt, types.TFloat)
+	if types.IsMixed(l) || types.IsMixed(r) {
+		return t
+	}
+	if allFloat(l) || allFloat(r) {
+		return types.TFloat
+	}
+	ln, lInts := asInteger(l)
+	rn, rInts := asInteger(r)
+	plain := func(n types.Type, ints bool) bool { return ints && types.Equal(n, types.TInt) }
+	switch {
+	case types.IsBenevolent(l) || types.IsBenevolent(r):
+		if plain(ln, lInts) || plain(rn, rInts) {
+			return t
+		}
+		return intOrFloat(l, r)
+	case lInts && rInts:
+		if types.IsSubtype(l, types.TInt, nil) && types.IsSubtype(r, types.TInt, nil) {
+			if n, ok := types.IsIntLit(l); ok && n == 0 {
+				return l
+			}
+			if n, ok := types.IsIntLit(r); ok && (n == 1 || n == -1) {
+				return types.TInt
+			}
+		}
+		if types.Equal(ln, types.TInt) && types.Equal(rn, types.TInt) {
+			return types.Benevolent(t)
+		}
+	}
+	return t
+}
+
+// allFloat reports a type whose every member is a float.
+func allFloat(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Float, types.FloatLit:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// asInteger is t as the integer PHP's arithmetic reads it, true and false
+// as 1 and 0 and null as 0, and whether t is one: `?int` is a plain int,
+// `bool` is 0|1.
+func asInteger(t types.Type) (types.Type, bool) {
+	var out []types.Type
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.Int:
+			out = append(out, m)
+		case types.BoolLit:
+			if m.V {
+				out = append(out, types.IntLit(1))
+			} else {
+				out = append(out, types.IntLit(0))
+			}
+		case types.Bool:
+			out = append(out, types.Int{Lo: 0, Hi: 1})
+		case types.Null:
+			out = append(out, types.IntLit(0))
+		default:
+			return nil, false
+		}
+	}
+	return types.MakeUnion(out...), len(out) > 0
+}
+
+// powerType is the type of l ** r where the operands are not both
+// literals, as PHPStan types it (ExponentiateHelper, IntegerRangeType's
+// exponentiate()), member by member of each operand:
+//
+//   - a float's power is a float, and null's 0 or 1 whatever the exponent;
+//   - to the power 0 anything is 1, to the power 1 an int is itself;
+//   - an int, a range or a literal to a literal or a range is an int
+//     where PHPStan computes the bounds and they stay integers: `$r ** 2`
+//     for `int<0, 10> $r`, `2 ** $p` for a positive-int (the checker keeps
+//     it int, computing with no range);
+//   - anything else is a benevolent int|float (types.Union): `$a ** $b`
+//     and `$a ** 2` over ints, `$n ** 2` for an int|float, a bool or a
+//     numeric string's. PHP gives a float where the exponent is negative
+//     or the power is past the integers; PHPStan passes the value for an
+//     int and for a float and holds it to both where a type is held, as a
+//     @param-out is.
+//
+// The checker is more precise than PHPStan in two places, and keeps what
+// PHP computes: a power to an exponent below zero for certain is a float
+// (pastTheIntegers), as is an int to a float exponent (`$i ** 0.5`), where
+// PHPStan has a benevolent int|float. Operands of a few integers each are
+// computed pair by pair (pastTheIntegers); a bool is no few integers to
+// PHPStan, which does not compute with it.
+func (x *fnCtx) powerType(l, r types.Type, span ast.Span) types.Type {
+	t := x.arithResult(l, r, span, "**")
+	l, r = gmpAsNumber(l), gmpAsNumber(r)
+	if types.IsMixed(l) || types.IsMixed(r) || types.Equal(t, types.TFloat) {
+		return t
+	}
+	if types.Equal(t, types.TInt) {
+		if u := pastTheIntegers(token.T_POW, l, r, t); !types.Equal(u, t) {
+			return u
+		}
+		if !hasPlainBool(l) && !hasPlainBool(r) {
+			if _, ok := fewInts(l); ok {
+				if _, ok := fewInts(r); ok {
+					return t // computed pair by pair, and every power an int
+				}
+			}
+		}
+	}
+	var out []types.Type
+	for _, b := range types.Members(l) {
+		for _, e := range types.Members(r) {
+			out = append(out, powerOf(b, e))
+		}
+	}
+	u := types.MakeUnion(out...)
+	if types.IsBenevolent(l) && types.Equal(u, types.MakeUnion(types.TInt, types.TFloat)) {
+		return types.Benevolent(u) // a benevolent base's power stays one, as PHPStan maps its members
+	}
+	return u
+}
+
+// hasPlainBool reports a type with a bool member that is no literal.
+func hasPlainBool(t types.Type) bool {
+	for _, m := range types.Members(t) {
+		if _, ok := m.(types.Bool); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// powerOf is the type of b ** e for one member of each operand
+// (powerType).
+func powerOf(b, e types.Type) types.Type {
+	switch b.(type) {
+	case types.Float, types.FloatLit:
+		return types.TFloat
+	case types.Null:
+		return types.Int{Lo: 0, Hi: 1}
+	}
+	benevolent := types.Benevolent(types.MakeUnion(types.TInt, types.TFloat))
+	switch e.(type) {
+	case types.Float, types.FloatLit:
+		return types.TFloat
+	case types.Bool:
+		return benevolent // no range to PHPStan, which computes with none
+	}
+	ei, eok := asInteger(e)
+	exp, eIsInt := ei.(types.Int)
+	if !eok || !eIsInt {
+		return benevolent
+	}
+	base, bIsInt := b.(types.Int)
+	if lit, ok := b.(types.BoolLit); ok {
+		bIsInt = true
+		base = types.Int{}
+		if lit.V {
+			base = types.Int{Lo: 1, Hi: 1}
+		}
+	}
+	full := func(i types.Int) bool { return i.Lo == math.MinInt64 && i.Hi == math.MaxInt64 }
+	switch {
+	case exp.Lo == 0 && exp.Hi == 0:
+		return types.IntLit(1)
+	case exp.Lo == 1 && exp.Hi == 1 && bIsInt:
+		return base
+	case exp.Hi < 0:
+		return types.TFloat
+	case !bIsInt || full(base) || full(exp):
+		return benevolent // a plain int's power, or to a plain int: no bounds
+	}
+	// The bounds PHPStan computes: a literal to each end of a range, each
+	// end of a range to a literal, or to the same end of a range.
+	var pairs [][2]int64
+	switch {
+	case base.Lo == base.Hi && exp.Lo == exp.Hi:
+		pairs = [][2]int64{{base.Lo, exp.Lo}}
+	case base.Lo == base.Hi:
+		if exp.Lo != math.MinInt64 {
+			pairs = append(pairs, [2]int64{base.Lo, exp.Lo})
+		}
+		if exp.Hi != math.MaxInt64 {
+			pairs = append(pairs, [2]int64{base.Lo, exp.Hi})
+		}
+	case exp.Lo == exp.Hi:
+		if base.Lo != math.MinInt64 {
+			pairs = append(pairs, [2]int64{base.Lo, exp.Lo})
+		}
+		if base.Hi != math.MaxInt64 {
+			pairs = append(pairs, [2]int64{base.Hi, exp.Lo})
+		}
+	default:
+		if base.Lo != math.MinInt64 && exp.Lo != math.MinInt64 {
+			pairs = append(pairs, [2]int64{base.Lo, exp.Lo})
+		}
+		if base.Hi != math.MaxInt64 && exp.Hi != math.MaxInt64 {
+			pairs = append(pairs, [2]int64{base.Hi, exp.Hi})
+		}
+	}
+	if len(pairs) == 0 {
+		return benevolent
+	}
+	for _, p := range pairs {
+		if _, ok := powInt(p[0], p[1]); !ok {
+			if len(pairs) == 1 && base.Lo == base.Hi && exp.Lo == exp.Hi {
+				return types.TFloat // two literals: past the integers
+			}
+			return benevolent
+		}
+	}
+	return types.TInt
+}
+
 // arithResult types an arithmetic operation and reports non-numeric operands.
 func (x *fnCtx) arithResult(l, r types.Type, span ast.Span, op string) types.Type {
 	numeric := types.MakeUnion(types.TInt, types.TFloat, types.TBool, types.TNull, types.String{Numeric: true})
@@ -3104,11 +3355,25 @@ func (x *fnCtx) arithResult(l, r types.Type, span ast.Span, op string) types.Typ
 		if types.IsSubtype(l, types.TFloat, nil) || types.IsSubtype(r, types.TFloat, nil) {
 			return types.TFloat
 		}
-		return types.MakeUnion(types.TInt, types.TFloat)
+		return intOrFloat(l, r)
 	case allInt(l) && allInt(r):
 		return types.TInt
 	}
-	return types.MakeUnion(types.TInt, types.TFloat)
+	return intOrFloat(l, r)
+}
+
+// intOrFloat is the int|float of arithmetic on l and r, benevolent where
+// an operand is (types.Union), as PHPStan's resolveCommonMath keeps it:
+// `($a / $b) * 100` and `-($a / $b)` are passed for an int as `$a / $b` is.
+// Where only the right operand is, and the left one a numeric string or
+// an int|float as declared, PHPStan splits the left into its members and
+// has an ordinary union.
+func intOrFloat(l, r types.Type) types.Type {
+	t := types.MakeUnion(types.TInt, types.TFloat)
+	if _, ints := asInteger(l); types.IsBenevolent(l) || types.IsBenevolent(r) && ints {
+		return types.Benevolent(t)
+	}
+	return t
 }
 
 func (x *fnCtx) coalesce(e *ast.Binary, env *state, expected types.Type) types.Type {
@@ -3480,6 +3745,9 @@ func (x *fnCtx) assignFrom(value ast.Expr, target ast.Expr, vt types.Type, env *
 			}
 		}
 		if key, ok := x.pathKey(t); ok {
+			if pr != nil {
+				vt = storedBenevolent(vt, pr.NativeType, x.p())
+			}
 			env.setPath(key, vt)
 		}
 	case *ast.Index:
@@ -3523,6 +3791,7 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 			x.report(t.Name.Span(), P2005, "unknown property object::$%s", name)
 		}
 	}
+	var declared []types.Type
 	for _, cl := range x.classesOf(base, t.Object.Span()) {
 		prs, lacking, _ := x.classProperties(cl, name)
 		if lacking != nil && !x.isConstructorOf(lacking) {
@@ -3530,6 +3799,7 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 		}
 		for _, pr := range prs {
 			x.assignDeclared(t, pr, name, base, vt, span, value, env)
+			declared = append(declared, pr.NativeType)
 		}
 	}
 	if v, ok := t.Object.(*ast.Variable); ok && v.Name == "this" && x.trackInits {
@@ -3537,8 +3807,36 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 	}
 	if key, ok := x.pathKey(t); ok {
 		env.invalidatePrefix(key)
+		if len(declared) == 1 {
+			vt = storedBenevolent(vt, declared[0], x.p())
+		}
 		env.setPath(key, vt)
 	}
+}
+
+// storedBenevolent is what a property PHP declares d holds once a value of
+// type vt is written to it, where vt is a benevolent union the property
+// takes for one of its members: that member, as PHPStan remembers it, an
+// int written to an int property, a float to a float one (PHP converts an
+// int written to a float property). A property PHP declares no type of,
+// d nil, keeps the union, as it does in PHPStan, whatever its docblock
+// says; so does any other value. A function that tests the type of the
+// property reports nothing of it while it is held (typeTest), as PHPStan
+// reports nothing there.
+func storedBenevolent(vt, d types.Type, h types.Hierarchy) types.Type {
+	if d == nil || !types.IsBenevolent(vt) || types.IsSubtype(vt, d, h) {
+		return vt
+	}
+	var kept []types.Type
+	for _, m := range types.Members(vt) {
+		if types.IsSubtype(m, d, h) {
+			kept = append(kept, m)
+		}
+	}
+	if len(kept) == 0 {
+		return vt
+	}
+	return types.MakeUnion(kept...)
 }
 
 // assignDeclared checks an assignment of vt to the declared property pr.

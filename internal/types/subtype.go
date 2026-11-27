@@ -10,9 +10,27 @@ func IsSubtype(a, b Type, h Hierarchy) bool {
 
 // IsAcceptable reports whether a value of type arg may be passed where
 // param is declared, under strict_types=1: subtyping plus PHP's int → float
-// widening.
+// widening. A benevolent union is accepted where one of its members is, as
+// PHPStan accepts it (BenevolentUnionType::isAcceptedBy): `$a / $b` over
+// ints is passed for an int and for a float.
 func IsAcceptable(arg, param Type, h Hierarchy) bool {
 	if subtype(arg, param, h, 0) {
+		return true
+	}
+	if u, ok := arg.(Union); ok && u.Benevolent {
+		for _, m := range u.Types {
+			if IsAcceptable(m, param, h) {
+				return true
+			}
+		}
+		return false
+	}
+	// In an array's values, a shape's entries and what else the value is
+	// made of too, as PHPStan's types accept theirs: list{(int|float)}
+	// passes for list<int> and for list<float>, and array{a: (int|float),
+	// b: (int|float)} for array{a: float, b: int}, each union decided where
+	// the comparison reaches it.
+	if h != nil && hasNestedBenevolent(arg) && subtype(arg, param, acceptingBenevolent{h}, 0) {
 		return true
 	}
 	// mixed is accepted where a type parameter without a bound is expected:
@@ -34,6 +52,48 @@ func IsAcceptable(arg, param Type, h Hierarchy) bool {
 		return true
 	}
 	return acceptsArray(arg, param, h, 0)
+}
+
+// acceptingBenevolent is a hierarchy under which subtype takes a
+// benevolent union for one of its members (IsAcceptable).
+type acceptingBenevolent struct{ Hierarchy }
+
+// benevolentAccepted reports a comparison under acceptingBenevolent.
+func benevolentAccepted(h Hierarchy) bool {
+	for {
+		switch v := h.(type) {
+		case acceptingBenevolent:
+			return true
+		case phpstanShapes:
+			h = v.Hierarchy
+		default:
+			return false
+		}
+	}
+}
+
+// withoutAccepting is h without acceptingBenevolent.
+func withoutAccepting(h Hierarchy) Hierarchy {
+	switch v := h.(type) {
+	case acceptingBenevolent:
+		return v.Hierarchy
+	case phpstanShapes:
+		if benevolentAccepted(v.Hierarchy) {
+			return phpstanShapes{withoutAccepting(v.Hierarchy)}
+		}
+	}
+	return h
+}
+
+// hasNestedBenevolent reports a benevolent union inside t, below its top.
+func hasNestedBenevolent(t Type) bool {
+	found := false
+	Walk(t, func(n Type) {
+		if u, ok := n.(Union); ok && u.Benevolent && !Equal(n, t) {
+			found = true
+		}
+	})
+	return found
 }
 
 // acceptsArray is the acceptance PHPStan grants a general array beyond
@@ -248,6 +308,14 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 		return true
 	case Union:
 		if au, ok := a.(Union); ok {
+			if au.Benevolent && benevolentAccepted(h) {
+				for _, m := range au.Types {
+					if subtype(m, b, h, depth+1) {
+						return true
+					}
+				}
+				return false
+			}
 			for _, m := range au.Types {
 				if !subtype(m, b, h, depth+1) {
 					return false
@@ -307,6 +375,14 @@ func subtype(a, b Type, h Hierarchy, depth int) bool {
 		// been reported, and cascading errors would only add noise.
 		return true
 	case Union:
+		if a.Benevolent && benevolentAccepted(h) {
+			for _, m := range a.Types {
+				if subtype(m, b, h, depth+1) {
+					return true
+				}
+			}
+			return false
+		}
 		for _, m := range a.Types {
 			if !subtype(m, b, h, depth+1) {
 				return false
@@ -654,6 +730,9 @@ func classSub(a, b Class, h Hierarchy, depth int) bool {
 	if h != nil {
 		vars = h.Variances(a.Name)
 	}
+	// A type argument is held as PHPStan holds a template's, by
+	// isSuperTypeOf: a benevolent union there is no member of it.
+	h = withoutAccepting(h)
 	for i := range a.Args {
 		if _, never := a.Args[i].(Never); never {
 			continue // `new ArrayObject([])` is ArrayObject<never, never>: fits any argument
@@ -823,8 +902,16 @@ func ShapesAsPHPStan(h Hierarchy) Hierarchy {
 }
 
 func shapesAsPHPStan(h Hierarchy) bool {
-	_, ok := h.(phpstanShapes)
-	return ok
+	for {
+		switch v := h.(type) {
+		case phpstanShapes:
+			return true
+		case acceptingBenevolent:
+			h = v.Hierarchy
+		default:
+			return false
+		}
+	}
 }
 
 // IsTuple reports the shape a tuple `(A, B)` is: sealed, positional, two

@@ -496,6 +496,8 @@ var checkerAlone = map[string][]struct {
 			"untouched parameter: a local of two values, a range the docblock declares. PHPStan computes with neither, which the lattice cannot tell from the values it does compute with"},
 		{P2103, []int{198, 278}, notToldApartYet, "a parameter under `$i > 5`: a condition that names it is a second occurrence, whatever it narrows to; " +
 			"PHPStan has a range there and computes with none"},
+		{P2103, []int{395}, notToldApartYet, "a plain int divided by a literal, 7 / 2 a float for an int: PHPStan has a benevolent (float|int) there and an ordinary " +
+			"int<…>|float for a range, which the lattice, computing with no range, cannot tell from a plain int"},
 	},
 	"benevolent.phn": {{P2105, []int{15}, notToldApartYet, "DOMDocument::createElement() kept in a variable: PHPStan's union stays benevolent there"}},
 	"call-invalidation.phn": {{P2202, []int{103}, notToldApartYet, "a static call of the class forgets what was narrowed of $this->label; " +

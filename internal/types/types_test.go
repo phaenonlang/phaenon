@@ -271,7 +271,7 @@ func TestTraversal(t *testing.T) {
 		name string
 		t    Type
 	}{
-		{"union", Union{[]Type{param, TNull}}},
+		{"union", Union{Types: []Type{param, TNull}}},
 		{"intersection", Intersection{[]Type{NewClass("Entity"), param}}},
 		{"array key", Array{Key: param, Value: TInt}},
 		{"array value", Array{Key: TInt, Value: param}},
@@ -330,6 +330,59 @@ func TestCallableShape(t *testing.T) {
 	}
 	if got, ok := Substitute(plain, map[string]Type{"T": TObject}).(Shape); !ok || got.Callable {
 		t.Errorf("Substitute: %#v, want a shape that is not callable", got)
+	}
+}
+
+// TestBenevolent: PHPStan's benevolent union is accepted where one of its
+// members is, held as an ordinary union where a type is held, and kept by
+// a union only where every member is one of its.
+func TestBenevolent(t *testing.T) {
+	h := mapHierarchy{}
+	plain := MakeUnion(TInt, TFloat)
+	b := Benevolent(plain)
+	if Equal(b, plain) || !IsBenevolent(b) || IsBenevolent(plain) {
+		t.Fatal("a benevolent int|float equals the ordinary one")
+	}
+	for _, c := range []struct {
+		name  string
+		t     Type
+		kept  bool
+		print string
+	}{
+		{"alone", MakeUnion(b), true, "int|float"},
+		{"with 0", MakeUnion(b, IntLit(0)), true, "int|float"},
+		{"with 1.5", MakeUnion(FloatLit{V: 1.5}, b), true, "int|float"},
+		{"with an ordinary int|float", MakeUnion(plain, b), true, "int|float"},
+		{"with null", MakeUnion(b, TNull), false, "int|float|null"},
+		{"with a string", MakeUnion(b, TString), false, "int|float|string"},
+		{"mapped", Map(b, func(m Type) Type { return m }), false, "int|float"},
+	} {
+		if IsBenevolent(c.t) != c.kept || Print(c.t) != c.print {
+			t.Errorf("%s: %s, benevolent %v; want %s, benevolent %v", c.name, Print(c.t), IsBenevolent(c.t), c.print, c.kept)
+		}
+	}
+	for _, want := range []Type{TInt, TFloat} {
+		if !IsAcceptable(b, want, h) || IsSubtype(b, want, h) {
+			t.Errorf("for %s: want accepted and held as an ordinary union", Print(want))
+		}
+		if IsAcceptable(plain, want, h) && want == TInt {
+			t.Errorf("an ordinary int|float is accepted for an int")
+		}
+		list := Array{Key: TInt, Value: want, List: true}
+		if !IsAcceptable(Shape{List: true, Entries: []ShapeEntry{{IsInt: true, Type: b}}}, list, h) ||
+			!IsAcceptable(Array{Key: TInt, Value: b, List: true, NonEmpty: true}, list, h) {
+			t.Errorf("in a list, for list<%s>: want accepted", Print(want))
+		}
+	}
+	if IsAcceptable(b, TString, h) || IsAcceptable(Shape{List: true, Entries: []ShapeEntry{{IsInt: true, Type: b}}}, Array{Key: TInt, Value: TString, List: true}, h) {
+		t.Error("accepted for a string")
+	}
+	two := Shape{Entries: []ShapeEntry{{Key: "ratio", Type: b}, {Key: "count", Type: b}}}
+	if !IsAcceptable(two, Shape{Entries: []ShapeEntry{{Key: "ratio", Type: TFloat}, {Key: "count", Type: TInt}}}, h) {
+		t.Error("two entries are not decided each on its own")
+	}
+	if got := Substitute(b, map[string]Type{"T": TInt}); !IsBenevolent(got) {
+		t.Errorf("Substitute: %s, want it benevolent", Print(got))
 	}
 }
 

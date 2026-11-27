@@ -1824,15 +1824,17 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 		// not exact both ways: is_resource() fails on a closed resource.
 		x.excluded(els, arg, target)
 	}
-	if nt := x.nativeOr(arg, at, env); !types.IsMixed(at) {
+	nt := x.nativeOr(arg, at, env)
+	if !types.IsMixed(at) {
+		held := x.heldExpression(arg, env)
 		if _, isNever := types.Intersect(at, target, x.p()).(types.Never); isNever {
 			x.condValueType = types.TFalse
-			if _, never := types.Intersect(nt, target, x.p()).(types.Never); never && !types.IsMixed(nt) {
+			if _, never := types.Intersect(nt, target, x.p()).(types.Never); never && !types.IsMixed(nt) && !held {
 				x.report(e.S, P2402, "%s() on %s is always false", name, x.typeName(at))
 			}
 		} else if types.IsSubtype(at, target, x.p()) && !isParamType(at) {
 			x.condValueType = types.TTrue
-			if !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p()) {
+			if !types.IsMixed(nt) && types.IsSubtype(nt, target, x.p()) && !held {
 				x.report(e.S, P2402, "%s() on %s is always true", name, x.typeName(at))
 			}
 		}
@@ -2274,4 +2276,24 @@ func utf8Literal(e ast.Expr) bool {
 		return true
 	}
 	return false
+}
+
+// heldExpression reports an argument of a type test that is no variable
+// and whose type the flow holds, a property or an offset the function
+// wrote or narrowed, and no call or write elsewhere has forgotten since.
+// PHPStan reports no type test of such an expression always true or false
+// (ImpossibleCheckTypeHelper::isSpecified, its scope's expression type):
+// `$this->pages = $a / $b;` holds the int the property takes, and
+// is_float($this->pages) after it, or after `$this->pages > 0`, is no
+// impossible check to it. A variable is held to its type as before.
+func (x *fnCtx) heldExpression(arg ast.Expr, env *state) bool {
+	if _, isVar := unparen(arg).(*ast.Variable); isVar {
+		return false
+	}
+	k, ok := x.pathKey(arg)
+	if !ok {
+		return false
+	}
+	_, held := env.getPath(k)
+	return held
 }
