@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -441,15 +442,27 @@ func (pr *printer) print(t Type, nested bool) {
 				return
 			}
 		}
+		// Members that differ in nothing the spelling shows, two closures
+		// of one signature of which one carries what its by-reference
+		// parameter leaves (CallableParam.Out), are written once.
+		var members []string
+		for _, m := range t.Types {
+			var mb strings.Builder
+			sub := *pr
+			sub.b = &mb
+			sub.print(m, true)
+			if !slices.Contains(members, mb.String()) {
+				members = append(members, mb.String())
+			}
+		}
+		if len(members) == 1 {
+			b.WriteString(members[0])
+			return
+		}
 		if nested {
 			b.WriteString("(")
 		}
-		for i, m := range t.Types {
-			if i > 0 {
-				b.WriteString("|")
-			}
-			pr.print(m, true)
-		}
+		b.WriteString(strings.Join(members, "|"))
 		if nested {
 			b.WriteString(")")
 		}

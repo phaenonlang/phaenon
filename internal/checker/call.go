@@ -63,6 +63,10 @@ type signature struct {
 	// to come from is part of the finding, not a second one (P2112). Its
 	// other parameters and its return type are checked as any call's.
 	removed bool
+	// reads marks, in the signature of a callable value's type, the
+	// by-reference parameters that leave their argument as it was
+	// (types.CallableParam.Reads).
+	reads map[*program.Param]bool
 	// value marks the signature of a callable value's type (sigOfCallable):
 	// its parameters' types are what the checker knows of the value, which
 	// PHP does not check of it, and a parameter the type gives no name is
@@ -1311,7 +1315,14 @@ func (x *fnCtx) sigOfCallable(c types.Callable) *signature {
 		if name == "" {
 			name = fmt.Sprintf("%d", i+1)
 		}
-		sig.params = append(sig.params, &program.Param{Name: name, Type: p.Type, HasDefault: p.Optional, Variadic: p.Variadic, ByRef: p.ByRef})
+		param := &program.Param{Name: name, Type: p.Type, HasDefault: p.Optional, Variadic: p.Variadic, ByRef: p.ByRef, Out: p.Out}
+		if p.Reads {
+			if sig.reads == nil {
+				sig.reads = map[*program.Param]bool{}
+			}
+			sig.reads[param] = true
+		}
+		sig.params = append(sig.params, param)
 	}
 	return sig
 }
@@ -1352,13 +1363,48 @@ func (x *fnCtx) openCallable(sig *signature) (types.Callable, []*program.TypePar
 		if sig.recv != nil {
 			t = replaceStatic(t, sig.recv)
 		}
-		c.Params = append(c.Params, types.CallableParam{Name: p.Name, Type: t, Optional: p.HasDefault, Variadic: p.Variadic, ByRef: p.ByRef})
+		cp := types.CallableParam{Name: p.Name, Type: t, Optional: p.HasDefault, Variadic: p.Variadic, ByRef: p.ByRef}
+		if p.ByRef {
+			cp.Reads, cp.Out = x.refThroughClosure(sig, p, rename)
+		}
+		c.Params = append(c.Params, cp)
 	}
 	c.Return = types.Substitute(types.Substitute(c.Return, rename), sig.subst)
 	if sig.recv != nil {
 		c.Return = replaceStatic(c.Return, sig.recv)
 	}
 	return c, tps
+}
+
+// refThroughClosure says what a call of the closure made from sig leaves
+// in the argument of its by-reference parameter p. PHPStan types a call
+// of a closure value, which has no reflection of the callee, from the
+// closure's parameter alone: one that reads its argument leaves it as it
+// was (reads), and one documented @param-out leaves the tag's type (out).
+// PHP's own by-reference parameters that read are those PHPStan's map has
+// so (readsByRef). Any other leaves mixed to PHPStan; the checker leaves
+// the parameter's type there, as a direct call does (out nil): PHPStan
+// types the operands of an expression in the scope from before it, so
+// that `$f($o) . $o` reads the old $o, and a mixed written back would be
+// reported there where PHPStan passes. A tag that names a type parameter
+// of the callee is left so too, as PHPStan resolves none there.
+func (x *fnCtx) refThroughClosure(sig *signature, p *program.Param, rename map[string]types.Type) (reads bool, out types.Type) {
+	if sig.stub {
+		return readsByRef(sig, p), nil
+	}
+	if p.Out == nil {
+		return false, nil
+	}
+	for _, tp := range sig.typeParams {
+		if types.ContainsParam(p.Out, tp.Name) {
+			return false, nil
+		}
+	}
+	out = types.Substitute(p.Out, sig.subst)
+	if sig.recv != nil {
+		out = replaceStatic(out, sig.recv)
+	}
+	return false, out
 }
 
 // argsOnly types the arguments of a call that cannot be checked further.
@@ -3543,6 +3589,15 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 					out = x.walkedArray(walkedBy, argTypes[i])
 				}
 			}
+		}
+		if out == nil && sig.reads[b.param] && argTypes[i] != nil && !x.maybeUndefined(b.arg.Value, env) {
+			// A call of a closure value whose parameter reads its argument
+			// leaves it as it was, as PHPStan has it (refThroughClosure).
+			if x.c.opts.ByRef != nil {
+				x.c.opts.ByRef(x.file, b.arg.Value, nil)
+			}
+			x.writtenThrough(b.arg.Value, env)
+			continue
 		}
 		if out == nil {
 			out = types.Substitute(types.Substitute(b.param.Type, rename), subst)
