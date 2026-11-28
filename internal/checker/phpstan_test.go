@@ -157,6 +157,13 @@ func TestPHPStanParity(t *testing.T) {
 		// holding that one reading to a user's tag reports code PHPStan
 		// passes (paramout.go).
 		"param-out-inherited.phn": {"paramOut.type": {356}},
+		// An offset a count proved (on one way of two at 244), read after
+		// an assertion narrowed the list to list<int>: PHPStan goes on
+		// reading it as the value type the list had when the count was
+		// tested, int|string, and refuses the sum and the return; the
+		// checker forgets the proved offset where the list's value type
+		// changes and reads the int PHP holds there.
+		"offset-proved-by-count.phn": {"assignOp.invalid": {209}, "return.type": {244}},
 	}
 	// besideExtra are the lines whose findings are all extra checks and on
 	// which PHPStan speaks all the same, under an identifier the lists

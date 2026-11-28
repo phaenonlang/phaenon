@@ -1072,6 +1072,7 @@ func (x *fnCtx) forStmt(s *ast.For, env *state) {
 	once := x.entersOnce(env, s.Cond)
 	after := x.fixpoint(env, func(head *state) (*state, *state) {
 		t, f := test(head)
+		x.countedLoopOffset(s, t)
 		x.stmt(s.Body, t)
 		// `continue` runs the step too: `for ($i = 1; ; ++$i) { … continue; }`
 		// does not loop on $i = 1.
@@ -1086,6 +1087,64 @@ func (x *fnCtx) forStmt(s *ast.For, env *state) {
 		after = x.leftAfterOnce(test)
 	}
 	*env = *after
+}
+
+// countedLoopOffset records, as the body of `for ($i = 0; $i < count($a);
+// $i++)` starts, that `$a[$i]` is there where $a is a list, as PHPStan
+// infers it from the loop's own syntax (ForHandler::inferForLoopExpressions):
+// one variable set to 0, the same one stepped up by one, and compared
+// below the count of a variable, `count($a) > $i` alike. The counter's
+// range is not asked: the syntax proves it is not negative. The offset is
+// a path, which a write of $a or $i in the body forgets.
+func (x *fnCtx) countedLoopOffset(s *ast.For, body *state) {
+	if body.dead || len(s.Init) != 1 || len(s.Step) != 1 || len(s.Cond) == 0 {
+		return
+	}
+	init, ok := s.Init[0].(*ast.Assign)
+	if !ok || init.Op != token.Kind('=') || init.ByRef {
+		return
+	}
+	counter, ok := init.Target.(*ast.Variable)
+	if !ok {
+		return
+	}
+	zero, ok := init.Value.(*ast.IntLit)
+	if !ok {
+		return
+	}
+	if v, isLit := types.IsIntLit(intLitType(zero.Raw)); !isLit || v != 0 {
+		return
+	}
+	if step, ok := s.Step[0].(*ast.IncDec); !ok || !step.Inc {
+		return
+	} else if v, ok := step.Expr.(*ast.Variable); !ok || v.Name != counter.Name {
+		return
+	}
+	cond, ok := s.Cond[len(s.Cond)-1].(*ast.Binary)
+	if !ok {
+		return
+	}
+	idx, counted := cond.Left, cond.Right
+	switch cond.Op {
+	case token.Kind('<'):
+	case token.Kind('>'):
+		idx, counted = cond.Right, cond.Left
+	default:
+		return
+	}
+	if v, ok := idx.(*ast.Variable); !ok || v.Name != counter.Name {
+		return
+	}
+	arr, ok := x.countedArg(counted)
+	if !ok {
+		return
+	}
+	if _, ok := arr.(*ast.Variable); !ok || !allLists(x.pathType(arr, body)) {
+		return
+	}
+	if key, ok := x.pathKey(&ast.Index{S: cond.S, Array: arr, Index: idx}); ok {
+		body.setProvedPath(key, x.valuesOf(arr, body))
+	}
 }
 
 // mayNotIterate reports whether t has a member that foreach may refuse or
@@ -2482,11 +2541,15 @@ func callEntry(entry, head *state, uses []*ast.ClosureUse) *state {
 		for k := range call.paths {
 			if pathOf(k, name) {
 				delete(call.paths, k)
+				delete(call.proved, k)
 			}
 		}
 		for k, t := range head.paths {
 			if pathOf(k, name) {
 				call.paths[k] = t
+				if head.proved[k] {
+					call.markProved(k)
+				}
 			}
 		}
 	}
@@ -2574,6 +2637,9 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 	for k, t := range env.paths {
 		if capturedOffset(k, captured) {
 			cenv.setPath(k, t)
+			if env.proved[k] {
+				cenv.markProved(k) // the copy is the offset a test proved
+			}
 		}
 	}
 	c.generator = bodyHasYield(e.Body)
