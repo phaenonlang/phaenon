@@ -1,0 +1,133 @@
+namespace ArrayWalkArgument;
+
+// array_walk() passes its third argument on to the callback, after the
+// value and the key: where the argument is given, the callback is
+// callable(V, K, A): mixed, A the argument's type, as PHPStan's extension
+// for array_walk() types it. A callback that needs a third parameter is
+// refused where the argument is not given, as PHP throws an
+// ArgumentCountError there, and one whose third parameter does not take
+// the argument is refused where it is.
+
+function takesInt(int $i): void
+{
+}
+
+function addTo(int &$price, string $name, int $add): void
+{
+    $price += $add;
+}
+
+// ---- the argument given: a third parameter takes it
+
+/** @param array<string, int> $prices */
+function given(array $prices, int $rate, string $label): void
+{
+    array_walk($prices, function (int &$price, string $name, int $add): void {
+        $price += $add;
+    }, 3);
+    array_walk($prices, function (int &$price, string $name, int $add): void {
+        $price += $add;
+    }, $rate);
+    array_walk($prices, function (int $price, string $name, string $prefix): void {
+    }, $label);
+    array_walk($prices, fn (int $price, string $name, int $add): int => $price + $add, $rate);
+    array_walk($prices, function ($price, $name, $add): void {
+        takesInt($add);
+    }, $rate);
+    array_walk($prices, 'ArrayWalkArgument\addTo', $rate);
+    array_walk($prices, addTo(...), $rate);
+    array_walk($prices, function (int $price, string $name, int|string $any): void {
+    }, $rate);
+    array_walk($prices, function (int $price, string $name, mixed $any): void {
+    }, null);
+    array_walk($prices, function (int $price, string $name, int $add): void {
+    }, arg: $rate);
+    array_walk(array: $prices, callback: function (int $price, string $name, int $add): void {
+    }, arg: $rate);
+}
+
+// ---- a callback may take fewer parameters, or more that are optional
+
+/** @param array<string, int> $prices */
+function fewer(array $prices, int $rate): void
+{
+    array_walk($prices, function (int $price, string $name): void {
+    }, $rate);
+    array_walk($prices, function (int $price): void {
+    }, $rate);
+    array_walk($prices, function (int $price, string $name, int $add, int $more = 0): void {
+    }, $rate);
+    array_walk($prices, function (int $price, string $name, int ...$more): void {
+    }, $rate);
+    array_walk($prices, function (int $price, string $name, ?int $add = null): void {
+    });
+}
+
+// ---- refused: a third parameter without the argument, or of another type
+
+/** @param array<string, int> $prices */
+function refused(array $prices, int $rate, string $label, ?int $maybe): void
+{
+    array_walk($prices, function (int &$price, string $name, int $add): void { // want P2103 "expects callable(int, string): mixed"
+        $price += $add;
+    });
+    array_walk($prices, 'ArrayWalkArgument\addTo'); // want P2103 "expects callable(int, string): mixed"
+    array_walk($prices, function (int $price, string $name, int $add): void { // want P2103 "expects callable(int, string, string): mixed"
+    }, $label);
+    array_walk($prices, function (int $price, string $name, int $add): void { // want P2103 "expects callable(int, string, int|null): mixed"
+    }, $maybe);
+    array_walk($prices, addTo(...), 'x'); // want P2103 "expects callable(int, string, 'x'): mixed"
+    array_walk($prices, function (int $price, string $name, int $add, int $more): void { // want P2103 "expects callable(int, string, int): mixed"
+    }, $rate);
+    array_walk($prices, function (int $price, int $name, int $add): void { // want P2103
+    }, $rate);
+}
+
+// ---- array_walk_recursive() passes the argument on too; its callable says
+// nothing of what it receives, as in PHPStan
+
+/** @param array<string, array<string, int>> $nested */
+function recursive(array $nested, int $rate): void
+{
+    array_walk_recursive($nested, function (int &$price, string $name, int $add): void {
+        $price += $add;
+    }, $rate);
+}
+
+// ---- the callback's value and key are what iterating the array gives,
+// read from it: an object that is no Traversable gives mixed for both, as
+// it does to PHPStan, and a callback that wants less is refused
+
+final class Settings
+{
+    public string $prefix = 'p';
+}
+
+/**
+ * @param \ArrayObject<int, string> $names
+ * @param \IteratorAggregate<string, float> $rates
+ * @param array<string, int>|Settings $either
+ */
+function objects(Settings $settings, \stdClass $std, \ArrayAccess $access, \ArrayObject $names, \IteratorAggregate $rates, array|Settings $either, string $label): void
+{
+    array_walk($settings, function (mixed $value, mixed $key): void {
+    });
+    array_walk($settings, function (mixed $value, string $key): void { // want P2103 "expects callable(mixed, mixed): mixed"
+    });
+    array_walk($settings, function (mixed $value, string $key, string $prefix): void { // want P2103 "expects callable(mixed, mixed, string): mixed"
+    }, $label);
+    array_walk($settings, function (mixed $value, mixed $key, string $prefix): void {
+    }, $label);
+    array_walk($std, function (mixed $value, int $key): void { // want P2103 "expects callable(mixed, mixed): mixed"
+    });
+    array_walk($access, function (mixed $value, int $key): void { // want P2103 "expects callable(mixed, mixed): mixed"
+    });
+    array_walk($names, function (string $name, int $i): void {
+    });
+    array_walk($names, function (int $name, int $i): void { // want P2103 "expects callable(string, int): mixed"
+    });
+    array_walk($rates, function (float $rate, string $key, string $prefix): void {
+    }, $label);
+    array_walk($either, function (int $value, string $key): void {
+    });
+}
