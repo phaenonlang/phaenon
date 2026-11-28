@@ -3793,7 +3793,16 @@ func (x *fnCtx) assignFrom(value ast.Expr, target ast.Expr, vt types.Type, env *
 			x.keepWritten(env, key, value, vt, certain)
 		}
 	case *ast.Index:
+		// An offset with a PHP type of its own, of a property's array or
+		// of one a docblock refines, holds the PHP type of the value
+		// written, as a property does (keepWritten): `$this->map['a'] =
+		// []` makes it empty to PHP, as PHPStan's native type has it.
+		native := x.nativeVar(t, env)
+		certain := native != nil && x.certainPath(t, x.pathType(t, env), env)
 		x.assignIndex(t, vt, env, span)
+		if key, ok := x.narrowedPathKey(t); ok && native != nil {
+			x.keepWritten(env, key, value, vt, certain)
+		}
 	case *ast.ArrayLit:
 		x.destructure(t, vt, env, span, nil)
 	case *ast.VariableVariable:

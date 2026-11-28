@@ -618,3 +618,40 @@ final class Sorted
         }
     }
 }
+
+/** @return non-empty-list<string> */
+function someLoaded(): array
+{
+    return ['x'];
+}
+
+/**
+ * An offset of a property's array, an instance's or a static one, holds
+ * the PHP type of the value written into it, as the property does: `[]`
+ * makes it empty, a literal list non-empty, and a value a docblock alone
+ * calls non-empty decides nothing.
+ */
+final class OffsetWritten
+{
+    /** @var array<string, list<string>> */
+    private array $map = [];
+
+    /** @var array<string, string> */
+    private static array $labels = [];
+
+    public function written(): void
+    {
+        $this->map['a'] = [];
+        echo $this->map['a'] ? 1 : 2; // want P2402 "always false"
+        $this->map['b'] = ['x'];
+        echo $this->map['b'] ? 1 : 2; // want P2402 "always true"
+        $this->map['c'] = someLoaded();
+        echo $this->map['c'] ? 1 : 2;
+        self::$labels['a'] = '';
+        echo self::$labels['a'] ? 1 : 2; // want P2402 "always false"
+        foreach ([1, 2] as $i) {
+            $this->map['d'] = [];
+        }
+        echo $this->map['d'] ? 1 : 2; // want P2402 "always false"
+    }
+}
