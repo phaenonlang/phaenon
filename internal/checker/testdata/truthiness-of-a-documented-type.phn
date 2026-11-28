@@ -655,3 +655,104 @@ final class OffsetWritten
         echo $this->map['d'] ? 1 : 2; // want P2402 "always false"
     }
 }
+
+/**
+ * A value of a type parameter a test narrows is decided by what the test
+ * leaves of PHP's type, as PHPStan decides it by the native type it
+ * narrows: isset() of an offset leaves an array non-empty, `$a > 0` takes
+ * null, false and the ints up to 0 away, is_string() of a callable leaves
+ * a callable-string, which is never falsy. A test that leaves PHP's type
+ * nothing, or a value that may still be falsy, decides nothing.
+ *
+ * @template T
+ */
+final class Narrowed
+{
+    /** @param T $a */
+    public function offset(mixed $a): void
+    {
+        if (\is_array($a) && isset($a['id'])) {
+            echo $a ? 1 : 2; // want P2402 "always true (non-empty-array)"
+            unset($a['id']);
+            echo $a ? 1 : 2;
+        }
+    }
+
+    /** @param T $a */
+    public function unbounded(mixed $a): void
+    {
+        if (isset($a['id'])) { // want P2302
+            echo $a ? 1 : 2;
+        }
+    }
+}
+
+/** @template T of bool */
+final class Compared
+{
+    /** @param T $a */
+    public function compared(bool $a): void
+    {
+        if ($a > 0) {
+            echo $a ? 1 : 2; // want P2402 "always true (true)"
+        }
+        if ($a < 1) {
+            echo $a ? 1 : 2; // want P2402 "always false (false)"
+        }
+        if ($a >= 0) {
+            echo $a ? 1 : 2;
+        }
+        if ($a > -1) {
+            echo $a ? 1 : 2;
+        }
+    }
+}
+
+/** @template T of int|null */
+final class ComparedInt
+{
+    /** @param T $a */
+    public function compared(?int $a): void
+    {
+        if ($a > 0) {
+            echo $a ? 1 : 2; // want P2402 "always true (int<1, max>)"
+        }
+        if ($a > -5) {
+            echo $a ? 1 : 2;
+        }
+    }
+}
+
+/** @template T of callable|null */
+final class Called
+{
+    /** @param T $a */
+    public function called(?callable $a): void
+    {
+        if (\is_string($a)) {
+            echo $a ? 1 : 2; // want P2402 "always true (callable-string)"
+        }
+    }
+
+    /** @param T $a */
+    public function compared(?callable $a): void
+    {
+        if ($a > 0) {
+            echo $a ? 1 : 2; // want P2402 "always true (callable)"
+        }
+    }
+}
+
+/** @param int<0, max>|null $n */
+function comparedNullable(?int $n, ?callable $c, ?string $s): void
+{
+    if ($n > 0) {
+        echo $n ? 1 : 2; // want P2402 "always true (int<1, max>)"
+    }
+    if (\is_string($c)) {
+        echo $c ? 1 : 2; // want P2402 "always true (callable-string)"
+    }
+    if ($s > 0) {
+        echo $s ? 1 : 2;
+    }
+}

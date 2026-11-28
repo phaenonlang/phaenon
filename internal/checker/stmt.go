@@ -448,6 +448,12 @@ func (x *fnCtx) unsetIndex(t *ast.Index, base types.Type, env *state, span ast.S
 			bounded, p := writtenBound(info.t)
 			now := unsetOffset(boundedShapes(bounded), keyT)
 			env.set(a.Name, now)
+			// PHP's type loses the entry too, and is not known to be
+			// non-empty any more, where a docblock refines it: the value
+			// of a type parameter is no certainty afterwards.
+			if info.native != nil {
+				env.setNative(a.Name, unsetOffset(info.native, keyT))
+			}
 			x.keepRewritten(a, info.rewritten, p, t.S, now, env)
 			x.wroteOut(a.Name, now, env, span)
 		}

@@ -636,12 +636,23 @@ func (x *fnCtx) narrowHolder(env *state, e *ast.Index, t types.Type) {
 // issetChain narrows, where isset() or !empty() of e holds, each object e
 // reads a member of as not null, and so set: `$r['o']` of
 // `isset($r['o']->p)`, as PHPStan has it. The array an offset is in is
-// narrowed already (narrowHolder).
+// narrowed already (narrowHolder), and so is PHP's type of a variable or
+// a static property holding it here: an array that holds the offset is not
+// empty, as PHPStan narrows their native type by the offset it has
+// (HasOffsetType), but of a value whose type is mixed, a type parameter's
+// without a bound among them. PHPStan 2.3 leaves the native type of an
+// instance's property and of an offset as it was.
 func (x *fnCtx) issetChain(env *state, e ast.Expr) {
 	for {
 		switch n := unparen(e).(type) {
 		case *ast.Index:
 			e = n.Array
+			switch unparen(e).(type) {
+			case *ast.Variable, *ast.StaticPropertyFetch:
+				if native := x.nativeVar(e, env); native != nil && !types.IsMixed(boundsOf(x.pathType(e, env))) {
+					x.keepPHPType(env, e, withAnOffset(native))
+				}
+			}
 		case *ast.PropertyFetch:
 			e = n.Object
 			if t := x.pathType(e, env); !types.IsMixed(t) {
@@ -650,6 +661,43 @@ func (x *fnCtx) issetChain(env *state, e ast.Expr) {
 		default:
 			return
 		}
+	}
+}
+
+// withAnOffset is PHP's type t of a value that has an offset: its arrays
+// are not empty, and null has none. The rest stays, an ArrayAccess and a
+// string among them.
+func withAnOffset(t types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Array:
+			m.NonEmpty = true
+			return m
+		case types.Null:
+			return types.TNever
+		}
+		return m
+	})
+}
+
+// keepPHPType gives a variable a docblock refines, or a narrowed path,
+// the PHP type nt a test left of it, its type as it was.
+func (x *fnCtx) keepPHPType(env *state, e ast.Expr, nt types.Type) {
+	if _, never := nt.(types.Never); never {
+		return
+	}
+	if v, ok := variableOf(e); ok {
+		if info, ok := env.vars[v.Name]; ok && info.native != nil {
+			info.native = nt
+			if types.Equal(nt, info.t) {
+				info.native = nil
+			}
+			env.vars[v.Name] = info
+		}
+		return
+	}
+	if key, ok := x.narrowedPathKey(e); ok {
+		env.keepNative(key, nt)
 	}
 }
 
@@ -1727,6 +1775,20 @@ func (x *fnCtx) rangeNarrow(env *state, target ast.Expr, t, bound types.Type, op
 	// the comparison leaves as it is.
 	if native := x.nativeVar(target, env); native != nil {
 		clipped, nativeNarrowed := clipInts(native, lo, hi)
+		// PHP's type loses the null, the bools and the 0.0 the comparison
+		// rules out too, as PHPStan narrows the native type by the type
+		// the bound's getGreaterType() and its kin give: `$a > 0` of a
+		// bool leaves true, of an ?int an int<1, max>, of a ?Row a Row,
+		// under `@param T $a` as well. Where they are all it held, `$a >
+		// -1` of a bool, it stays: a PHP type of nothing would make the
+		// variable certain, and a type parameter's type decide the tests
+		// PHP never reaches.
+		if away := comparedAway(op, b); away != nil {
+			rest := x.subtract(clipped, away, x.p())
+			if !types.Equal(rest, clipped) && !isNeverType(rest) {
+				clipped, nativeNarrowed = rest, true
+			}
+		}
 		if narrowed || nativeNarrowed {
 			x.narrowPathNative(env, target, out, clipped, false)
 		}
@@ -1735,6 +1797,51 @@ func (x *fnCtx) rangeNarrow(env *state, target ast.Expr, t, bound types.Type, op
 	if narrowed {
 		x.narrowPath(env, target, out, false)
 	}
+}
+
+// comparedAway is what PHPStan takes from a value `$x op b` holds of
+// besides the ints out of range, b an int: the null, false, true and 0.0
+// PHP's loose comparison with b rules out, as its getSmallerType(),
+// getSmallerOrEqualType(), getGreaterType() and getGreaterOrEqualType()
+// of a constant int and of an int range give them. nil where it takes
+// none of them.
+func comparedAway(op token.Kind, b types.Int) types.Type {
+	constant := b.Lo == b.Hi
+	zero := constant && b.Lo == 0
+	// A range all of whose values are truthy, as PHPStan asks of one.
+	signed := !constant && (b.Lo != math.MinInt64 && b.Lo > 0 || b.Hi != math.MaxInt64 && b.Hi < 0)
+	falsy := []types.Type{types.TNull, types.TFalse}
+	var away []types.Type
+	switch op {
+	case token.Kind('<'):
+		away = append(away, types.TTrue)
+		if zero {
+			away = append(away, types.TNull, types.TFalse, types.FloatLit{V: 0})
+		}
+	case token.T_IS_SMALLER_OR_EQUAL:
+		if zero {
+			away = append(away, types.TTrue)
+		}
+	case token.Kind('>'):
+		away = append(away, falsy...)
+		if constant {
+			away = append(away, types.FloatLit{V: 0})
+		}
+		if constant && !zero || signed {
+			away = append(away, types.TTrue)
+		}
+	case token.T_IS_GREATER_OR_EQUAL:
+		if constant && !zero {
+			away = append(away, types.TNull, types.TFalse, types.FloatLit{V: 0})
+		}
+		if signed {
+			away = append(away, falsy...)
+		}
+	}
+	if len(away) == 0 {
+		return nil
+	}
+	return types.MakeUnion(away...)
 }
 
 // orderingBounds is what `$x op b` says of $x, the bounds of an int range;
