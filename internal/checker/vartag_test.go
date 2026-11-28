@@ -21,7 +21,7 @@ func TestRefinesOutside(t *testing.T) {
 		{"a tag outside the refinement", types.TString, types.TBytes, types.TString, false},
 	}
 	for _, c := range cases {
-		if got := refinesOutside(c.declared, c.refined, c.native, nil); got != c.want {
+		if got := refinesOutside(c.declared, c.refined, c.native, true, nil); got != c.want {
 			t.Errorf("%s: refinesOutside = %v, want %v", c.name, got, c.want)
 		}
 	}

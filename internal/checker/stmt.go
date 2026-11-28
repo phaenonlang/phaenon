@@ -240,6 +240,7 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 	// varTag.nativeType), unless the tag narrows a refinement that leaves
 	// PHP's type (refinesOutside).
 	native := x.nativeOf(assign.Value, env)
+	guaranteed := native != nil // else the inferred type stands in, whose ranges PHP may not keep
 	if native == nil {
 		native = vt
 	}
@@ -248,7 +249,7 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 		if !types.IsAcceptable(vt, declared, x.p()) {
 			x.report(s.S, P2212, "@var %s does not accept the assigned %s", x.typeName(declared), x.typeName(vt))
 		}
-	case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native), x.p()) && !refinesOutside(declared, vt, native, x.p()):
+	case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native, guaranteed), x.p()) && !refinesOutside(declared, vt, native, guaranteed, x.p()):
 		x.report(s.S, P2212, "@var %s is not a subtype of the assigned %s", x.typeName(declared), x.typeName(native))
 	}
 	x.bind(nil, assign.Target, declared, env, s.S)
@@ -266,8 +267,8 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 // random_bytes(), bytes to the overlay and a string to PHP, which the
 // lattice keeps apart. Such a tag narrows PHP's type as well. A refined
 // type of mixed says nothing and excuses nothing.
-func refinesOutside(declared, refined, native types.Type, h types.Hierarchy) bool {
-	return !types.IsMixed(refined) && types.IsSubtype(declared, refined, h) && !types.IsSubtype(refined, withoutTypeArgs(native), h)
+func refinesOutside(declared, refined, native types.Type, guaranteed bool, h types.Hierarchy) bool {
+	return !types.IsMixed(refined) && types.IsSubtype(declared, refined, h) && !types.IsSubtype(refined, withoutTypeArgs(native, guaranteed), h)
 }
 
 // varTags applies the named `@var T $x` tags of a docblock above a
@@ -334,12 +335,20 @@ func statementDoc(s ast.Stmt) string {
 // withoutTypeArgs is the PHP type behind t: a class without its type
 // arguments. A @var tag is checked against what PHP knows, so `@var
 // Meta<object>` may widen an inferred Meta<Dog> (PHPStan's varTag.nativeType).
-func withoutTypeArgs(t types.Type) types.Type {
+func withoutTypeArgs(t types.Type, guaranteed bool) types.Type {
 	// bytes is a type of its own, not a refinement of string a docblock may
 	// narrow to: `@var bytes $out` over a bytes value is no contradiction,
-	// over a string it is (the (bytes) cast retypes, strings.md §2).
+	// over a string it is (the (bytes) cast retypes, strings.md §2). An
+	// integer range PHP guarantees is kept, the one its function map gives
+	// count() or abs(): `@var int` over count() widens it, as PHPStan
+	// reports. A range only the checker infers, of a ternary or an offset
+	// it has no PHP type for, is no guarantee and is erased, and so is a
+	// single integer, as PHPStan holds no literal against the tag.
 	return types.Map(t, func(m types.Type) types.Type {
 		if _, ok := m.(types.Bytes); ok || types.IsTextBytes(m) {
+			return m
+		}
+		if i, ok := m.(types.Int); ok && i.Lo != i.Hi && guaranteed {
 			return m
 		}
 		return types.Erase(m)
@@ -1923,13 +1932,17 @@ func (x *fnCtx) returnStmt(s *ast.Return, env *state) {
 	}
 	t := x.expr(s.Expr, env, expected)
 	if declared != nil && s.Expr != nil {
-		native := x.nativeOr(s.Expr, t, env)
+		native := x.nativeOf(s.Expr, env)
+		guaranteed := native != nil
+		if native == nil {
+			native = t
+		}
 		switch {
 		case isLiteralExpr(s.Expr):
 			if !types.IsAcceptable(t, declared, x.p()) {
 				x.report(s.S, P2212, "@var %s does not accept the returned %s", x.typeName(declared), x.typeName(t))
 			}
-		case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native), x.p()) && !refinesOutside(declared, t, native, x.p()):
+		case !types.IsMixed(native) && !types.IsSubtype(declared, withoutTypeArgs(native, guaranteed), x.p()) && !refinesOutside(declared, t, native, guaranteed, x.p()):
 			x.report(s.S, P2212, "@var %s is not a subtype of the returned %s", x.typeName(declared), x.typeName(native))
 		}
 		t = declared

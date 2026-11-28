@@ -1,6 +1,8 @@
 package checker
 
 import (
+	"strings"
+
 	"github.com/phaenonlang/phaenon/internal/ast"
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/token"
@@ -105,11 +107,17 @@ func (x *fnCtx) phpType(e ast.Expr, env *state, guaranteed bool) types.Type {
 		if !ok {
 			return nil
 		}
+		if e.Args != nil && (e.Args.FirstClassCallable || e.Args.Partial()) {
+			return nil // `strtolower(...)`, `str_repeat(?, 2)`: a Closure, as typed
+		}
 		fn := x.lookupFunction(n)
 		if fn == nil {
 			return nil
 		}
 		fn.Signature()
+		if ownReturn := phpsOwnReturn(fn); ownReturn != nil {
+			return ownReturn
+		}
 		return refinedNative(fn.NativeReturn, fn.Return, guaranteed)
 	case *ast.StaticCall:
 		name, ok := identName(e.Name)
@@ -148,6 +156,52 @@ func (x *fnCtx) phpType(e ast.Expr, env *state, guaranteed bool) types.Type {
 		}
 	}
 	return nil
+}
+
+// phpsOwnReturn is what PHP guarantees a call of one of its own functions
+// returns, as PHPStan types the call natively with treatPhpDocTypesAsCertain
+// off: its declared return type, nil for a function that is not PHP's own
+// or declares none. What the checker infers beyond it from the arguments,
+// as PHPStan's return type extensions do, is no type PHP guarantees:
+// max(1, $m) is int<1, max> to both and mixed to PHP, and a comparison
+// only that range decides is not reported. PHPStan's function map is
+// native to it, and where the overlay documents the declared int as a
+// range, the map's, the range is what PHP guarantees: count() and strlen()
+// are int<0, max>, and `count($xs) < 0` is always false; so is a
+// class-string over a declared string, get_class()'s. The overlay's other
+// refinements, a list, bytes, a condition on the arguments, are the
+// checker's reading, as a docblock's are.
+func phpsOwnReturn(fn *program.Function) types.Type {
+	if fn.File == nil || fn.NativeReturn == nil {
+		return nil
+	}
+	path := fn.File.Path
+	if !strings.HasPrefix(path, "<stub>/php-src/") && !strings.HasPrefix(path, "<stub>/overlay/") && !strings.HasPrefix(path, "<ext>/") {
+		return nil
+	}
+	if fn.Return != nil && rangesOf(fn.Return, fn.NativeReturn) {
+		return fn.Return
+	}
+	return fn.NativeReturn
+}
+
+// rangesOf reports a documented type that is the declared one but for its
+// int, which it narrows to ranges, and its string, which it narrows to a
+// class-string, as PHPStan's function map has them natively: int<0, max>
+// over int, int<0, max>|float over int|float, class-string over string.
+func rangesOf(documented, declared types.Type) bool {
+	widened := types.Map(documented, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Int:
+			return types.TInt
+		case types.ClassString:
+			if m.Of == nil {
+				return types.TString
+			}
+		}
+		return m
+	})
+	return types.Equal(widened, declared)
 }
 
 // refinedNative is what PHP holds a declaration to, native erased, when
