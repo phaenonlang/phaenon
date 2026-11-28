@@ -287,6 +287,111 @@ func (p *typeParser) name() string {
 
 func isAlpha(c byte) bool { return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
 
+// unescapeString is the value of a quoted string in a type, raw between
+// its quotes, as phpdoc-parser's StringUnescaper reads it: a single-quoted
+// string decodes \\ and \' alone; a double-quoted one decodes \" and the
+// escapes nikic/php-parser decodes in PHP's double-quoted strings, \\ \n
+// \r \t \f \v \e, \x with one or two hex digits, one to three octal
+// digits and \u{hex}, but not \$, which stays as written. A backslash
+// before anything else stays with what follows it.
+func unescapeString(raw string, quote byte) string {
+	if strings.IndexByte(raw, '\\') < 0 {
+		return raw
+	}
+	if quote == '\'' {
+		return strings.NewReplacer(`\\`, `\`, `\'`, `'`).Replace(raw)
+	}
+	b := make([]byte, 0, len(raw))
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if c != '\\' || i+1 == len(raw) {
+			b = append(b, c)
+			continue
+		}
+		switch e := raw[i+1]; e {
+		case '\\', '"':
+			b = append(b, e)
+		case 'n':
+			b = append(b, '\n')
+		case 'r':
+			b = append(b, '\r')
+		case 't':
+			b = append(b, '\t')
+		case 'f':
+			b = append(b, '\f')
+		case 'v':
+			b = append(b, '\v')
+		case 'e':
+			b = append(b, 0x1b)
+		case 'x', 'X':
+			end := i + 2
+			for end < len(raw) && end < i+4 && isHex(raw[end]) {
+				end++
+			}
+			if end == i+2 {
+				b = append(b, c)
+				continue
+			}
+			v, _ := strconv.ParseUint(raw[i+2:end], 16, 8)
+			b = append(b, byte(v))
+			i = end - 2
+		case 'u':
+			close := strings.IndexByte(raw[i+2:], '}')
+			if i+2 == len(raw) || raw[i+2] != '{' || close < 2 || !allHex(raw[i+3:i+2+close]) {
+				b = append(b, c)
+				continue
+			}
+			v, err := strconv.ParseUint(raw[i+3:i+2+close], 16, 32)
+			if err != nil || v > 0x1FFFFF {
+				v = 0xFFFD // phpdoc-parser's answer to a code point past 21 bits
+			}
+			b = appendCodePoint(b, v)
+			i += 1 + close
+		default:
+			if e < '0' || e > '7' {
+				b = append(b, c)
+				continue
+			}
+			end := i + 2
+			for end < len(raw) && end < i+4 && raw[end] >= '0' && raw[end] <= '7' {
+				end++
+			}
+			v, _ := strconv.ParseUint(raw[i+1:end], 8, 16)
+			b = append(b, byte(v))
+			i = end - 2
+		}
+		i++
+	}
+	return string(b)
+}
+
+// appendCodePoint writes a code point's UTF-8 bytes as PHP writes them, a
+// surrogate's included.
+func appendCodePoint(b []byte, v uint64) []byte {
+	switch {
+	case v < 0x80:
+		return append(b, byte(v))
+	case v <= 0x7FF:
+		return append(b, byte(v>>6)+0xC0, byte(v&0x3F)+0x80)
+	case v <= 0xFFFF:
+		return append(b, byte(v>>12)+0xE0, byte(v>>6&0x3F)+0x80, byte(v&0x3F)+0x80)
+	}
+	return append(b, byte(v>>18)+0xF0, byte(v>>12&0x3F)+0x80, byte(v>>6&0x3F)+0x80, byte(v&0x3F)+0x80)
+}
+
+func isHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+func allHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isHex(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // parseType parses a full type: union of intersections of atoms, with the
 // conditional form on top.
 func (p *typeParser) parseType() (*TypeNode, error) {
@@ -436,7 +541,7 @@ func (p *typeParser) parseAtom() (*TypeNode, error) {
 		}
 		raw := p.s[start:p.i]
 		p.i++
-		return p.suffix(&TypeNode{Kind: KindStringLit, Str: strings.NewReplacer(`\'`, `'`, `\"`, `"`, `\\`, `\`).Replace(raw)})
+		return p.suffix(&TypeNode{Kind: KindStringLit, Str: unescapeString(raw, c)})
 	case c == '-' || c == '+' || c >= '0' && c <= '9':
 		return p.suffix(p.number())
 	}
@@ -599,12 +704,15 @@ func (p *typeParser) shapeKey() (key string, isInt bool, intKey int64, ok bool) 
 		p.i++
 		start := p.i
 		for !p.eof() && p.s[p.i] != c {
+			if p.s[p.i] == '\\' {
+				p.i++
+			}
 			p.i++
 		}
 		if p.eof() {
 			return "", false, 0, false
 		}
-		key = p.s[start:p.i]
+		key = unescapeString(p.s[start:p.i], c)
 		p.i++
 		return key, false, 0, true
 	case c == '-' || c >= '0' && c <= '9':

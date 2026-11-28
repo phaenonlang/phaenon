@@ -93,6 +93,10 @@ func TestPrint(t *testing.T) {
 		{MakeUnion(TBool, TTrue), "bool"},
 		{MakeUnion(StringLit{"a"}, StringLit{"b"}), "'a'|'b'"},
 		{MakeUnion(StringLit{"a"}, TString), "string"},
+		// As PHPStan's ConstantStringType::export() writes them.
+		{StringLit{`it's \ "q"`}, `'it\'s \\ "q"'`},
+		{StringLit{"a\tb\n\r\v\f\a\b\x1b\x00\x1f \\ \" ' $"}, `"a\tb\n\r\v\f\a\b\033\000\037 \\ \" ' $"`},
+		{StringLit{"é😀"}, `'é😀'`},
 		{Array{Key: TArrayKey, Value: TMixed}, "array"},
 		{Array{Key: TString, Value: TInt}, "array<string, int>"},
 		{Array{Key: TInt, Value: TInt, List: true}, "list<int>"},
@@ -575,5 +579,32 @@ func TestPrintQualifiedInPlace(t *testing.T) {
 		if got, ok := Native(c.t); !ok || got != c.want {
 			t.Errorf("Native(%s) = %q, want %q", Print(c.t), got, c.want)
 		}
+	}
+}
+
+// TestDescribeCutsLiterals: a literal in a message is cut at 20
+// characters as Nette's Strings::truncate cuts it for PHPStan (the values
+// are its), but one shaped as a namespaced class's name; Print keeps it
+// whole.
+func TestDescribeCutsLiterals(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"short", "short"},
+		{"exactly twenty chars", "exactly twenty chars"},
+		{"twenty-one characters", "twenty-one…"},
+		{"abcdefghijklmnopqrstuvwxyz", "abcdefghijklmnopqrs…"},
+		{"one two three four five six", "one two three four…"},
+		{"héllo wörld ünïcode ñ and more", "héllo wörld ünïcode…"},
+		{"a/b/c/d/e/f/g/h/i/j/k/l/m", "a/b/c/d/e/f/g/h/i/j…"},
+	} {
+		if got := Describe(StringLit{c.in}); got != quoteString(c.want) {
+			t.Errorf("%q: %s, want %s", c.in, got, quoteString(c.want))
+		}
+	}
+	long := `App\Domain\Ordering\OrderPlacedEvent`
+	if got := Describe(StringLit{long}); got != quoteString(long) {
+		t.Errorf("class name cut: %s", got)
+	}
+	if got := Print(StringLit{"abcdefghijklmnopqrstuvwxyz"}); got != "'abcdefghijklmnopqrstuvwxyz'" {
+		t.Errorf("Print cut a literal: %s", got)
 	}
 }

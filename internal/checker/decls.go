@@ -561,7 +561,7 @@ func (c *Checker) checkClass(cl *program.Class) {
 		if k.Type != nil && !types.IsAcceptable(vt, k.Type, c.p) {
 			// A @var tag's type is no native one.
 			refused := !k.Doc && literalRefused(k.Value, k.Type, false)
-			c.reportUnfitRefused(refused, given{expr: k.Value}, vt, k.Type, k.Span, P2211, nil, "constant %s::%s (%s) does not accept %s", cl.Name, k.Name, types.Print(k.Type), types.Print(vt))
+			c.reportUnfitRefused(refused, given{expr: k.Value}, vt, k.Type, k.Span, P2211, nil, "constant %s::%s (%s) does not accept %s", cl.Name, k.Name, types.Describe(k.Type), types.Describe(vt))
 		}
 	}
 	if cl.Kind == ast.KindEnum {
@@ -779,7 +779,7 @@ func (c *Checker) checkEnum(cl *program.Class) {
 			continue
 		}
 		if !types.IsSubtype(vt, cl.BackingType, c.p) {
-			c.report(cs.Value.Span(), P2507, "case %s::%s has value %s, expected %s", cl.Name, cs.Name, types.Print(vt), types.Print(cl.BackingType))
+			c.report(cs.Value.Span(), P2507, "case %s::%s has value %s, expected %s", cl.Name, cs.Name, types.Describe(vt), types.Describe(cl.BackingType))
 		}
 	}
 	for _, pr := range cl.Props {
@@ -860,7 +860,7 @@ func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 		dt := ctx.expr(pr.Default, newEnv(), pr.Type)
 		if !types.IsAcceptable(dt, pr.Type, c.p) {
 			refused := literalRefused(pr.Default, pr.NativeType, false)
-			c.reportUnfitRefused(refused, given{expr: pr.Default}, dt, pr.Type, pr.Default.Span(), P2201, nil, "property %s::$%s (%s) does not accept default %s", cl.Name, pr.Name, types.Print(pr.Type), types.Print(dt))
+			c.reportUnfitRefused(refused, given{expr: pr.Default}, dt, pr.Type, pr.Default.Span(), P2201, nil, "property %s::$%s (%s) does not accept default %s", cl.Name, pr.Name, types.Describe(pr.Type), types.Describe(dt))
 		}
 	}
 	for _, h := range pr.Hooks {
@@ -876,12 +876,12 @@ func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 			if h.Expr != nil {
 				t := hctx.expr(h.Expr, env, pr.Type)
 				if !types.IsAcceptable(t, pr.Type, c.p) {
-					c.report(h.Expr.Span(), P2512, "get hook of %s::$%s returns %s, expected %s", cl.Name, pr.Name, types.Print(t), types.Print(pr.Type))
+					c.report(h.Expr.Span(), P2512, "get hook of %s::$%s returns %s, expected %s", cl.Name, pr.Name, types.Describe(t), types.Describe(pr.Type))
 				}
 			} else if h.Body != nil {
 				hctx.stmts(h.Body, env)
 				if !env.dead {
-					c.report(h.S, P2203, "get hook of %s::$%s must return %s", cl.Name, pr.Name, types.Print(pr.Type))
+					c.report(h.S, P2203, "get hook of %s::$%s must return %s", cl.Name, pr.Name, types.Describe(pr.Type))
 				}
 			}
 		case "set":
@@ -897,7 +897,7 @@ func (c *Checker) checkProperty(cl *program.Class, pr *program.Property) {
 						// writes, Phaenon's and the docblock's erased.
 						refused := pr.NativeType != nil && !mentionsParam(pr.NativeType) && !mentionsParam(pt) &&
 							!types.IsSubtype(phpType(pr.NativeType), phpType(pt), c.p)
-						c.reportRefused(refused, h.Params[0].S, P2512, nil, "set hook parameter of %s::$%s must accept %s", cl.Name, pr.Name, types.Print(pr.Type))
+						c.reportRefused(refused, h.Params[0].S, P2512, nil, "set hook parameter of %s::$%s must accept %s", cl.Name, pr.Name, types.Describe(pr.Type))
 					}
 				}
 				env.set(h.Params[0].Var.Name, vt)
@@ -1099,7 +1099,7 @@ func (c *Checker) checkPropertyRedeclaration(cl *program.Class, pr, parent *prog
 		// erased.
 		want := types.Erase(parent.NativeType)
 		if pr.NativeType == nil || !types.Equal(want, types.Erase(pr.NativeType)) {
-			c.reportRefused(c.linkedOnLoad(cl), span, P2502, rel, "type of %s::$%s must be %s (as in class %s)", cl.Name, pr.Name, types.Print(want), parent.Class.Name)
+			c.reportRefused(c.linkedOnLoad(cl), span, P2502, rel, "type of %s::$%s must be %s (as in class %s)", cl.Name, pr.Name, types.Describe(want), parent.Class.Name)
 		}
 	}
 }
@@ -1480,7 +1480,7 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 		if pt != nil && ct != nil && !c.overrideFits(pt, ct) {
 			typeMismatch(nativesFit(written(parent, parent.Class, i), written(m, cl, i), false), compiledApart(i), i,
 				cp.Span, "parameter $%s of %s::%s() (%s) is not contravariant with %s::%s() (%s)",
-				cp.Name, cl.Name, m.Name, types.Print(ct), parent.Class.Name, parent.Name, types.Print(pt))
+				cp.Name, cl.Name, m.Name, types.Describe(ct), parent.Class.Name, parent.Name, types.Describe(pt))
 		}
 		if pp.ByRef != cp.ByRef {
 			mismatch(refused, cp.Span, "parameter $%s of %s::%s() disagrees on by-reference with %s::%s()", cp.Name, cl.Name, m.Name, parent.Class.Name, parent.Name)
@@ -1497,13 +1497,13 @@ func (c *Checker) checkOverrideOf(cl *program.Class, m, parent *program.Method, 
 		if cr == nil {
 			if _, isVoid := pr.(types.Void); !isVoid && !types.IsMixed(pr) {
 				// PHP sees the parent's native return type alone.
-				mismatch(refused && parent.NativeReturn != nil && !ofPHP(parent.Class), m.Span, "%s::%s() must declare a return type compatible with %s::%s() (%s)", cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
+				mismatch(refused && parent.NativeReturn != nil && !ofPHP(parent.Class), m.Span, "%s::%s() must declare a return type compatible with %s::%s() (%s)", cl.Name, m.Name, parent.Class.Name, parent.Name, types.Describe(pr))
 			}
 		} else if !c.overrideFits(cr, pr) {
 			if _, parentVoid := pr.(types.Void); !(parentVoid && isVoidLike(cr)) {
 				typeMismatch(nativesFit(written(m, cl, -1), written(parent, parent.Class, -1), true), compiledApart(-1), -1,
 					m.Span, "return type %s of %s::%s() is not covariant with %s::%s() (%s)",
-					types.Print(cr), cl.Name, m.Name, parent.Class.Name, parent.Name, types.Print(pr))
+					types.Describe(cr), cl.Name, m.Name, parent.Class.Name, parent.Name, types.Describe(pr))
 			}
 		}
 	}

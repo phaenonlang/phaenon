@@ -1,0 +1,128 @@
+namespace StringEscapes;
+
+/**
+ * A string literal's type holds the string PHP makes of it, as PHPStan's
+ * does: a double-quoted string and a heredoc decode their escapes, \x41,
+ * \101 and \u{41} alike, and a heredoc's lines lose the closing marker's
+ * indentation. A single-quoted string decodes \\ and \' alone, and a
+ * nowdoc nothing. A heredoc or a nowdoc of text alone is a literal too.
+ */
+function hexEscape(int $i): bool
+{
+    $a = $i > 0 ? "\x41" : 'B';
+    return $a === 'A';
+}
+
+function otherEscapes(int $i): bool
+{
+    $a = $i > 0 ? "\101\u{42}\X43" : 'D';
+    return $a === 'ABC';
+}
+
+function decodedApart(): bool
+{
+    $a = "\x41";
+    return $a === 'B'; // want P2305 "between 'A' and 'B' is always false"
+}
+
+function unknownEscape(int $i): bool
+{
+    $a = $i > 0 ? "\q\u" : 'B';
+    return $a === 'q'; // want P2305 "'\\q\\u'|'B' and 'q'"
+}
+
+function singleQuoted(int $i): bool
+{
+    $a = $i > 0 ? '\x41' : 'B';
+    return $a === 'A'; // want P2305 "'\\x41'|'B' and 'A' is always false"
+}
+
+function heredoc(int $i): bool
+{
+    $a = $i > 0 ? <<<EOT
+        \x41
+        EOT : 'B';
+    return $a === 'A';
+}
+
+function heredocApart(): bool
+{
+    $a = <<<EOT
+        \x41
+        EOT;
+    return $a === 'B'; // want P2305 "between 'A' and 'B' is always false"
+}
+
+function heredocIndented(int $i): bool
+{
+    $a = $i > 0 ? <<<EOT
+          x\"
+        EOT : 'B';
+    return $a === 'x'; // want P2305 "between '  x\\"
+}
+
+function nowdoc(int $i): bool
+{
+    $a = $i > 0 ? <<<'EOT'
+        \x41
+        EOT : 'B';
+    return $a === 'A'; // want P2305 "'\\x41'|'B' and 'A' is always false"
+}
+
+function controlCharacter(): bool
+{
+    $a = "a\tb";
+    return $a === 'a b'; // want P2305 "a\tb"
+}
+
+function keyed(): int
+{
+    $a = ["\x41" => 1, 'B' => 2];
+    return $a['A'];
+}
+
+function keyedApart(): int
+{
+    $a = ["\x41" => 1, 'B' => 2];
+    return $a['C']; // want P2313 "array{A: 1, B: 2}"
+}
+
+function readWithEscape(): int
+{
+    $a = ['A' => 1];
+    return $a["\x41"];
+}
+
+/**
+ * A docblock's string is read as PHPStan's phpdoc-parser reads it: a
+ * double-quoted one decodes the escapes of PHP's double-quoted strings,
+ * \$ apart, a single-quoted one \\ and \' alone.
+ *
+ * @param array{"\x41": int, 'B\'': int} $a
+ */
+function docKeys(array $a): int
+{
+    return $a['A'] + $a["B'"];
+}
+
+/**
+ * A key written twice, once with an escape, is one entry with the last
+ * type, as PHPStan reads it.
+ *
+ * @param array{'A': int, "\x41": string} $a
+ */
+function docKeyTwice(array $a): string
+{
+    return $a['A'];
+}
+
+/**
+ * A literal in a message is cut at 20 characters, as PHPStan cuts it.
+ */
+function longLiteral(): bool
+{
+    $a = <<<EOT
+        twenty-one characters and more
+        EOT;
+    return $a === 'x'; // want P2305 "between 'twenty-one…' and 'x' is always false"
+}

@@ -1439,9 +1439,9 @@ func (c *Checker) constType(k *program.Constant) types.Type {
 // as PHPStan writes one: `(int|float)`.
 func (x *fnCtx) typeName(t types.Type) string {
 	if types.IsBenevolent(t) {
-		return "(" + types.Print(t) + ")"
+		return "(" + types.Describe(t) + ")"
 	}
-	return types.Print(t)
+	return types.Describe(t)
 }
 
 // declaredReturn returns the return type to check against, nil when none.

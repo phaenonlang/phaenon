@@ -829,13 +829,10 @@ func pregMatchesType(sigName, param string, args *ast.ArgList, argByName map[str
 	if param != "matches" || (name != "preg_match()" && name != "preg_match_all()") || args == nil {
 		return nil
 	}
-	var flags, pattern ast.Expr
+	var flags ast.Expr
 	for i, a := range args.Args {
 		if (a.Name == nil && i == 3) || (a.Name != nil && a.Name.Name == "flags") {
 			flags = a.Value
-		}
-		if (a.Name == nil && i == 0) || (a.Name != nil && a.Name.Name == "pattern") {
-			pattern = a.Value
 		}
 	}
 	var offsets, setOrder, nulls, known bool
@@ -848,7 +845,7 @@ func pregMatchesType(sigName, param string, args *ast.ArgList, argByName map[str
 	} else {
 		known = true // none given
 	}
-	unnamed := known && unnamedGroups(pattern, argByName["pattern"])
+	unnamed := known && unnamedGroups(argByName["pattern"])
 	if !offsets && !setOrder && !unnamed {
 		return nil
 	}
@@ -883,11 +880,12 @@ func pregMatchesType(sigName, param string, args *ast.ArgList, argByName map[str
 // backtracking verb with a name, (*MARK:x) or (*:x) and their kin, adds
 // the key 'MARK'; anything that may be one of them, escaped or in a class
 // or a comment, counts as one. A branch reset, (?|…), and the J option,
-// which lets names repeat, keep the keys of a named group too. So does a
-// pattern whose text may hold an escape PHP decodes and the literal's
-// value does not (decodedLiterally).
-func unnamedGroups(arg ast.Expr, pattern types.Type) bool {
-	if pattern == nil || !decodedLiterally(arg, pattern) {
+// which lets names repeat, keep the keys of a named group too. The
+// pattern is read as PCRE gets it, the value of its literal: an escape of
+// a double-quoted string, "(\x3F<name>…)", is decoded there, and one PCRE
+// decodes, '(\x3F<name>…)', is a literal question mark.
+func unnamedGroups(pattern types.Type) bool {
+	if pattern == nil {
 		return false
 	}
 	for _, m := range types.Members(pattern) {
@@ -900,52 +898,6 @@ func unnamedGroups(arg ast.Expr, pattern types.Type) bool {
 }
 
 var namedGroup = regexp.MustCompile(`\(\?(<[^=!]|P|'|\||[a-zA-Z^-]*J)|\(\*[A-Za-z_]*:`)
-
-// decodedLiterally reports a pattern whose value the checker reads as PHP
-// does. A single-quoted string or a nowdoc holds its text; a
-// double-quoted string or a heredoc holds an escape PHP decodes, \x3F,
-// \u{3F} or \077, as written (program.StringValue), and so does a value
-// from elsewhere, a constant's, whose spelling is not at hand: a backslash
-// before x, u, an octal digit, e, v or f there may be one.
-func decodedLiterally(arg ast.Expr, pattern types.Type) bool {
-	if lit, ok := unparen(arg).(*ast.StringLit); ok {
-		raw := strings.TrimLeft(lit.Raw, "bB")
-		if heredoc, ok := strings.CutPrefix(raw, "<<<"); ok {
-			raw = strings.TrimLeft(heredoc, " \t") // a nowdoc's label is quoted
-		}
-		if strings.HasPrefix(raw, "'") {
-			return true
-		}
-		return !mayHoldEscape(raw, true)
-	}
-	for _, m := range types.Members(pattern) {
-		if lit, ok := m.(types.StringLit); ok && mayHoldEscape(lit.V, false) {
-			return false
-		}
-	}
-	return true
-}
-
-// mayHoldEscape reports text with a backslash before x, u, an octal
-// digit, e, v or f: an escape PHP decodes in a double-quoted string. In
-// the source of a literal (pairs) an escaped backslash is skipped as a
-// pair, which PHP reads as one backslash.
-func mayHoldEscape(text string, pairs bool) bool {
-	for i := 0; i < len(text)-1; i++ {
-		if text[i] != '\\' {
-			continue
-		}
-		c := text[i+1]
-		if pairs && c == '\\' {
-			i++
-			continue
-		}
-		if strings.IndexByte("xu01234567evf", c) >= 0 {
-			return true
-		}
-	}
-	return false
-}
 
 // filteredValue is the value type array_filter() keeps under its callback:
 // what the callback's condition narrows the value to (`fn (?string $a) =>
