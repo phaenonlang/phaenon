@@ -224,6 +224,7 @@ func (e *state) applyHolder(h condHolder, p *program.Program) {
 		cur.t = r
 		cur.native = narrowNative(cur.native, r, p)
 		e.vars[k] = cur
+		e.dropProvedUnder("$"+k, r, p)
 	}
 	for k, nt := range h.offsets {
 		if cur, ok := e.paths[k]; ok {
@@ -375,6 +376,12 @@ type state struct {
 	// it the link outlives an unset() of either and a new reference, which
 	// in PHP would break it; a meet keeps what every way in has.
 	refs map[string]map[string]bool
+	// proved are the paths that stand for an offset a test of count()
+	// proved there, `$list[$i]` (countedOffset): what the path holds is
+	// the list's value type as the test found it, which a narrowing of the
+	// list does not reach, so a narrowing of the list forgets the offset
+	// (dropProvedUnder). Any other setting of the path takes the mark away.
+	proved map[string]bool
 }
 
 func newEnv() *state {
@@ -405,6 +412,9 @@ func (e *state) clone() *state {
 		for o := range others {
 			n.addRef(k, o)
 		}
+	}
+	for k := range e.proved {
+		n.markProved(k)
 	}
 	return n
 }
@@ -463,6 +473,7 @@ func (e *state) invalidateMentions(name string) {
 			end := j + len(needle)
 			if j > 0 && strings.ContainsRune("([,", rune(k[j-1])) && end < len(k) && strings.ContainsRune(",)]", rune(k[end])) {
 				delete(e.paths, k)
+				delete(e.proved, k)
 				break
 			}
 			i = end
@@ -541,6 +552,47 @@ func (e *state) unset(name string) {
 
 func (e *state) setPath(key string, t types.Type) {
 	e.paths[key] = t
+	delete(e.proved, key)
+}
+
+// setProvedPath sets the path of an offset a test of count() proved
+// there (state.proved).
+func (e *state) setProvedPath(key string, t types.Type) {
+	e.paths[key] = t
+	e.markProved(key)
+}
+
+func (e *state) markProved(key string) {
+	if e.proved == nil {
+		e.proved = map[string]bool{}
+	}
+	e.proved[key] = true
+}
+
+// dropProvedUnder forgets the offsets proved under the holder prefix,
+// which a narrowing just gave the type holder, where the value type the
+// narrowed list gives an offset of it is not the one the path holds: a
+// narrowing to a non-empty list, a count or is_array() keep it, an
+// assertion that the values are ints does not. An offset of an offset
+// goes.
+func (e *state) dropProvedUnder(prefix string, holder types.Type, p *program.Program) {
+	var value types.Type
+	if allLists(holder) {
+		if _, v, ok := types.IterableKV(holder, p); ok {
+			value = v
+		}
+	}
+	for k := range e.proved {
+		if !pathUnder(k, prefix) {
+			continue
+		}
+		rest := k[len(prefix):]
+		if value != nil && strings.HasPrefix(rest, "[") && strings.Index(rest, "]") == len(rest)-1 && types.Equal(e.paths[k], value) {
+			continue
+		}
+		delete(e.paths, k)
+		delete(e.proved, k)
+	}
 }
 
 func (e *state) getPath(key string) (types.Type, bool) {
@@ -576,6 +628,7 @@ func (e *state) invalidate(drop func(key string) bool) {
 	for k := range e.paths {
 		if drop(k) {
 			delete(e.paths, k)
+			delete(e.proved, k)
 		}
 	}
 	e.forgetInConds(func(string) bool { return false }, drop)
@@ -608,6 +661,7 @@ func (e *state) invalidateCalls(receiver string) {
 	for k := range e.paths {
 		if strings.HasPrefix(k, receiver+"->") && strings.Contains(k[len(receiver):], "(") {
 			delete(e.paths, k)
+			delete(e.proved, k)
 		}
 	}
 }
@@ -689,6 +743,11 @@ func join(a, b *state) *state {
 	for k, ta := range a.paths {
 		if tb, ok := b.paths[k]; ok {
 			n.paths[k] = joinTypes(ta, tb)
+			// An offset a test of count() proved on either way stays one:
+			// what the path holds on that way is what the test found.
+			if a.proved[k] || b.proved[k] {
+				n.markProved(k)
+			}
 		}
 	}
 	for k := range a.inits {

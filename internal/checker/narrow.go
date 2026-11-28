@@ -283,7 +283,10 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 			return
 		}
 		// Narrowing keeps the member paths: the object is the same one.
+		// An offset a test of count() proved goes: its type is the
+		// value type of the list as it was (state.proved).
 		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define, native: narrowNative(info.native, t, x.p()), conds: info.conds, guaranteed: info.guaranteed, rewritten: info.rewritten}
+		env.dropProvedUnder("$"+p.Name, t, x.p())
 		if ok {
 			env.applyConds(p.Name, t, x.p())
 		}
@@ -291,6 +294,7 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 	}
 	if key, ok := x.pathKey(e); ok {
 		env.setPath(key, t)
+		env.dropProvedUnder(key, t, x.p())
 	}
 }
 
@@ -709,6 +713,7 @@ func (x *fnCtx) valuesOf(arr ast.Expr, env *state) types.Type {
 // array_keys($r) is the other way (keysSource). Whatever changes $r or $k
 // forgets it (state.invalidatePrefix, state.set).
 func (x *fnCtx) rememberKeyOf(assign *ast.Assign, name string, value ast.Expr, env *state) {
+	x.rememberLastOffset(assign, name, value, env)
 	c, ok := unparen(value).(*ast.Call)
 	if !ok {
 		return
@@ -764,6 +769,33 @@ func (x *fnCtx) rememberKeyOf(assign *ast.Assign, name string, value ast.Expr, e
 		return
 	}
 	env.setConds(name, &condHolder{whenType: when, offsets: map[string]types.Type{key: val}})
+}
+
+// rememberLastOffset records, on `$k = count($list) - 1` as a statement,
+// that `$list[$k]` is there where $list is a list that cannot be empty,
+// as PHPStan has it (AssignHandler): the last offset of the list.
+func (x *fnCtx) rememberLastOffset(assign *ast.Assign, name string, value ast.Expr, env *state) {
+	m, ok := unparen(value).(*ast.Binary)
+	if !ok || m.Op != token.Kind('-') || x.stmtExpr != ast.Expr(assign) {
+		return
+	}
+	one, ok := unparen(m.Right).(*ast.IntLit)
+	if !ok {
+		return
+	}
+	if v, isLit := types.IsIntLit(intLitType(one.Raw)); !isLit || v != 1 {
+		return
+	}
+	arr, ok := x.countedArg(m.Left)
+	if !ok {
+		return
+	}
+	if t := x.pathType(arr, env); !allLists(t) || !certainlyNonEmpty(t) {
+		return
+	}
+	if key, ok := x.pathKey(&ast.Index{S: value.Span(), Array: arr, Index: &ast.Variable{S: value.Span(), Name: name}}); ok {
+		env.setProvedPath(key, x.valuesOf(arr, env))
+	}
 }
 
 // certainlyNonEmpty reports an array type every value of which holds an
@@ -1392,6 +1424,8 @@ func (x *fnCtx) ordering(e *ast.Binary, env *state) (then, els *state) {
 			}
 		}
 	}
+	x.countedOffset(then, e, e.Op, env)
+	x.countedOffset(els, e, negateOrdering(e.Op), env)
 	c, ok := x.countCompare(e)
 	if !ok {
 		x.lengthNarrow(then, e, e.Op, env)
@@ -1406,6 +1440,87 @@ func (x *fnCtx) ordering(e *ast.Binary, env *state) (then, els *state) {
 	x.countNarrow(then, c, c.op, at)
 	x.countNarrow(els, c, negateOrdering(c.op), at)
 	return then, els
+}
+
+// countedOffset records, where `$i < count($list)` holds by op (or
+// `count($list) > $i`, the comparison seen from the other side), that
+// `$list[$i]` is there, as PHPStan's comparison narrowing infers it
+// (BinaryOpHandler): $list a list, and $i an int that is not negative and
+// no constant. So does `$i < count($list) - $n` and `$i <= count($list) -
+// $n` with $n at least 1. A test that fails, `$i >= count($list)` before a
+// return, holds the other comparison where it does not hold. The offset
+// is a path: whatever changes $list or $i forgets it (state.set), and a
+// write at it keeps the list a list (assignIndex's existing).
+func (x *fnCtx) countedOffset(env *state, e *ast.Binary, op token.Kind, at *state) {
+	if env.dead {
+		return
+	}
+	idx, right := e.Left, e.Right
+	switch op {
+	case token.Kind('>'), token.T_IS_GREATER_OR_EQUAL:
+		idx, right = e.Right, e.Left
+		op = flipOrdering(op)
+	}
+	if op != token.Kind('<') && op != token.T_IS_SMALLER_OR_EQUAL {
+		return
+	}
+	arg, ok := x.countedArg(right)
+	if !ok {
+		// `count($list) - $n`, $n at least 1.
+		m, isMinus := unparen(right).(*ast.Binary)
+		if !isMinus || m.Op != token.Kind('-') {
+			return
+		}
+		if arg, ok = x.countedArg(m.Left); !ok {
+			return
+		}
+		if n, isInt := x.pathType(m.Right, at).(types.Int); !isInt || n.Lo < 1 {
+			return
+		}
+	} else if op != token.Kind('<') {
+		return // `$i <= count($list)` may be one past the end
+	}
+	i, isInt := x.pathType(idx, at).(types.Int)
+	if !isInt || i.Lo < 0 || i.Lo == i.Hi || !allLists(x.pathType(arg, at)) {
+		return
+	}
+	if key, ok := x.pathKey(&ast.Index{S: e.S, Array: arg, Index: idx}); ok {
+		env.setProvedPath(key, x.valuesOf(arg, at))
+	}
+}
+
+// countedArg is what count($x) or sizeof($x) counts, PHP's own as the
+// call resolves it, in its normal mode: the expression's first argument.
+func (x *fnCtx) countedArg(e ast.Expr) (ast.Expr, bool) {
+	call, ok := unparen(e).(*ast.Call)
+	if !ok {
+		return nil, false
+	}
+	n, isName := call.Callee.(*ast.Name)
+	if !isName || call.Args == nil || call.Args.Closure() || len(call.Args.Args) != 1 {
+		return nil, false
+	}
+	first := call.Args.Args[0]
+	if first.Value == nil || first.Unpack || first.Name != nil && first.Name.Name != "value" {
+		return nil, false
+	}
+	fn := x.lookupFunction(n)
+	if fn == nil || !strings.EqualFold(fn.Name, "count") && !strings.EqualFold(fn.Name, "sizeof") {
+		return nil, false
+	}
+	return first.Value, true
+}
+
+// allLists reports a type every value of which is a list (isList),
+// PHPStan's isList() yes.
+func allLists(t types.Type) bool {
+	members := types.Members(t)
+	for _, m := range members {
+		if !isList(m) {
+			return false
+		}
+	}
+	return len(members) > 0
 }
 
 // lengthNarrow narrows what strlen() or mb_strlen() measures where its
