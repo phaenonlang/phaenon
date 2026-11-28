@@ -146,13 +146,14 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 				x.handedOver(t, env)
 			case *ast.Index:
 				base := x.exprLenient(t.Array, env)
+				holderPHP := x.nativeVar(t.Array, env) // before forgetOffset rewrites the holder
 				x.forgetOffset(t, env)
 				var raw types.Type
 				if t.Index != nil {
 					raw = x.expr(t.Index, env, nil)
 				}
 				x.unsetOffsetCheck(t, base, raw, env)
-				x.unsetIndex(t, base, env, s.S)
+				x.unsetIndex(t, base, holderPHP, env, s.S)
 			default:
 				x.exprLenient(v, env)
 				if key, ok := x.pathKey(v); ok {
@@ -428,7 +429,7 @@ func (x *fnCtx) unsetOffsetCheck(t *ast.Index, base, raw types.Type, env *state)
 // accept the list an element left). An array inside another, `$a[$i][$k]`,
 // is written back into the one holding it (writeExisting), so the variable
 // or property at the root takes its new type and is checked the same way.
-func (x *fnCtx) unsetIndex(t *ast.Index, base types.Type, env *state, span ast.Span) {
+func (x *fnCtx) unsetIndex(t *ast.Index, base, holderPHP types.Type, env *state, span ast.Span) {
 	if key, ok := pathKey(t); ok {
 		env.invalidatePrefix(key)
 	}
@@ -465,6 +466,11 @@ func (x *fnCtx) unsetIndex(t *ast.Index, base types.Type, env *state, span ast.S
 		// A value of `T of array<…>` is written as its bound.
 		if bounded, _ := writtenBound(base); holdsArray(bounded) {
 			x.writeExisting(t.Array, unsetOffset(bounded, keyT), env, span)
+			// PHP's type of the array, as it was before the unset() began,
+			// loses the entry too, as a variable's does.
+			if key, ok := x.narrowedPathKey(t.Array); ok && holderPHP != nil && onlyArrays(holderPHP) {
+				env.keepNative(key, unsetOffset(holderPHP, keyT))
+			}
 		}
 	}
 }
@@ -567,10 +573,10 @@ func (x *fnCtx) writeExisting(target ast.Expr, vt types.Type, env *state, span a
 			return
 		}
 		before := rewrittenOf(t.Array, env)
-		nativeBefore := x.nativeVar(t.Array, env)
+		nativeBefore, truthBefore := x.nativeVar(t.Array, env), x.foundBefore(t.Array, env)
 		now := withExistingOffset(base, normaliseKey(x.pathType(t.Index, env)), vt)
 		x.writeExisting(t.Array, now, env, span)
-		x.keepOffsetWritten(env, t.Array, nativeBefore)
+		x.keepOffsetWritten(env, t.Array, nativeBefore, truthBefore, normaliseKey(x.pathType(t.Index, env)), vt)
 		x.keepRewritten(t.Array, before, p, t.S, now, env)
 		// What was known of this array, an is_array() of `$a['k']` that
 		// a general array's type cannot hold, stays known of what is left

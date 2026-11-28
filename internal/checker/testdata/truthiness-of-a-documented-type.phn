@@ -858,3 +858,80 @@ final class Finished
         }
     }
 }
+
+function v(): mixed
+{
+    return \json_decode('[]', true);
+}
+
+/**
+ * A step, a compound assignment, a destructuring, an offset written or
+ * unset under a path, and a write of the whole array give a variable, a
+ * property, a static property or an offset the PHP type PHPStan's native
+ * type has after them, computed on the PHP types written: `.= 'x'` of an
+ * empty string is a non-empty one, `unset()` of the one entry leaves an
+ * empty array, an offset of an array written whole is the entry written.
+ * A mixed one an inline @var leaves stays mixed: `$n++` of it, or an
+ * entry appended to it, decides nothing.
+ */
+final class Computed
+{
+    /** @var array<string, string> */
+    public array $labels = [];
+
+    /** @var array<string, string> */
+    public static array $names = [];
+
+    /** @var array<string, array<int, int>> */
+    public array $lists = [];
+
+    /** @var array<string, list<string>> */
+    public array $groups = [];
+
+    public function computed(string $s): void
+    {
+        $this->labels['a'] = '';
+        $this->labels['a'] .= 'x';
+        echo $this->labels['a'] ? 1 : 2; // want P2402 "always true"
+        self::$names['a'] = '';
+        self::$names['a'] .= 'x';
+        echo self::$names['a'] ? 1 : 2; // want P2402 "always true"
+        $this->labels['b'] = '';
+        $this->labels['b'] .= $s;
+        echo $this->labels['b'] ? 1 : 2;
+        $this->lists['a'] = [1];
+        unset($this->lists['a'][0]);
+        echo $this->lists['a'] ? 1 : 2; // want P2402 "always false"
+        $this->labels = ['a' => 'x'];
+        echo $this->labels['a'] ? 1 : 2; // want P2402 "always true"
+        [$this->labels['c']] = ['y'];
+        echo $this->labels['c'] ? 1 : 2; // want P2402 "always true"
+        if (!isset($this->groups['k'])) {
+            return;
+        }
+        $this->groups['k'][] = 'z';
+        echo $this->groups['k'] ? 1 : 2; // want P2402 "always true"
+        $this->groups['k'] += ['w'];
+        echo $this->groups['k'] ? 1 : 2; // want P2402 "always true"
+    }
+
+    public function mixedStays(): void
+    {
+        /** @var int $n */
+        $n = v();
+        if ($n) {
+            $n++;
+            echo $n ? 1 : 2;
+        }
+        /** @var list<string> $xs */
+        $xs = v();
+        if ($xs) {
+            $xs[] = 'a';
+            echo $xs ? 1 : 2;
+        }
+        if (!$xs) {
+            $xs[] = 'a';
+            echo $xs ? 1 : 2; // want P2402 "always true"
+        }
+    }
+}

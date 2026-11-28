@@ -141,8 +141,18 @@ func (x *fnCtx) phpType(e ast.Expr, env *state, guaranteed bool) types.Type {
 		}
 	case *ast.Index:
 		// An element of a refined array (`@param array{body: string}` over
-		// a native `array`) is as uncertain as the array: PHP knows mixed.
+		// a native `array`) is as uncertain as the array: PHP knows mixed,
+		// but where PHP's type of the array has the entry, one a write
+		// gave it (`$this->labels = ['a' => 'x']`), as PHPStan's native
+		// type of the offset is the entry's.
 		if n := x.phpType(e.Array, env, guaranteed); n != nil {
+			key := types.Type(types.TArrayKey)
+			if lit := x.literalOffset(e, env); lit != nil {
+				key = lit
+			}
+			if v := elementPHP(n, key); v != nil {
+				return v
+			}
 			return types.TMixed
 		}
 	case *ast.Ternary:
