@@ -1176,12 +1176,31 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 	if empty {
 		before = env.clone()
 	}
+	if vv, isVar := s.Value.(*ast.Variable); isVar {
+		// A test under the value variable made before the loop is no test
+		// the loop makes (literalLoopOffsets).
+		for mark, test := range x.keyedTests {
+			if test.key == vv.Name {
+				delete(env.paths, mark)
+			}
+		}
+		if sh, ok := it.(types.Shape); ok && !sh.Unsealed && len(sh.Entries) > 0 {
+			if x.literalKeys == nil {
+				x.literalKeys = map[string]int{}
+			}
+			x.literalKeys[vv.Name]++
+			defer func() { x.literalKeys[vv.Name]-- }()
+		}
+	}
 	after := x.fixpoint(env, func(head *state) (*state, *state) {
 		exit := head.clone()
 		if s.Key != nil {
 			x.bind(nil, s.Key, k, head, s.Key.Span())
 		}
 		x.bind(nil, s.Value, v, head, s.Value.Span())
+		if vv, isVar := s.Value.(*ast.Variable); isVar && x.literalKeys[vv.Name] > 0 {
+			head.setPath(unwrittenMark(s, vv.Name), types.TMixed) // the iteration's key (literalLoopOffsets)
+		}
 		if s.Key != nil {
 			// `$xs[$k]` is an offset the iteration found: a write to it
 			// replaces a value, so a list stays a list (PHPStan's
@@ -1216,6 +1235,9 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 		}
 		return head, exit
 	})
+	if nonEmpty && !after.dead {
+		x.literalLoopOffsets(s, it, after, x.loopBreaks)
+	}
 	if nonEmpty && !after.dead {
 		// At least one iteration ran: the loop variables are defined.
 		for _, e := range []ast.Expr{s.Key, s.Value} {

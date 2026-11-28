@@ -379,6 +379,291 @@ function offsets(array $data): void
     takesString($data['collection']);
 }
 
+// A test of `$row[$field]` with $field one of a few literals narrows the
+// offset as written: which of the offsets $field names was tested is not
+// known, and each holds what it held, as PHPStan has it. Where a foreach
+// over the literals ends, PHPStan has run it once for each of them, and
+// every way to the end made the test: each offset holds what the test
+// leaves of it.
+
+/** @param array{name: string, age: int|null} $row */
+function offsetsInside(array $row): string
+{
+    foreach (['name', 'age'] as $field) {
+        if ($row[$field] === null) {
+            takesString($row['name']);
+        }
+    }
+    return $row['name'];
+}
+
+/** @param array{name: string|null, age: int|null} $row */
+function offsetsAfterThrow(array $row): int
+{
+    foreach (['name', 'age'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+    }
+    takesString($row['name']);
+    return $row['age'];
+}
+
+/** @param array{name: string|null, age: int|null} $row */
+function offsetsAfterContinue(array $row): string
+{
+    foreach (['name', 'age'] as $field) {
+        if ($row[$field] === null) {
+            continue;
+        }
+        echo $field;
+    }
+    return $row['name']; // want P2202 "string|null"
+}
+
+/** @param array{name: string|null, age: int|null} $row */
+function offsetsAfterBreak(array $row, bool $stop): void
+{
+    foreach (['name', 'age'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+        if ($stop) {
+            break;
+        }
+    }
+    takesString($row['name']);
+    takesInt($row['age']); // want P2103 "int|null given"
+}
+
+/** @param array{name: string|null, age: string|null} $row */
+function offsetsBreakOnLastKey(array $row): void
+{
+    foreach (['name', 'age'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+        if ($field === 'age') {
+            break;
+        }
+    }
+    takesString($row['name']);
+    takesString($row['age']);
+}
+
+/** @param array{a: string|null, b: string|null, c: string|null} $row */
+function offsetsBreakOnMiddleKey(array $row): void
+{
+    foreach (['a', 'b', 'c'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+        if ($field === 'b') {
+            break;
+        }
+    }
+    takesString($row['a']);
+    takesString($row['b']);
+    takesString($row['c']); // want P2103 "string|null given"
+}
+
+// At a `break`, the key variable unwritten since the iteration began holds
+// that iteration's key: the earliest key its type there admits, however a
+// test narrowed it, is the earliest iteration the `break` is taken in. One
+// written before the `break` may hold any key.
+/** @param array{a: string|null, b: string|null, c: string|null} $row */
+function offsetsKeyWrittenBeforeBreak(array $row, bool $stop): void
+{
+    foreach (['a', 'b', 'c'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+        if ($stop) {
+            $field = 'c';
+            break;
+        }
+    }
+    takesString($row['a']);
+    takesString($row['b']); // want P2103 "string|null given"
+    takesString($row['c']); // want P2103 "string|null given"
+}
+
+/** @param array{a: string|null, b: string|null, c: string|null} $row */
+function offsetsBreakOnLooseKey(array $row): void
+{
+    foreach (['a', 'b', 'c'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+        if ($field == 'b') {
+            break;
+        }
+    }
+    takesString($row['b']);
+    takesString($row['c']); // want P2103 "string|null given"
+}
+
+/** @param array{a: string|null, b: string|null, c: string|null} $row */
+function offsetsBreakOnEitherKey(array $row): void
+{
+    foreach (['a', 'b', 'c'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+        if ($field === 'b' || $field === 'c') {
+            break;
+        }
+    }
+    takesString($row['b']);
+    takesString($row['c']); // want P2103 "string|null given"
+}
+
+// in_array() narrows the key too, where PHPStan, which does not decide the
+// test in each key's run, takes the `break` in any (phpstan_test.go).
+/** @param array{a: string|null, b: string|null, c: string|null} $row */
+function offsetsBreakAfterInArray(array $row): void
+{
+    foreach (['a', 'b', 'c'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+        if (in_array($field, ['b'], true)) {
+            break;
+        }
+    }
+    takesString($row['a']);
+    takesString($row['b']);
+    takesString($row['c']); // want P2103 "string|null given"
+}
+
+// A copy of the key is not the key, and a by-reference argument is a
+// write: the first key's offset alone is narrowed, where PHPStan, running
+// the body for each key, narrows more (phpstan_test.go).
+/** @param array{a: string|null, b: string|null, c: string|null} $row */
+function offsetsBreakOnCopy(array $row): void
+{
+    foreach (['a', 'b', 'c'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+        $copy = $field;
+        if ($copy === 'c') {
+            break;
+        }
+    }
+    takesString($row['c']); // want P2103 "string|null given"
+}
+
+/** @param array{a: string|null, b: string|null, c: string|null} $row */
+function offsetsBreakAfterReference(array $row): void
+{
+    foreach (['a', 'b', 'c'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+        if ($field === 'c') {
+            touchString($field);
+            break;
+        }
+    }
+    takesString($row['c']); // want P2103 "string|null given"
+}
+
+function touchString(string &$s): void
+{
+}
+
+/** @param array{name: string|null, age: string|null} $row */
+function offsetsBreakUnlessFirst(array $row): void
+{
+    foreach (['name', 'age'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+        if ($field !== 'name') {
+            break;
+        }
+        $field = 'age';
+    }
+    takesString($row['name']);
+    takesString($row['age']);
+}
+
+/** @param array{name: string|null, age: string|null} $row */
+function offsetsKeyReassigned(array $row): void
+{
+    foreach (['name', 'age'] as $field) {
+        if ($row[$field] === null) {
+            throw new \InvalidArgumentException($field);
+        }
+        $field = 'other';
+    }
+    takesString($row['name']);
+    takesString($row['age']);
+}
+
+/**
+ * @param array{name: string|null, age: int|null} $row
+ * @param 'name'|'age' $field
+ */
+function offsetsTestedBeforeLoop(array $row, string $field): void
+{
+    if ($row[$field] === null) {
+        throw new \InvalidArgumentException($field);
+    }
+    foreach (['name', 'age'] as $field) {
+        echo $field;
+    }
+    takesString($row['name']); // want P2103 "string|null given"
+}
+
+/** @param array{0: string|null, 1: int|null} $pair */
+function offsetsOfIntKeys(array $pair): void
+{
+    foreach ([0, 1] as $i) {
+        if ($pair[$i] === null) {
+            throw new \InvalidArgumentException();
+        }
+    }
+    takesString($pair[0]);
+    takesInt($pair[1]);
+}
+
+// A key that is one literal names one offset, narrowed as if written.
+
+/**
+ * @param array{name: string|null, age: int|null} $row
+ * @param 'name' $field
+ */
+function offsetOfOneKey(array $row, string $field): void
+{
+    if ($row[$field] === null) {
+        throw new \InvalidArgumentException($field);
+    }
+    takesString($row['name']);
+    foreach (['name', 'age'] as $key) {
+        if ($key === 'name') {
+            if ($row[$key] === null) {
+                throw new \InvalidArgumentException($key);
+            }
+            takesString($row['name']);
+        }
+    }
+}
+
+/**
+ * @param array{name: string, age: int|null} $row
+ * @param 'name'|'age' $field
+ */
+function offsetOfSeveralKeys(array $row, string $field): int
+{
+    if ($row[$field] !== null) {
+        takesString($row['name']);
+        return $row['age']; // want P2202 "int|null"
+    }
+    return 0;
+}
+
 function destructuring(mixed $reply): void
 {
     if (!\is_array($reply) || !\is_string($reply[0] ?? null) || !\is_array($reply[1] ?? null)) {
