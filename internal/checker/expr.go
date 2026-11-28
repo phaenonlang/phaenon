@@ -826,6 +826,11 @@ func (x *fnCtx) magicConst(e *ast.MagicConst) types.Type {
 		line, _ := x.file.Position(e.S.Start)
 		return types.IntLit(int64(line))
 	case token.T_CLASS_C:
+		if x.inTraitBody() {
+			// Some class's name, the user's, which PHPStan does not take
+			// for any one of them.
+			return types.ClassString{}
+		}
 		if x.class != nil && !x.class.Anonymous {
 			return types.StringLit{V: x.class.Name}
 		}
@@ -836,6 +841,41 @@ func (x *fnCtx) magicConst(e *ast.MagicConst) types.Type {
 	return types.TString
 }
 
+// traitClassName types self::class and static::class (lateBound) in a
+// trait's body: the trait's own name, and a class-string of its static,
+// as self is the trait in its signatures and stands for the classes
+// using it, so that `find(self::class, $id)` returns what `?self`
+// declares and `self::class . '::up'` names a method. A comparison of it
+// with a class's name is decided for the users (traitComparison).
+func (x *fnCtx) traitClassName(lateBound bool) types.Type {
+	if lateBound {
+		return types.ClassString{Of: types.Static{Of: &types.Class{Name: x.class.Name, Args: selfArgs(x.class)}}}
+	}
+	return types.StringLit{V: x.class.Name}
+}
+
+// classTypes is the union of the classes' object types.
+func classTypes(classes []*program.Class) types.Type {
+	var out []types.Type
+	for _, c := range classes {
+		out = append(out, types.Class{Name: c.Name})
+	}
+	return types.MakeUnion(out...)
+}
+
+// classNames is the union of the classes' names, as ::class writes them.
+func classNames(classes []*program.Class) types.Type {
+	var out []types.Type
+	for _, c := range classes {
+		if c.Anonymous {
+			out = append(out, types.ClassString{Of: types.Class{Name: c.Name}})
+			continue
+		}
+		out = append(out, types.StringLit{V: c.Name})
+	}
+	return types.MakeUnion(out...)
+}
+
 func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 	if x.lateStaticRefused(e) {
 		return types.TError
@@ -843,7 +883,16 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 	var recv types.Type
 	var classes []*program.Class
 	if n, ok := e.Class.(*ast.Name); ok {
-		if specialClassName(n) == "parent" && x.class != nil {
+		if specialClassName(n) == "parent" && x.inTraitBody() {
+			parents := x.traitParents(n.S)
+			if len(parents) == 0 {
+				return types.TMixed
+			}
+			if id, ok := e.Name.(*ast.Ident); ok && strings.EqualFold(id.Name, "class") {
+				return classNames(parents)
+			}
+			recv, classes = classTypes(parents), parents
+		} else if specialClassName(n) == "parent" && x.class != nil {
 			if pc := x.class.ParentClass(); pc != nil {
 				recv, classes = types.Class{Name: pc.Name, Args: x.class.ParentArgs}, []*program.Class{pc}
 			} else {
@@ -877,6 +926,9 @@ func (x *fnCtx) classConstFetch(e *ast.ClassConstFetch, env *state) types.Type {
 		x.memberOnMixed(recv, e.Class.Span(), "cannot access constant %s on mixed", name)
 	}
 	if strings.EqualFold(name, "class") {
+		if n, ok := e.Class.(*ast.Name); ok && x.inTraitBody() && len(classes) == 1 && classes[0] == x.class && specialClassName(n) != "" {
+			return x.traitClassName(specialClassName(n) == "static")
+		}
 		if lit, ok := recv.(types.Class); ok && !strings.EqualFold(lit.Name, "static") {
 			if _, isName := e.Class.(*ast.Name); isName {
 				return types.StringLit{V: lit.Name}
@@ -1406,7 +1458,10 @@ func (x *fnCtx) staticPropertyFetch(e *ast.StaticPropertyFetch, env *state) (typ
 	var classes []*program.Class
 	var recv types.Type
 	if n, ok := e.Class.(*ast.Name); ok {
-		if specialClassName(n) == "parent" && x.class != nil {
+		if specialClassName(n) == "parent" && x.inTraitBody() {
+			classes = x.traitParents(n.S)
+			recv = classTypes(classes)
+		} else if specialClassName(n) == "parent" && x.class != nil {
 			if pc := x.class.ParentClass(); pc != nil {
 				classes = []*program.Class{pc}
 				recv = types.Class{Name: pc.Name, Args: x.class.ParentArgs}
@@ -2343,7 +2398,15 @@ func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Typ
 // not reported, as PHPStan does not with treatPhpDocTypesAsCertain off,
 // and still decide the result for the flow.
 func (x *fnCtx) disjointComparison(e *ast.Binary, l, r types.Type, env *state) (known bool) {
-	if !x.nativeOverlap(e.Left, l, e.Right, r, env) {
+	var apart bool
+	if x.traitTyped(l) || x.traitTyped(r) {
+		if apart = x.traitComparison(l, r); !apart {
+			return false // a class using the trait may meet it
+		}
+	} else {
+		apart = !x.nativeOverlap(e.Left, l, e.Right, r, env)
+	}
+	if apart {
 		word := "false"
 		if e.Op == token.T_IS_NOT_IDENTICAL {
 			word = "true"

@@ -1,0 +1,429 @@
+namespace App\TraitSelfParent;
+
+// In a trait's body self, static and parent name the class that runs it,
+// as PHPStan analyses a trait once per user (design/checker.md §9, "A trait
+// sees its users"). `new self` and `new static` make that class: an
+// abstract user refuses `new self`, an enum both, and the constructor that
+// takes the arguments is the user's, the first user's where they differ.
+// self::class and static::class are the user's name, __CLASS__ some
+// class's as PHPStan has it, parent the user's parent, and a user without
+// one is P2011 naming it. A trait no class uses runs nowhere and is judged
+// nowhere. Plain PHP, so that PHPStan reads this file as written.
+
+/** @param class-string<Made> $class */
+function takesMade(string $class): void
+{
+}
+
+trait Makes
+{
+    public static function make(): self
+    {
+        return new self();
+    }
+
+    public static function makeLate(): static
+    {
+        return new static();
+    }
+
+    public function names(): void
+    {
+        takesMade(self::class);
+        takesMade(static::class);
+        takesMade(__CLASS__); // want P2103 "class-string given"
+    }
+}
+
+final class Made
+{
+    use Makes;
+}
+
+trait MakesAbstract
+{
+    public static function make(): self
+    {
+        return new self(); // want P2107 "abstract class App\TraitSelfParent\AbstractUser"
+    }
+}
+
+abstract class AbstractUser
+{
+    use MakesAbstract;
+}
+
+trait MakesCase
+{
+    public static function make(): self
+    {
+        return new self(); // want P2107 "enum App\TraitSelfParent\Suit"
+    }
+
+    public static function makeLate(): static
+    {
+        return new static(); // want P2107 "enum App\TraitSelfParent\Suit"
+    }
+}
+
+enum Suit
+{
+    use MakesCase;
+
+    case Hearts;
+}
+
+trait MakesWithArguments
+{
+    public static function make(int $n): self
+    {
+        return new self($n);
+    }
+
+    public static function makeWrong(): self
+    {
+        return new self('x'); // want P2103 "TakesInt::__construct() expects int"
+    }
+
+    public static function makeShort(): self
+    {
+        return new self(); // want P2101 "TakesInt::__construct() expects at least 1 argument"
+    }
+}
+
+final class TakesInt
+{
+    use MakesWithArguments;
+
+    public function __construct(public int $n)
+    {
+    }
+}
+
+trait AbstractConstructor
+{
+    abstract public function __construct(int $n);
+
+    public static function make(): static
+    {
+        return new static(1);
+    }
+}
+
+final class Concrete
+{
+    use AbstractConstructor;
+
+    public function __construct(public int $n)
+    {
+    }
+}
+
+trait Unused
+{
+    public static function make(): self
+    {
+        return new self(1);
+    }
+}
+
+class Base
+{
+    public const KIND = 'base';
+
+    public static int $count = 0;
+
+    public function __construct(protected int $n)
+    {
+    }
+
+    public static function name(): string
+    {
+        return 'base';
+    }
+}
+
+trait Parented
+{
+    public function __construct(int $n, public string $s)
+    {
+        parent::__construct($n);
+    }
+
+    public function parentConstructedWrong(): void
+    {
+        parent::__construct('x'); // want P2103 "Base::__construct() expects int"
+    }
+
+    public function parentOne(): Base
+    {
+        return new parent(1);
+    }
+
+    public function parentName(): string
+    {
+        return parent::name() . parent::KIND . parent::class . parent::$count;
+    }
+
+    public function isParent(object $o): bool
+    {
+        return $o instanceof parent;
+    }
+}
+
+final class Child extends Base
+{
+    use Parented;
+}
+
+trait ParentedOrphan
+{
+    public function parentName(): string
+    {
+        return parent::name(); // want P2011 "class App\TraitSelfParent\Orphan, which uses trait"
+    }
+
+    public function parentKind(): string
+    {
+        return parent::KIND; // want P2011 "Orphan"
+    }
+}
+
+final class Orphan
+{
+    use ParentedOrphan;
+}
+
+final class Adopted extends Base
+{
+    use ParentedOrphan;
+}
+
+// The trait's own self, in its signatures and properties, and `new self`
+// are the trait's own type in the body, accepted where a type every class
+// using it is, is expected, as PHPStan reads the body in each class's
+// context; one way only, as no class is the trait.
+
+/**
+ * @template T of object
+ * @param class-string<T> $class
+ * @return T|null
+ */
+function find(string $class, int $id): ?object
+{
+    return $id > 0 ? new $class() : null;
+}
+
+/**
+ * @template T of object
+ * @param class-string<T> $class
+ * @return T
+ */
+function make(string $class): object
+{
+    return new $class();
+}
+
+interface Plugin
+{
+    public function name(): string;
+}
+
+final class Registry
+{
+    public function add(Plugin $p): void
+    {
+    }
+}
+
+trait FindsSelf
+{
+    private static ?self $default = null;
+
+    private static ?self $instance = null;
+
+    public static function findOne(int $id): ?self
+    {
+        return find(self::class, $id);
+    }
+
+    public function narrowed(object $o): ?self
+    {
+        return is_a($o, self::class) ? $o : null;
+    }
+
+    public function asserted(object $o): self
+    {
+        assert(is_a($o, self::class));
+        return $o;
+    }
+
+    public function cast(object $o): self
+    {
+        $class = self::class;
+        if (!$o instanceof $class) {
+            throw new \InvalidArgumentException();
+        }
+        return $o;
+    }
+
+    public function merge(self $other): void
+    {
+    }
+
+    public function mergeMade(): void
+    {
+        $this->merge(make(self::class));
+        self::$default = make(self::class);
+    }
+
+    public static function instance(): static
+    {
+        return self::$instance ??= new static();
+    }
+
+    public function register(Registry $r): void
+    {
+        $r->add(new self());
+        $r->add($this);
+    }
+
+    public function byClassName(): ?self
+    {
+        return find(__CLASS__, 1); // want P2202 "returns object|null"
+    }
+}
+
+final class Account implements Plugin
+{
+    use FindsSelf;
+
+    public function name(): string
+    {
+        return 'account';
+    }
+}
+
+trait Compares
+{
+    public function keyOf(object $o): int
+    {
+        return is_a($o, self::class) ? $o->key() : 0;
+    }
+}
+
+final class First
+{
+    use Compares;
+
+    public function key(): int
+    {
+        return 1;
+    }
+}
+
+final class Second
+{
+    use Compares;
+
+    public function key(): int
+    {
+        return 2;
+    }
+}
+
+trait Exact
+{
+    public function exactly(): bool
+    {
+        return $this::class === self::class;
+    }
+
+    public function exactlyByName(): bool
+    {
+        return get_class($this) === self::class;
+    }
+}
+
+class Open
+{
+    use Exact;
+}
+
+// One way only: the trait is what every class using it is, and no class
+// is the trait. So another user's object is not taken for self, and
+// `instanceof` a trait is never true in plain code, as in PHP. A type test of the trait's own type decides
+// nothing, as PHPStan, testing in each user's context, decides nothing
+// of it in a trait; a strict comparison is decided where every user
+// decides it alike.
+
+interface Loggable
+{
+}
+
+trait Logs
+{
+    public function log(): void
+    {
+        if ($this instanceof Loggable) {
+            echo 'logged';
+        }
+        assert($this instanceof Loggable);
+    }
+
+    public function isOther(): bool
+    {
+        return self::class === Registry::class; // want P2305 "always false"
+    }
+}
+
+final class Job implements Loggable
+{
+    use Logs;
+}
+
+trait Links
+{
+    public ?self $next = null;
+
+    public function link(self $o): void
+    {
+    }
+
+    public function linkLeaf(): void
+    {
+        $this->link(new Leaf()); // want P2103 "Leaf given"
+    }
+
+    public function sameKind(object $o): bool
+    {
+        return $o instanceof static;
+    }
+}
+
+final class Leaf
+{
+    use Links;
+}
+
+final class Branch
+{
+    use Links;
+}
+
+trait Stamps
+{
+}
+
+final class Post
+{
+    use Stamps;
+}
+
+function plain(Post $p): bool
+{
+    if ($p instanceof Stamps) { // want P2306 "never an instance"
+        return true;
+    }
+    return false;
+}

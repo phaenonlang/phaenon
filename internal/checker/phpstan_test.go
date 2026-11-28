@@ -121,6 +121,11 @@ func TestPHPStanParity(t *testing.T) {
 		// (design/checker.md §9, "A trait sees its users"), where PHPStan,
 		// analysing once per user, reports it in that user's context.
 		"trait-properties.phn": {"identical.alwaysFalse": true},
+		// A trait no class uses, whose `new self` the file shows unjudged:
+		// PHPStan says on the trait's line that it does not analyse it, a
+		// finding about unused code, which the checker leaves to tooling as
+		// it does return.unusedType.
+		"trait-self-parent.phn": {"trait.unused": true},
 		// Properties a mapping attribute marks: PHPStan needs the framework's
 		// extension to know they are read and written (design/tooling.md §9.2).
 		"unused-attributes.phn":        {"property.onlyWritten": true, "property.unused": true, "property.onlyRead": true},

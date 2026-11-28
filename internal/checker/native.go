@@ -171,6 +171,16 @@ func (x *fnCtx) namedClass(e ast.Expr) *program.Class {
 	case "self", "static":
 		return x.class
 	case "parent":
+		if x.inTraitBody() {
+			// The parent of the class that runs the body, the first one's
+			// as the first user's method decides (traitRunners).
+			for _, u := range x.traitRunners(x.class) {
+				if pc := u.ParentClass(); pc != nil {
+					return pc
+				}
+			}
+			return nil
+		}
 		if x.class != nil {
 			return x.class.ParentClass()
 		}

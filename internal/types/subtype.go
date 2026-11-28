@@ -211,9 +211,22 @@ func overlap2(x, y Type, h Hierarchy) bool {
 	if in, ok := x.(Intersection); ok && IsTextBytes(in) {
 		return overlap2(in.Types[0], y, h) || overlap2(in.Types[1], y, h)
 	}
-	// 'github.client' is no class-string: a literal decides by itself.
+	// 'github.client' is no class-string: a literal decides by itself. The
+	// class of static or $this is the class or any subclass of it:
+	// `static::class === Kid::class` may hold in a Base Kid extends.
 	if lit, cs, ok := literalAndClassString(x, y); ok {
-		return h != nil && h.Exists(lit.V) && (cs.Of == nil || subtype(Class{Name: lit.V}, cs.Of, h, 0))
+		of := cs.Of
+		switch o := of.(type) {
+		case Static:
+			if o.Of != nil {
+				of = *o.Of
+			}
+		case This:
+			if o.Of != nil {
+				of = *o.Of
+			}
+		}
+		return h != nil && h.Exists(lit.V) && (of == nil || subtype(Class{Name: lit.V}, of, h, 0))
 	}
 	if ax, ok := x.(Array); ok {
 		if ay, ok := y.(Array); ok {
