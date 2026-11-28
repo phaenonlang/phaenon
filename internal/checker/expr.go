@@ -421,7 +421,7 @@ func (x *fnCtx) arrayLit(e *ast.ArrayLit, env *state, expected types.Type) types
 		if item.Unpack {
 			t := x.expr(item.Value, env, nil)
 			k, v, ok := types.IterableKV(t, x.p())
-			if !ok || mayNotIterate(t) {
+			if !x.silencedNever(item.Value, t, env) && (!ok || mayNotIterate(t)) {
 				x.report(item.Value.Span(), P2303, "cannot unpack %s", x.typeName(t))
 			}
 			if sh, ok := unpackedShape(t); ok && isShape && (unpacksByEntry(sh) || !sh.Unsealed && namedOnly(e.Items[i+1:]) && trailingOptional(sh)) {
@@ -1687,6 +1687,15 @@ func (x *fnCtx) indexType(base types.Type, e *ast.Index, env *state, lenient boo
 			out = append(out, types.TMixed)
 		case types.Unknown:
 			out = append(out, types.TMixed)
+		case types.Never:
+			// A value that cannot be, in a branch reported as one that
+			// cannot run, draws no second finding (silencedNever). PHPStan
+			// reads its offset as an error type, which its rules take for
+			// mixed.
+			if !lenient && !x.silencedAt(e.Array, env) {
+				x.report(e.Array.Span(), P2302, "cannot use %s as an array", x.typeName(m))
+			}
+			out = append(out, types.TMixed)
 		default:
 			if !lenient {
 				x.report(e.Array.Span(), P2302, "cannot use %s as an array", x.typeName(m))
@@ -2028,17 +2037,20 @@ func shapeOffset(s types.Shape, idx types.Type) (t types.Type, found, certain bo
 
 func (x *fnCtx) cloneExpr(e *ast.Clone, env *state) types.Type {
 	var t types.Type
+	var cloned ast.Expr
 	if e.Expr != nil {
+		cloned = e.Expr
 		t = x.expr(e.Expr, env, nil)
 	} else if e.Args != nil && len(e.Args.Args) > 0 {
-		t = x.expr(e.Args.Args[0].Value, env, nil)
+		cloned = e.Args.Args[0].Value
+		t = x.expr(cloned, env, nil)
 		for _, a := range e.Args.Args[1:] {
 			x.expr(a.Value, env, nil)
 		}
 	} else {
 		return types.TObject
 	}
-	if !types.IsMixed(t) && !types.IsObjectLike(t) {
+	if !x.silencedNever(cloned, t, env) && !types.IsMixed(t) && !types.IsObjectLike(t) {
 		x.report(e.S, P2310, "cannot clone %s", x.typeName(t))
 	}
 	return t
@@ -3782,6 +3794,9 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 		x.memberOnMixed(base, t.Object.Span(), "cannot access property $%s on mixed", name) // the read's words: one finding for `$m->n++`
 		return
 	}
+	if x.silencedNever(t.Object, base, env) {
+		return // in a branch reported as one that cannot run
+	}
 	if !types.IsObjectLike(base) {
 		x.report(t.Object.Span(), P2105, "cannot assign property $%s on %s", name, x.typeName(base))
 		return
@@ -4040,6 +4055,13 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 			// reports the write, and types what is left of the value as
 			// what was written, which it holds to T where it is returned.
 			x.report(t.Array.Span(), P2302, "cannot use %s as an array", x.typeName(named))
+			out = append(out, boundMember{m, nil})
+		case types.Never:
+			// In a branch reported as one that cannot run (the offset read
+			// above): the value stays never, as PHPStan keeps it.
+			if !x.silencedAt(t.Array, env) {
+				x.report(t.Array.Span(), P2302, "cannot use %s as an array", x.typeName(named))
+			}
 			out = append(out, boundMember{m, nil})
 		default:
 			x.report(t.Array.Span(), P2302, "cannot use %s as an array", x.typeName(named))
@@ -4789,7 +4811,8 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 	if t.Kind == ast.ArrayList {
 		x.removed(t.S, "list()", "[...] destructuring")
 	}
-	if !x.destructurable(vt, t.S) {
+	never := x.silencedNever(src, vt, env)
+	if !never && !x.destructurable(vt, t.S) {
 		// PHPStan's offsetAccess.nonArray: PHP reads null from a scalar or
 		// null, and throws for an object that is no ArrayAccess.
 		x.report(t.S, P2302, "cannot use array destructuring on %s", x.typeName(vt))
@@ -4827,6 +4850,8 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 			// narrowed on the source
 		} else if types.IsMixed(vt) {
 			elem = types.TMixed
+		} else if never {
+			elem = types.TNever // what a value that cannot be holds, as PHPStan has it
 		} else {
 			// A key the shapes may lack is read as a direct read is: P2321,
 			// and the entry's own type (indexType). It is reported at the

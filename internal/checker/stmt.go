@@ -1124,7 +1124,10 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 	// asked of it as it is.
 	_, _, ok := types.IterableKV(it, x.p())
 	k, v, _ := types.IterableKV(iteratedBounds(it, x.p()), x.p())
-	if !ok || mayNotIterate(it) {
+	if !x.silencedNever(s.Expr, it, env) && (!ok || mayNotIterate(it)) {
+		// A value that cannot be, in a branch reported as one that cannot
+		// run, draws no second finding (silencedNever): PHPStan iterates
+		// it as nothing, and so does the checker.
 		x.report(s.Expr.Span(), P2303, "foreach over %s", x.typeName(it))
 	}
 	if s.Doc != "" {
@@ -2563,6 +2566,15 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 			cenv.setPath(k, t)
 		}
 	}
+	// What a reported test left never where the closure is created is
+	// silenced in its body as well (silencedNever).
+	var silenced []string
+	for k := range env.silenced {
+		if captured[strings.TrimPrefix(k, "$")] || capturedOffset(k, captured) {
+			silenced = append(silenced, k)
+		}
+	}
+	cenv.silence(silenced)
 	c.generator = bodyHasYield(e.Body)
 	c.generatorReturnType()
 	exits := cenv

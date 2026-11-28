@@ -13,8 +13,39 @@ import (
 
 // cond evaluates a condition and returns the environments in force when
 // it is true and when it is false. env itself is left as the state after
-// evaluating the condition's side effects (assignments).
+// evaluating the condition's side effects (assignments). Where the test
+// itself was reported as always true or always false, the variables and
+// paths it narrowed to never in a branch are silenced there
+// (state.silenced): a test it is made of, or a closure in it, reported
+// so, marks nothing of its own.
 func (x *fnCtx) cond(e ast.Expr, env *state) (then, els *state) {
+	before := x.decided
+	then, els = x.condOf(e, env)
+	if x.decided > before && then != nil && els != nil && x.c.decidedAt(e.Span()) {
+		then.silence(neverOnlyIn(then, els))
+		els.silence(neverOnlyIn(els, then))
+	}
+	return then, els
+}
+
+// neverOnlyIn lists the variables ("$item") and paths a holds as never
+// where b holds a value of them.
+func neverOnlyIn(a, b *state) []string {
+	var keys []string
+	for k, va := range a.vars {
+		if vb, ok := b.vars[k]; ok && isNeverType(va.t) && !isNeverType(vb.t) {
+			keys = append(keys, "$"+k)
+		}
+	}
+	for k, ta := range a.paths {
+		if tb, ok := b.paths[k]; ok && isNeverType(ta) && !isNeverType(tb) {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+func (x *fnCtx) condOf(e ast.Expr, env *state) (then, els *state) {
 	switch e := e.(type) {
 	case *ast.Paren:
 		return x.cond(e.Expr, env)

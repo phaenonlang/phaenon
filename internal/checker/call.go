@@ -1273,6 +1273,15 @@ func (x *fnCtx) dynamicCall(e *ast.Call, env *state, expected types.Type) types.
 			x.unknownCallee(e)
 			x.argsOnly(e.Args, env)
 			out = append(out, types.TMixed)
+		case types.Never:
+			// A value that cannot be, in a branch reported as one that
+			// cannot run (silencedNever): PHPStan calls it without a word
+			// and reads the result as mixed.
+			if !x.silencedAt(e.Callee, env) {
+				x.report(e.Callee.Span(), P2109, "%s is not callable", x.typeName(m))
+			}
+			x.argsOnly(e.Args, env)
+			out = append(out, types.TMixed)
 		default:
 			x.report(e.Callee.Span(), P2109, "%s is not callable", x.typeName(m))
 			x.argsOnly(e.Args, env)
@@ -2938,7 +2947,7 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				}
 				t := x.expr(a.Value, env, nil)
 				unpackTypes[a] = t
-				if _, _, ok := types.IterableKV(t, x.p()); (!ok && !types.IsMixed(t)) || mayNotIterate(t) {
+				if _, _, ok := types.IterableKV(t, x.p()); !x.silencedNever(a.Value, t, env) && ((!ok && !types.IsMixed(t)) || mayNotIterate(t)) {
 					x.report(a.S, P2303, "cannot unpack %s", x.typeName(t))
 				}
 				continue
@@ -3115,6 +3124,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		argTypes[i] = at
 		if b.arg.Unpack {
 			_, v, ok := types.IterableKV(at, x.p())
+			if x.silencedNever(b.arg.Value, at, env) {
+				continue // in a branch reported as one that cannot run
+			}
 			if mayNotIterate(at) {
 				// PHPStan's argument.unpackNonIterable; its elements are not
 				// checked again against the parameter.
