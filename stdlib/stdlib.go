@@ -45,6 +45,25 @@ var benevolent = sync.OnceValue(func() map[string]bool {
 	return m
 })
 
+//go:embed sideeffects.txt
+var sideEffectsList string
+
+var sideEffects = sync.OnceValue(func() map[string]bool {
+	m := map[string]bool{}
+	for _, line := range strings.Split(sideEffectsList, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			m[line] = true
+		}
+	}
+	return m
+})
+
+// HasSideEffects reports a function or method of PHP's (`class::method`,
+// lower-cased) that PHPStan holds to have side effects though it returns a
+// value: get_object_vars(), array_push(), DateTime::modify(). A call of one
+// forgets what the flow knew of an object passed to it.
+func HasSideEffects(name string) bool { return sideEffects()[name] }
+
 // Benevolent reports a function or method (`class::method`, lower-cased)
 // whose result PHPStan reads as a benevolent union: a method may be called
 // on it when one of its members has it, as on phpredis's results in a
