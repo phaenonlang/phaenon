@@ -555,6 +555,11 @@ var checkerAlone = map[string][]struct {
 		{P2402, []int{197}, notToldApartYet, "is_float() on a power to -1, a float always; PHPStan has a benevolent (float|int) there and says nothing"},
 		{P2301, []int{271, 272}, notToldApartYet, "`**` on a string parameter named twice, where PHPStan learns nothing between the two: the price of proving by the only occurrence"},
 	},
+	"steps.phn": {
+		{P2202, []int{117, 127}, falseFinding, "a ranged int stepped is a plain int, as the checker computes with no range: PHPStan has int<1, max> for " +
+			"non-negative-int stepped, null or not, and the return passes"},
+		{P2201, []int{137}, falseFinding, "the same, written into a property documented non-negative-int|null"},
+	},
 	"string-steps.phn": {
 		{P2301, []int{82}, notToldApartYet, "the step of a key of array<array-key, int>, an int|string here and a benevolent (int|string) to PHPStan: a foreach's key is no value both read alike"},
 		{P2305, []int{97}, notToldApartYet, "the step of a numeric-string is a number, and no '6'; PHPStan has a benevolent (float|int) and passes the comparison"},
