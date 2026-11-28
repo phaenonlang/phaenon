@@ -239,36 +239,25 @@ func (x *fnCtx) writtenOwnArray(env *state, e ast.Expr, w ownArrayWrite, declare
 	}
 }
 
-// settypeKeeps reports `settype($x, 'array')` and its kin that leave the
-// value as it was, PHP's type of it already being the type named: an
-// array to 'array', an int to 'int', and so on, as PHP's settype() of a
-// value of its type is the value. PHP's type of a variable an inline @var
-// declares is what PHP guarantees of the value it was assigned
-// (varInfo.held), `load(): array`'s, mixed where it guarantees nothing:
-// settype() to 'array' of an object may empty it, of a falsy scalar fill
-// it, and PHPStan, which decides it by the tag's type, is not followed
-// there.
-func (x *fnCtx) settypeKeeps(e ast.Expr, args *ast.ArgList, env *state) bool {
-	if args == nil || len(args.Args) != 2 || args.Args[1].Unpack {
+// settypeKeeps reports a settype() of e after which what a test of its
+// truthiness found, truth, still holds, as PHP's cast of each value PHP's
+// type of it may hold keeps it (settypeCasts): an int made a string keeps
+// both, a truthy string made an int may be 0, a falsy one made an array is
+// a non-empty one. PHP's type of a variable an inline @var declares is
+// what PHP guarantees of the value it was assigned (varInfo.held),
+// `random_int()`'s int; mixed where it guarantees nothing, whose truthiness
+// only 'bool' keeps: an object made an array may be empty. PHPStan types
+// the value by the tag there, and decides the test after it.
+func (x *fnCtx) settypeKeeps(e ast.Expr, args *ast.ArgList, env *state, truth int) bool {
+	if truth == 0 || args == nil || len(args.Args) != 2 || args.Args[1].Unpack {
 		return false
 	}
 	name, ok := x.pathType(args.Args[1].Value, env).(types.StringLit)
 	if !ok {
 		return false
 	}
-	var as types.Type
-	switch strings.ToLower(name.V) {
-	case "array":
-		as = types.TArray
-	case "int", "integer":
-		as = types.TInt
-	case "string":
-		as = types.TString
-	case "bool", "boolean":
-		as = types.TBool
-	case "float", "double":
-		as = types.TFloat
-	default:
+	target, ok := settypeTargets[strings.ToLower(name.V)]
+	if !ok {
 		return false
 	}
 	php := x.nativeOr(e, x.pathType(e, env), env)
@@ -277,7 +266,71 @@ func (x *fnCtx) settypeKeeps(e ast.Expr, args *ast.ArgList, env *state) bool {
 			php = info.held
 		}
 	}
-	return !types.IsMixed(php) && !mentionsParam(php) && types.IsSubtype(php, as, x.p())
+	// The values the test left: those of the truthiness it found.
+	if truth > 0 {
+		php = types.Truthy(php)
+	} else {
+		php = types.Falsy(php)
+	}
+	keeps := 0 // truthy keeps for 0, falsy for 1
+	if truth < 0 {
+		keeps = 1
+	}
+	for _, m := range types.Members(php) {
+		source := settypeSource(m)
+		if source == "" {
+			if target != "bool" || mentionsParam(m) {
+				return false
+			}
+			continue
+		}
+		if !settypeCasts[source][target][keeps] {
+			return false
+		}
+	}
+	return !isNeverType(php)
+}
+
+// settypeTargets are the types settype() takes, as it spells them.
+var settypeTargets = map[string]string{
+	"int": "int", "integer": "int", "float": "float", "double": "float", "string": "string",
+	"bool": "bool", "boolean": "bool", "array": "array", "null": "null",
+}
+
+// settypeSource is the kind of value of a member of PHP's type settype()
+// casts, "" for one settypeCasts says nothing of: an object, a resource,
+// mixed.
+func settypeSource(m types.Type) string {
+	switch m.(type) {
+	case types.Int:
+		return "int"
+	case types.Float, types.FloatLit:
+		return "float"
+	case types.String, types.StringLit:
+		return "string"
+	case types.Bool, types.BoolLit:
+		return "bool"
+	case types.Array, types.Shape:
+		return "array"
+	case types.Null:
+		return "null"
+	}
+	return ""
+}
+
+// settypeCasts says, for a value of the source kind settype() makes the
+// target type, whether a truthy one stays truthy ([0]) and a falsy one
+// falsy ([1]), as php casts the edge values: 0.5 and NAN make the int 0,
+// 'abc' the int 0, -0.0 the string '-0', 0, '0' and false a non-empty
+// array, the empty array the string 'Array'; null makes every target
+// falsy, and the null target any value.
+var settypeCasts = map[string]map[string][2]bool{
+	"int":    {"int": {true, true}, "float": {true, true}, "string": {true, true}, "bool": {true, true}, "array": {true, false}, "null": {false, true}},
+	"float":  {"int": {false, true}, "float": {true, true}, "string": {true, false}, "bool": {true, true}, "array": {true, false}, "null": {false, true}},
+	"string": {"int": {false, true}, "float": {false, true}, "string": {true, true}, "bool": {true, true}, "array": {true, false}, "null": {false, true}},
+	"bool":   {"int": {true, true}, "float": {true, true}, "string": {true, true}, "bool": {true, true}, "array": {true, false}, "null": {false, true}},
+	"array":  {"int": {true, true}, "float": {true, true}, "string": {true, false}, "bool": {true, true}, "array": {true, true}, "null": {false, true}},
+	"null":   {"int": {false, true}, "float": {false, true}, "string": {false, true}, "bool": {false, true}, "array": {false, true}, "null": {false, true}},
 }
 
 // pushesNothing reports a call of array_push() or array_unshift() with no

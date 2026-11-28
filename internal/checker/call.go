@@ -3604,7 +3604,8 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				case isVar && sig.fn != nil && strings.EqualFold(sig.fn.Name, "array_multisort"):
 					env.reordered(v.Name)
 				default:
-					truth, keeps := x.foundBefore(b.arg.Value, env), settype && x.settypeKeeps(b.arg.Value, args, env)
+					truth := x.foundBefore(b.arg.Value, env)
+					keeps := settype && x.settypeKeeps(b.arg.Value, args, env, truth)
 					x.writtenThrough(b.arg.Value, env)
 					if settype || !readsByRef(sig, b.param) || invalidatesRead(sig, argTypes[i], x.p()) {
 						x.handedOver(b.arg.Value, env)

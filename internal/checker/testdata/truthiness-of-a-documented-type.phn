@@ -1087,3 +1087,25 @@ final class Rewritten
         }
     }
 }
+
+/**
+ * settype() keeps what a test found of a value where PHP's cast of every
+ * value PHP's type of it may hold keeps it: an int made a string, here
+ * the int random_int() gave a variable an inline tag declares; a float
+ * made an int may be 0, and decides nothing.
+ */
+function casted(): void
+{
+    /** @var int $m */
+    $m = \random_int(0, 5);
+    if ($m) {
+        \settype($m, 'string');
+        echo $m ? 1 : 2; // want P2402 "always true"
+    }
+    /** @var float $f */
+    $f = \random_int(0, 5) / 2;
+    if ($f) {
+        \settype($f, 'int');
+        echo $f ? 1 : 2;
+    }
+}

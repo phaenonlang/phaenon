@@ -159,10 +159,13 @@ func TestPHPStanParity(t *testing.T) {
 		"param-out-inherited.phn": {"paramOut.type": {356}},
 		// settype($zs, 'array') of what json_decode() gave, found truthy:
 		// PHPStan's settype() extension types the value by the @var tag,
-		// a list, and calls the test after it always true, where PHP may
-		// have made an empty array of a truthy object; the checker keeps
-		// what a test found through settype() only where PHP guarantees
-		// the value the type named (settypeKeeps).
+		// a list, and calls the test after it always true. That is true
+		// where $associative is true, as here, since json_decode() returns
+		// no object then, and untrue where it is not, a truthy object made
+		// an empty array; the checker knows nothing of json_decode()'s
+		// return by its arguments, and keeps what a test found through
+		// settype() only where PHP's type of the value keeps it
+		// (settypeKeeps).
 		"truthiness-of-a-documented-type.phn": {"ternary.alwaysTrue": {986}},
 	}
 	// besideExtra are the lines whose findings are all extra checks and on
