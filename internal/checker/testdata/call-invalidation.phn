@@ -257,3 +257,219 @@ final class Desk
         }
     }
 }
+
+// The result of a call with side effects is not remembered: a method
+// tagged @phpstan-impure, or one of PHP's own that PHPStan lists with side
+// effects, may give another value each time, and what a test learnt of
+// one call says nothing of the next, as PHPStan has it. An untagged
+// method's result is remembered, and so is a call made with ?->, which
+// PHPStan narrows through its plain twin.
+final class Lexer
+{
+    private int $at = 0;
+
+    /** @phpstan-impure */
+    public function next(): int|string
+    {
+        $this->at++;
+        return $this->at % 2 === 0 ? $this->at : 'word';
+    }
+
+    public function peek(): int|string
+    {
+        return $this->at % 2 === 0 ? $this->at : 'word';
+    }
+}
+
+function takesNumber(int $i): void
+{
+}
+
+function impureResults(Lexer $lexer, Lexer $other): string
+{
+    if (is_int($lexer->next())) {
+        takesNumber($lexer->next()); // want P2103 "int|string given"
+    }
+    $token = $lexer->next();
+    if (is_int($token)) {
+        return 'number';
+    }
+    if (is_int($lexer->peek())) {
+        takesNumber($lexer->peek());
+    }
+    if (!is_string($other->next())) {
+        return 'number';
+    }
+    takesRef($other->next()); // want P2103 "int|string given"
+    return $token;
+}
+
+function fileChars(\SplFileObject $file): void
+{
+    if (is_string($file->fgetc())) {
+        takesRef($file->fgetc()); // want P2103 "false|string given"
+    }
+}
+
+// A method without a docblock reads the one it inherits, its interface's
+// @phpstan-impure included. On a union, the side effects are certain only
+// where every class's method has them: one pure method of a member makes
+// them possible, and PHPStan remembers the result, as the checker does.
+interface Feed
+{
+    /** @phpstan-impure */
+    public function next(): int|string;
+}
+
+final class ListFeed implements Feed
+{
+    private int $at = 0;
+
+    public function next(): int|string
+    {
+        $this->at++;
+        return $this->at % 2 === 0 ? $this->at : 'word';
+    }
+}
+
+final class FixedFeed
+{
+    private int $at = 0;
+
+    public function next(): int|string
+    {
+        return $this->at % 2 === 0 ? $this->at : 'word';
+    }
+}
+
+function inheritedImpure(ListFeed $feed): void
+{
+    if (is_int($feed->next())) {
+        takesNumber($feed->next()); // want P2103 "int|string given"
+    }
+}
+
+function impureOnOneMember(ListFeed|FixedFeed $feed): void
+{
+    if (is_int($feed->next())) {
+        takesNumber($feed->next());
+    }
+}
+
+// A docblock of the method's own that says nothing of purity, a
+// {@inheritDoc} or a @return alone, leaves it to the method it implements
+// or overrides; a @phpstan-pure of its own decides.
+final class DocumentedFeed implements Feed
+{
+    private int $at = 0;
+
+    /** {@inheritDoc} */
+    public function next(): int|string
+    {
+        $this->at++;
+        return $this->at % 2 === 0 ? $this->at : 'word';
+    }
+}
+
+class ImpureSource
+{
+    /** @phpstan-impure */
+    public function take(): int|string
+    {
+        return 1;
+    }
+}
+
+final class ReturnDocSource extends ImpureSource
+{
+    private int $taken = 0;
+
+    /** @return int|string the next item */
+    public function take(): int|string
+    {
+        $this->taken++;
+        return $this->taken % 2 === 0 ? $this->taken : 'word';
+    }
+}
+
+final class PureSource extends ImpureSource
+{
+    /** @phpstan-pure */
+    public function take(): int|string
+    {
+        return 'word';
+    }
+}
+
+function inheritDocImpure(DocumentedFeed $feed): void
+{
+    if (is_int($feed->next())) {
+        takesNumber($feed->next()); // want P2103 "int|string given"
+    }
+}
+
+function returnDocImpure(ReturnDocSource $source): void
+{
+    if (is_int($source->take())) {
+        takesNumber($source->take()); // want P2103 "int|string given"
+    }
+}
+
+function ownPure(PureSource $source): void
+{
+    if (is_int($source->take())) {
+        takesNumber($source->take());
+    }
+}
+
+// The docblock merged with is one declaration's, the parent's where it has
+// one and else the first interface's: where that says nothing of purity,
+// an impure method further on is not reached, and the result is
+// remembered.
+interface ImpureTake
+{
+    /** @phpstan-impure */
+    public function take(): int|string;
+}
+
+interface PlainTake
+{
+    /** @return int|string the next item */
+    public function take(): int|string;
+}
+
+abstract class DocumentedTake
+{
+    /** @return int|string the next item */
+    abstract public function take(): int|string;
+}
+
+final class MergedWithParent extends DocumentedTake implements ImpureTake
+{
+    public function take(): int|string
+    {
+        return 'word';
+    }
+}
+
+final class MergedWithFirstInterface implements PlainTake, ImpureTake
+{
+    public function take(): int|string
+    {
+        return 'word';
+    }
+}
+
+function mergedWithParent(MergedWithParent $source): void
+{
+    if (is_int($source->take())) {
+        takesNumber($source->take());
+    }
+}
+
+function mergedWithFirstInterface(MergedWithFirstInterface $source): void
+{
+    if (is_int($source->take())) {
+        takesNumber($source->take());
+    }
+}

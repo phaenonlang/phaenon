@@ -9,6 +9,7 @@ import (
 	"github.com/phaenonlang/phaenon/internal/program"
 	"github.com/phaenonlang/phaenon/internal/token"
 	"github.com/phaenonlang/phaenon/internal/types"
+	"github.com/phaenonlang/phaenon/stdlib"
 )
 
 // cond evaluates a condition and returns the environments in force when
@@ -289,9 +290,109 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 		}
 		return
 	}
+	if x.impureChain(e, env) {
+		return
+	}
 	if key, ok := x.pathKey(e); ok {
 		env.setPath(key, t)
 	}
+}
+
+// impureChain reports a path that reads the result of a call with side
+// effects, `$lexer->next()` or a member of one: what a test learnt of it
+// says nothing of the next call, and PHPStan remembers no such value
+// (DefaultNarrowingHelper::isSubjectValueRemembered, which passes over a
+// call that only may have side effects). A method tagged
+// `@phpstan-impure` has them, and so does one of PHP's own that PHPStan
+// lists with side effects though it returns a value (sideEffects); a
+// method that returns void has nothing to test. An untagged method's
+// result is remembered, as PHPStan remembers it, and so is a call made
+// with ?->, which PHPStan narrows through its plain twin.
+func (x *fnCtx) impureChain(e ast.Expr, env *state) bool {
+	for {
+		switch n := e.(type) {
+		case *ast.Paren:
+			e = n.Expr
+		case *ast.PropertyFetch:
+			e = n.Object
+		case *ast.Index:
+			e = n.Array
+		case *ast.MethodCall:
+			name, ok := identName(n.Name)
+			if !ok {
+				return false
+			}
+			if n.NullSafe {
+				// PHPStan narrows a ?-> call through its plain twin, and
+				// remembers what it learnt of it whatever the method.
+				e = n.Object
+				continue
+			}
+			saved := x.c.mark()
+			classes := x.classesOf(types.StripNull(x.pathType(n.Object, env)), n.Object.Span())
+			x.c.rollback(saved)
+			if impureOnEvery(classes, name) {
+				return true
+			}
+			e = n.Object
+		case *ast.StaticCall:
+			name, ok := identName(n.Name)
+			if !ok {
+				return false
+			}
+			var classes []*program.Class
+			if cn, isName := n.Class.(*ast.Name); isName {
+				switch x.res.ClassName(cn) {
+				case "self", "static":
+					if x.class != nil {
+						classes = []*program.Class{x.class}
+					}
+				case "parent":
+					if x.class != nil {
+						if pc := x.class.ParentClass(); pc != nil {
+							classes = []*program.Class{pc}
+						}
+					}
+				default:
+					if cl := x.p().Class(x.res.ClassName(cn)); cl != nil {
+						classes = []*program.Class{cl}
+					}
+				}
+			}
+			return impureOnEvery(classes, name)
+		default:
+			return false
+		}
+	}
+}
+
+// impureOnEvery reports a method each of the receiver's classes has with
+// side effects: PHPStan forgets a call's result where its side effects
+// are certain, and on a union one class's pure method makes them only
+// possible.
+func impureOnEvery(classes []*program.Class, name string) bool {
+	for _, cl := range classes {
+		m := cl.FindMethod(name)
+		if m == nil || !impureMethod(m) {
+			return false
+		}
+	}
+	return len(classes) > 0
+}
+
+// impureMethod reports a method whose call PHPStan holds to have side
+// effects for certain, so that its result is not remembered: one tagged
+// `@phpstan-impure`, or as impure as the method it overrides or implements
+// where its own docblock says nothing of purity (Method.Impure), or one of
+// PHP's own that PHPStan lists so.
+func impureMethod(m *program.Method) bool {
+	if m.Impure() {
+		return true
+	}
+	if m.Class == nil || !isStubFile(m.Class.File) {
+		return false
+	}
+	return stdlib.HasSideEffects(strings.ToLower(m.Class.Name) + "::" + strings.ToLower(m.Name))
 }
 
 // literalOffsetKeys spells a union of literal keys the way pathKey spells
