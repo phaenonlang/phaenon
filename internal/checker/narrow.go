@@ -539,8 +539,11 @@ func truthyNarrowable(t types.Type) bool {
 // 0 where no test found anything.
 func (x *fnCtx) foundBefore(e ast.Expr, env *state) int {
 	if v, ok := variableOf(e); ok {
-		if info, ok := env.get(v.Name); ok && info.found != nil && types.Equal(info.found, info.t) {
-			return info.foundTruth
+		// A variable a closure holds by reference is read as the type it
+		// may be given there, which the checker does not follow (variable),
+		// and what a test found of it is not known either: `use (&$xs)`.
+		if info, ok := env.get(v.Name); ok && !x.byRef[v.Name] {
+			return verdictOf(info)
 		}
 		return 0
 	}

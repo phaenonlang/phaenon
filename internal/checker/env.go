@@ -45,10 +45,20 @@ type varInfo struct {
 	// truthiness: while it still has that type, the value is the one the
 	// test found truthy or falsy, and the same test again is decided by
 	// that type, as PHPStan decides it by a native type the first test
-	// narrowed, mixed~falsy too. A narrowing carries it, any write takes
-	// it away. foundTruth is what the test found: 1 truthy, -1 falsy.
+	// narrowed, mixed~falsy too. A narrowing carries it, a meet of ways
+	// that all hold it keeps it (join), any write takes it away.
+	// foundTruth is what the test found: 1 truthy, -1 falsy.
 	found      types.Type
 	foundTruth int
+}
+
+// verdictOf is what a test of truthiness found of a variable that still
+// holds the value it found (varInfo.found): 1 truthy, -1 falsy, 0 none.
+func verdictOf(v varInfo) int {
+	if v.found != nil && types.Equal(v.found, v.t) {
+		return v.foundTruth
+	}
+	return 0
 }
 
 // paramWrite is a write into a value of a type parameter: the parameter,
@@ -725,6 +735,15 @@ func join(a, b *state) *state {
 		if vb, ok := b.vars[k]; ok {
 			n.vars[k] = varInfo{t: joinTypes(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds),
 				guaranteed: va.guaranteed && vb.guaranteed, rewritten: earlierWrite(va.rewritten, vb.rewritten)}
+			// What a test found holds where every way in holds it, as
+			// PHPStan's mixed~falsy joined with itself is itself, and
+			// nowhere else: a way that wrote the value, or never tested
+			// it, joins it with what it holds there.
+			if truth := verdictOf(va); truth != 0 && truth == verdictOf(vb) {
+				info := n.vars[k]
+				info.found, info.foundTruth = info.t, truth
+				n.vars[k] = info
+			}
 		} else {
 			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native, rewritten: va.rewritten}
 		}
@@ -798,14 +817,18 @@ func joinAll(es ...*state) *state {
 // equal reports whether two environments agree on every variable (for the
 // loop fixed point), the conditions remembered with it included: a body
 // that assigns a variable a condition narrowed changes what the condition
-// says at the loop head, though no type changes.
+// says at the loop head, though no type changes. So do PHP's type of it
+// and what a test found of it: a body that writes the variable a value of
+// the type it had takes away what the first test found, and the head is
+// the join of the entry with that end, where the test decides nothing.
 func (e *state) equal(o *state) bool {
 	if e.dead != o.dead || len(e.vars) != len(o.vars) {
 		return false
 	}
 	for k, v := range e.vars {
 		w, ok := o.vars[k]
-		if !ok || v.maybe != w.maybe || !types.Equal(v.t, w.t) || !equalConds(v.conds, w.conds) {
+		if !ok || v.maybe != w.maybe || !types.Equal(v.t, w.t) || !equalConds(v.conds, w.conds) ||
+			!equalOrNil(v.native, w.native) || verdictOf(v) != verdictOf(w) {
 			return false
 		}
 	}

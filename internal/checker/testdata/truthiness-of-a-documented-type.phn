@@ -486,3 +486,69 @@ function countedMixed(mixed $m): void
         echo $m ? 1 : 2;
     }
 }
+
+function more(): bool
+{
+    return \rand(0, 1) === 1;
+}
+
+/**
+ * What a test found of a variable an inline @var declares holds where
+ * every way in holds it, as PHPStan's mixed~falsy joined with itself: after
+ * an if/else, a match, a loop that does not write the value, a foreach
+ * over it. A way that writes the value, or never tested it, takes it away,
+ * and so does a loop whose body writes it, a value of the same type too.
+ */
+function joined(bool $c): void
+{
+    /** @var list<string> $errors */
+    $errors = loaded();
+    if ($errors) {
+        if ($c) {
+            echo 1;
+        } else {
+            echo 2;
+        }
+        echo $errors ? 'a' : 'b'; // want P2402 "always true"
+        foreach ($errors as $e) {
+            echo $e;
+        }
+        echo $errors ? 'a' : 'b'; // want P2402 "always true"
+        while (more()) {
+            echo 3;
+        }
+        echo $errors ? 'a' : 'b'; // want P2402 "always true"
+        if ($c) {
+            $errors = loaded();
+        }
+        echo $errors ? 'a' : 'b';
+    }
+    /** @var list<string> $ids */
+    $ids = loaded();
+    if (!$ids) {
+        return;
+    }
+    foreach ($ids as $id) {
+        echo $id;
+    }
+    if ($ids) { // want P2402 "always true"
+        echo 'again';
+    }
+    /** @var non-empty-list<string> $names */
+    $names = loaded();
+    if ($names) {
+        while (more()) {
+            if ($names) {
+                echo 'n';
+            }
+            /** @var non-empty-list<string> $names */
+            $names = loaded();
+        }
+    }
+    /** @var list<string> $rows */
+    $rows = loaded();
+    if ($c && $rows) {
+        echo 'r';
+    }
+    echo $rows ? 'a' : 'b';
+}

@@ -1535,10 +1535,28 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		}
 		after := joinAll(ends...)
 		mergeOuts(after, wrote)
-		// Assignments in finally apply on every path.
+		// Assignments in finally apply on every path, with the PHP type
+		// the block left and what a test in it found. A write of the type
+		// the variable had takes away what a test found of it before, as
+		// one of another type does: the ways in kept what the block has
+		// since changed.
 		for k, v := range fEnv.vars {
-			if _, ok := after.vars[k]; !ok || !types.Equal(after.vars[k].t, v.t) {
-				after.vars[k] = varInfo{t: v.t, maybe: v.maybe && after.vars[k].maybe, rewritten: v.rewritten}
+			cur, ok := after.vars[k]
+			if !ok || !types.Equal(cur.t, v.t) {
+				left := varInfo{t: v.t, maybe: v.maybe && cur.maybe, native: v.native, rewritten: v.rewritten}
+				if truth := verdictOf(v); truth != 0 {
+					left.found, left.foundTruth = v.t, truth
+				}
+				after.vars[k] = left
+				continue
+			}
+			if was, ok := start.vars[k]; ok && (verdictOf(was) != verdictOf(v) || !equalOrNil(was.native, v.native)) {
+				cur.native = v.native
+				cur.found, cur.foundTruth = nil, 0
+				if truth := verdictOf(v); truth != 0 {
+					cur.found, cur.foundTruth = cur.t, truth
+				}
+				after.vars[k] = cur
 			}
 		}
 		if fEnv.dead {
