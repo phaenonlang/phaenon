@@ -650,7 +650,7 @@ func (x *fnCtx) issetChain(env *state, e ast.Expr) {
 			switch unparen(e).(type) {
 			case *ast.Variable, *ast.StaticPropertyFetch:
 				if native := x.nativeVar(e, env); native != nil && !types.IsMixed(boundsOf(x.pathType(e, env))) {
-					x.keepPHPType(env, e, withAnOffset(native))
+					x.keepPHPType(env, e, withAnOffset(native, x.literalOffset(n, env)))
 				}
 			}
 		case *ast.PropertyFetch:
@@ -664,14 +664,48 @@ func (x *fnCtx) issetChain(env *state, e ast.Expr) {
 	}
 }
 
-// withAnOffset is PHP's type t of a value that has an offset: its arrays
-// are not empty, and null has none. The rest stays, an ArrayAccess and a
-// string among them.
-func withAnOffset(t types.Type) types.Type {
+// withAnOffset is PHP's type t of a value that has an offset, key where
+// it is a literal: an array holds it, an unsealed shape with that entry,
+// as PHPStan's hasOffset(key), so that unset() of another key leaves it
+// non-empty; an array is not empty where the key is no literal; null has
+// none. The rest stays, an ArrayAccess and a string among them.
+func withAnOffset(t, key types.Type) types.Type {
+	var entry types.ShapeEntry
+	literal := false
+	switch k := normaliseKey(key).(type) {
+	case types.StringLit:
+		entry, literal = types.ShapeEntry{Key: k.V}, true
+	case types.Int:
+		if k.Lo == k.Hi {
+			entry, literal = types.ShapeEntry{IsInt: true, IntKey: k.Lo}, true
+		}
+	}
 	return types.Map(t, func(m types.Type) types.Type {
 		switch m := m.(type) {
 		case types.Array:
-			m.NonEmpty = true
+			if !literal {
+				m.NonEmpty = true
+				return m
+			}
+			e := entry
+			e.Type = m.Value
+			return types.Shape{Entries: []types.ShapeEntry{e}, Unsealed: true}
+		case types.Shape:
+			if !literal || !m.Unsealed {
+				return types.NonEmptyShape(m)
+			}
+			for i, have := range m.Entries {
+				if keyedBy(have, key) {
+					entries := append([]types.ShapeEntry(nil), m.Entries...)
+					entries[i].Optional = false
+					m.Entries = entries
+					return m
+				}
+			}
+			e := entry
+			e.Type = types.TMixed
+			m.Entries = append(append([]types.ShapeEntry(nil), m.Entries...), e)
+			m.List = false
 			return m
 		case types.Null:
 			return types.TNever

@@ -672,7 +672,7 @@ final class Narrowed
     public function offset(mixed $a): void
     {
         if (\is_array($a) && isset($a['id'])) {
-            echo $a ? 1 : 2; // want P2402 "always true (non-empty-array)"
+            echo $a ? 1 : 2; // want P2402 "always true (array{id: mixed, ...})"
             unset($a['id']);
             echo $a ? 1 : 2;
         }
@@ -991,6 +991,41 @@ final class Referenced
             }
             unset($g);
             echo $this->groups['k'] ? 1 : 2;
+        }
+    }
+}
+
+/**
+ * isset() of a constant key leaves PHP's type of the array holding it an
+ * array that has the key, as PHPStan's hasOffset() does: an unset() of
+ * another key leaves it non-empty, one of that key may empty it.
+ *
+ * @template T
+ */
+final class Offsetted
+{
+    /** @var array<string, int> */
+    public static array $counts = [];
+
+    /**
+     * @param T $a
+     * @param array<string, int> $m
+     */
+    public function offsetted(mixed $a, array $m): void
+    {
+        if (\is_array($a) && isset($a['id'])) {
+            unset($a['other']);
+            echo $a ? 1 : 2; // want P2402 "always true (array{id: mixed, ...})"
+            unset($a['id']);
+            echo $a ? 1 : 2;
+        }
+        if (isset($m['id'])) {
+            unset($m['other']);
+            echo $m ? 1 : 2; // want P2402 "always true"
+        }
+        if (isset(self::$counts['a'])) {
+            unset(self::$counts['b']);
+            echo self::$counts ? 1 : 2; // want P2402 "always true"
         }
     }
 }
