@@ -756,3 +756,105 @@ function comparedNullable(?int $n, ?callable $c, ?string $s): void
         echo $s ? 1 : 2;
     }
 }
+
+/**
+ * A way that wrote the variable meets the others with what PHP's type of
+ * the value written says of its truthiness, as PHPStan's mixed~falsy
+ * joined with array{'a'} is truthy: a default written where the value was
+ * empty leaves the test decided. A value PHP's type certifies nothing of,
+ * a call documented non-empty or a ternary of documented values, leaves it
+ * open, and so does a falsy default.
+ *
+ * @param non-empty-list<string> $docs
+ */
+function defaulted(string $s, bool $c, int $k, array $docs): int
+{
+    /** @var list<string> $xs */
+    $xs = loaded();
+    if (!$xs) {
+        $xs = ['a'];
+    }
+    if ($xs) { // want P2402 "always true"
+        echo 1;
+    }
+    /** @var list<string> $ys */
+    $ys = loaded();
+    if ($ys) {
+        echo 2;
+    } else {
+        $ys = [$s];
+    }
+    echo $ys ? 1 : 2; // want P2402 "always true"
+    /** @var list<string> $zs */
+    $zs = loaded();
+    if (!$zs) {
+        switch ($k) {
+            case 1:
+                $zs = ['one'];
+                break;
+            default:
+                $zs = ['other'];
+        }
+    }
+    echo $zs ? 1 : 2; // want P2402 "always true"
+    /** @var list<string> $us */
+    $us = loaded();
+    if (!$us) {
+        $us = someLoaded();
+    }
+    echo $us ? 1 : 2;
+    /** @var list<string> $ws */
+    $ws = loaded();
+    if (!$ws) {
+        $ws = $c ? $docs : $docs;
+    }
+    echo $ws ? 1 : 2;
+    /** @var list<string> $vs */
+    $vs = loaded();
+    if ($vs) {
+        $vs = [];
+    }
+    echo $vs ? 1 : 2; // want P2402 "always false"
+    /** @var int $n */
+    $n = \json_decode('0');
+    if (!$n) {
+        $n = 10;
+    }
+    return $n ? $n : 1; // want P2402 "always true"
+}
+
+/**
+ * A finally block's writes, of a variable and of a property, hold after
+ * the try statement, with what a test in the block found.
+ */
+final class Finished
+{
+    /** @var list<string> */
+    private array $list = [];
+
+    public function finished(): void
+    {
+        /** @var list<string> $xs */
+        $xs = loaded();
+        try {
+            $xs = loaded();
+        } finally {
+            if (!$xs) {
+                $xs = ['a'];
+            }
+        }
+        if ($xs) { // want P2402 "always true"
+            echo 1;
+        }
+        if ($this->list) {
+            try {
+                loaded();
+            } finally {
+                $this->list = loaded();
+            }
+            if ($this->list) {
+                echo 2;
+            }
+        }
+    }
+}

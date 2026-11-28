@@ -61,6 +61,51 @@ func verdictOf(v varInfo) int {
 	return 0
 }
 
+// wayVerdict is what a variable's value is on one way into a join: what a
+// test found of it (verdictOf), else what PHP's type of it decides, its
+// PHP type or the checker's where that is certain (truthOf). A type
+// parameter's value is decided by no PHP type.
+func wayVerdict(v varInfo) int {
+	if truth := verdictOf(v); truth != 0 {
+		return truth
+	}
+	php := v.native
+	if php == nil {
+		php = v.t
+	}
+	if mentionsParam(php) {
+		return 0
+	}
+	return truthOf(php)
+}
+
+// pathVerdict is what a test of truthiness found of the path key on this
+// way (foundPathKey), where the path still holds the value it found.
+func pathVerdict(e *state, key string) int {
+	t, ok := e.paths[key]
+	if !ok {
+		return 0
+	}
+	for _, truth := range []int{1, -1} {
+		if found, ok := e.paths[foundPathKey(key, truth)]; ok && types.Equal(found, t) {
+			return truth
+		}
+	}
+	return 0
+}
+
+// pathWayVerdict is wayVerdict of a path: what a test found of it, else
+// what the PHP type a test or a write gave it decides.
+func pathWayVerdict(e *state, key string) int {
+	if truth := pathVerdict(e, key); truth != 0 {
+		return truth
+	}
+	if php, ok := e.paths[nativePathKey(key)]; ok && !mentionsParam(php) {
+		return truthOf(php)
+	}
+	return 0
+}
+
 // paramWrite is a write into a value of a type parameter: the parameter,
 // the span of the offset written (or unset, or iterated by reference),
 // and what the variable held after it and the writes into the same value
@@ -738,10 +783,15 @@ func join(a, b *state) *state {
 			n.vars[k] = varInfo{t: joinTypes(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds),
 				guaranteed: va.guaranteed && vb.guaranteed, rewritten: earlierWrite(va.rewritten, vb.rewritten)}
 			// What a test found holds where every way in holds it, as
-			// PHPStan's mixed~falsy joined with itself is itself, and
-			// nowhere else: a way that wrote the value, or never tested
-			// it, joins it with what it holds there.
-			if truth := verdictOf(va); truth != 0 && truth == verdictOf(vb) {
+			// PHPStan's mixed~falsy joined with itself is itself. A way
+			// that wrote the variable holds what PHP's type of the value
+			// written says: `if (!$xs) { $xs = ['a']; }` leaves $xs truthy,
+			// as PHPStan's mixed~falsy joined with array{'a'} is truthy. A
+			// way where PHP's type decides nothing, or the other way,
+			// leaves the test open.
+			if verdictOf(va) == 0 && verdictOf(vb) == 0 {
+				// neither way found anything: the types join as they are
+			} else if truth := wayVerdict(va); truth != 0 && truth == wayVerdict(vb) {
 				info := n.vars[k]
 				info.found, info.foundTruth = info.t, truth
 				n.vars[k] = info
@@ -758,6 +808,19 @@ func join(a, b *state) *state {
 	for k, ta := range a.paths {
 		if tb, ok := b.paths[k]; ok {
 			n.paths[k] = joinTypes(ta, tb)
+		}
+	}
+	// A path as a variable: what a test found of it, or what PHP's type
+	// of the value a way wrote says, where every way in says the same.
+	for k := range n.paths {
+		if keptKey(k) {
+			continue
+		}
+		if pathVerdict(a, k) == 0 && pathVerdict(b, k) == 0 {
+			continue
+		}
+		if truth := pathWayVerdict(a, k); truth != 0 && truth == pathWayVerdict(b, k) {
+			n.paths[foundPathKey(k, truth)] = n.paths[k]
 		}
 	}
 	for k := range a.inits {

@@ -1541,6 +1541,19 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		}
 		after := joinAll(ends...)
 		mergeOuts(after, wrote)
+		// So do its writes of a property or an offset, and what it kept of
+		// one: a path the block changed holds what the block left on every
+		// way out, and one it forgot is forgotten.
+		for k, t := range fEnv.paths {
+			if was, ok := start.paths[k]; !ok || !types.Equal(was, t) {
+				after.paths[k] = t
+			}
+		}
+		for k := range start.paths {
+			if _, ok := fEnv.paths[k]; !ok {
+				delete(after.paths, k)
+			}
+		}
 		// Assignments in finally apply on every path, with the PHP type
 		// the block left and what a test in it found. A write of the type
 		// the variable had takes away what a test found of it before, as
