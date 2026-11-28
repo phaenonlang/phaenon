@@ -146,13 +146,14 @@ func (x *fnCtx) stmt(s ast.Stmt, env *state) {
 				x.handedOver(t, env)
 			case *ast.Index:
 				base := x.exprLenient(t.Array, env)
+				holderPHP := x.nativeVar(t.Array, env) // before forgetOffset rewrites the holder
 				x.forgetOffset(t, env)
 				var raw types.Type
 				if t.Index != nil {
 					raw = x.expr(t.Index, env, nil)
 				}
 				x.unsetOffsetCheck(t, base, raw, env)
-				x.unsetIndex(t, base, env, s.S)
+				x.unsetIndex(t, base, holderPHP, env, s.S)
 			default:
 				x.exprLenient(v, env)
 				if key, ok := x.pathKey(v); ok {
@@ -254,12 +255,18 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 	}
 	x.bind(nil, assign.Target, declared, env, s.S)
 	if isVar {
-		// The variable holds what PHP guarantees of the value, which for a
-		// declaration PHP gives no type is nothing.
-		if g := x.guaranteedOf(assign.Value, env); g != nil {
-			native = g
+		// The variable holds what the tag says, and nothing PHP
+		// guarantees: PHPStan's native type of a variable an inline @var
+		// declares is mixed, so that `/** @var list<string> $errors */
+		// $errors = [];` leaves `if ($errors)` open. What PHP guarantees of
+		// the value is held beside it for settype() (varInfo.held).
+		env.setNative(v.Name, types.TMixed)
+		if g := x.guaranteedOr(assign.Value, vt, env); !types.IsMixed(g) {
+			if info, ok := env.vars[v.Name]; ok {
+				info.held = g
+				env.vars[v.Name] = info
+			}
 		}
-		env.setNative(v.Name, native)
 	}
 }
 
@@ -429,7 +436,7 @@ func (x *fnCtx) unsetOffsetCheck(t *ast.Index, base, raw types.Type, env *state)
 // accept the list an element left). An array inside another, `$a[$i][$k]`,
 // is written back into the one holding it (writeExisting), so the variable
 // or property at the root takes its new type and is checked the same way.
-func (x *fnCtx) unsetIndex(t *ast.Index, base types.Type, env *state, span ast.Span) {
+func (x *fnCtx) unsetIndex(t *ast.Index, base, holderPHP types.Type, env *state, span ast.Span) {
 	if key, ok := pathKey(t); ok {
 		env.invalidatePrefix(key)
 	}
@@ -449,6 +456,12 @@ func (x *fnCtx) unsetIndex(t *ast.Index, base types.Type, env *state, span ast.S
 			bounded, p := writtenBound(info.t)
 			now := unsetOffset(boundedShapes(bounded), keyT)
 			env.set(a.Name, now)
+			// PHP's type loses the entry too, and is not known to be
+			// non-empty any more, where a docblock refines it: the value
+			// of a type parameter is no certainty afterwards.
+			if info.native != nil {
+				env.setNative(a.Name, unsetOffset(info.native, keyT))
+			}
 			x.keepRewritten(a, info.rewritten, p, t.S, now, env)
 			x.wroteOut(a.Name, now, env, span)
 		}
@@ -460,6 +473,11 @@ func (x *fnCtx) unsetIndex(t *ast.Index, base types.Type, env *state, span ast.S
 		// A value of `T of array<…>` is written as its bound.
 		if bounded, _ := writtenBound(base); holdsArray(bounded) {
 			x.writeExisting(t.Array, unsetOffset(bounded, keyT), env, span)
+			// PHP's type of the array, as it was before the unset() began,
+			// loses the entry too, as a variable's does.
+			if key, ok := x.narrowedPathKey(t.Array); ok && holderPHP != nil && onlyArrays(holderPHP) {
+				env.keepNative(key, unsetOffset(holderPHP, keyT))
+			}
 		}
 	}
 }
@@ -504,11 +522,23 @@ func offsetRootVar(e ast.Expr) *ast.Variable {
 
 // writtenBound is t with each type parameter whose bound holds an array,
 // narrowed or not, read as its bound, as a write reads it (boundMembers),
-// and the first such parameter; t and nil where none is.
+// and the first such parameter; t and nil where none is. A parameter with
+// no bound a test narrowed to an array, `T&array` after is_array(), is
+// written as that array, no longer T, as PHPStan types what an offset
+// write leaves of it.
 func writtenBound(t types.Type) (types.Type, *types.Param) {
 	var p *types.Param
 	var out []types.Type
 	for _, m := range types.Members(t) {
+		if in, ok := m.(types.Intersection); ok {
+			if open, rest, ok := narrowedOpenParam(in); ok {
+				if array := types.MakeIntersection(rest...); holdsArray(array) {
+					p = firstParam(p, &open)
+					out = append(out, array)
+					continue
+				}
+			}
+		}
 		read := boundMembers(m)
 		if len(read) > 0 && read[0].from != nil {
 			bound := types.TNever
@@ -527,6 +557,19 @@ func writtenBound(t types.Type) (types.Type, *types.Param) {
 		return t, nil
 	}
 	return types.MakeUnion(out...), p
+}
+
+// narrowedOpenParam is the type parameter with no bound of an
+// intersection, and the intersection's other members: `T&array` is T and
+// array.
+func narrowedOpenParam(in types.Intersection) (types.Param, []types.Type, bool) {
+	for i, m := range in.Types {
+		if p, ok := m.(types.Param); ok && openParam(p) {
+			rest := append(append([]types.Type{}, in.Types[:i]...), in.Types[i+1:]...)
+			return p, rest, len(rest) > 0
+		}
+	}
+	return types.Param{}, nil, false
 }
 
 // writeExisting gives the array at target, which holds the offset unset()
@@ -562,8 +605,10 @@ func (x *fnCtx) writeExisting(target ast.Expr, vt types.Type, env *state, span a
 			return
 		}
 		before := rewrittenOf(t.Array, env)
+		nativeBefore, truthBefore := x.nativeVar(t.Array, env), x.foundBefore(t.Array, env)
 		now := withExistingOffset(base, normaliseKey(x.pathType(t.Index, env)), vt)
 		x.writeExisting(t.Array, now, env, span)
+		x.keepOffsetWritten(env, t.Array, nativeBefore, truthBefore, normaliseKey(x.pathType(t.Index, env)), vt)
 		x.keepRewritten(t.Array, before, p, t.S, now, env)
 		// What was known of this array, an is_array() of `$a['k']` that
 		// a general array's type cannot hold, stays known of what is left
@@ -701,8 +746,12 @@ func (x *fnCtx) ifStmt(s *ast.If, env *state) {
 	ends := []*state{thenEnv}
 	cur := elseEnv
 	negatives := []libraryGuard{negative}
-	for _, ei := range s.ElseIfs {
+	for i, ei := range s.ElseIfs {
+		if i == len(s.ElseIfs)-1 && (s.Else == nil || onlyThrows(s.Else)) {
+			x.lastCond = 1
+		}
 		t, f := x.cond(ei.Cond, cur)
+		x.lastCond = 0
 		p, n := x.guardOf(ei.Cond)
 		pops := []func(){x.c.pushGuard(p)}
 		for _, g := range negatives {
@@ -728,6 +777,22 @@ func (x *fnCtx) ifStmt(s *ast.If, env *state) {
 	}
 	ends = append(ends, cur)
 	*env = *joinAll(ends...)
+}
+
+// onlyThrows reports an else whose one statement is a throw.
+func onlyThrows(s ast.Stmt) bool {
+	if b, ok := s.(*ast.Block); ok {
+		if len(b.Stmts) != 1 {
+			return false
+		}
+		s = b.Stmts[0]
+	}
+	e, ok := s.(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	_, ok = e.Expr.(*ast.Throw)
+	return ok
 }
 
 // deepJump is a `break N` / `continue N` on its way out: levels counts the
@@ -1152,6 +1217,12 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 			x.byRef[vv.Name] = true
 		}
 		x.writtenThrough(s.Expr, env) // the body may write any element
+		// and what a test found of a property or an offset iterated is gone
+		// with it, as PHPStan's native type of it is no longer narrowed.
+		if key, ok := x.narrowedPathKey(s.Expr); ok {
+			delete(env.paths, foundPathKey(key, 1))
+			delete(env.paths, foundPathKey(key, -1))
+		}
 		// The body may write any element of a value of `T of array<…>`,
 		// or of an array in it (`foreach ($a['inner'] as &$v)`): what the
 		// variable holds is its bound, no longer T, as PHPStan has it
@@ -1160,6 +1231,9 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 			if info, defined := env.get(a.Name); defined {
 				if bounded, p := writtenBound(info.t); p != nil {
 					env.set(a.Name, bounded)
+					// The loop writes values, not keys: PHP's type of the
+					// array, non-empty or holding a key, is as it was.
+					env.setNative(a.Name, info.native)
 					x.keepRewritten(a, info.rewritten, p, s.Expr.Span(), bounded, env)
 				}
 			}
@@ -1514,10 +1588,41 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		}
 		after := joinAll(ends...)
 		mergeOuts(after, wrote)
-		// Assignments in finally apply on every path.
+		// So do its writes of a property or an offset, and what it kept of
+		// one: a path the block changed holds what the block left on every
+		// way out, and one it forgot is forgotten.
+		for k, t := range fEnv.paths {
+			if was, ok := start.paths[k]; !ok || !types.Equal(was, t) {
+				after.paths[k] = t
+			}
+		}
+		for k := range start.paths {
+			if _, ok := fEnv.paths[k]; !ok {
+				delete(after.paths, k)
+			}
+		}
+		// Assignments in finally apply on every path, with the PHP type
+		// the block left and what a test in it found. A write of the type
+		// the variable had takes away what a test found of it before, as
+		// one of another type does: the ways in kept what the block has
+		// since changed.
 		for k, v := range fEnv.vars {
-			if _, ok := after.vars[k]; !ok || !types.Equal(after.vars[k].t, v.t) {
-				after.vars[k] = varInfo{t: v.t, maybe: v.maybe && after.vars[k].maybe, rewritten: v.rewritten}
+			cur, ok := after.vars[k]
+			if !ok || !types.Equal(cur.t, v.t) {
+				left := varInfo{t: v.t, maybe: v.maybe && cur.maybe, native: v.native, rewritten: v.rewritten}
+				if truth := verdictOf(v); truth != 0 {
+					left.found, left.foundTruth = v.t, truth
+				}
+				after.vars[k] = left
+				continue
+			}
+			if was, ok := start.vars[k]; ok && (verdictOf(was) != verdictOf(v) || !equalOrNil(was.native, v.native)) {
+				cur.native = v.native
+				cur.found, cur.foundTruth = nil, 0
+				if truth := verdictOf(v); truth != 0 {
+					cur.found, cur.foundTruth = cur.t, truth
+				}
+				after.vars[k] = cur
 			}
 		}
 		if fEnv.dead {
@@ -2020,6 +2125,9 @@ func (x *fnCtx) rewrittenWhy(value ast.Expr, got, want types.Type, env *state, r
 	line, _ := x.file.Position(w.at.Start)
 	why := fmt.Sprintf("$%s is no longer %s after it was written on line %d", v.Name, p, line)
 	switch {
+	case w.param.Bound == nil:
+		// A parameter with no bound, a test narrowed to an array: the
+		// array written is all there is to say.
 	case !types.IsAcceptable(w.written, w.param.Bound, x.p()):
 		// What the write produced leaves the bound.
 		why += fmt.Sprintf(", and does not fit %s either", bound)

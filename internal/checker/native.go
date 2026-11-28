@@ -48,8 +48,17 @@ func (x *fnCtx) guaranteedOr(e ast.Expr, t types.Type, env *state) types.Type {
 	return t
 }
 
-// phpType is nativeOf, or guaranteedOf with guaranteed set.
+// phpType is nativeOf, or guaranteedOf with guaranteed set. A property or
+// an offset a test narrowed has the PHP type the test left of it, as a
+// variable has.
 func (x *fnCtx) phpType(e ast.Expr, env *state, guaranteed bool) types.Type {
+	if env != nil {
+		if key, ok := x.narrowedPathKey(e); ok {
+			if t, ok := env.getPath(nativePathKey(key)); ok {
+				return t
+			}
+		}
+	}
 	switch e := e.(type) {
 	case *ast.Paren:
 		return x.phpType(e.Expr, env, guaranteed)
@@ -132,9 +141,56 @@ func (x *fnCtx) phpType(e ast.Expr, env *state, guaranteed bool) types.Type {
 		}
 	case *ast.Index:
 		// An element of a refined array (`@param array{body: string}` over
-		// a native `array`) is as uncertain as the array: PHP knows mixed.
+		// a native `array`) is as uncertain as the array: PHP knows mixed,
+		// but where PHP's type of the array has the entry, one a write
+		// gave it (`$this->labels = ['a' => 'x']`), as PHPStan's native
+		// type of the offset is the entry's.
 		if n := x.phpType(e.Array, env, guaranteed); n != nil {
+			key := types.Type(types.TArrayKey)
+			if lit := x.literalOffset(e, env); lit != nil {
+				key = lit
+			}
+			if v := elementPHP(n, key); v != nil {
+				return v
+			}
 			return types.TMixed
+		}
+	case *ast.Ternary:
+		// A ternary or a match whose result may be a value a docblock
+		// refines is no certainty either: its PHP type is its branches',
+		// the condition's where it is truthy for `?:`.
+		if e.Then == nil {
+			cond := x.phpType(e.Cond, env, guaranteed)
+			els := x.phpType(e.Else, env, guaranteed)
+			if cond == nil && els == nil {
+				return nil
+			}
+			return types.MakeUnion(types.Truthy(x.phpOr(e.Cond, cond, env)), x.phpOr(e.Else, els, env))
+		}
+		return x.branchesPHP([]ast.Expr{e.Then, e.Else}, env, guaranteed)
+	case *ast.Match:
+		var bodies []ast.Expr
+		for _, arm := range e.Arms {
+			bodies = append(bodies, arm.Body)
+		}
+		return x.branchesPHP(bodies, env, guaranteed)
+	case *ast.ArrayLit:
+		// An array a value PHP's type does not certify is spread into is
+		// an array of what PHP's types hold, empty unless an item is no
+		// spread: `[...$xs]` of a documented non-empty list may be empty.
+		uncertain, filled := false, false
+		for _, item := range e.Items {
+			if item == nil {
+				continue
+			}
+			if !item.Unpack {
+				filled = true
+			} else if x.phpType(item.Value, env, guaranteed) != nil {
+				uncertain = true
+			}
+		}
+		if uncertain {
+			return types.Array{Key: types.TArrayKey, Value: types.TMixed, NonEmpty: filled}
 		}
 	case *ast.Binary:
 		if e.Op == token.T_COALESCE {
@@ -147,6 +203,34 @@ func (x *fnCtx) phpType(e ast.Expr, env *state, guaranteed bool) types.Type {
 		}
 	}
 	return nil
+}
+
+// branchesPHP is the PHP type of a value that is one of the branches: nil
+// where each is certain, the union of their PHP types, or of their types
+// where certain, otherwise.
+func (x *fnCtx) branchesPHP(branches []ast.Expr, env *state, guaranteed bool) types.Type {
+	phps := make([]types.Type, len(branches))
+	any := false
+	for i, b := range branches {
+		phps[i] = x.phpType(b, env, guaranteed)
+		any = any || phps[i] != nil
+	}
+	if !any {
+		return nil
+	}
+	var out []types.Type
+	for i, b := range branches {
+		out = append(out, x.phpOr(b, phps[i], env))
+	}
+	return types.MakeUnion(out...)
+}
+
+// phpOr is php, PHP's type of e, or e's type where it is certain (nil).
+func (x *fnCtx) phpOr(e ast.Expr, php types.Type, env *state) types.Type {
+	if php != nil {
+		return php
+	}
+	return x.pathType(e, env)
 }
 
 // phpsOwnReturn is what PHP guarantees a call of one of its own functions

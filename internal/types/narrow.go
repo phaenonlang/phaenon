@@ -104,6 +104,9 @@ func Falsy(t Type) Type {
 			}
 			return TNever
 		case String:
+			if m.Callable {
+				return TNever // no function is named '' or '0', as PHPStan's callable-string is truthy
+			}
 			if m.NonEmpty {
 				if m.Numeric {
 					return StringLit{"0"}

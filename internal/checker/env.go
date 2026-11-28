@@ -41,6 +41,76 @@ type varInfo struct {
 	// is expected says where it stopped being one. An assignment of the
 	// whole variable forgets it, as it forgets the rest.
 	rewritten *paramWrite
+	// found is the type the variable had right after a test of its
+	// truthiness: while it still has that type, the value is the one the
+	// test found truthy or falsy, and the same test again is decided by
+	// that type, as PHPStan decides it by a native type the first test
+	// narrowed, mixed~falsy too. A narrowing carries it, a meet of ways
+	// that all hold it keeps it (join), any write takes it away.
+	// foundTruth is what the test found: 1 truthy, -1 falsy.
+	found      types.Type
+	foundTruth int
+	// held is what PHP guarantees of the value an inline @var's variable
+	// was assigned, `array` of `load(): array`, where PHP's type of it
+	// (native) is the mixed PHPStan gives it: settype() to the type the
+	// value already has leaves it as it was (settypeKeeps). A narrowing
+	// carries it, a meet keeps it where both ways hold one, any write takes
+	// it away.
+	held types.Type
+}
+
+// verdictOf is what a test of truthiness found of a variable that still
+// holds the value it found (varInfo.found): 1 truthy, -1 falsy, 0 none.
+func verdictOf(v varInfo) int {
+	if v.found != nil && types.Equal(v.found, v.t) {
+		return v.foundTruth
+	}
+	return 0
+}
+
+// wayVerdict is what a variable's value is on one way into a join: what a
+// test found of it (verdictOf), else what PHP's type of it decides, its
+// PHP type or the checker's where that is certain (truthOf). A type
+// parameter's value is decided by no PHP type.
+func wayVerdict(v varInfo) int {
+	if truth := verdictOf(v); truth != 0 {
+		return truth
+	}
+	php := v.native
+	if php == nil {
+		php = v.t
+	}
+	if mentionsParam(php) {
+		return 0
+	}
+	return truthOf(php)
+}
+
+// pathVerdict is what a test of truthiness found of the path key on this
+// way (foundPathKey), where the path still holds the value it found.
+func pathVerdict(e *state, key string) int {
+	t, ok := e.paths[key]
+	if !ok {
+		return 0
+	}
+	for _, truth := range []int{1, -1} {
+		if found, ok := e.paths[foundPathKey(key, truth)]; ok && types.Equal(found, t) {
+			return truth
+		}
+	}
+	return 0
+}
+
+// pathWayVerdict is wayVerdict of a path: what a test found of it, else
+// what the PHP type a test or a write gave it decides.
+func pathWayVerdict(e *state, key string) int {
+	if truth := pathVerdict(e, key); truth != 0 {
+		return truth
+	}
+	if php, ok := e.paths[nativePathKey(key)]; ok && !mentionsParam(php) {
+		return truthOf(php)
+	}
+	return 0
 }
 
 // paramWrite is a write into a value of a type parameter: the parameter,
@@ -260,8 +330,8 @@ func (e *state) written(name string) {
 }
 
 func (e *state) writtenOne(name string) {
-	if info, ok := e.vars[name]; ok && info.conds != nil {
-		info.conds = nil
+	if info, ok := e.vars[name]; ok && (info.conds != nil || info.found != nil || info.held != nil) {
+		info.conds, info.found, info.held = nil, nil, nil
 		e.vars[name] = info
 	}
 	e.dropConds(name)
@@ -269,7 +339,9 @@ func (e *state) writtenOne(name string) {
 
 // reordered is written for an array whose int keys were renumbered and
 // whose string keys kept their values (array_multisort()): what the
-// conditions say of its string offsets stands.
+// conditions say of its string offsets stands, and so does what a test of
+// truthiness found of it, the array holding the values it held, as
+// PHPStan keeps the type of an argument its map says the function reads.
 func (e *state) reordered(name string) {
 	e.reorderedOne(name)
 	for o := range e.refs[name] {
@@ -463,6 +535,7 @@ func (e *state) invalidateMentions(name string) {
 			end := j + len(needle)
 			if j > 0 && strings.ContainsRune("([,", rune(k[j-1])) && end < len(k) && strings.ContainsRune(",)]", rune(k[end])) {
 				delete(e.paths, k)
+				e.dropKept(k)
 				break
 			}
 			i = end
@@ -539,8 +612,45 @@ func (e *state) unset(name string) {
 	e.dropConds(name)
 }
 
+// setPath gives a path the type of the value it holds now, which forgets
+// what a test kept beside its type (dropKept), whatever wrote the value.
 func (e *state) setPath(key string, t types.Type) {
 	e.paths[key] = t
+	e.dropKept(key)
+}
+
+// nativePathKey is the key the PHP type of a path is kept under among the
+// narrowed paths, where a test narrowed it or a write gave it one;
+// foundPathKey that of the type the path had right after a test of its
+// truthiness found it truthy (truth 1) or falsy (-1), varInfo.found's
+// counterpart. Each is spelled as a member of the path, and setPath,
+// invalidate and invalidateCalls drop them with the path: what a test
+// kept goes with any change of the path's type, as a variable's does.
+func nativePathKey(key string) string { return key + "->\x00native" }
+
+func foundPathKey(key string, truth int) string {
+	if truth > 0 {
+		return key + "->\x00truthy"
+	}
+	return key + "->\x00falsy"
+}
+
+// keptKey reports a key nativePathKey or foundPathKey spells.
+func keptKey(key string) bool { return strings.Contains(key, "->\x00") }
+
+// dropKept forgets what a test kept of a path beside its type.
+func (e *state) dropKept(key string) {
+	if keptKey(key) {
+		return
+	}
+	delete(e.paths, nativePathKey(key))
+	delete(e.paths, foundPathKey(key, 1))
+	delete(e.paths, foundPathKey(key, -1))
+}
+
+// keepNative gives a path the PHP type a test or a write left it.
+func (e *state) keepNative(key string, native types.Type) {
+	e.paths[nativePathKey(key)] = native
 }
 
 func (e *state) getPath(key string) (types.Type, bool) {
@@ -576,6 +686,7 @@ func (e *state) invalidate(drop func(key string) bool) {
 	for k := range e.paths {
 		if drop(k) {
 			delete(e.paths, k)
+			e.dropKept(k)
 		}
 	}
 	e.forgetInConds(func(string) bool { return false }, drop)
@@ -608,6 +719,7 @@ func (e *state) invalidateCalls(receiver string) {
 	for k := range e.paths {
 		if strings.HasPrefix(k, receiver+"->") && strings.Contains(k[len(receiver):], "(") {
 			delete(e.paths, k)
+			e.dropKept(k)
 		}
 	}
 }
@@ -677,6 +789,25 @@ func join(a, b *state) *state {
 		if vb, ok := b.vars[k]; ok {
 			n.vars[k] = varInfo{t: joinTypes(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds),
 				guaranteed: va.guaranteed && vb.guaranteed, rewritten: earlierWrite(va.rewritten, vb.rewritten)}
+			if va.held != nil && vb.held != nil {
+				info := n.vars[k]
+				info.held = types.MakeUnion(va.held, vb.held)
+				n.vars[k] = info
+			}
+			// What a test found holds where every way in holds it, as
+			// PHPStan's mixed~falsy joined with itself is itself. A way
+			// that wrote the variable holds what PHP's type of the value
+			// written says: `if (!$xs) { $xs = ['a']; }` leaves $xs truthy,
+			// as PHPStan's mixed~falsy joined with array{'a'} is truthy. A
+			// way where PHP's type decides nothing, or the other way,
+			// leaves the test open.
+			if verdictOf(va) == 0 && verdictOf(vb) == 0 {
+				// neither way found anything: the types join as they are
+			} else if truth := wayVerdict(va); truth != 0 && truth == wayVerdict(vb) {
+				info := n.vars[k]
+				info.found, info.foundTruth = info.t, truth
+				n.vars[k] = info
+			}
 		} else {
 			n.vars[k] = varInfo{t: va.t, maybe: true, native: va.native, rewritten: va.rewritten}
 		}
@@ -689,6 +820,19 @@ func join(a, b *state) *state {
 	for k, ta := range a.paths {
 		if tb, ok := b.paths[k]; ok {
 			n.paths[k] = joinTypes(ta, tb)
+		}
+	}
+	// A path as a variable: what a test found of it, or what PHP's type
+	// of the value a way wrote says, where every way in says the same.
+	for k := range n.paths {
+		if keptKey(k) {
+			continue
+		}
+		if pathVerdict(a, k) == 0 && pathVerdict(b, k) == 0 {
+			continue
+		}
+		if truth := pathWayVerdict(a, k); truth != 0 && truth == pathWayVerdict(b, k) {
+			n.paths[foundPathKey(k, truth)] = n.paths[k]
 		}
 	}
 	for k := range a.inits {
@@ -750,14 +894,18 @@ func joinAll(es ...*state) *state {
 // equal reports whether two environments agree on every variable (for the
 // loop fixed point), the conditions remembered with it included: a body
 // that assigns a variable a condition narrowed changes what the condition
-// says at the loop head, though no type changes.
+// says at the loop head, though no type changes. So do PHP's type of it
+// and what a test found of it: a body that writes the variable a value of
+// the type it had takes away what the first test found, and the head is
+// the join of the entry with that end, where the test decides nothing.
 func (e *state) equal(o *state) bool {
 	if e.dead != o.dead || len(e.vars) != len(o.vars) {
 		return false
 	}
 	for k, v := range e.vars {
 		w, ok := o.vars[k]
-		if !ok || v.maybe != w.maybe || !types.Equal(v.t, w.t) || !equalConds(v.conds, w.conds) {
+		if !ok || v.maybe != w.maybe || !types.Equal(v.t, w.t) || !equalConds(v.conds, w.conds) ||
+			!equalOrNil(v.native, w.native) || verdictOf(v) != verdictOf(w) {
 			return false
 		}
 	}
@@ -814,7 +962,12 @@ func (e *state) widen(prev *state) {
 	}
 	for k, t := range e.paths {
 		if pt, ok := prev.paths[k]; ok && !types.Equal(pt, t) {
+			if keptKey(k) {
+				delete(e.paths, k)
+				continue
+			}
 			e.paths[k] = generalize(pt, t, 0) // `$this->rows[] = …` in a loop grows a path as a variable
+			e.dropKept(k)
 		}
 	}
 }

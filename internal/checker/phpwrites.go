@@ -65,7 +65,7 @@ func refFirst(e *ast.Closure) bool {
 // An exit where the parameter is not set adds nothing.
 func (x *fnCtx) recordRefExit(e *ast.Closure, end *state, returns, nevers []*state) {
 	name := e.Params[0].Var.Name
-	var held []types.Type
+	var held, php []types.Type
 	exits := append(slices.Concat(returns, nevers), end)
 	for _, r := range exits {
 		if r == nil || r.dead {
@@ -73,16 +73,22 @@ func (x *fnCtx) recordRefExit(e *ast.Closure, end *state, returns, nevers []*sta
 		}
 		if info, ok := r.get(name); ok {
 			held = append(held, info.t)
+			if info.native != nil {
+				php = append(php, info.native)
+			} else {
+				php = append(php, info.t)
+			}
 		}
 	}
 	if x.refExits == nil {
-		x.refExits = map[*ast.Closure]types.Type{}
+		x.refExits, x.refExitsPHP = map[*ast.Closure]types.Type{}, map[*ast.Closure]types.Type{}
 	}
 	if len(held) == 0 {
 		delete(x.refExits, e)
+		delete(x.refExitsPHP, e)
 		return
 	}
-	x.refExits[e] = types.MakeUnion(held...)
+	x.refExits[e], x.refExitsPHP[e] = types.MakeUnion(held...), types.MakeUnion(php...)
 }
 
 // walkedArray is what array_walk() leaves in the array t when its callback
@@ -91,11 +97,22 @@ func (x *fnCtx) recordRefExit(e *ast.Closure, end *state, returns, nevers []*sta
 // shape stay (PHPStan's mapValueType). nil for any other callback, which
 // writes nothing back PHPStan follows.
 func (x *fnCtx) walkedArray(callback ast.Expr, t types.Type) types.Type {
+	return x.walked(callback, t, x.refExits)
+}
+
+// walkedArrayPHP is walkedArray of PHP's type t of the array: each value
+// is what PHP's type of the closure's parameter is where it exits, as
+// PHPStan types the walked array natively.
+func (x *fnCtx) walkedArrayPHP(callback ast.Expr, t types.Type) types.Type {
+	return x.walked(callback, t, x.refExitsPHP)
+}
+
+func (x *fnCtx) walked(callback ast.Expr, t types.Type, exits map[*ast.Closure]types.Type) types.Type {
 	cl, ok := unparen(callback).(*ast.Closure)
 	if !ok || !refFirst(cl) {
 		return nil
 	}
-	v, ok := x.refExits[cl]
+	v, ok := exits[cl]
 	if !ok {
 		return nil
 	}
@@ -159,6 +176,190 @@ func invalidatesRead(sig *signature, t types.Type, h types.Hierarchy) bool {
 		return false
 	}
 	return types.IsMixed(t) || types.Overlaps(t, types.Object{}, h) || types.Overlaps(t, types.TResource, h)
+}
+
+// ownArrayWrite is what one of PHP's own array functions, a sort, the
+// push or the pop of an entry, array_splice() or array_walk(), does to
+// PHP's type of the array it takes by reference, where it writes it back:
+// before, the PHP type of the array before the call, and certain where it
+// is the checker's type itself; out, what the function leaves of before,
+// computed as its out type is (nil where nothing is computed of it); and
+// keepsTruth for a function that keeps any value's truthiness, a sort that
+// keeps the keys.
+type ownArrayWrite struct {
+	before, out types.Type
+	certain     bool
+	keepsTruth  bool
+	keepsFalsy  bool // array_walk(): an empty array stays empty, and it takes no other falsy value
+	exact       bool // out is PHP's type itself, not the checker's type computed on PHP's
+	truth       int  // what a test of truthiness found of the array before (foundBefore)
+}
+
+// writtenOwnArray gives the array w was written back into the PHP type the
+// function leaves of the one it had, as PHPStan reads the out types of
+// its own function map as native and computes them on the native type:
+// sort() leaves a non-empty array non-empty, array_push() makes one, and
+// array_pop() may leave none. A PHP type the checker takes from its own
+// (certain) is the type written, as for any write. A PHP type that is not
+// only arrays, a mixed one an inline @var leaves, holds the array the
+// function declares afterwards, PHPStan's list after sort(), and keeps
+// what a test of truthiness found of it only through a sort that keeps
+// the keys, which leaves it as it was to PHPStan: `if ($xs) { asort($xs);
+// if ($xs) … }` decides the inner test, `if ($xs) { sort($xs); … }` does
+// not, under `/** @var list<string> $xs */`.
+func (x *fnCtx) writtenOwnArray(env *state, e ast.Expr, w ownArrayWrite, declared types.Type) {
+	var native types.Type
+	keep := false
+	switch {
+	case w.certain:
+	case w.out != nil && onlyArrays(w.before) && w.exact:
+		native = w.out
+	case w.out != nil && onlyArrays(w.before):
+		native = phpArrayOf(w.out)
+	case w.keepsTruth || w.keepsFalsy && w.truth < 0:
+		native, keep = w.before, true
+	default:
+		native = declared
+	}
+	if v, ok := unparen(e).(*ast.Variable); ok {
+		env.setNative(v.Name, native)
+		if info, ok := env.vars[v.Name]; ok && keep && w.truth != 0 {
+			info.found, info.foundTruth = info.t, w.truth
+			env.vars[v.Name] = info
+		}
+		return
+	}
+	key, ok := x.narrowedPathKey(e)
+	if !ok || w.certain {
+		return // a certain path holds the type written (keepWritten)
+	}
+	env.keepNative(key, native)
+	if t, ok := env.getPath(key); ok && keep && w.truth != 0 {
+		env.paths[foundPathKey(key, w.truth)] = t
+	}
+}
+
+// settypeKeeps reports a settype() of e after which what a test of its
+// truthiness found, truth, still holds, as PHP's cast of each value PHP's
+// type of it may hold keeps it (settypeCasts): an int made a string keeps
+// both, a truthy string made an int may be 0, a falsy one made an array is
+// a non-empty one. PHP's type of a variable an inline @var declares is
+// what PHP guarantees of the value it was assigned (varInfo.held),
+// `random_int()`'s int; mixed where it guarantees nothing, whose truthiness
+// only 'bool' keeps: an object made an array may be empty. PHPStan types
+// the value by the tag there, and decides the test after it.
+func (x *fnCtx) settypeKeeps(e ast.Expr, args *ast.ArgList, env *state, truth int) bool {
+	if truth == 0 || args == nil || len(args.Args) != 2 || args.Args[1].Unpack {
+		return false
+	}
+	name, ok := x.pathType(args.Args[1].Value, env).(types.StringLit)
+	if !ok {
+		return false
+	}
+	target, ok := settypeTargets[strings.ToLower(name.V)]
+	if !ok {
+		return false
+	}
+	php := x.nativeOr(e, x.pathType(e, env), env)
+	if v, ok := variableOf(e); ok && types.IsMixed(php) {
+		if info, ok := env.get(v.Name); ok && info.held != nil {
+			php = info.held
+		}
+	}
+	// The values the test left: those of the truthiness it found.
+	if truth > 0 {
+		php = types.Truthy(php)
+	} else {
+		php = types.Falsy(php)
+	}
+	keeps := 0 // truthy keeps for 0, falsy for 1
+	if truth < 0 {
+		keeps = 1
+	}
+	for _, m := range types.Members(php) {
+		source := settypeSource(m)
+		if source == "" {
+			if target != "bool" || mentionsParam(m) {
+				return false
+			}
+			continue
+		}
+		if !settypeCasts[source][target][keeps] {
+			return false
+		}
+	}
+	return !isNeverType(php)
+}
+
+// settypeTargets are the types settype() takes, as it spells them.
+var settypeTargets = map[string]string{
+	"int": "int", "integer": "int", "float": "float", "double": "float", "string": "string",
+	"bool": "bool", "boolean": "bool", "array": "array", "null": "null",
+}
+
+// settypeSource is the kind of value of a member of PHP's type settype()
+// casts, "" for one settypeCasts says nothing of: an object, a resource,
+// mixed.
+func settypeSource(m types.Type) string {
+	switch m.(type) {
+	case types.Int:
+		return "int"
+	case types.Float, types.FloatLit:
+		return "float"
+	case types.String, types.StringLit:
+		return "string"
+	case types.Bool, types.BoolLit:
+		return "bool"
+	case types.Array, types.Shape:
+		return "array"
+	case types.Null:
+		return "null"
+	}
+	return ""
+}
+
+// settypeCasts says, for a value of the source kind settype() makes the
+// target type, whether a truthy one stays truthy ([0]) and a falsy one
+// falsy ([1]), as php casts the edge values: 0.5 and NAN make the int 0,
+// 'abc' the int 0, -0.0 the string '-0', 0, '0' and false a non-empty
+// array, the empty array the string 'Array'; null makes every target
+// falsy, and the null target any value.
+var settypeCasts = map[string]map[string][2]bool{
+	"int":    {"int": {true, true}, "float": {true, true}, "string": {true, true}, "bool": {true, true}, "array": {true, false}, "null": {false, true}},
+	"float":  {"int": {false, true}, "float": {true, true}, "string": {true, false}, "bool": {true, true}, "array": {true, false}, "null": {false, true}},
+	"string": {"int": {false, true}, "float": {false, true}, "string": {true, true}, "bool": {true, true}, "array": {true, false}, "null": {false, true}},
+	"bool":   {"int": {true, true}, "float": {true, true}, "string": {true, true}, "bool": {true, true}, "array": {true, false}, "null": {false, true}},
+	"array":  {"int": {true, true}, "float": {true, true}, "string": {true, false}, "bool": {true, true}, "array": {true, true}, "null": {false, true}},
+	"null":   {"int": {false, true}, "float": {false, true}, "string": {false, true}, "bool": {false, true}, "array": {false, true}, "null": {false, true}},
+}
+
+// pushesNothing reports a call of array_push() or array_unshift() with no
+// value to add, which leaves the array as it was.
+func pushesNothing(sig *signature, args *ast.ArgList) bool {
+	switch strings.ToLower(sig.fn.Name) {
+	case "array_push", "array_unshift":
+		return args != nil && len(args.Args) == 1 && !args.Args[0].Unpack
+	}
+	return false
+}
+
+// phpArrayOf is the PHP type of an array of type t: an array of any keys
+// and values, non-empty where t is, and the empty array where t is,
+// `array_splice($xs, 0)`'s.
+func phpArrayOf(t types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Array:
+			return types.Array{Key: types.TArrayKey, Value: types.TMixed, NonEmpty: m.NonEmpty}
+		case types.Shape:
+			if len(m.Entries) == 0 && !m.Unsealed {
+				return types.Shape{}
+			}
+			_, nonEmpty := types.Falsy(m).(types.Never)
+			return types.Array{Key: types.TArrayKey, Value: types.TMixed, NonEmpty: nonEmpty}
+		}
+		return types.Erase(m)
+	})
 }
 
 // openSSLTagType is what openssl_encrypt() leaves in $tag for a cipher

@@ -2215,7 +2215,29 @@ func (x *fnCtx) stringCast(e *ast.Cast, t types.Type) []types.Type {
 
 func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 	t := x.expr(e.Expr, env, nil)
+	php := x.nativeOr(e.Expr, t, env) // PHP's type of the operand, before the write
 	since := len(x.c.diags)
+	result := x.stepType(t, e)
+	unchecked := x.outUnchecked
+	x.outUnchecked = unchecked || x.refusedSince(since) // the refused step is the one finding (paramout.go)
+	certain := x.certainPath(e.Expr, t, env)
+	x.assignTo(e.Expr, result, env, e.S)
+	x.outUnchecked = unchecked
+	x.keepComputed(env, e.Expr, result, certain)
+	if types.Equal(php, t) {
+		x.writtenPHP(env, e.Expr, result) // PHP's type is the checker's: the same step
+	} else {
+		x.writtenPHP(env, e.Expr, x.memberwise(php, func(m types.Type) types.Type { return x.stepType(m, e) }))
+	}
+	if e.Prefix {
+		return result
+	}
+	return t
+}
+
+// stepType is the result of `++` or `--` of a value of type t, reported
+// where PHP refuses or deprecates the step.
+func (x *fnCtx) stepType(t types.Type, e *ast.IncDec) types.Type {
 	var result types.Type
 	switch {
 	case types.IsSubtype(t, types.TInt, nil):
@@ -2295,14 +2317,7 @@ func (x *fnCtx) incDec(e *ast.IncDec, env *state) types.Type {
 		x.report(e.S, P2301, "cannot increment or decrement %s", x.typeName(t))
 		result = t
 	}
-	unchecked := x.outUnchecked
-	x.outUnchecked = unchecked || x.refusedSince(since) // the refused step is the one finding (paramout.go)
-	x.assignTo(e.Expr, result, env, e.S)
-	x.outUnchecked = unchecked
-	if e.Prefix {
-		return result
-	}
-	return t
+	return result
 }
 
 func (x *fnCtx) binary(e *ast.Binary, env *state, expected types.Type) types.Type {
@@ -3540,6 +3555,11 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 			x.byRef[target.Name] = true
 		}
 		x.bind(nil, e.Target, vt, env, e.S)
+		// A property made a reference holds the value's PHP type, as for
+		// `=`: PHPStan follows the reference no more than the checker does.
+		if key, ok := x.narrowedPathKey(e.Target); ok {
+			env.keepNative(key, x.nativeOr(e.Value, vt, env))
+		}
 		// `$alias = &$r`: one value from here on, which a write to either
 		// writes (env.set). A reference to an offset or a property is
 		// not followed, as PHPStan does not follow it.
@@ -3569,15 +3589,29 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 	}
 	if e.Op == token.T_COALESCE_EQUAL {
 		cur := x.exprLenient(e.Target, env)
+		php := x.nativeOr(e.Target, cur, env)
+		truth := x.foundBefore(e.Target, env)
 		rightEnv := env.clone()
 		vt := x.expr(e.Value, rightEnv, x.targetType(e.Target, env))
+		phpValue := x.nativeOr(e.Value, vt, rightEnv)
 		*env = *join(env, rightEnv)
 		res := types.MakeUnion(types.StripNull(cur), vt)
 		x.bind(nil, e.Target, res, env, e.S)
+		// PHP writes a value that is null: one PHP's type says is none, or
+		// a test found truthy, keeps the value it had, as PHPStan's native
+		// type has it.
+		if types.IsNullable(php) && truth <= 0 {
+			php = types.MakeUnion(types.StripNull(php), phpValue)
+		} else if truth > 0 {
+			x.markFound(env, e.Target, truth)
+		}
+		x.writtenPHP(env, e.Target, php)
 		return res
 	}
 	cur := x.expr(e.Target, env, nil)
+	php := x.nativeOr(e.Target, cur, env) // PHP's type of the target, before the write
 	vt := x.expr(e.Value, env, nil)
+	phpValue := x.nativeOr(e.Value, vt, env)
 	op := compoundOp(e.Op)
 	since := len(x.c.diags)
 	var res types.Type
@@ -3596,11 +3630,108 @@ func (x *fnCtx) assign(e *ast.Assign, env *state) types.Type {
 			env.setPath(key, cur)
 		}
 	}
+	certain := x.certainPath(e.Target, cur, env) && x.nativeOf(e.Value, env) == nil
 	unchecked := x.outUnchecked
 	x.outUnchecked = unchecked || x.refusedSince(since) // the refused operation is the one finding (paramout.go)
 	x.assignTo(e.Target, res, env, e.S)
 	x.outUnchecked = unchecked
+	x.keepComputed(env, e.Target, res, certain)
+	if op == token.Kind('+') && onlyArrays(phpValue) {
+		// The union of arrays: PHP refuses any other value beside one, so
+		// a value it allows is an array.
+		var arrays []types.Type
+		for _, m := range types.Members(php) {
+			switch m.(type) {
+			case types.Mixed:
+				arrays = append(arrays, types.Array{Key: types.TArrayKey, Value: types.TMixed})
+			case types.Array, types.Shape:
+				arrays = append(arrays, m)
+			}
+		}
+		if len(arrays) > 0 {
+			php = types.MakeUnion(arrays...)
+		}
+	}
+	switch {
+	case op == token.Kind('/') || op == token.Kind('%'): // whose second typing would throw again
+	case types.Equal(php, cur) && types.Equal(phpValue, vt):
+		x.writtenPHP(env, e.Target, res) // PHP's types are the checker's: the same operation
+	default:
+		x.writtenPHP(env, e.Target, x.memberwise(php, func(m types.Type) types.Type { return x.binaryTypes(op, m, phpValue, e) }))
+	}
 	return res
+}
+
+// memberwise is an operation f typed again on PHP's type t of its operand,
+// member by member as PHPStan types it: the empty string or '0' joined to
+// 'x' is `'x'|'0x'`. Nil where f refuses a member, the operation PHP's
+// type does not allow, which leaves the write as the checker's type has
+// it.
+func (x *fnCtx) memberwise(t types.Type, f func(types.Type) types.Type) types.Type {
+	saved, arith := x.c.mark(), x.arith
+	defer func() {
+		x.c.rollback(saved)
+		x.arith = arith
+	}()
+	x.arith = arithOperands{}
+	since := len(x.c.diags)
+	var out []types.Type
+	for _, m := range types.Members(t) {
+		out = append(out, f(m))
+		if len(x.c.diags) > since {
+			return nil
+		}
+	}
+	return types.MakeUnion(out...)
+}
+
+// writtenPHP gives the variable or the path a step or a compound
+// assignment wrote the PHP type of the result, computed on the PHP types
+// of its operands (memberwise), as PHPStan computes the native type:
+// `$x++` of the mixed an inline @var leaves is a number and decides
+// nothing, `.= 'x'` of a falsy string leaves `'x'|'0x'`. Nil leaves the
+// write as it was: the variable holds the checker's type, a path the one
+// keepComputed gave it.
+func (x *fnCtx) writtenPHP(env *state, target ast.Expr, php types.Type) {
+	if php == nil {
+		return
+	}
+	if v, ok := unparen(target).(*ast.Variable); ok {
+		env.setNative(v.Name, php)
+		return
+	}
+	if key, ok := x.narrowedPathKey(target); ok {
+		env.keepNative(key, php)
+	}
+}
+
+// certainPath reports a property, a static property or an offset whose
+// type t is the one PHP guarantees: no docblock refines it, or a test
+// narrowed its PHP type to the same.
+func (x *fnCtx) certainPath(e ast.Expr, t types.Type, env *state) bool {
+	if _, ok := x.narrowedPathKey(e); !ok {
+		return false
+	}
+	n := x.nativeOf(e, env)
+	return n == nil || types.Equal(n, t) || types.IsSubtype(n, t, x.p()) && types.IsSubtype(t, n, x.p())
+}
+
+// keepComputed gives a path a step or a compound assignment wrote the PHP
+// type of the result, where it and the operand were certain before
+// (certainPath): PHP's types give the result the checker computed, as
+// `self::$count++` after `!self::$count` is 1 to PHPStan's native type.
+// Otherwise the path has its declared PHP type again, a docblock's
+// claims about it not carried into a certainty.
+func (x *fnCtx) keepComputed(env *state, target ast.Expr, res types.Type, certain bool) {
+	key, ok := x.narrowedPathKey(target)
+	if !ok {
+		return
+	}
+	if certain {
+		env.keepNative(key, res)
+	} else {
+		delete(env.paths, nativePathKey(key)) // an operand a docblock alone refines
+	}
 }
 
 func compoundOp(k token.Kind) token.Kind {
@@ -3745,13 +3876,29 @@ func (x *fnCtx) assignFrom(value ast.Expr, target ast.Expr, vt types.Type, env *
 			}
 		}
 		if key, ok := x.pathKey(t); ok {
+			certain := x.certainPath(t, x.pathType(t, env), env)
+			php := x.valuePHP(value, vt, env)
 			if pr != nil {
 				vt = storedBenevolent(vt, pr.NativeType, x.p())
+				if php != nil {
+					php = storedBenevolent(php, pr.NativeType, x.p())
+				}
 			}
 			env.setPath(key, vt)
+			x.keepWritten(env, key, php, vt, certain)
 		}
 	case *ast.Index:
+		// An offset with a PHP type of its own, of a property's array or
+		// of one a docblock refines, holds the PHP type of the value
+		// written, as a property does (keepWritten): `$this->map['a'] =
+		// []` makes it empty to PHP, as PHPStan's native type has it.
+		native := x.nativeVar(t, env)
+		certain := native != nil && x.certainPath(t, x.pathType(t, env), env)
+		php := x.valuePHP(value, vt, env)
 		x.assignIndex(t, vt, env, span)
+		if key, ok := x.narrowedPathKey(t); ok && native != nil {
+			x.keepWritten(env, key, php, vt, certain)
+		}
 	case *ast.ArrayLit:
 		x.destructure(t, vt, env, span, nil)
 	case *ast.VariableVariable:
@@ -3764,6 +3911,7 @@ func (x *fnCtx) assignFrom(value ast.Expr, target ast.Expr, vt types.Type, env *
 }
 
 func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, span ast.Span, value ast.Expr) {
+	php := x.valuePHP(value, vt, env) // as the value is, before the write
 	name, ok := identName(t.Name)
 	if !ok {
 		x.noteRecv(t, x.expr(t.Object, env, nil))
@@ -3806,12 +3954,142 @@ func (x *fnCtx) assignProperty(t *ast.PropertyFetch, vt types.Type, env *state, 
 		env.initialise(name)
 	}
 	if key, ok := x.pathKey(t); ok {
+		certain := x.certainPath(t, x.pathType(t, env), env)
 		env.invalidatePrefix(key)
 		if len(declared) == 1 {
 			vt = storedBenevolent(vt, declared[0], x.p())
+			if php != nil {
+				php = storedBenevolent(php, declared[0], x.p())
+			}
 		}
 		env.setPath(key, vt)
+		x.keepWritten(env, key, php, vt, certain)
 	}
+}
+
+// keepWritten gives a property assigned a value its PHP type, php (valuePHP),
+// as PHPStan's native type of the property has it after the write, so
+// that `$this->map = []; if ($this->map)` is decided as for a variable. A
+// write with no value of its own, a write back of an array an offset of
+// it was written into or unset from, a by-reference argument, `??=`, a
+// step, gives the type written to a property that was certain before it
+// (certainPath), whose PHP type the operation keeps as the checker reads
+// it, `array_pop()` of `['x']` an empty array; another keeps its declared
+// PHP type, and keepOffsetWritten or keepComputed say more where they can.
+func (x *fnCtx) keepWritten(env *state, key string, php, vt types.Type, certain bool) {
+	switch {
+	case php != nil:
+		env.keepNative(key, php)
+	case certain:
+		env.keepNative(key, vt)
+	}
+}
+
+// valuePHP is the PHP type of the value an assignment writes, read before
+// the write, as `$this->a = $this->a ?: 'default'` reads it: nil for a
+// write with no value of its own.
+func (x *fnCtx) valuePHP(value ast.Expr, vt types.Type, env *state) types.Type {
+	if value == nil {
+		return nil
+	}
+	return x.nativeOr(value, vt, env)
+}
+
+// keepOffsetWritten gives a property, a static property, an offset or a
+// variable an offset of it was written into, key (nil for an append) and
+// value as typed, the PHP type it had before the write as PHPStan's
+// native type has it after: an array, null or false is an array that is
+// not empty now, of any keys and values; a string holds the character
+// written (writtenString); a number or true refuses the write. A mixed one
+// is such an array where it is an offset, as PHPStan types the offset
+// written into anew, and is what is left of its falsy values where a test
+// found a variable falsy; a variable's mixed stays mixed otherwise, as
+// PHPStan's does.
+func (x *fnCtx) keepOffsetWritten(env *state, root ast.Expr, before types.Type, truth int, key, value types.Type) {
+	if before == nil {
+		return
+	}
+	_, isOffset := unparen(root).(*ast.Index)
+	v, isVar := variableOf(root)
+	nonEmpty := types.Array{Key: types.TArrayKey, Value: types.TMixed, NonEmpty: true}
+	var members []types.Type
+	var written func(m types.Type) bool
+	written = func(m types.Type) bool {
+		switch m := m.(type) {
+		case types.Mixed:
+			switch {
+			case isOffset:
+				members = append(members, nonEmpty)
+			case isVar && truth < 0:
+				for _, f := range types.Members(types.Falsy(m)) {
+					written(f)
+				}
+			case isVar:
+				members = append(members, m)
+			default:
+				return false
+			}
+		case types.Array, types.Shape:
+			// A literal key written is there, as PHPStan's hasOffsetValue():
+			// an unset() of another key leaves the array non-empty.
+			if key != nil {
+				if keyed := withAnOffset(m, key); !types.Equal(keyed, m) && !isNeverType(keyed) {
+					members = append(members, keyed)
+					return true
+				}
+			}
+			members = append(members, nonEmpty)
+		case types.Null, types.Bool:
+			members = append(members, nonEmpty)
+		case types.BoolLit:
+			if !m.V {
+				members = append(members, nonEmpty)
+			}
+		case types.Int, types.Float, types.FloatLit:
+		case types.String, types.StringLit:
+			if key != nil {
+				members = append(members, writtenString(m, key, value))
+			}
+		default:
+			members = append(members, m)
+		}
+		return true
+	}
+	for _, m := range types.Members(before) {
+		if !written(m) {
+			return
+		}
+	}
+	if len(members) == 0 {
+		return // every value refuses the write, which throws
+	}
+	if isVar {
+		env.setNative(v.Name, types.MakeUnion(members...))
+		return
+	}
+	if k, ok := x.narrowedPathKey(root); ok {
+		env.keepNative(k, types.MakeUnion(members...))
+	}
+}
+
+// writtenString is a string of type s after `$s[key] = value`: the
+// string PHP makes of a literal where key is an int literal not below 0
+// and value a non-empty literal, padded with spaces to the offset and its
+// character there the value's first, as PHPStan computes it; a non-empty
+// string otherwise.
+func writtenString(s, key, value types.Type) types.Type {
+	lit, ok := s.(types.StringLit)
+	k, kok := key.(types.Int)
+	v, vok := value.(types.StringLit)
+	if !ok || !kok || k.Lo != k.Hi || k.Lo < 0 || k.Lo > 64 || !vok || v.V == "" {
+		return types.String{NonEmpty: true}
+	}
+	b := []byte(lit.V)
+	for int64(len(b)) <= k.Lo {
+		b = append(b, ' ')
+	}
+	b[k.Lo] = v.V[0]
+	return types.StringLit{V: string(b)}
 }
 
 // storedBenevolent is what a property PHP declares d holds once a value of
@@ -3971,7 +4249,20 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 			refused = append(refused, *p)
 		}
 	}
-	for _, w := range boundMembers(base) {
+	written := boundMembers(base)
+	for i, w := range written {
+		// A parameter with no bound a test narrowed to an array, `T&array`
+		// after is_array(), is written as that array, no longer T, as
+		// PHPStan writes it (writtenBound).
+		if in, ok := w.member.(types.Intersection); ok && w.from == nil {
+			if open, rest, ok := narrowedOpenParam(in); ok {
+				if array := types.MakeIntersection(rest...); holdsArray(array) {
+					written[i] = boundMember{array, &open}
+				}
+			}
+		}
+	}
+	for _, w := range written {
 		named := w.member // the type a finding names: the parameter, where the member is its bound's
 		if w.from != nil {
 			named = *w.from
@@ -4081,7 +4372,9 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 		newT = arrayWithEntry(types.Shape{}, keyT, vt)
 	}
 	before := rewrittenOf(t.Array, env)
+	nativeBefore, truthBefore := x.nativeVar(t.Array, env), x.foundBefore(t.Array, env)
 	x.assignTo(t.Array, newT, env, span)
+	x.keepOffsetWritten(env, t.Array, nativeBefore, truthBefore, keyT, vt)
 	x.keepRewritten(t.Array, before, rewritten, t.S, newT, env)
 	if key, ok := x.pathKey(t); ok {
 		env.setPath(key, vt)
@@ -4794,6 +5087,12 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 		// null, and throws for an object that is no ArrayAccess.
 		x.report(t.S, P2302, "cannot use array destructuring on %s", x.typeName(vt))
 	}
+	// PHP's type of the value destructured, which gives a property or an
+	// offset written the PHP type of its element (destructuredPHP).
+	var phpSource types.Type
+	if src != nil {
+		phpSource = x.nativeOr(src, vt, env)
+	}
 	pos := int64(0)
 	for _, item := range t.Items {
 		if item == nil {
@@ -4867,7 +5166,41 @@ func (x *fnCtx) destructure(t *ast.ArrayLit, vt types.Type, env *state, span ast
 			}
 		}
 		x.bind(nil, item.Value, elem, env, span)
+		if _, isVar := unparen(item.Value).(*ast.Variable); !isVar && phpSource != nil {
+			if php := elementPHP(phpSource, keyT); php != nil {
+				x.writtenPHP(env, item.Value, php)
+			}
+		}
 	}
+}
+
+// elementPHP is PHP's type of the entry key of an array whose PHP type is
+// t, as `[$this->label] = ['x']` writes it: a shape's entry, a general
+// array's value; nil where PHP's type gives none (mixed, a key a shape may
+// lack, a value that is no array).
+func elementPHP(t, key types.Type) types.Type {
+	var out []types.Type
+	for _, m := range types.Members(t) {
+		switch m := m.(type) {
+		case types.Shape:
+			et, found, certain := shapeOffset(m, key)
+			if !found || !certain {
+				return nil
+			}
+			out = append(out, et)
+		case types.Array:
+			out = append(out, m.Value)
+		default:
+			return nil
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	if u := types.MakeUnion(out...); !types.IsMixed(u) {
+		return u
+	}
+	return nil
 }
 
 // classTypeName names an object type in a diagnostic: the class for one,
