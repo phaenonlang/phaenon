@@ -4029,7 +4029,17 @@ func (x *fnCtx) keepOffsetWritten(env *state, root ast.Expr, before types.Type, 
 			default:
 				return false
 			}
-		case types.Array, types.Shape, types.Null, types.Bool:
+		case types.Array, types.Shape:
+			// A literal key written is there, as PHPStan's hasOffsetValue():
+			// an unset() of another key leaves the array non-empty.
+			if key != nil {
+				if keyed := withAnOffset(m, key); !types.Equal(keyed, m) && !isNeverType(keyed) {
+					members = append(members, keyed)
+					return true
+				}
+			}
+			members = append(members, nonEmpty)
+		case types.Null, types.Bool:
 			members = append(members, nonEmpty)
 		case types.BoolLit:
 			if !m.V {
@@ -4239,7 +4249,20 @@ func (x *fnCtx) assignIndex(t *ast.Index, vt types.Type, env *state, span ast.Sp
 			refused = append(refused, *p)
 		}
 	}
-	for _, w := range boundMembers(base) {
+	written := boundMembers(base)
+	for i, w := range written {
+		// A parameter with no bound a test narrowed to an array, `T&array`
+		// after is_array(), is written as that array, no longer T, as
+		// PHPStan writes it (writtenBound).
+		if in, ok := w.member.(types.Intersection); ok && w.from == nil {
+			if open, rest, ok := narrowedOpenParam(in); ok {
+				if array := types.MakeIntersection(rest...); holdsArray(array) {
+					written[i] = boundMember{array, &open}
+				}
+			}
+		}
+	}
+	for _, w := range written {
 		named := w.member // the type a finding names: the parameter, where the member is its bound's
 		if w.from != nil {
 			named = *w.from

@@ -1029,3 +1029,61 @@ final class Offsetted
         }
     }
 }
+
+/**
+ * A write into a value of a type parameter with no bound a test narrowed
+ * to an array, an offset written or unset(), makes it that array, no
+ * longer T, as PHPStan writes it. isset() narrows PHP's type of a value
+ * whose type is no plain mixed, a union with a type parameter among its
+ * members included, as PHPStan does: a key that is no number makes it an
+ * array with that key or an ArrayAccess, which is truthy. A bare type
+ * parameter with no bound is narrowed by nothing.
+ *
+ * @template T
+ */
+final class Rewritten
+{
+    /** @param T $a */
+    public function rewritten(mixed $a): void
+    {
+        if (\is_array($a) && isset($a['id'])) {
+            echo $a ? 1 : 2; // want P2402 "always true"
+            unset($a['id']);
+            echo $a ? 1 : 2;
+        }
+        if (isset($a['id'])) { // want P2302
+            echo $a ? 1 : 2; // want P2402 "always true"
+        }
+    }
+
+    /**
+     * @param T $a
+     * @return T
+     */
+    public function written(mixed $a): mixed
+    {
+        if (\is_array($a)) {
+            $a['k'] = 1;
+            return $a; // want P2202 "no longer T"
+        }
+        return $a;
+    }
+
+    /**
+     * @param T $a
+     * @param T|array<string, int> $b
+     * @param string|array<string, int> $u
+     */
+    public function unions(mixed $a, mixed $b, string|array $u): void
+    {
+        if (isset($b['id'])) { // want P2302
+            echo $b ? 1 : 2; // want P2402 "always true"
+        }
+        if (isset($u['id'])) {
+            echo $u ? 1 : 2; // want P2402 "always true"
+        }
+        if (isset($a['id'])) { // want P2302
+            echo $a ? 1 : 2;
+        }
+    }
+}

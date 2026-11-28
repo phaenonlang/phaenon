@@ -649,7 +649,7 @@ func (x *fnCtx) issetChain(env *state, e ast.Expr) {
 			e = n.Array
 			switch unparen(e).(type) {
 			case *ast.Variable, *ast.StaticPropertyFetch:
-				if native := x.nativeVar(e, env); native != nil && !types.IsMixed(boundsOf(x.pathType(e, env))) {
+				if native := x.nativeVar(e, env); native != nil && !bareMixed(x.pathType(e, env)) {
 					x.keepPHPType(env, e, withAnOffset(native, x.literalOffset(n, env)))
 				}
 			}
@@ -664,11 +664,23 @@ func (x *fnCtx) issetChain(env *state, e ast.Expr) {
 	}
 }
 
+// bareMixed reports a type PHPStan's isset() takes nothing from: mixed, or
+// a type parameter with no bound, itself and not in a union.
+func bareMixed(t types.Type) bool {
+	if p, ok := t.(types.Param); ok {
+		return openParam(p)
+	}
+	return types.IsMixed(t)
+}
+
 // withAnOffset is PHP's type t of a value that has an offset, key where
 // it is a literal: an array holds it, an unsealed shape with that entry,
 // as PHPStan's hasOffset(key), so that unset() of another key leaves it
-// non-empty; an array is not empty where the key is no literal; null has
-// none. The rest stays, an ArrayAccess and a string among them.
+// non-empty; an array is not empty where the key is no literal. Null and
+// a number or a bool have no offset isset() finds, nor a string one under
+// a key that is no number. A mixed one is an array with the offset or an
+// ArrayAccess, and a string that is not empty, which may be '0', where the
+// key may be a number. The rest stays, an object among them.
 func withAnOffset(t, key types.Type) types.Type {
 	var entry types.ShapeEntry
 	literal := false
@@ -680,8 +692,31 @@ func withAnOffset(t, key types.Type) types.Type {
 			entry, literal = types.ShapeEntry{IsInt: true, IntKey: k.Lo}, true
 		}
 	}
+	named := literal && !entry.IsInt // a key that is no number, which no string has
+	nonEmptyString := types.String{NonEmpty: true}
 	return types.Map(t, func(m types.Type) types.Type {
 		switch m := m.(type) {
+		case types.Mixed:
+			array := types.Type(types.Array{Key: types.TArrayKey, Value: types.TMixed, NonEmpty: true})
+			if literal {
+				e := entry
+				e.Type = types.TMixed
+				array = types.Shape{Entries: []types.ShapeEntry{e}, Unsealed: true}
+			}
+			if named {
+				return types.MakeUnion(array, types.NewClass("ArrayAccess"))
+			}
+			return types.MakeUnion(array, types.NewClass("ArrayAccess"), nonEmptyString)
+		case types.String, types.StringLit:
+			if named {
+				return types.TNever
+			}
+			if _, ok := m.(types.String); ok {
+				return nonEmptyString
+			}
+			return m
+		case types.Int, types.Float, types.FloatLit, types.Bool, types.BoolLit:
+			return types.TNever
 		case types.Array:
 			if !literal {
 				m.NonEmpty = true

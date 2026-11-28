@@ -522,11 +522,23 @@ func offsetRootVar(e ast.Expr) *ast.Variable {
 
 // writtenBound is t with each type parameter whose bound holds an array,
 // narrowed or not, read as its bound, as a write reads it (boundMembers),
-// and the first such parameter; t and nil where none is.
+// and the first such parameter; t and nil where none is. A parameter with
+// no bound a test narrowed to an array, `T&array` after is_array(), is
+// written as that array, no longer T, as PHPStan types what an offset
+// write leaves of it.
 func writtenBound(t types.Type) (types.Type, *types.Param) {
 	var p *types.Param
 	var out []types.Type
 	for _, m := range types.Members(t) {
+		if in, ok := m.(types.Intersection); ok {
+			if open, rest, ok := narrowedOpenParam(in); ok {
+				if array := types.MakeIntersection(rest...); holdsArray(array) {
+					p = firstParam(p, &open)
+					out = append(out, array)
+					continue
+				}
+			}
+		}
 		read := boundMembers(m)
 		if len(read) > 0 && read[0].from != nil {
 			bound := types.TNever
@@ -545,6 +557,19 @@ func writtenBound(t types.Type) (types.Type, *types.Param) {
 		return t, nil
 	}
 	return types.MakeUnion(out...), p
+}
+
+// narrowedOpenParam is the type parameter with no bound of an
+// intersection, and the intersection's other members: `T&array` is T and
+// array.
+func narrowedOpenParam(in types.Intersection) (types.Param, []types.Type, bool) {
+	for i, m := range in.Types {
+		if p, ok := m.(types.Param); ok && openParam(p) {
+			rest := append(append([]types.Type{}, in.Types[:i]...), in.Types[i+1:]...)
+			return p, rest, len(rest) > 0
+		}
+	}
+	return types.Param{}, nil, false
 }
 
 // writeExisting gives the array at target, which holds the offset unset()
@@ -1206,6 +1231,9 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 			if info, defined := env.get(a.Name); defined {
 				if bounded, p := writtenBound(info.t); p != nil {
 					env.set(a.Name, bounded)
+					// The loop writes values, not keys: PHP's type of the
+					// array, non-empty or holding a key, is as it was.
+					env.setNative(a.Name, info.native)
 					x.keepRewritten(a, info.rewritten, p, s.Expr.Span(), bounded, env)
 				}
 			}
@@ -2097,6 +2125,9 @@ func (x *fnCtx) rewrittenWhy(value ast.Expr, got, want types.Type, env *state, r
 	line, _ := x.file.Position(w.at.Start)
 	why := fmt.Sprintf("$%s is no longer %s after it was written on line %d", v.Name, p, line)
 	switch {
+	case w.param.Bound == nil:
+		// A parameter with no bound, a test narrowed to an array: the
+		// array written is all there is to say.
 	case !types.IsAcceptable(w.written, w.param.Bound, x.p()):
 		// What the write produced leaves the bound.
 		why += fmt.Sprintf(", and does not fit %s either", bound)
