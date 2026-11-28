@@ -1,0 +1,173 @@
+namespace ClassIdentityNarrows;
+
+// An object's class compared with a class written `Dog::class` narrows
+// the object where the two are equal, as PHPStan narrows it: `$x::class`
+// or get_class($x), with === or ==, on either side, negated, in a match
+// arm, a switch case or in_array(…, true) over such classes, for a final
+// class or not. Where they differ nothing is taken away: an object that
+// is not exactly a Cat may be a subclass of Cat. A class name in a
+// string, another object's class, a class-string value and static::class
+// narrow nothing, and nor does a class not known, which may name any
+// class. static::class and $this::class may name a subclass, so comparing
+// them with one is no comparison that always fails. Plain PHP, so that
+// PHPStan reads this file as written.
+
+class Animal
+{
+    public function name(): string
+    {
+        return '';
+    }
+}
+
+final class Dog extends Animal
+{
+    public function bark(): string
+    {
+        return '';
+    }
+}
+
+class Cat extends Animal
+{
+    public function meow(): string
+    {
+        return '';
+    }
+}
+
+final class Lion extends Cat
+{
+    public function roar(): string
+    {
+        return '';
+    }
+}
+
+function identical(Animal $a): string
+{
+    if ($a::class === Dog::class) {
+        return $a->bark();
+    }
+    if (Cat::class === $a::class) {
+        return $a->meow();
+    }
+    if (get_class($a) == Lion::class) {
+        return $a->roar();
+    }
+    return '';
+}
+
+function negated(Animal $a): string
+{
+    if (get_class($a) !== Dog::class) {
+        return $a->bark(); // want P2006 "unknown method ClassIdentityNarrows\Animal::bark()"
+    }
+    return $a->bark();
+}
+
+function nothingTakenAway(Cat $c): string
+{
+    if ($c::class === Cat::class) {
+        return 'cat';
+    }
+    return $c->meow();
+}
+
+function nullable(?Animal $a): string
+{
+    if ($a !== null && $a::class === Dog::class) {
+        return $a->bark();
+    }
+    return '';
+}
+
+function anyObject(object $o): string
+{
+    return $o::class === Lion::class ? $o->roar() : '';
+}
+
+function among(Animal $a): string
+{
+    if (in_array($a::class, [Dog::class, Lion::class], true)) {
+        return $a->bark(); // want P2006 "unknown method ClassIdentityNarrows\Lion::bark()"
+    }
+    return '';
+}
+
+function arms(Animal $a): string
+{
+    return match ($a::class) {
+        Dog::class => $a->bark(),
+        Cat::class => $a->meow(),
+        default => $a instanceof Lion ? $a->roar() : $a->name(),
+    };
+}
+
+function cases(Animal $a): string
+{
+    switch (get_class($a)) {
+        case Dog::class:
+            return $a->bark();
+        case Cat::class:
+            return $a->meow();
+    }
+    return '';
+}
+
+/** @param class-string<Dog> $class */
+function notWritten(Animal $a, Animal $b, string $class): string
+{
+    if ($a::class === $class) {
+        return $a->bark(); // want P2006 "unknown method ClassIdentityNarrows\Animal::bark()"
+    }
+    if ($a::class === $b::class) {
+        return $a->bark(); // want P2006 "unknown method ClassIdentityNarrows\Animal::bark()"
+    }
+    return '';
+}
+
+class Base
+{
+    public function kind(): string
+    {
+        if ($this::class === Kid::class) {
+            return 'kid';
+        }
+        return static::class === Kid::class ? 'kid' : 'base';
+    }
+}
+
+final class Kid extends Base
+{
+}
+
+/**
+ * A class not known narrows nothing and decides no comparison: its name
+ * is the one finding there, and a call on the object is judged against
+ * the declared Animal. PHPStan narrows to the class not known and reports
+ * the call on it, the line the checker reports for a method Animal lacks.
+ */
+function unknown(Animal $a): string
+{
+    if ($a::class === Missing::class) { // want P2001 "unknown class ClassIdentityNarrows\Missing"
+        return $a->bark(); // want P2006
+    }
+    return '';
+}
+
+trait SameClass
+{
+    public function sameClass(object $o): ?self
+    {
+        if ($o::class === self::class) {
+            return $o;
+        }
+        return get_class($o) === self::class ? $o : null;
+    }
+}
+
+final class Point
+{
+    use SameClass;
+}

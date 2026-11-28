@@ -1045,6 +1045,16 @@ func (x *fnCtx) comparison(e *ast.Binary, env *state) (then, els *state) {
 			x.narrowPath(els, arg, x.subtract(at, t, x.p()), false)
 		}
 	}
+	// `$x::class === Dog::class`, `get_class($x) == Dog::class`: $x is a
+	// Dog where the two are equal (with != and !==, the branches swap
+	// below). Where they differ, $x may still be a subclass of Dog, or a
+	// Dog of a class it extends, and nothing is taken away, as PHPStan
+	// takes nothing away.
+	for _, side := range [][2]ast.Expr{{e.Left, e.Right}, {e.Right, e.Left}} {
+		if obj, class, ok := x.classIdentity(side[0], side[1]); ok {
+			x.narrowPath(then, obj, types.Intersect(x.pathType(obj, env), class, x.p()), true)
+		}
+	}
 	// `$x === []` / `$x !== []`
 	if isEmptyArrayLit(e.Right) {
 		x.narrowPath(then, e.Left, emptyArray(lt), false)
@@ -1083,6 +1093,100 @@ var gettypeNames = map[string]types.Type{
 	"array":   types.TArray,
 	"object":  types.TObject,
 	"NULL":    types.TNull,
+}
+
+// classIdentity reads one side of a comparison as the class of an object,
+// `$x::class` or get_class($x), and the other as a class written
+// `Dog::class` (or self::class, parent::class): the object and the class.
+// In a trait's body self::class narrows to the trait's own type, the self
+// of its signatures.
+// PHPStan narrows by nothing else: not by a class's name in a string, by
+// another object's class or by a class-string value, and not by
+// static::class, the class of the call.
+func (x *fnCtx) classIdentity(side, other ast.Expr) (ast.Expr, types.Type, bool) {
+	obj := x.objectOfClass(side)
+	if obj == nil {
+		return nil, nil, false
+	}
+	class, ok := x.writtenClass(other)
+	return obj, class, ok
+}
+
+// objectOfClass is $x of `$x::class` or get_class($x), nil for any other
+// expression.
+func (x *fnCtx) objectOfClass(e ast.Expr) ast.Expr {
+	e = unparen(e)
+	if obj := classOfSubject(e); obj != nil {
+		return obj
+	}
+	c, ok := e.(*ast.Call)
+	if !ok || c.Args == nil || c.Args.FirstClassCallable || c.Args.Partial() || len(c.Args.Args) != 1 {
+		return nil
+	}
+	n, ok := c.Callee.(*ast.Name)
+	if !ok {
+		return nil
+	}
+	if fn := x.lookupFunction(n); fn == nil || !strings.EqualFold(fn.Name, "get_class") {
+		return nil
+	}
+	a := c.Args.Args[0]
+	if a.Unpack || a.Value == nil || a.Name != nil && a.Name.Name != "object" {
+		return nil
+	}
+	return a.Value
+}
+
+// writtenClass is the class of `Dog::class`, self::class or
+// parent::class, as an object type; false for static::class, a class not
+// known and any other expression.
+func (x *fnCtx) writtenClass(e ast.Expr) (types.Type, bool) {
+	c, ok := unparen(e).(*ast.ClassConstFetch)
+	if !ok {
+		return nil, false
+	}
+	if id, ok := c.Name.(*ast.Ident); !ok || !strings.EqualFold(id.Name, "class") {
+		return nil, false
+	}
+	n, ok := c.Class.(*ast.Name)
+	if !ok {
+		return nil, false
+	}
+	switch specialClassName(n) {
+	case "static":
+		return nil, false
+	case "self":
+		if x.class == nil {
+			return nil, false
+		}
+		return types.NewClass(x.class.Name), true
+	case "parent":
+		if x.class == nil || x.class.ParentClass() == nil {
+			return nil, false
+		}
+		return types.NewClass(x.class.ParentClass().Name), true
+	}
+	name := x.res.ClassName(n)
+	if x.p().Class(name) == nil {
+		return nil, false // a class not known narrows nothing: its name is reported already
+	}
+	return types.NewClass(name), true
+}
+
+// unknownClassName reports `Missing::class` for a class the program does
+// not know. PHPStan reads it as the name of some class, which may be any
+// class's subclass, so that no comparison of it is always false; the
+// class not known is the one finding.
+func (x *fnCtx) unknownClassName(e ast.Expr) bool {
+	c, ok := unparen(e).(*ast.ClassConstFetch)
+	if !ok {
+		return false
+	}
+	if id, ok := c.Name.(*ast.Ident); !ok || !strings.EqualFold(id.Name, "class") {
+		return false
+	}
+	n, ok := c.Class.(*ast.Name)
+	return ok && specialClassName(n) == "" && x.p().Class(x.res.ClassName(n)) == nil
 }
 
 // gettypeArg reports a call to PHP's gettype() and the value it names.
@@ -1773,6 +1877,28 @@ func (x *fnCtx) predicateCall(e *ast.Call, env *state) (then, els *state, ok boo
 				x.narrowPath(els, arg, x.subtract(at, v, x.p()), false)
 			} else {
 				x.narrowPath(then, arg, types.Intersect(at, v, x.p()), true)
+			}
+			// `in_array($x::class, [A::class, B::class], true)`: $x is an A
+			// or a B, as each identity would make it (classIdentity).
+			if obj := x.objectOfClass(arg); obj != nil {
+				if list, ok := unparen(e.Args.Args[1].Value).(*ast.ArrayLit); ok && len(list.Items) > 0 {
+					var classes []types.Type
+					for _, it := range list.Items {
+						if it == nil || it.Unpack || it.ByRef {
+							classes = nil
+							break
+						}
+						class, ok := x.writtenClass(it.Value)
+						if !ok {
+							classes = nil
+							break
+						}
+						classes = append(classes, class)
+					}
+					if classes != nil {
+						x.narrowPath(then, obj, types.Intersect(x.pathType(obj, env), types.MakeUnion(classes...), x.p()), true)
+					}
+				}
 			}
 			return then, els, true
 		case "assert":
