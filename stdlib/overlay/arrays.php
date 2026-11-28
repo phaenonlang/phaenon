@@ -15,7 +15,7 @@ function count(Countable|array $value, int $mode = COUNT_NORMAL): int {}
  * @template K of array-key
  * @template V
  * @template R
- * @param callable(V): R $callback
+ * @param (callable(V): R)|null $callback
  * @param array<K, V> $array
  * @return ($array is list ? list<R> : array<K, R>)
  */

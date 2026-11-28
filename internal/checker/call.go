@@ -44,6 +44,10 @@ type signature struct {
 	// known holds argument types computed before the call is checked (the
 	// receiver of a stdlib method call), so the expression is not typed twice.
 	known map[ast.Expr]types.Type
+	// typed holds, once the call is checked, the type each argument was
+	// given, but a closure's or a partial application's, which are typed
+	// against their parameter.
+	typed map[ast.Expr]types.Type
 	// stub marks a php-src declaration: its by-reference parameters are
 	// read-write unless the overlay says @param-out (PHPStan's functionMap
 	// makes the same distinction), where user code's are writes.
@@ -158,6 +162,11 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 		// returns, refined from its arguments, is not what creating the
 		// closure does (sprintf's format, max's operands).
 		return ret
+	}
+	if lower == "array_map" && sig.stub {
+		if t := x.mapWithoutCallback(e.Args, sig, env); t != nil {
+			return t
+		}
 	}
 	return x.specialReturn(lower, e, ret, env)
 }
@@ -306,13 +315,23 @@ func (sig *signature) declaredAt() (*program.File, *program.Scope, *program.Clas
 
 // arrayMapOverSeveral adapts array_map's signature to a call with several
 // arrays: the callback takes one value of each, in order, and the result
-// is a list (keys are not preserved then).
+// is a list (keys are not preserved then). The callback may still be null
+// (mapWithoutCallback).
 func (x *fnCtx) arrayMapOverSeveral(sig *signature, args *ast.ArgList, env *state) {
 	if len(sig.params) < 2 {
 		return
 	}
-	cb, ok := sig.params[0].Type.(types.Callable)
-	if !ok || !cb.HasSig {
+	var cb types.Callable
+	found, nullable := false, false
+	for _, m := range types.Members(sig.params[0].Type) {
+		switch m := m.(type) {
+		case types.Callable:
+			cb, found = m, true
+		case types.Null:
+			nullable = true
+		}
+	}
+	if !found || !cb.HasSig {
 		return
 	}
 	known := map[ast.Expr]types.Type{}
@@ -331,6 +350,9 @@ func (x *fnCtx) arrayMapOverSeveral(sig *signature, args *ast.ArgList, env *stat
 	}
 	callback := *sig.params[0]
 	callback.Type = types.Callable{HasSig: true, Params: values, Return: cb.Return}
+	if nullable {
+		callback.Type = types.Nullable(callback.Type)
+	}
 	params := []*program.Param{&callback}
 	for _, p := range sig.params[1:] {
 		q := *p
@@ -340,6 +362,146 @@ func (x *fnCtx) arrayMapOverSeveral(sig *signature, args *ast.ArgList, env *stat
 	sig.params = params
 	sig.ret = types.Array{Key: types.TInt, Value: cb.Return, List: true}
 	sig.known = known
+}
+
+// mapWithoutCallback is what array_map(null, …) returns, as PHPStan's
+// ArrayMapFunctionReturnTypeExtension types it: the array itself where one
+// is given, and where several are, a list of tuples that hold a value of
+// each array by position. A value may be null, PHP's filler where an array
+// is shorter than another, unless every array is known to be as long as
+// the others: sealed shapes of one size, or one variable given each time.
+// The list is non-empty where the first array is. PHPStan reads an
+// unpacked argument as an array of its own, and so does this. A callback
+// that may be null or a callable leaves PHPStan sure of neither result,
+// and it has the values mixed, the keys and the list kept, where PHPStan
+// maps the values of a sealed shape through the callback still: mixed is
+// the side of what PHP may return. nil where the callback is not null, or
+// an argument is named. sig is the call's, checked: the arrays
+// arrayMapOverSeveral typed and the callback's type are read from it.
+func (x *fnCtx) mapWithoutCallback(args *ast.ArgList, sig *signature, env *state) types.Type {
+	if len(args.Args) < 2 {
+		return nil
+	}
+	for _, a := range args.Args {
+		if a.Name != nil || a.Value == nil {
+			return nil
+		}
+	}
+	// The callback's type is the one the call gave it: an expression typed
+	// again here, without the type the call expected of it, would be
+	// recorded so for the emitter. A closure has none there, and is not
+	// null.
+	cb := args.Args[0].Value
+	maybe := false
+	if n, ok := constName(cb); !ok || n != "null" {
+		t, ok := sig.typed[cb]
+		if !ok {
+			return nil
+		}
+		switch {
+		case isNullType(t):
+		case types.IsNullable(t) && !types.IsMixed(t):
+			// A callback that may be null maps the values or gives the
+			// array back, and PHPStan, which is sure of neither, has the
+			// values mixed.
+			maybe = true
+		default:
+			return nil
+		}
+	}
+	typeOf := func(e ast.Expr) types.Type {
+		if t, ok := sig.known[e]; ok {
+			return t
+		}
+		return x.pathType(e, env)
+	}
+	arrays := args.Args[1:]
+	first := typeOf(arrays[0].Value)
+	if maybe {
+		if len(arrays) > 1 {
+			return types.Array{Key: types.TInt, Value: types.TMixed, List: true, NonEmpty: iteratesOnce(first)}
+		}
+		key, _, ok := types.IterableKV(first, x.p())
+		if !ok {
+			key = types.TArrayKey
+		}
+		return types.Array{Key: key, Value: types.TMixed, List: isListType(first), NonEmpty: iteratesOnce(first)}
+	}
+	if len(arrays) == 1 {
+		return first
+	}
+	sameSize, size := true, -1
+	sameVar := true
+	firstVar, _ := arrays[0].Value.(*ast.Variable)
+	var values []types.Type
+	for _, a := range arrays {
+		t := typeOf(a.Value)
+		_, v, ok := types.IterableKV(t, x.p())
+		if !ok {
+			v = types.TMixed
+		}
+		values = append(values, v)
+		for _, m := range types.Members(t) {
+			sh, ok := m.(types.Shape)
+			if !ok || sh.Unsealed || slices.ContainsFunc(sh.Entries, func(e types.ShapeEntry) bool { return e.Optional }) ||
+				size >= 0 && len(sh.Entries) != size {
+				sameSize = false
+				break
+			}
+			size = len(sh.Entries)
+		}
+		if v, ok := a.Value.(*ast.Variable); !ok || firstVar == nil || v.Name != firstVar.Name {
+			sameVar = false
+		}
+	}
+	tuple := types.Shape{List: true}
+	for i, v := range values {
+		if !sameSize && !sameVar {
+			v = types.Nullable(v)
+		}
+		tuple.Entries = append(tuple.Entries, types.ShapeEntry{IsInt: true, IntKey: int64(i), Type: v})
+	}
+	return types.Array{Key: types.TInt, Value: tuple, List: true, NonEmpty: iteratesOnce(first)}
+}
+
+// isListType reports an array type every value of which is a list.
+func isListType(t types.Type) bool {
+	members := types.Members(t)
+	for _, m := range members {
+		switch m := m.(type) {
+		case types.Array:
+			if !m.List {
+				return false
+			}
+		case types.Shape:
+			if !m.List && !shapeIsList(m) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return len(members) > 0
+}
+
+// iteratesOnce reports an array type every value of which holds an entry.
+func iteratesOnce(t types.Type) bool {
+	members := types.Members(t)
+	for _, m := range members {
+		switch m := m.(type) {
+		case types.Array:
+			if !m.NonEmpty {
+				return false
+			}
+		case types.Shape:
+			if !slices.ContainsFunc(m.Entries, func(e types.ShapeEntry) bool { return !e.Optional }) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return len(members) > 0
 }
 
 // arrayPush retypes the by-reference array of array_push / array_unshift
@@ -3113,6 +3275,12 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		}
 		at = x.closeForeignParams(at)
 		argTypes[i] = at
+		if b.arg.Value != nil {
+			if sig.typed == nil {
+				sig.typed = map[ast.Expr]types.Type{}
+			}
+			sig.typed[b.arg.Value] = at
+		}
 		if b.arg.Unpack {
 			_, v, ok := types.IterableKV(at, x.p())
 			if mayNotIterate(at) {

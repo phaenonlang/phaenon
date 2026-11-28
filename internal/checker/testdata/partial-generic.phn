@@ -89,7 +89,7 @@ function unexpected(Pair<int> $pair, Name $name): void {
     // So does what the callers give nothing of: a type parameter no
     // placeholder has, and one whose values the callee gives a callback.
     wantsInt(first(['ada', 'bob'], ?)); // want P2103 "Closure(int $i): 'ada'|'bob' given"
-    wantsInt(array_map(?, ['a', 'b'])); // want P2103 "Closure(callable('a'|'b'): mixed $callback): list given", P3010
+    wantsInt(array_map(?, ['a', 'b'])); // want P2103 "Closure((callable('a'|'b'): mixed)|null $callback): list given", P3010
     // One that nothing determines is its bound, mixed without one.
     wantsInt($pair->with(?, 2)); // want P2103 "Closure(mixed $v): mixed given", P3010
     wantsInt(show(?, ?)); // want P2103 "Closure(Stringable $a, Stringable $b): string given"
