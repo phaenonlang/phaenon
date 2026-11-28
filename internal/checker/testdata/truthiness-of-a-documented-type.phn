@@ -935,3 +935,62 @@ final class Computed
         }
     }
 }
+
+/**
+ * A by-reference argument of PHP's own functions, as PHPStan types it:
+ * array_push() with no value adds nothing, array_walk() leaves an empty
+ * array empty and writes its callback's values into the array, settype()
+ * to the type PHP already gives the value leaves it as it was, where PHP
+ * guarantees that type (a value of `loaded(): array`), and decides
+ * nothing where PHP does not (json_decode()'s mixed, an object made an
+ * array may be empty). A foreach by reference over an offset forgets
+ * what a test found of it.
+ */
+final class Referenced
+{
+    /** @var array<string, string> */
+    public array $labels = [];
+
+    /** @var array<string, list<string>> */
+    public array $groups = [];
+
+    public function referenced(): void
+    {
+        /** @var list<string> $xs */
+        $xs = v();
+        if ($xs) {
+            \array_push($xs);
+            echo $xs ? 1 : 2; // want P2402 "always true"
+        }
+        if (!$xs) {
+            \array_walk($xs, function (string &$v): void {
+                $v = \trim($v);
+            });
+            echo $xs ? 1 : 2; // want P2402 "always false"
+        }
+        $this->labels['a'] = '';
+        \array_walk($this->labels, function (string &$v): void {
+            $v = 'x';
+        });
+        echo $this->labels['a'] ? 1 : 2; // want P2402 "always true"
+        /** @var list<string> $ys */
+        $ys = loaded();
+        if ($ys) {
+            \settype($ys, 'array');
+            echo $ys ? 1 : 2; // want P2402 "always true"
+        }
+        /** @var list<string> $zs */
+        $zs = \json_decode('[]', true);
+        if ($zs) {
+            \settype($zs, 'array');
+            echo $zs ? 1 : 2;
+        }
+        if (isset($this->groups['k']) && $this->groups['k']) {
+            foreach ($this->groups['k'] as &$g) {
+                $g = '';
+            }
+            unset($g);
+            echo $this->groups['k'] ? 1 : 2;
+        }
+    }
+}

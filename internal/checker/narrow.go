@@ -348,7 +348,7 @@ func (x *fnCtx) narrowPath(env *state, e ast.Expr, t types.Type, define bool) {
 		if ok && info.found != nil && types.Equal(info.found, info.t) {
 			found = t
 		}
-		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define, native: narrowNative(info.native, t, x.p()), conds: info.conds, guaranteed: info.guaranteed, rewritten: info.rewritten, found: found, foundTruth: info.foundTruth}
+		env.vars[p.Name] = varInfo{t: t, maybe: ok && info.maybe && !define, native: narrowNative(info.native, t, x.p()), conds: info.conds, guaranteed: info.guaranteed, rewritten: info.rewritten, found: found, foundTruth: info.foundTruth, held: info.held}
 		if ok {
 			env.applyConds(p.Name, t, x.p())
 		}

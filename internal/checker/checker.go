@@ -1004,6 +1004,9 @@ type fnCtx struct {
 	// the closure returns or ends: what array_walk() writes back with it
 	// (phpwrites.go).
 	refExits map[*ast.Closure]types.Type
+	// refExitsPHP is refExits as PHP types the parameter at the exits,
+	// its native type where a docblock refines it (walkedArrayPHP).
+	refExitsPHP map[*ast.Closure]types.Type
 	// neverEnvs collects, while trackNever is set, the state at every
 	// statement of type never in a closure whose first parameter is taken
 	// by reference: an exit PHPStan gathers for array_walk() as a return.

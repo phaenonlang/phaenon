@@ -65,7 +65,7 @@ func refFirst(e *ast.Closure) bool {
 // An exit where the parameter is not set adds nothing.
 func (x *fnCtx) recordRefExit(e *ast.Closure, end *state, returns, nevers []*state) {
 	name := e.Params[0].Var.Name
-	var held []types.Type
+	var held, php []types.Type
 	exits := append(slices.Concat(returns, nevers), end)
 	for _, r := range exits {
 		if r == nil || r.dead {
@@ -73,16 +73,22 @@ func (x *fnCtx) recordRefExit(e *ast.Closure, end *state, returns, nevers []*sta
 		}
 		if info, ok := r.get(name); ok {
 			held = append(held, info.t)
+			if info.native != nil {
+				php = append(php, info.native)
+			} else {
+				php = append(php, info.t)
+			}
 		}
 	}
 	if x.refExits == nil {
-		x.refExits = map[*ast.Closure]types.Type{}
+		x.refExits, x.refExitsPHP = map[*ast.Closure]types.Type{}, map[*ast.Closure]types.Type{}
 	}
 	if len(held) == 0 {
 		delete(x.refExits, e)
+		delete(x.refExitsPHP, e)
 		return
 	}
-	x.refExits[e] = types.MakeUnion(held...)
+	x.refExits[e], x.refExitsPHP[e] = types.MakeUnion(held...), types.MakeUnion(php...)
 }
 
 // walkedArray is what array_walk() leaves in the array t when its callback
@@ -91,11 +97,22 @@ func (x *fnCtx) recordRefExit(e *ast.Closure, end *state, returns, nevers []*sta
 // shape stay (PHPStan's mapValueType). nil for any other callback, which
 // writes nothing back PHPStan follows.
 func (x *fnCtx) walkedArray(callback ast.Expr, t types.Type) types.Type {
+	return x.walked(callback, t, x.refExits)
+}
+
+// walkedArrayPHP is walkedArray of PHP's type t of the array: each value
+// is what PHP's type of the closure's parameter is where it exits, as
+// PHPStan types the walked array natively.
+func (x *fnCtx) walkedArrayPHP(callback ast.Expr, t types.Type) types.Type {
+	return x.walked(callback, t, x.refExitsPHP)
+}
+
+func (x *fnCtx) walked(callback ast.Expr, t types.Type, exits map[*ast.Closure]types.Type) types.Type {
 	cl, ok := unparen(callback).(*ast.Closure)
 	if !ok || !refFirst(cl) {
 		return nil
 	}
-	v, ok := x.refExits[cl]
+	v, ok := exits[cl]
 	if !ok {
 		return nil
 	}
@@ -173,7 +190,9 @@ type ownArrayWrite struct {
 	before, out types.Type
 	certain     bool
 	keepsTruth  bool
-	truth       int // what a test of truthiness found of the array before (foundBefore)
+	keepsFalsy  bool // array_walk(): an empty array stays empty, and it takes no other falsy value
+	exact       bool // out is PHP's type itself, not the checker's type computed on PHP's
+	truth       int  // what a test of truthiness found of the array before (foundBefore)
 }
 
 // writtenOwnArray gives the array w was written back into the PHP type the
@@ -193,9 +212,11 @@ func (x *fnCtx) writtenOwnArray(env *state, e ast.Expr, w ownArrayWrite, declare
 	keep := false
 	switch {
 	case w.certain:
+	case w.out != nil && onlyArrays(w.before) && w.exact:
+		native = w.out
 	case w.out != nil && onlyArrays(w.before):
 		native = phpArrayOf(w.out)
-	case w.keepsTruth:
+	case w.keepsTruth || w.keepsFalsy && w.truth < 0:
 		native, keep = w.before, true
 	default:
 		native = declared
@@ -216,6 +237,57 @@ func (x *fnCtx) writtenOwnArray(env *state, e ast.Expr, w ownArrayWrite, declare
 	if t, ok := env.getPath(key); ok && keep && w.truth != 0 {
 		env.paths[foundPathKey(key, w.truth)] = t
 	}
+}
+
+// settypeKeeps reports `settype($x, 'array')` and its kin that leave the
+// value as it was, PHP's type of it already being the type named: an
+// array to 'array', an int to 'int', and so on, as PHP's settype() of a
+// value of its type is the value. PHP's type of a variable an inline @var
+// declares is what PHP guarantees of the value it was assigned
+// (varInfo.held), `load(): array`'s, mixed where it guarantees nothing:
+// settype() to 'array' of an object may empty it, of a falsy scalar fill
+// it, and PHPStan, which decides it by the tag's type, is not followed
+// there.
+func (x *fnCtx) settypeKeeps(e ast.Expr, args *ast.ArgList, env *state) bool {
+	if args == nil || len(args.Args) != 2 || args.Args[1].Unpack {
+		return false
+	}
+	name, ok := x.pathType(args.Args[1].Value, env).(types.StringLit)
+	if !ok {
+		return false
+	}
+	var as types.Type
+	switch strings.ToLower(name.V) {
+	case "array":
+		as = types.TArray
+	case "int", "integer":
+		as = types.TInt
+	case "string":
+		as = types.TString
+	case "bool", "boolean":
+		as = types.TBool
+	case "float", "double":
+		as = types.TFloat
+	default:
+		return false
+	}
+	php := x.nativeOr(e, x.pathType(e, env), env)
+	if v, ok := variableOf(e); ok && types.IsMixed(php) {
+		if info, ok := env.get(v.Name); ok && info.held != nil {
+			php = info.held
+		}
+	}
+	return !types.IsMixed(php) && !mentionsParam(php) && types.IsSubtype(php, as, x.p())
+}
+
+// pushesNothing reports a call of array_push() or array_unshift() with no
+// value to add, which leaves the array as it was.
+func pushesNothing(sig *signature, args *ast.ArgList) bool {
+	switch strings.ToLower(sig.fn.Name) {
+	case "array_push", "array_unshift":
+		return args != nil && len(args.Args) == 1 && !args.Args[0].Unpack
+	}
+	return false
 }
 
 // phpArrayOf is the PHP type of an array of type t: an array of any keys

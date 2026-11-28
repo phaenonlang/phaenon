@@ -157,6 +157,13 @@ func TestPHPStanParity(t *testing.T) {
 		// holding that one reading to a user's tag reports code PHPStan
 		// passes (paramout.go).
 		"param-out-inherited.phn": {"paramOut.type": {356}},
+		// settype($zs, 'array') of what json_decode() gave, found truthy:
+		// PHPStan's settype() extension types the value by the @var tag,
+		// a list, and calls the test after it always true, where PHP may
+		// have made an empty array of a truthy object; the checker keeps
+		// what a test found through settype() only where PHP guarantees
+		// the value the type named (settypeKeeps).
+		"truthiness-of-a-documented-type.phn": {"ternary.alwaysTrue": {986}},
 	}
 	// besideExtra are the lines whose findings are all extra checks and on
 	// which PHPStan speaks all the same, under an identifier the lists

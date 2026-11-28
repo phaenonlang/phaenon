@@ -50,6 +50,13 @@ type varInfo struct {
 	// foundTruth is what the test found: 1 truthy, -1 falsy.
 	found      types.Type
 	foundTruth int
+	// held is what PHP guarantees of the value an inline @var's variable
+	// was assigned, `array` of `load(): array`, where PHP's type of it
+	// (native) is the mixed PHPStan gives it: settype() to the type the
+	// value already has leaves it as it was (settypeKeeps). A narrowing
+	// carries it, a meet keeps it where both ways hold one, any write takes
+	// it away.
+	held types.Type
 }
 
 // verdictOf is what a test of truthiness found of a variable that still
@@ -323,8 +330,8 @@ func (e *state) written(name string) {
 }
 
 func (e *state) writtenOne(name string) {
-	if info, ok := e.vars[name]; ok && (info.conds != nil || info.found != nil) {
-		info.conds, info.found = nil, nil
+	if info, ok := e.vars[name]; ok && (info.conds != nil || info.found != nil || info.held != nil) {
+		info.conds, info.found, info.held = nil, nil, nil
 		e.vars[name] = info
 	}
 	e.dropConds(name)
@@ -782,6 +789,11 @@ func join(a, b *state) *state {
 		if vb, ok := b.vars[k]; ok {
 			n.vars[k] = varInfo{t: joinTypes(va.t, vb.t), maybe: va.maybe || vb.maybe, native: joinNative(va, vb), conds: joinConds(va.conds, vb.conds),
 				guaranteed: va.guaranteed && vb.guaranteed, rewritten: earlierWrite(va.rewritten, vb.rewritten)}
+			if va.held != nil && vb.held != nil {
+				info := n.vars[k]
+				info.held = types.MakeUnion(va.held, vb.held)
+				n.vars[k] = info
+			}
 			// What a test found holds where every way in holds it, as
 			// PHPStan's mixed~falsy joined with itself is itself. A way
 			// that wrote the variable holds what PHP's type of the value

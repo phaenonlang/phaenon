@@ -3514,6 +3514,9 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		// PHP's type of it is computed as what it does to the checker's
 		// (writtenOwnArray).
 		ownArray := sig.stub && sig.fn != nil && argTypes[i] != nil && b.param.Name == "array"
+		if ownArray && pushesNothing(sig, args) {
+			continue // array_push($xs) adds nothing: the array is as it was, as PHPStan keeps it
+		}
 		var own ownArrayWrite
 		if ownArray {
 			own.before, own.certain = x.nativeVar(b.arg.Value, env), false
@@ -3570,7 +3573,8 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				own.out = splicedArray(own.before, offset, length, replacement, x.p())
 			case "array_walk":
 				if walkedBy != nil {
-					out, own.out = x.walkedArray(walkedBy, argTypes[i]), x.walkedArray(walkedBy, own.before)
+					out, own.out = x.walkedArray(walkedBy, argTypes[i]), x.walkedArrayPHP(walkedBy, own.before)
+					own.keepsFalsy, own.exact = true, true
 				}
 			}
 		}
@@ -3594,15 +3598,27 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 				// parameter over unchecked, and so does a write the
 				// overlay has no tag for.
 				v, isVar := b.arg.Value.(*ast.Variable)
+				settype := sig.fn != nil && strings.EqualFold(sig.fn.Name, "settype")
 				switch {
 				case movesPointerOnly(sig) || walksByValue:
 				case isVar && sig.fn != nil && strings.EqualFold(sig.fn.Name, "array_multisort"):
 					env.reordered(v.Name)
 				default:
+					truth, keeps := x.foundBefore(b.arg.Value, env), settype && x.settypeKeeps(b.arg.Value, args, env)
 					x.writtenThrough(b.arg.Value, env)
-					if sig.fn != nil && strings.EqualFold(sig.fn.Name, "settype") ||
-						!readsByRef(sig, b.param) || invalidatesRead(sig, argTypes[i], x.p()) {
+					if settype || !readsByRef(sig, b.param) || invalidatesRead(sig, argTypes[i], x.p()) {
 						x.handedOver(b.arg.Value, env)
+					}
+					switch {
+					case keeps && truth != 0:
+						x.markFound(env, b.arg.Value, truth)
+					case settype:
+						// It may change the value: what a test found of a
+						// property or an offset is gone, as of a variable.
+						if key, ok := x.narrowedPathKey(b.arg.Value); ok {
+							delete(env.paths, foundPathKey(key, 1))
+							delete(env.paths, foundPathKey(key, -1))
+						}
 					}
 				}
 				continue // php-src reads and writes the reference (sort, end, ksort): the type stays

@@ -258,8 +258,15 @@ func (x *fnCtx) exprStmt(s *ast.ExprStmt, env *state) {
 		// The variable holds what the tag says, and nothing PHP
 		// guarantees: PHPStan's native type of a variable an inline @var
 		// declares is mixed, so that `/** @var list<string> $errors */
-		// $errors = [];` leaves `if ($errors)` open.
+		// $errors = [];` leaves `if ($errors)` open. What PHP guarantees of
+		// the value is held beside it for settype() (varInfo.held).
 		env.setNative(v.Name, types.TMixed)
+		if g := x.guaranteedOr(assign.Value, vt, env); !types.IsMixed(g) {
+			if info, ok := env.vars[v.Name]; ok {
+				info.held = g
+				env.vars[v.Name] = info
+			}
+		}
 	}
 }
 
@@ -1185,6 +1192,12 @@ func (x *fnCtx) foreach(s *ast.Foreach, env *state) {
 			x.byRef[vv.Name] = true
 		}
 		x.writtenThrough(s.Expr, env) // the body may write any element
+		// and what a test found of a property or an offset iterated is gone
+		// with it, as PHPStan's native type of it is no longer narrowed.
+		if key, ok := x.narrowedPathKey(s.Expr); ok {
+			delete(env.paths, foundPathKey(key, 1))
+			delete(env.paths, foundPathKey(key, -1))
+		}
 		// The body may write any element of a value of `T of array<…>`,
 		// or of an array in it (`foreach ($a['inner'] as &$v)`): what the
 		// variable holds is its bound, no longer T, as PHPStan has it
