@@ -236,6 +236,76 @@ func (x *fnCtx) namedCallable(name string) types.Type {
 	return x.callableOf(&signature{name: fn.Name + "()", params: fn.Params, ret: fn.Return, typeParams: fn.TypeParams, stub: isStubFile(fn.File)})
 }
 
+// arrayCallable is the signature behind the array form of a callable whose
+// target is known: [$object, 'method'] on an object of a class that has
+// the method, ['Class', 'method'] or [Foo::class, 'method'] naming a
+// static one; nil otherwise.
+func (x *fnCtx) arrayCallable(s types.Shape) types.Type {
+	var first, method types.Type
+	for _, e := range s.Entries {
+		switch {
+		case e.Optional || !e.IsInt:
+			return nil
+		case e.IntKey == 0:
+			first = e.Type
+		case e.IntKey == 1:
+			method = e.Type
+		}
+	}
+	name, ok := method.(types.StringLit)
+	if len(s.Entries) != 2 || first == nil || !ok {
+		return nil
+	}
+	var cls types.Class
+	byName := false
+	switch f := first.(type) {
+	case types.Class:
+		cls = f
+	case types.Static:
+		if f.Of == nil {
+			return nil
+		}
+		cls = *f.Of
+	case types.This:
+		if f.Of == nil {
+			return nil
+		}
+		cls = *f.Of
+	case types.StringLit:
+		cls, byName = types.Class{Name: f.V}, true
+	default:
+		return nil
+	}
+	cl := x.p().Class(cls.Name)
+	if cl == nil {
+		return nil
+	}
+	cl.Signature()
+	m := cl.FindMethod(name.V)
+	if m == nil || byName && !m.Static {
+		return nil
+	}
+	// The receiver's type arguments are the method's, as for `$b->get(...)`.
+	return x.callableOf(&signature{name: cl.Name + "::" + m.Name + "()", params: m.Params, ret: m.Return, typeParams: m.TypeParams, decl: m.Class, recv: cls,
+		subst: x.memberSubst(cls, m.Class)})
+}
+
+// namesInstanceMethod reports a 'Class::method' string that names a
+// method of a class known that is not static.
+func (x *fnCtx) namesInstanceMethod(name string) bool {
+	cls, meth, ok := strings.Cut(strings.TrimPrefix(name, "\\"), "::")
+	if !ok {
+		return false
+	}
+	cl := x.p().Class(cls)
+	if cl == nil {
+		return false
+	}
+	cl.Signature()
+	m := cl.FindMethod(meth)
+	return m != nil && !m.Static
+}
+
 // defaultType is the type of a parameter's default value as far as it is
 // read here: a literal, a constant, named as the callee's own namespace
 // names it (valueWhereDeclared), a class constant of the declaring class
@@ -1230,7 +1300,38 @@ func keyOrArrayKey(k types.Type) types.Type {
 func (x *fnCtx) dynamicCall(e *ast.Call, env *state, expected types.Type) types.Type {
 	ct := x.expr(e.Callee, env, nil)
 	if e.Args != nil && e.Args.FirstClassCallable {
-		return ct
+		// `$f(...)` is a Closure of what $f calls, with its signature: a
+		// callable's, the function or static method a string names, the
+		// method an array names on a class known. A callable-string or a
+		// callable array whose target is not known makes a Closure of no
+		// signature. What is not known to be a callable stays as it is.
+		return types.Map(ct, func(m types.Type) types.Type {
+			switch c := m.(type) {
+			case types.Callable:
+				c.Closure = true
+				return c
+			case types.StringLit:
+				if x.namesInstanceMethod(c.V) {
+					// 'Svc::inst' of a method that is not static: PHP
+					// binds no object, and PHPStan types it a Closure.
+					return types.TClosure
+				}
+				if named := x.namedCallable(c.V); named != nil {
+					return named
+				}
+			case types.Shape:
+				if target := x.arrayCallable(c); target != nil {
+					return target
+				}
+			}
+			switch m.(type) {
+			case types.String, types.StringLit, types.Shape:
+				if types.IsSubtype(m, types.TCallable, x.p()) {
+					return types.TClosure
+				}
+			}
+			return m
+		})
 	}
 	if types.IsMixed(ct) {
 		x.unknownCallee(e)

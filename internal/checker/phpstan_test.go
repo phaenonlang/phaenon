@@ -157,6 +157,16 @@ func TestPHPStanParity(t *testing.T) {
 		// holding that one reading to a user's tag reports code PHPStan
 		// passes (paramout.go).
 		"param-out-inherited.phn": {"paramOut.type": {356}},
+		// is_callable() of [$object, 'name'] where the final class lacks the
+		// method and has __call(): PHP calls __call() for the name, and the
+		// test is true, where PHPStan, which does not count __call(), has it
+		// always false. And is_callable() of [static::class, 'create'],
+		// which PHPStan decides from class-string<static>, where the checker
+		// leaves a class-string uncertain: which class one names is known
+		// from a docblock as a rule. And a callable-string is_string()
+		// proved given for a non-falsy-string, which the checker reads as a
+		// non-empty-string, where PHPStan refuses it: '0' names no function.
+		"is-callable.phn": {"function.impossibleType": {498}, "function.alreadyNarrowedType": {709}, "argument.type": {635}},
 	}
 	// besideExtra are the lines whose findings are all extra checks and on
 	// which PHPStan speaks all the same, under an identifier the lists
@@ -509,6 +519,12 @@ var checkerAlone = map[string][]struct {
 			"not one a closure makes. The return is no place that proves the closure PHPStan reads alike"},
 		{P2202, []int{79}, phpRefuses, "the Generator an arrow function returns, returned from a function declared int: \"Return value must be of type int, " +
 			"Generator returned\" whatever the values; PHPStan passes the Generator a call of a closure gives"},
+	},
+	"is-callable.phn": {
+		{P2103, []int{167}, notToldApartYet, "a class-string is_callable() found callable, given for a callable: PHPStan has " +
+			"callable&class-string there, and the lattice, which intersects objects alone, keeps the class-string"},
+		{P2103, []int{629}, notToldApartYet, "a callable-string a docblock declares, given for a non-empty-string: PHPStan takes it, " +
+			"and the lattice holds no non-emptiness of a callable-string it was not shown, so that the docblock decides no comparison"},
 	},
 	"generator-return-types.phn": {{P2202, []int{29}, phpRefuses, "a generator declared IteratorAggregate, a Traversable but no supertype of Generator: " +
 		"\"Generator return type must be a supertype of Generator, IteratorAggregate given\" when the file compiles; PHPStan admits any Traversable"}},

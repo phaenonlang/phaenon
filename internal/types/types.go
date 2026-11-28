@@ -29,8 +29,11 @@ type Hierarchy interface {
 	// and compared case-insensitively.
 	IsSubclassOf(sub, super string) bool
 	// IsFinal reports whether the class cannot be extended (final classes,
-	// enums, anonymous classes).
+	// enums, anonymous classes), a class a docblock marks @final included.
 	IsFinal(name string) bool
+	// IsFinalByKeyword is IsFinal without @final: a class PHP itself keeps
+	// from being extended, which no subclass can give a method it lacks.
+	IsFinalByKeyword(name string) bool
 	// Variances returns the variance of each type parameter of a class,
 	// nil when the class is unknown or not generic.
 	Variances(name string) []Variance
@@ -49,6 +52,11 @@ type Hierarchy interface {
 	IteratorArgs(c Class) (key, value Type, ok bool)
 	// IsInvokable reports a class with an __invoke() method: a callable.
 	IsInvokable(name string) bool
+	// HasMethod reports whether a class declares or inherits a method of
+	// the name (case-insensitively, a @method tag included), and whether
+	// that method is static. has is false for a class that is not known,
+	// which Exists tells apart.
+	HasMethod(class, name string) (has, static bool)
 	// IsInterface reports whether the name is an interface's. Two classes
 	// neither of which extends the other share no instance; a class and an
 	// interface it does not implement may, in a subclass.
@@ -94,10 +102,14 @@ type (
 	FloatLit struct{ V float64 }
 	// String is a string with optional refinements; StringLit a literal.
 	String struct {
-		NonEmpty  bool
-		Numeric   bool
-		Literal   bool // literal-string
-		Callable  bool // callable-string
+		NonEmpty bool
+		Numeric  bool
+		Literal  bool // literal-string
+		// Callable is callable-string. One a test proved, is_callable() or
+		// is_string() of a callable, is NonEmpty too, and names no number;
+		// one a docblock declares proves neither to a comparison, as
+		// PHPStan does not take the docblock as certain.
+		Callable  bool
 		Lowercase bool
 		// DecimalInt is PHPStan's decimal-int-string: a canonical decimal
 		// integer ("42", "-7", never "042" or "1.0"), what (string) gives
@@ -812,6 +824,15 @@ func absorbs(o, m Type) bool {
 		if m, ok := m.(Callable); ok && !o.HasSig && (!o.Closure || m.Closure) {
 			return true
 		}
+		// A bare callable holds its string and array forms.
+		if !o.HasSig && !o.Closure {
+			switch m := m.(type) {
+			case String:
+				return m.Callable
+			case Shape:
+				return m.Callable
+			}
+		}
 	case Iterable:
 		switch m := m.(type) {
 		case Array:
@@ -833,7 +854,8 @@ func absorbs(o, m Type) bool {
 // value of shape o: m has every certain entry of o, nothing o does not
 // name unless o is unsealed, and each entry's type fits.
 func shapeFits(m, o Shape) bool {
-	if m.Unsealed && !o.Unsealed || o.List && !m.List && !shapeIsList(m) {
+	// The array form of a callable holds no array that may not be one.
+	if m.Unsealed && !o.Unsealed || o.List && !m.List && !shapeIsList(m) || o.Callable && !m.Callable {
 		return false
 	}
 	for _, em := range m.Entries {
@@ -906,6 +928,9 @@ func stringLitFits(v string, s String) bool {
 	if s.NonEmpty && v == "" {
 		return false
 	}
+	if provenCallable(s) && isNumericString(v) {
+		return false // no function's name is a number
+	}
 	if s.Numeric && !isNumericString(v) {
 		return false
 	}
@@ -924,6 +949,10 @@ func stringRefines(m, o String) bool {
 		(!o.Literal || m.Literal) && (!o.Callable || m.Callable) && (!o.Lowercase || m.Lowercase) &&
 		(!o.DecimalInt || m.DecimalInt)
 }
+
+// provenCallable reports a callable-string a test proved to be one
+// (String.Callable).
+func provenCallable(s String) bool { return s.Callable && s.NonEmpty }
 
 // IsDecimalInt reports whether PHP reads s as a canonical decimal integer,
 // the strings it stores as int array keys (ZEND_HANDLE_NUMERIC_STR): an
@@ -1133,13 +1162,27 @@ func meet2(a, b Type) Type {
 	if structuralSub(b, a) {
 		return b
 	}
+	if c, ok := b.(Callable); ok {
+		if r, ok := callableForm(a, c); ok {
+			return r
+		}
+	}
+	if c, ok := a.(Callable); ok {
+		if r, ok := callableForm(b, c); ok {
+			return r
+		}
+	}
 	switch a := a.(type) {
 	case String:
 		switch b := b.(type) {
 		case String:
-			return String{NonEmpty: a.NonEmpty || b.NonEmpty, Numeric: a.Numeric || b.Numeric,
+			r := String{NonEmpty: a.NonEmpty || b.NonEmpty, Numeric: a.Numeric || b.Numeric,
 				Literal: a.Literal || b.Literal, Callable: a.Callable || b.Callable, Lowercase: a.Lowercase || b.Lowercase,
 				DecimalInt: a.DecimalInt || b.DecimalInt}
+			if provenCallable(r) && r.Numeric {
+				return TNever // no function's name is a number
+			}
+			return r
 		case ClassString:
 			return b
 		}
