@@ -3,6 +3,22 @@
 From 0.3.0 on, release-please writes each entry from the Conventional Commits merged since the
 previous release (`release-please-config.json`). The two releases before were cut by hand.
 
+## [0.8.1](https://github.com/phaenonlang/phaenon/compare/v0.8.0...v0.8.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **checker:** a by-reference argument holds what PHP's functions write ([#141](https://github.com/phaenonlang/phaenon/issues/141)) ([0b77c61](https://github.com/phaenonlang/phaenon/commit/0b77c61c987e88965d62e098f539cad01bf758ae))
+* **checker:** a division and a power are typed as PHPStan types them ([#143](https://github.com/phaenonlang/phaenon/issues/143)) ([12145f8](https://github.com/phaenonlang/phaenon/commit/12145f8ddc093fca1a66a7ddb40755a5f59f1cba))
+* **checker:** a function's body is held to its [@param-out](https://github.com/param-out) types ([#135](https://github.com/phaenonlang/phaenon/issues/135)) ([3483a07](https://github.com/phaenonlang/phaenon/commit/3483a072b89ac108dd9648099c55b23022f90bf8))
+* **checker:** a nullable type keeps null under a refining docblock ([#142](https://github.com/phaenonlang/phaenon/issues/142)) ([15dc161](https://github.com/phaenonlang/phaenon/commit/15dc161a334282cbc58827915286fbd04500ac88))
+* **checker:** a range inferred from arguments decides no comparison ([#145](https://github.com/phaenonlang/phaenon/issues/145)) ([1cfaa1a](https://github.com/phaenonlang/phaenon/commit/1cfaa1a40f8d0777c8f7d2d1a103d4996f7065e9))
+* **checker:** an object given to a call with side effects is forgotten ([#144](https://github.com/phaenonlang/phaenon/issues/144)) ([9d73f67](https://github.com/phaenonlang/phaenon/commit/9d73f675c51b3bad5540fead270beede585dfae5))
+* **checker:** an override inherits the [@param-out](https://github.com/param-out) of the method it overrides ([#139](https://github.com/phaenonlang/phaenon/issues/139)) ([b389378](https://github.com/phaenonlang/phaenon/commit/b3893783cc0f28d15a61f541b8832b109ccb5a11))
+* **checker:** no ignore comment silences an override compiled otherwise ([#138](https://github.com/phaenonlang/phaenon/issues/138)) ([6d534a3](https://github.com/phaenonlang/phaenon/commit/6d534a3ec8282ce1b38f99ab8d3cedcd4b0c8279))
+* **checker:** no ignore comment silences code PHP refuses ([#136](https://github.com/phaenonlang/phaenon/issues/136)) ([45feb1e](https://github.com/phaenonlang/phaenon/commit/45feb1ea937b4d7be3d8a04f078d7660e963b8f1))
+* **checker:** self:: forwards static, and a [@param-out](https://github.com/param-out) static is the receiver's class ([#140](https://github.com/phaenonlang/phaenon/issues/140)) ([b1d2dfc](https://github.com/phaenonlang/phaenon/commit/b1d2dfcc613f84db2ba4bcdcab34f95b22ed6fb7))
+
 ## [0.8.0](https://github.com/phaenonlang/phaenon/compare/v0.7.2...v0.8.0) (2026-11-26)
 
 
