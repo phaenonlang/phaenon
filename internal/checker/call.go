@@ -143,6 +143,9 @@ func (x *fnCtx) call(e *ast.Call, env *state, expected types.Type) types.Type {
 	if lower == "array_map" && e.Args != nil && len(e.Args.Args) > 2 {
 		x.arrayMapOverSeveral(sig, e.Args, env)
 	}
+	if lower == "preg_replace_callback" && sig.stub && e.Args != nil {
+		x.pregCallbackMatches(sig, e.Args, env)
+	}
 	ret := x.checkCall(sig, e.Args, env, e.S, expected)
 	if _, isNever := ret.(types.Never); isNever {
 		env.dead = true
@@ -812,6 +815,93 @@ func pregSplitType(args *ast.ArgList) types.Type {
 		piece = types.Shape{List: true, Entries: []types.ShapeEntry{{IsInt: true, IntKey: 0, Type: piece}, {IsInt: true, IntKey: 1, Type: types.Int{Lo: 0, Hi: math.MaxInt64}}}}
 	}
 	return types.MakeUnion(types.Array{Key: types.TInt, Value: piece, List: true}, types.TFalse)
+}
+
+// pregCallbackMatches adapts preg_replace_callback()'s signature to a call
+// whose flags have PREG_OFFSET_CAPTURE and whose callback is a closure
+// written at the call: the closure receives every match paired with its
+// offset, as preg_match() fills $matches under the flag (pregMatchesType),
+// and under PREG_UNMATCHED_AS_NULL as well a value that may be null, the
+// whole match's included. PHPStan types such a closure so, by its
+// PregReplaceCallbackClosureTypeExtension, where the pattern is known at
+// the call; it holds any other callback, a first-class callable or a
+// callable string, to the type the function declares, as the overlay
+// does. PREG_UNMATCHED_AS_NULL alone makes null the groups that may take
+// no part in a match, which PHPStan reads from the pattern and the
+// checker does not: the callback keeps the declared type there.
+func (x *fnCtx) pregCallbackMatches(sig *signature, args *ast.ArgList, env *state) {
+	cb := slices.IndexFunc(sig.params, func(p *program.Param) bool { return p.Name == "callback" })
+	if cb < 0 {
+		return
+	}
+	declared, ok := sig.params[cb].Type.(types.Callable)
+	if !ok || !declared.HasSig || len(declared.Params) != 1 {
+		return
+	}
+	var pattern, callback, flags *ast.Arg
+	for i, a := range args.Args {
+		switch {
+		case a.Unpack:
+			return
+		case a.Name != nil && a.Name.Name == "pattern" || a.Name == nil && i == 0:
+			pattern = a
+		case a.Name != nil && a.Name.Name == "callback" || a.Name == nil && i == 1:
+			callback = a
+		case a.Name != nil && a.Name.Name == "flags" || a.Name == nil && i == 5:
+			flags = a
+		}
+	}
+	if pattern == nil || callback == nil || flags == nil || pattern.Value == nil || flags.Value == nil {
+		return
+	}
+	switch callback.Value.(type) {
+	case *ast.Closure, *ast.ArrowFunc:
+	default:
+		return
+	}
+	// Read as the constants they are: typed again here, an expression
+	// with a call in it would be checked twice.
+	if !constantExpr(pattern.Value) || !constantExpr(flags.Value) {
+		return
+	}
+	patternType := x.pathType(pattern.Value, env)
+	for _, m := range types.Members(patternType) {
+		if _, lit := m.(types.StringLit); !lit {
+			return
+		}
+	}
+	v, ok := constInt(x.pathType(flags.Value, env))
+	if !ok || v&256 == 0 { // PREG_OFFSET_CAPTURE
+		return
+	}
+	var match types.Type = types.TString
+	if v&512 != 0 { // PREG_UNMATCHED_AS_NULL
+		match = types.Nullable(types.TString)
+	}
+	match = types.Shape{List: true, Entries: []types.ShapeEntry{{IsInt: true, IntKey: 0, Type: match}, {IsInt: true, IntKey: 1, Type: types.TInt}}}
+	var matches types.Type = types.Array{Key: types.TArrayKey, Value: match}
+	if unnamedGroups(pattern.Value, patternType) {
+		matches = types.Array{Key: types.TInt, Value: match, List: true}
+	}
+	declared.Params = []types.CallableParam{{Type: matches}}
+	param := *sig.params[cb]
+	param.Type = declared
+	sig.params = slices.Clone(sig.params)
+	sig.params[cb] = &param
+}
+
+// constantExpr reports an expression made of literals, constants and
+// variables, which typing again does nothing but read.
+func constantExpr(e ast.Expr) bool {
+	switch e := e.(type) {
+	case *ast.StringLit, *ast.IntLit, *ast.Name, *ast.ConstFetch, *ast.ClassConstFetch, *ast.Variable:
+		return true
+	case *ast.Paren:
+		return constantExpr(e.Expr)
+	case *ast.Binary:
+		return constantExpr(e.Left) && constantExpr(e.Right)
+	}
+	return false
 }
 
 // pregMatchesType is what preg_match() / preg_match_all() leave in
