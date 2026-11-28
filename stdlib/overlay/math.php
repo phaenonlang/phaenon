@@ -44,6 +44,14 @@ function intval(mixed $value, int $base = 10): int {}
 function pow(mixed $num, mixed $exponent): int|float|object {}
 
 /**
+ * Never below zero, as PHPStan's function map has it: the absolute value
+ * of PHP_INT_MIN is a float.
+ *
+ * @return int<0, max>|float
+ */
+function abs(int|float $num): int|float {}
+
+/**
  * An object is no number, as for intval().
  *
  * @param int|float|string|bool|array<mixed>|resource|\GMP|\SimpleXMLElement|null $value

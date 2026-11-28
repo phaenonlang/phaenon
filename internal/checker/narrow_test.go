@@ -55,7 +55,9 @@ func TestComparisonMirrored(t *testing.T) {
 // TestCountNarrowing: what each branch of a count() comparison knows of
 // the counted list, in both spellings: not empty where the count is at
 // least 1, empty where it can only be 0, either where it may be both or
-// where the comparison never holds.
+// where the comparison never holds. count() is int<0, max> to PHP, as
+// PHPStan's function map has it, so a comparison its range decides is
+// reported (P2402), and the branch it rules out with it (P2401).
 func TestCountNarrowing(t *testing.T) {
 	const (
 		nonEmpty = "non-empty"
@@ -65,20 +67,21 @@ func TestCountNarrowing(t *testing.T) {
 	cases := []struct {
 		cond, mirrored string
 		then, els      string
+		always         string // "true" or "false" where the range decides the comparison
 	}{
-		{"count($a) > 0", "0 < count($a)", nonEmpty, empty},
-		{"count($a) >= 1", "1 <= count($a)", nonEmpty, empty},
-		{"count($a) < 1", "1 > count($a)", empty, nonEmpty},
-		{"count($a) <= 0", "0 >= count($a)", empty, nonEmpty},
-		{"count($a) > 2", "2 < count($a)", nonEmpty, either},
-		{"count($a) >= 0", "0 <= count($a)", either, either},
-		{"count($a) < 3", "3 > count($a)", either, nonEmpty},
-		{"count($a) <= 2", "2 >= count($a)", either, nonEmpty},
-		{"count($a) < 0", "0 > count($a)", either, either},
-		{"count($a) === 0", "0 === count($a)", empty, nonEmpty},
-		{"count($a) !== 0", "0 !== count($a)", nonEmpty, empty},
-		{"count($a) === 2", "2 === count($a)", nonEmpty, either},
-		{"count($a) != 2", "2 != count($a)", either, nonEmpty},
+		{"count($a) > 0", "0 < count($a)", nonEmpty, empty, ""},
+		{"count($a) >= 1", "1 <= count($a)", nonEmpty, empty, ""},
+		{"count($a) < 1", "1 > count($a)", empty, nonEmpty, ""},
+		{"count($a) <= 0", "0 >= count($a)", empty, nonEmpty, ""},
+		{"count($a) > 2", "2 < count($a)", nonEmpty, either, ""},
+		{"count($a) >= 0", "0 <= count($a)", either, either, "true"},
+		{"count($a) < 3", "3 > count($a)", either, nonEmpty, ""},
+		{"count($a) <= 2", "2 >= count($a)", either, nonEmpty, ""},
+		{"count($a) < 0", "0 > count($a)", either, either, "false"},
+		{"count($a) === 0", "0 === count($a)", empty, nonEmpty, ""},
+		{"count($a) !== 0", "0 !== count($a)", nonEmpty, empty, ""},
+		{"count($a) === 2", "2 === count($a)", nonEmpty, either, ""},
+		{"count($a) != 2", "2 != count($a)", either, nonEmpty, ""},
 	}
 	// The probe's lines: takesInt() and takesFalse() of current($a) in
 	// the then branch, then in the else branch.
@@ -98,6 +101,12 @@ func TestCountNarrowing(t *testing.T) {
 	got := mirrorProbe(t, conds)
 	for i, c := range cases {
 		want := append(fails(c.then, 8, 9), fails(c.els, 11, 12)...)
+		switch c.always {
+		case "true":
+			want = append(want, "7:P2402", "11:P2401")
+		case "false":
+			want = append(want, "7:P2402", "8:P2401")
+		}
 		slices.Sort(want)
 		for j, cond := range []string{c.cond, c.mirrored} {
 			if g := got[2*i+j]; !slices.Equal(g, want) {
