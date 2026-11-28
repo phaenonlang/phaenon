@@ -300,7 +300,7 @@ func (x *fnCtx) variable(v *ast.Variable, env *state, lenient bool) types.Type {
 		x.report(v.S, P2009, "variable $%s might not be defined", v.Name)
 	}
 	if x.byRef[v.Name] {
-		return widenType(info.t)
+		return x.byRefValue(v.Name, info.t)
 	}
 	return info.t
 }

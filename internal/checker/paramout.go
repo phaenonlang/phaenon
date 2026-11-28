@@ -14,12 +14,12 @@ import (
 //
 //   - every write to such a parameter in the body leaves a value of the
 //     tag's type: an assignment, compound or by reference, a write to an
-//     offset and an unset() of one, a destructuring, a foreach, a step,
-//     and an argument passed by reference to a callee that writes it, a
-//     sort of php-src's included, which leaves the type the array had.
-//     Reported at the write. A step or a compound assignment whose own
-//     operation the checker refuses (P2301), as `$x--` on ?int, is that
-//     finding alone;
+//     offset and an unset() of one, a destructuring, a foreach, a catch,
+//     a step, and an argument passed by reference to a callee that writes
+//     it, a sort of php-src's included, which leaves the type the array
+//     had. Reported at the write. A step or a compound assignment whose
+//     own operation the checker refuses (P2301), as `$x--` on ?int, is
+//     that finding alone;
 //   - where the body ends with the parameter unwritten on some way there,
 //     what it holds is of the tag's type: the value it was passed,
 //     narrowed by the conditions on the way, or joined with what the
@@ -74,12 +74,27 @@ import (
 //	interface Reader { /** @param-out int $n */ function read(mixed &$n): void; }
 //	trait WritesString { function read(mixed &$n): void { $n = 'x'; } }
 //	final class R implements Reader { use WritesString; }
+//
+// A by-reference parameter no @param-out documents is held to its declared
+// type, the docblock's where it refines the native one (P2214), by the
+// same rule of PHPStan's (parameterByRef.type): every write the same, and
+// handed over the same way, but nothing where the body ends, which PHPStan
+// holds to a tag alone. An untyped parameter, or one declared mixed, holds
+// whatever is written.
+//
+// A variadic parameter's type, tag or declaration, describes one argument,
+// while its variable holds the array of them: where it holds an array, the
+// array's values are held to the type; where it holds anything else, its
+// references are gone and nothing reaches a caller (PHPStan's
+// ParameterOutTypeCheck).
 
-// outParam is a by-reference parameter a @param-out documents, with what
-// it holds where the body starts.
+// outParam is a by-reference parameter the body is held to a type of,
+// with what it holds where the body starts. tagged is a parameter a
+// @param-out documents, which the end of the body is held to as well.
 type outParam struct {
-	p     *program.Param
-	entry types.Type
+	p      *program.Param
+	entry  types.Type
+	tagged bool
 }
 
 // How a place where the body ends is reported: a statement after which the
@@ -92,28 +107,29 @@ const (
 )
 
 // paramOuts prepares the check of the body about to be checked, env being
-// the state at its start: the by-reference parameters a @param-out
-// documents, and the statements the body ends with, each with the span its
-// finding goes to. Nothing is prepared for a body without such a
-// parameter. A variadic one is left alone: its variable holds the packed
-// arguments, not one of them.
+// the state at its start: the by-reference parameters held to a type, and,
+// where a @param-out documents one of them, the statements the body ends
+// with, each with the span its finding goes to. Nothing is prepared for a
+// body without such a parameter.
 func (x *fnCtx) paramOuts(params []*program.Param, stmts []ast.Stmt, env *state) {
+	tagged := false
 	for _, p := range params {
-		if !p.ByRef || p.Out == nil || p.Variadic {
+		if !p.ByRef || p.Out == nil && types.IsMixed(p.Type) {
 			continue
 		}
 		if x.outs == nil {
 			x.outs = map[string]*outParam{}
 		}
-		op := &outParam{p: p, entry: p.Type}
+		op := &outParam{p: p, entry: p.Type, tagged: p.Out != nil}
 		if info, ok := env.get(p.Name); ok {
 			op.entry = info.t
 		}
 		x.outs[p.Name] = op
 		x.outOrder = append(x.outOrder, op)
+		tagged = tagged || op.tagged
 	}
-	if x.outs == nil {
-		return
+	if !tagged {
+		return // PHPStan holds the end of a body to a tag alone
 	}
 	x.trackReturns = true // the returns inside a statement the body ends with (outsAtEnd)
 	x.outEnds = map[ast.Stmt]ast.Span{}
@@ -221,7 +237,7 @@ func (x *fnCtx) outsHeld(env *state, at ast.Span, how int) {
 		return
 	}
 	for _, op := range x.outOrder {
-		if env.outs[op.p.Name] {
+		if !op.tagged || env.outs[op.p.Name] {
 			continue // written on every way here: each write was held to the tag
 		}
 		info, ok := env.get(op.p.Name)
@@ -239,6 +255,9 @@ func (x *fnCtx) outsHeld(env *state, at ast.Span, how int) {
 // the write.
 func (x *fnCtx) outsReturned(exits []*state, at ast.Span) {
 	for _, op := range x.outOrder {
+		if !op.tagged {
+			continue
+		}
 		var held []types.Type
 		for _, r := range exits {
 			if r.dead {
@@ -267,8 +286,9 @@ func (x *fnCtx) outsReturned(exits []*state, at ast.Span) {
 // outEnd reports a parameter documented @param-out that the body ends
 // with holding t, at at, unless t is of the tag's type.
 func (x *fnCtx) outEnd(op *outParam, t types.Type, at ast.Span, how int) {
-	out := x.outType(op.p)
-	if _, never := t.(types.Never); never || types.IsSubtype(t, out, x.p()) {
+	out := x.outType(op)
+	t, checked := x.checkedValue(op, t)
+	if _, never := t.(types.Never); never || !checked || types.IsSubtype(t, out, x.p()) {
 		return
 	}
 	where := "ends here"
@@ -304,18 +324,25 @@ func (x *fnCtx) outDocumented(p *program.Param, out types.Type) (string, *Relate
 }
 
 // wroteOut holds a write of a value of type vt to the variable name, at
-// span, to the @param-out type of the parameter of that name, and records
-// the write; nothing for any other variable. A write x.outUnchecked marks
-// is recorded and held to nothing: its operation was refused, or another
-// place holds it.
+// span, to the type of the by-reference parameter of that name, its
+// @param-out type or its declared one, and records the write; nothing for
+// any other variable. A write x.outUnchecked marks is recorded and held to
+// nothing: its operation was refused, or another place holds it.
 func (x *fnCtx) wroteOut(name string, vt types.Type, env *state, span ast.Span) {
 	op := x.outs[name]
 	if op == nil {
 		return
 	}
 	env.wroteOut(name)
-	out := x.outType(op.p)
-	if x.outUnchecked || types.IsSubtype(vt, out, x.p()) {
+	out := x.outType(op)
+	vt, checked := x.checkedValue(op, vt)
+	if x.outUnchecked || !checked || types.IsSubtype(vt, out, x.p()) {
+		return
+	}
+	if !op.tagged {
+		x.c.reportRelated(span, P2214, related(x.file, op.p.Span, "parameter $%s declared here", op.p.Name),
+			"$%s is declared %s by reference, and %s writes %s to it here: write a value of type %s, or document with @param-out what $%s holds afterwards",
+			op.p.Name, x.typeName(out), x.name, x.typeName(vt), x.typeName(out), op.p.Name)
 		return
 	}
 	remedy := "write a value of type " + x.typeName(out) + ", or declare the @param-out type the body writes"
@@ -379,11 +406,78 @@ func (x *fnCtx) refusedSince(since int) bool {
 	return false
 }
 
-// outType is a parameter's @param-out type as the body sees it: its own
-// type parameters stay themselves, and a conditional type is both its
-// branches, as nothing is known of the subject inside.
-func (x *fnCtx) outType(p *program.Param) types.Type {
-	return x.evalConditional(p.Out, nil)
+// outType is the type the body holds a by-reference parameter to: its
+// declared type where no tag is there, else its @param-out type as the
+// body sees it, its own type parameters themselves and a conditional type
+// both its branches, as nothing is known of the subject inside.
+func (x *fnCtx) outType(op *outParam) types.Type {
+	if !op.tagged {
+		return op.p.Type
+	}
+	return x.evalConditional(op.p.Out, nil)
+}
+
+// byRefValue is what a read of the by-reference variable name gives, t
+// being what the flow says it holds: t widened, its literals and ranges
+// their types, as another holder of the reference may have written it
+// since. A by-reference parameter the body is held to a type of, and a
+// closure's by-reference use of one, is read as t itself where t is of
+// such a type and widening it would leave the type: PHPStan widens
+// nothing, and a closure that uses the parameter reads it as the body
+// does, so that what it leaves joins the parameter within the type where
+// its writes are. `$seen[$key] = true` on an array<string, true> writes
+// an array<string, true>, not one of bool. The types are
+// the one the writes are held to and, for a parameter a @param-out
+// documents, its declared one, which it holds until the body has written
+// what the tag says: `$opts['level'] ??= 'info'` on an array{level?:
+// 'info'|'warn'} documented @param-out array{level: 'info'|'warn'} keeps
+// the level's literals. A t that is of neither is widened as before: the
+// parameter was written a value of another type, which that write was
+// held to, and what follows reads it as any reference is read. (`$n++`
+// on a positive-int still writes an int: the checker's arithmetic on a
+// range is int.)
+func (x *fnCtx) byRefValue(name string, t types.Type) types.Type {
+	w := widenType(t)
+	for _, held := range x.heldRef(name) {
+		if types.IsSubtype(t, held, x.p()) && !types.IsSubtype(w, held, x.p()) {
+			return t
+		}
+	}
+	return w
+}
+
+// heldRef is the types the by-reference variable name is held to, where
+// it is a by-reference parameter of the function or method being checked
+// or a closure's by-reference use of one: the type its writes are held to
+// (outType), and its declared one where a @param-out documents it.
+func (x *fnCtx) heldRef(name string) []types.Type {
+	if op := x.outs[name]; op != nil {
+		if op.tagged {
+			return []types.Type{x.outType(op), op.p.Type}
+		}
+		return []types.Type{x.outType(op)}
+	}
+	return x.heldUses[name]
+}
+
+// checkedValue is t, a value the parameter of op is written or ends with,
+// as it is held to the parameter's type: itself, or, for a variadic
+// parameter, the values of the array it holds. checked is false for a
+// variadic parameter that may hold anything else than an array, whose
+// references are gone.
+func (x *fnCtx) checkedValue(op *outParam, t types.Type) (_ types.Type, checked bool) {
+	if !op.p.Variadic {
+		return t, true
+	}
+	for _, m := range types.Members(t) {
+		switch m.(type) {
+		case types.Array, types.Shape:
+		default:
+			return t, false
+		}
+	}
+	_, v, ok := types.IterableKV(t, x.p())
+	return v, ok
 }
 
 // wroteOut records that the body certainly wrote the parameter of that

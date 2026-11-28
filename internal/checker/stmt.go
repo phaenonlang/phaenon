@@ -1469,6 +1469,9 @@ func (x *fnCtx) tryStmt(s *ast.Try, env *state) {
 		caught = append(caught, ts...)
 		if c.Var != nil {
 			cEnv.set(c.Var.Name, types.MakeUnion(ts...))
+			if reached {
+				x.wroteOut(c.Var.Name, types.MakeUnion(ts...), cEnv, c.Var.S) // a by-reference parameter (paramout.go)
+			}
 		}
 		x.stmts(c.Body, cEnv)
 		if reached {
@@ -2536,6 +2539,12 @@ func (x *fnCtx) closure(e *ast.Closure, env *state, expected types.Type) types.T
 		if u.ByRef {
 			c.byRef[u.Var.Name] = true
 			x.byRef[u.Var.Name] = true
+			if held := x.heldRef(u.Var.Name); held != nil {
+				if c.heldUses == nil {
+					c.heldUses = map[string][]types.Type{}
+				}
+				c.heldUses[u.Var.Name] = held // its reads stay within the types (byRefValue)
+			}
 			if !ok {
 				env.set(u.Var.Name, types.TNull)
 				info = varInfo{t: types.TNull}
