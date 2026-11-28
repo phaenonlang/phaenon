@@ -161,6 +161,82 @@ func invalidatesRead(sig *signature, t types.Type, h types.Hierarchy) bool {
 	return types.IsMixed(t) || types.Overlaps(t, types.Object{}, h) || types.Overlaps(t, types.TResource, h)
 }
 
+// ownArrayWrite is what one of PHP's own array functions, a sort, the
+// push or the pop of an entry, array_splice() or array_walk(), does to
+// PHP's type of the array it takes by reference, where it writes it back:
+// before, the PHP type of the array before the call, and certain where it
+// is the checker's type itself; out, what the function leaves of before,
+// computed as its out type is (nil where nothing is computed of it); and
+// keepsTruth for a function that keeps any value's truthiness, a sort that
+// keeps the keys.
+type ownArrayWrite struct {
+	before, out types.Type
+	certain     bool
+	keepsTruth  bool
+	truth       int // what a test of truthiness found of the array before (foundBefore)
+}
+
+// writtenOwnArray gives the array w was written back into the PHP type the
+// function leaves of the one it had, as PHPStan reads the out types of
+// its own function map as native and computes them on the native type:
+// sort() leaves a non-empty array non-empty, array_push() makes one, and
+// array_pop() may leave none. A PHP type the checker takes from its own
+// (certain) is the type written, as for any write. A PHP type that is not
+// only arrays, a mixed one an inline @var leaves, holds the array the
+// function declares afterwards, PHPStan's list after sort(), and keeps
+// what a test of truthiness found of it only through a sort that keeps
+// the keys, which leaves it as it was to PHPStan: `if ($xs) { asort($xs);
+// if ($xs) … }` decides the inner test, `if ($xs) { sort($xs); … }` does
+// not, under `/** @var list<string> $xs */`.
+func (x *fnCtx) writtenOwnArray(env *state, e ast.Expr, w ownArrayWrite, declared types.Type) {
+	var native types.Type
+	keep := false
+	switch {
+	case w.certain:
+	case w.out != nil && onlyArrays(w.before):
+		native = phpArrayOf(w.out)
+	case w.keepsTruth:
+		native, keep = w.before, true
+	default:
+		native = declared
+	}
+	if v, ok := unparen(e).(*ast.Variable); ok {
+		env.setNative(v.Name, native)
+		if info, ok := env.vars[v.Name]; ok && keep && w.truth != 0 {
+			info.found, info.foundTruth = info.t, w.truth
+			env.vars[v.Name] = info
+		}
+		return
+	}
+	key, ok := x.narrowedPathKey(e)
+	if !ok || w.certain {
+		return // a certain path holds the type written (keepWritten)
+	}
+	env.keepNative(key, native)
+	if t, ok := env.getPath(key); ok && keep && w.truth != 0 {
+		env.paths[foundPathKey(key, w.truth)] = t
+	}
+}
+
+// phpArrayOf is the PHP type of an array of type t: an array of any keys
+// and values, non-empty where t is, and the empty array where t is,
+// `array_splice($xs, 0)`'s.
+func phpArrayOf(t types.Type) types.Type {
+	return types.Map(t, func(m types.Type) types.Type {
+		switch m := m.(type) {
+		case types.Array:
+			return types.Array{Key: types.TArrayKey, Value: types.TMixed, NonEmpty: m.NonEmpty}
+		case types.Shape:
+			if len(m.Entries) == 0 && !m.Unsealed {
+				return types.Shape{}
+			}
+			_, nonEmpty := types.Falsy(m).(types.Never)
+			return types.Array{Key: types.TArrayKey, Value: types.TMixed, NonEmpty: nonEmpty}
+		}
+		return types.Erase(m)
+	})
+}
+
 // openSSLTagType is what openssl_encrypt() leaves in $tag for a cipher
 // named at the call, as PHPStan's extension has it: a non-empty string
 // for a GCM or CCM mode, null for any other; nil when the cipher is not

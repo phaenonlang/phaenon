@@ -552,3 +552,69 @@ function joined(bool $c): void
     }
     echo $rows ? 'a' : 'b';
 }
+
+/**
+ * A function of PHP's own that takes an array by reference leaves PHP's
+ * type of it what it leaves of the one it had, as PHPStan reads its out
+ * types as native: a sort keeps an array non-empty, array_push() makes it
+ * so, array_pop() and array_shift() may leave none, and
+ * `array_splice($xs, 0)` leaves none. Of the mixed PHP type an inline tag
+ * leaves, sort() leaves a list and decides nothing, a sort that keeps the
+ * keys leaves it as it was.
+ */
+final class Sorted
+{
+    /** @var list<string> */
+    private static array $names = [];
+
+    /** @var list<string> */
+    private array $list = [];
+
+    public function sorted(): void
+    {
+        if (self::$names) {
+            \sort(self::$names);
+            if (self::$names) { // want P2402 "always true"
+                echo 'a';
+            }
+        }
+        if ($this->list) {
+            \usort($this->list, fn (string $a, string $b): int => $a <=> $b);
+            if ($this->list) { // want P2402 "always true"
+                echo 'b';
+            }
+            \array_pop($this->list);
+            if ($this->list) {
+                echo 'c';
+            }
+            \array_push($this->list, 'x');
+            if ($this->list) { // want P2402 "always true"
+                echo 'd';
+            }
+        }
+    }
+
+    /** @param list<string> $xs */
+    public function argument(array $xs): void
+    {
+        $ys = loaded();
+        if ($xs && $ys) {
+            \rsort($xs);
+            \ksort($ys);
+            echo $xs ? 1 : 2; // want P2402 "always true"
+            echo $ys ? 1 : 2; // want P2402 "always true"
+            \array_shift($xs);
+            echo $xs ? 1 : 2;
+            \array_splice($xs, 0);
+            echo $xs ? 1 : 2; // want P2402 "always false"
+        }
+        /** @var list<string> $zs */
+        $zs = loaded();
+        if ($zs) {
+            \asort($zs);
+            echo $zs ? 1 : 2; // want P2402 "always true"
+            \sort($zs);
+            echo $zs ? 1 : 2;
+        }
+    }
+}

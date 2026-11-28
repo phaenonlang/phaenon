@@ -287,7 +287,9 @@ func (e *state) writtenOne(name string) {
 
 // reordered is written for an array whose int keys were renumbered and
 // whose string keys kept their values (array_multisort()): what the
-// conditions say of its string offsets stands.
+// conditions say of its string offsets stands, and so does what a test of
+// truthiness found of it, the array holding the values it held, as
+// PHPStan keeps the type of an argument its map says the function reads.
 func (e *state) reordered(name string) {
 	e.reorderedOne(name)
 	for o := range e.refs[name] {
@@ -296,8 +298,8 @@ func (e *state) reordered(name string) {
 }
 
 func (e *state) reorderedOne(name string) {
-	if info, ok := e.vars[name]; ok && (info.conds != nil || info.found != nil) {
-		info.conds, info.found = nil, nil
+	if info, ok := e.vars[name]; ok && info.conds != nil {
+		info.conds = nil
 		e.vars[name] = info
 	}
 	e.forgetInConds(func(k string) bool { return k == name }, func(k string) bool {

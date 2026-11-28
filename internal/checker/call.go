@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -388,11 +389,21 @@ func (x *fnCtx) arrayPush(e *ast.Call, env *state) {
 	})
 	// The overlay's @param-out wrote the array already, with the values
 	// as given, and held a parameter documented @param-out to its tag
-	// there: this retyping is no second write of it (paramout.go).
+	// there: this retyping is no second write of it (paramout.go), and
+	// PHP's type of the array is the one that write gave it
+	// (writtenOwnArray).
+	native := x.nativeVar(target, env)
+	key, isPath := x.narrowedPathKey(target)
+	_, kept := env.getPath(nativePathKey(key))
 	unchecked := x.outUnchecked
 	x.outUnchecked = true
 	x.assignTo(target, result, env, e.S)
 	x.outUnchecked = unchecked
+	if v, ok := unparen(target).(*ast.Variable); ok {
+		env.setNative(v.Name, native)
+	} else if isPath && kept && native != nil {
+		env.keepNative(key, native)
+	}
 }
 
 // specialReturn refines the return type of a few core functions whose
@@ -3499,11 +3510,29 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		if !b.param.ByRef || b.arg.Value == x.pipeOperand {
 			continue // a piped value is a temporary (P2114): nothing is written back
 		}
+		// The array one of PHP's own array functions takes: what it does to
+		// PHP's type of it is computed as what it does to the checker's
+		// (writtenOwnArray).
+		ownArray := sig.stub && sig.fn != nil && argTypes[i] != nil && b.param.Name == "array"
+		var own ownArrayWrite
+		if ownArray {
+			own.before, own.certain = x.nativeVar(b.arg.Value, env), false
+			if own.before == nil {
+				own.before, own.certain = argTypes[i], true
+			}
+			own.truth = x.foundBefore(b.arg.Value, env)
+		}
 		out := b.param.Out
 		if out != nil {
-			out = x.evalConditional(types.Substitute(types.Substitute(out, rename), subst), argByName)
+			declaredOut := types.Substitute(types.Substitute(out, rename), subst)
+			out = x.evalConditional(declaredOut, argByName)
 			if sig.recv != nil {
 				out = replaceStatic(out, sig.recv) // `@param-out static` is the receiver's class, as a `@return static` is
+			}
+			if ownArray {
+				onPHPs := maps.Clone(argByName)
+				onPHPs[b.param.Name] = own.before
+				own.out = x.evalConditional(declaredOut, onPHPs)
 			}
 		}
 		if pm := pregMatchesType(sig.name, b.param.Name, args, argByName); pm != nil {
@@ -3512,20 +3541,20 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		if tag := openSSLTagType(sig.name, b.param.Name, argByName); tag != nil {
 			out = tag
 		}
-		if sig.stub && sig.fn != nil && argTypes[i] != nil && b.param.Name == "array" {
+		if ownArray {
 			switch strings.ToLower(sig.fn.Name) {
 			case "array_pop":
-				out = poppedArray(argTypes[i], false, x.p())
+				out, own.out = poppedArray(argTypes[i], false, x.p()), poppedArray(own.before, false, x.p())
 			case "array_shift":
-				out = poppedArray(argTypes[i], true, x.p())
+				out, own.out = poppedArray(argTypes[i], true, x.p()), poppedArray(own.before, true, x.p())
 			}
 		}
-		if out == nil && sig.stub && sig.fn != nil && argTypes[i] != nil && b.param.Name == "array" {
+		if out == nil && ownArray {
 			// What PHPStan writes back through a parameter its map says the
 			// function reads (phpwrites.go).
 			switch strings.ToLower(sig.fn.Name) {
 			case "asort", "arsort", "ksort", "krsort", "natsort", "natcasesort", "uasort", "uksort":
-				out = sortKeepingKeys(argTypes[i])
+				out, own.out, own.keepsTruth = sortKeepingKeys(argTypes[i]), sortKeepingKeys(own.before), true
 			case "array_splice":
 				offset, length, replacement := argByName["offset"], argByName["length"], argByName["replacement"]
 				if offset == nil {
@@ -3538,9 +3567,10 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 					replacement = types.Shape{List: true}
 				}
 				out = splicedArray(argTypes[i], offset, length, replacement, x.p())
+				own.out = splicedArray(own.before, offset, length, replacement, x.p())
 			case "array_walk":
 				if walkedBy != nil {
-					out = x.walkedArray(walkedBy, argTypes[i])
+					out, own.out = x.walkedArray(walkedBy, argTypes[i]), x.walkedArray(walkedBy, own.before)
 				}
 			}
 		}
@@ -3587,14 +3617,17 @@ func (x *fnCtx) checkCallArgs(sig *signature, args *ast.ArgList, env *state, spa
 		if x.c.opts.ByRef != nil {
 			x.c.opts.ByRef(x.file, b.arg.Value, finalizeParams(out, tps))
 		}
-		if v, ok := b.arg.Value.(*ast.Variable); ok {
-			// What a by-reference parameter writes is known from a docblock
-			// (@param-out, or the @param of an untyped reference): PHP
-			// guarantees only the declared type of the reference, if any.
-			native := types.TMixed
-			if b.param.NativeType != nil {
-				native = types.Erase(b.param.NativeType)
-			}
+		// What a by-reference parameter writes is known from a docblock
+		// (@param-out, or the @param of an untyped reference): PHP
+		// guarantees only the declared type of the reference, if any, but
+		// for the array of one of PHP's own array functions.
+		native := types.TMixed
+		if b.param.NativeType != nil {
+			native = types.Erase(b.param.NativeType)
+		}
+		if ownArray {
+			x.writtenOwnArray(env, b.arg.Value, own, native)
+		} else if v, ok := b.arg.Value.(*ast.Variable); ok {
 			env.setNative(v.Name, native)
 		}
 	}
