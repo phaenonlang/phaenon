@@ -158,6 +158,10 @@ type (
 		Optional bool
 		Variadic bool
 		ByRef    bool
+		// PreferRef: the closure of a function of PHP's own whose
+		// parameter takes a variable by reference and any other argument
+		// by value (program.Param.PreferRef); no docblock spells it.
+		PreferRef bool
 	}
 	// Iterable is iterable<Key, Value>.
 	Iterable struct{ Key, Value Type }
@@ -379,7 +383,7 @@ func Equal(a, b Type) bool {
 		}
 		for i := range a.Params {
 			x, y := a.Params[i], b.Params[i]
-			if x.Optional != y.Optional || x.Variadic != y.Variadic || x.ByRef != y.ByRef || !equalOrNil(x.Type, y.Type) {
+			if x.Optional != y.Optional || x.Variadic != y.Variadic || x.ByRef != y.ByRef || x.PreferRef != y.PreferRef || !equalOrNil(x.Type, y.Type) {
 				return false
 			}
 		}

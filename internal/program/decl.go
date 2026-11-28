@@ -219,6 +219,11 @@ type Param struct {
 	// Sensitive marks a parameter declared #[\SensitiveParameter], whose
 	// argument a stack trace shows as a SensitiveParameterValue.
 	Sensitive bool
+	// PreferRef marks a parameter of PHP's own that its stub tags
+	// `@prefer-ref`: PHP passes a variable to it by reference and any
+	// other argument by value, without a notice (array_multisort()'s
+	// arrays and the sort flags between them, extract()'s array).
+	PreferRef bool
 }
 
 // TagSource is the parameter of a method whose docblock documents a tag
