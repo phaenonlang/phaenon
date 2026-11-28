@@ -1,0 +1,155 @@
+namespace App\VarTagOverNull;
+
+// An inline @var is held to the value under it as PHPStan's
+// VarTagTypeRuleHelper holds it. A value written out, an array literal, a
+// constant fetch (null, true, false, a named constant) or a scalar, only
+// has to share a value with the tag: `@var string|null` over null passes,
+// `@var int` over 'x' does not. `[]` is any array; another array literal
+// is compared entry by entry with a shape, every key of it one the tag
+// has, and with any other array by its keys and its values together,
+// nested arrays the same way. `new` (its type arguments left out) and a
+// class's constant take the widening check: an iterable tag over an
+// iterable value is compared by its values, a constant scalar shares a
+// value with the tag, and anything else, an enum's case among them, must
+// be narrowed by the tag. Any other value is held to its PHP type, which
+// the tag must narrow, never widen. Plain PHP, so that PHPStan reads this
+// file as written.
+
+const LIMIT = 10;
+
+class Base
+{
+    public const SIZE = 3;
+    public const LIST = [1, 2];
+}
+
+final class Child extends Base
+{
+}
+
+enum Suit: string
+{
+    case Hearts = 'h';
+}
+
+final class User
+{
+}
+
+/**
+ * @implements \IteratorAggregate<int, User>
+ */
+final class Users implements \IteratorAggregate, \Countable
+{
+    /** @return \ArrayIterator<int, User> */
+    public function getIterator(): \ArrayIterator
+    {
+        return new \ArrayIterator([]);
+    }
+
+    public function count(): int
+    {
+        return 0;
+    }
+}
+
+/** @return list<mixed> */
+function shared(): array
+{
+    /** @var string|null $last */
+    $last = null;
+    /** @var \stdClass|null $object */
+    $object = null;
+    /** @var bool $flag */
+    $flag = true;
+    /** @var int|null $limit */
+    $limit = LIMIT;
+    /** @var non-empty-list<int> $none */
+    $none = [];
+    /** @var list<int> $mixed */
+    $mixed = [1, 'a'];
+    /** @var int|string $text */
+    $text = 'x';
+    /** @var int|null $size */
+    $size = Base::SIZE;
+    /** @var Child $narrowed */
+    $narrowed = new Base();
+    /** @var array{a: int, b: string} $fewer */
+    $fewer = ['a' => 1];
+    /** @var list<array{id: int}> $rows */
+    $rows = [['id' => 1], ['id' => 2]];
+    return [$last, $object, $flag, $limit, $none, $mixed, $text, $size, $narrowed, $fewer, $rows];
+}
+
+/** @return list<mixed> */
+function apart(): array
+{
+    /** @var string $nothing */
+    $nothing = null; // want P2212 "@var string does not accept the assigned null"
+    /** @var string $limit */
+    $limit = LIMIT; // want P2212 "does not accept the assigned 10"
+    /** @var int $array */
+    $array = []; // want P2212 "does not accept the assigned list{}"
+    /** @var int $text */
+    $text = 'x'; // want P2212 "does not accept the assigned 'x'"
+    /** @var Base $widened */
+    $widened = new Child(); // want P2212 "@var App\VarTagOverNull\Base is not a subtype of the assigned App\VarTagOverNull\Child"
+    /** @var int<1, 5> $seven */
+    $seven = 7; // want P2212 "does not accept the assigned 7"
+    /** @var float|null $negative */
+    $negative = -1; // want P2212 "does not accept the assigned -1"
+    /** @var non-empty-string $empty */
+    $empty = ''; // want P2212 "does not accept the assigned ''"
+    /** @var list<string> $keyed */
+    $keyed = ['a' => 1]; // want P2212 "does not accept the assigned array{a: 1}"
+    /** @var array{id: int, name: string} $swapped */
+    $swapped = ['id' => '', 'name' => 0]; // want P2212 "does not accept the assigned array{id: '', name: 0}"
+    /** @var array{int, string} $pair */
+    $pair = ['a', 1]; // want P2212 "does not accept the assigned list{'a', 1}"
+    /** @var array<string, list<int>> $nested */
+    $nested = ['a' => ['x' => 1]]; // want P2212 "does not accept the assigned array{a: array{x: 1}}"
+    /** @var list<array{id: int}> $row */
+    $row = [['id' => 'x']]; // want P2212 "does not accept the assigned list{array{id: 'x'}}"
+    /** @var Suit $suit */
+    $suit = Suit::Hearts; // want P2212 "@var App\VarTagOverNull\Suit is not a subtype of the assigned"
+    /** @var list<int> $constant */
+    $constant = Base::LIST; // want P2212 "@var list<int> is not a subtype of the assigned list{1, 2}"
+    return [$nothing, $limit, $array, $text, $widened, $seven, $negative, $empty, $keyed, $swapped, $pair, $nested, $row, $suit, $constant];
+}
+
+/**
+ * An iterable class under an iterable tag only has to be maybe a supertype
+ * of it, a class it is, extends or implements, or an interface it may
+ * come to implement, and then hold the tag's values: a final collection
+ * of users is an \IteratorAggregate<int, User>, and not the bare
+ * \IteratorAggregate, whose values are mixed.
+ */
+function iterated(string $dir): int
+{
+    /** @var \RecursiveDirectoryIterator|\RecursiveIteratorIterator<\RecursiveDirectoryIterator> $files */
+    $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir));
+    /** @var \Countable&\Traversable<int, string> $counted */
+    $counted = new \ArrayObject();
+    /** @var \ArrayIterator<int, string> $other */
+    $other = new \ArrayObject(); // want P2212 "is not a subtype of the assigned ArrayObject"
+    /** @var \IteratorAggregate<int, User> $users */
+    $users = new Users();
+    /** @var \Traversable<int, User>&\Countable $counted_users */
+    $counted_users = new Users();
+    /** @var \IteratorAggregate $bare */
+    $bare = new Users(); // want P2212 "@var IteratorAggregate is not a subtype of the assigned App\VarTagOverNull\Users"
+    return iterator_count($files) + count($counted) + count($other) + iterator_count($users) + count($counted_users) + iterator_count($bare);
+}
+
+function returned(): ?string
+{
+    /** @var string|null */
+    return null;
+}
+
+/** @return \IteratorAggregate<int, User> */
+function made(): \IteratorAggregate
+{
+    /** @var \IteratorAggregate<int, User> */
+    return new Users();
+}
